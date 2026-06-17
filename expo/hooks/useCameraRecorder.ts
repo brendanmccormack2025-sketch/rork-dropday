@@ -36,12 +36,13 @@ function triggerHaptic(style: Haptics.ImpactFeedbackStyle): void {
 }
 
 export function useCameraRecorder() {
-  // Two always-mounted CameraViews — one per facing direction.
-  // Neither ever receives a changed `facing` prop, so their native
-  // capture sessions survive across flips. This eliminates the
-  // session-teardown gap that happens with a single reactive CameraView.
-  const backCameraRef = useRef<CameraView>(null);
-  const frontCameraRef = useRef<CameraView>(null);
+  // Single CameraView with dynamic facing prop.
+  // The native session rebuilds when facing changes — the flip-flash
+  // animation in camera.tsx covers the brief gap. The recording loop
+  // waits for onCameraReady before calling recordAsync on the new camera.
+  const cameraRef = useRef<CameraView>(null);
+  /** True when the native camera session is ready for recording */
+  const cameraReadyRef = useRef<boolean>(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const [mediaPermission, requestMediaPermission] =
@@ -92,10 +93,10 @@ export function useCameraRecorder() {
   // Keep micPermissionRef in sync with the latest micPermission state
   micPermissionRef.current = micPermission;
 
-  /** Return the CameraView ref that matches the CURRENT facing direction.
-   *  Always uses facingRef.current so async loops read the live value. */
+  /** Return the single CameraView ref. Always uses facingRef.current so
+   *  async loops read the live value after a facing change. */
   const getActiveCamera = useCallback((): CameraView | null => {
-    return facingRef.current === "back" ? backCameraRef.current : frontCameraRef.current;
+    return cameraRef.current;
   }, []);
 
   /** Guard against rapid state transitions */
@@ -111,25 +112,25 @@ export function useCameraRecorder() {
 
   /** Toggle front/back camera.
    *  When idle: just swaps facing immediately.
-   *  During recording: explicitly stops the currently-recording camera,
-   *  swaps facing, and signals the recording loop to auto-restart on the
-   *  new (already-warm) camera. No session teardown/rebuild — both
-   *  CameraViews stay mounted with fixed `facing` props forever. */
+   *  During recording: explicitly stops the current recording so
+   *  recordAsync resolves with the segment captured so far, then
+   *  signals the recording loop to restart on the new camera after
+   *  it reports ready via onCameraReady. */
   const flipCamera = useCallback((): boolean => {
     const recording = recordStateRef.current === "recording" || recordStateRef.current === "stopping";
 
     if (recording) {
-      // Stop the currently-active camera so recordAsync resolves with
-      // the segment captured so far. The new camera is already warm
-      // (always mounted), so restarting is near-instant.
+      // Stop the current recording so recordAsync resolves.
+      // The recording loop will see isFlippingRef=true and restart.
       isFlippingRef.current = true;
       cameraSwitchingRef.current = true;
+      cameraReadyRef.current = false; // expect a new session
       const oldCam = getActiveCamera();
       try { oldCam?.stopRecording(); } catch { /* ignore */ }
     }
 
-    // Swap facing — facingRef is read by getActiveCamera() inside the
-    // recording loop, so the next recordAsync call targets the new camera.
+    // Swap facing — the CameraView's facing prop will update on re-render,
+    // tearing down the old session and building the new one.
     const next = facingRef.current === "back" ? "front" : "back";
     facingRef.current = next;
     setFacing(next);
@@ -221,16 +222,26 @@ export function useCameraRecorder() {
           accumulatedSegmentUrisRef.current.push(result.uri);
         }
 
-        // The new camera is already warm (always mounted), so there is no
-        // session build-up delay. We restart immediately — only the
-        // stop-then-start round-trip latency (~50-100 ms) creates a gap,
-        // which the flip-flash animation covers.
+        // When the camera flips, the session rebuilds. Wait until
+        // onCameraReady fires before calling recordAsync again.
         if (isFlippingRef.current) {
-          console.log("[camera] Flip — restarting on new (pre-warmed) camera");
+          console.log("[camera] Flip — waiting for camera to be ready");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
-          // Loop continues — next iteration calls getActiveCamera() which
-          // returns the new camera's ref (facingRef was already updated).
+          // Spin until the new session reports ready (up to 3 s timeout)
+          const waited = Date.now();
+          while (!cameraReadyRef.current) {
+            if (Date.now() - waited > 3000) {
+              console.warn("[camera] Camera not ready after flip — aborting");
+              setError("Camera failed to restart after flip.");
+              keepRecording = false;
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 30));
+          }
+          if (cameraReadyRef.current) {
+            console.log("[camera] Camera ready — resuming recording");
+          }
           continue;
         }
 
@@ -337,15 +348,25 @@ export function useCameraRecorder() {
     setError(null);
   }, []);
 
-  /** Ensure recording is stopped on BOTH cameras — call on unmount or navigation. */
+  /** Ensure recording is stopped — call on unmount or navigation. */
   const teardown = useCallback((): void => {
-    try { backCameraRef.current?.stopRecording(); } catch {}
-    try { frontCameraRef.current?.stopRecording(); } catch {}
+    cameraReadyRef.current = false;
+    try { cameraRef.current?.stopRecording(); } catch {}
   }, []);
 
-  /** Handle the CameraView.onCameraReady event */
+  /** Handle the CameraView.onCameraReady event — signals the recording
+   *  loop that the camera is ready to accept recordAsync. */
   const handleCameraReady = useCallback((): void => {
-    // No-op: camera ready tracking for potential future use
+    cameraReadyRef.current = true;
+    console.log("[camera] onCameraReady — session is live");
+  }, []);
+
+  /** Handle CameraView.onMountError — capture and display camera failures */
+  const [cameraMountError, setCameraMountError] = useState<string | null>(null);
+  const handleMountError = useCallback((event: { message: string }) => {
+    const msg = event?.message ?? "Camera failed to start.";
+    console.error("[camera] onMountError:", msg);
+    setCameraMountError(msg);
   }, []);
 
   /** Synchronous recording check — use the ref for gesture handlers, not the derived boolean.
@@ -363,9 +384,8 @@ export function useCameraRecorder() {
       : 0;
 
   return {
-    // Camera refs — one per facing direction, both always mounted
-    backCameraRef,
-    frontCameraRef,
+    // Camera ref — single dynamic-facing CameraView
+    cameraRef,
     facingRef,
     // Permissions
     permission,
@@ -401,6 +421,9 @@ export function useCameraRecorder() {
     // Error
     error,
     setError,
+    cameraMountError,
+    setCameraMountError,
+    handleMountError,
     // Lifecycle
     teardown,
   } as const;

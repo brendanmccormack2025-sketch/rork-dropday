@@ -43,13 +43,6 @@ const RING_WRAP = RING_SIZE + 28;
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-// Two always-mounted CameraViews — one for each facing direction.
-// Neither ever receives a changed `facing` prop, so the native capture
-// session survives across camera flips. Visibility is toggled via
-// opacity + pointerEvents, not by remounting or changing the prop.
-// This eliminates the session-teardown gap that causes dropped frames
-// and audio interruptions during mid-recording camera flips.
-
 const triggerHaptic = (style: Haptics.ImpactFeedbackStyle) => {
   if (Platform.OS !== "web") {
     Haptics.impactAsync(style).catch(() => {});
@@ -62,8 +55,7 @@ export default function CameraScreen() {
   const insets = useSafeAreaInsets();
 
   const {
-    backCameraRef,
-    frontCameraRef,
+    cameraRef,
     permission,
     requestPermission,
     micPermission,
@@ -86,6 +78,9 @@ export default function CameraScreen() {
     setZoom,
     error,
     setError,
+    cameraMountError,
+    setCameraMountError,
+    handleMountError,
     teardown,
     handleCameraReady,
   } = useCameraRecorder();
@@ -458,46 +453,29 @@ export default function CameraScreen() {
     <GestureHandlerRootView style={styles.fullscreen}>
       <StatusBar style="light" hidden={false} />
 
-      {/* Two always-mounted CameraViews — one per facing direction.
-          Visibility is controlled by opacity + pointerEvents, so neither
-          native capture session is ever torn down by a prop change.
-          This keeps the inactive camera warm for instant flip restarts. */}
-      <View style={StyleSheet.absoluteFill}>
-        {/* Back camera — always mounted with fixed facing="back" */}
-        <CameraView
-          ref={backCameraRef}
-          style={[
-            StyleSheet.absoluteFill,
-            { opacity: facing === "back" ? 1 : 0 },
-          ]}
-          facing="back"
-          mode="video"
-          mute={false}
-          enableTorch={torch && facing === "back"}
-          zoom={zoom}
-          mirror={false}
-          responsiveOrientationWhenOrientationLocked
-          onCameraReady={handleCameraReady}
-          pointerEvents={facing === "back" ? "auto" : "none"}
-        />
-        {/* Front camera — always mounted with fixed facing="front" */}
-        <CameraView
-          ref={frontCameraRef}
-          style={[
-            StyleSheet.absoluteFill,
-            { opacity: facing === "front" ? 1 : 0 },
-          ]}
-          facing="front"
-          mode="video"
-          mute={false}
-          enableTorch={false}
-          zoom={zoom}
-          mirror={true}
-          responsiveOrientationWhenOrientationLocked
-          onCameraReady={handleCameraReady}
-          pointerEvents={facing === "front" ? "auto" : "none"}
-        />
-      </View>
+      {/* Single CameraView with dynamic facing. The native session
+          rebuilds when facing changes — the flip-flash animation
+          covers the brief gap seamlessly. */}
+      <CameraView
+        ref={cameraRef}
+        style={StyleSheet.absoluteFill}
+        facing={facing}
+        mode="video"
+        mute={false}
+        enableTorch={torch && facing === "back"}
+        zoom={zoom}
+        mirror={facing === "front"}
+        responsiveOrientationWhenOrientationLocked
+        onCameraReady={handleCameraReady}
+        onMountError={handleMountError}
+      />
+
+      {/* Camera mount error */}
+      {cameraMountError && (
+        <View style={[StyleSheet.absoluteFill, styles.cameraErrorBanner]} pointerEvents="none">
+          <Text style={styles.cameraErrorBannerText}>{cameraMountError}</Text>
+        </View>
+      )}
 
       {/* Gesture zone — double-tap to flip, pinch to zoom.
           Simultaneous() allows both gestures to coexist on the same layer. */}
@@ -1024,5 +1002,19 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "rgba(10,10,10,0.45)",
     overflow: "hidden",
+  },
+
+  cameraErrorBanner: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.85)",
+    padding: 32,
+  },
+  cameraErrorBannerText: {
+    color: theme.danger,
+    fontSize: 14,
+    fontWeight: "600" as const,
+    textAlign: "center",
+    lineHeight: 20,
   },
 });
