@@ -60,6 +60,10 @@ export function useCameraRecorder() {
   const recordingStartedAtRef = useRef<number | null>(null);
   /** True briefly after a camera flip during recording — keeps isRecording visually continuous */
   const cameraSwitchingRef = useRef<boolean>(false);
+  /** Set true when a flip happens mid-recording — tells the recordAsync loop to restart, not finalize */
+  const isFlippingRef = useRef<boolean>(false);
+  /** Accumulates URIs from each segment of a multi-flip recording session */
+  const accumulatedSegmentUrisRef = useRef<string[]>([]);
   /** Stable ref mirror of micPermission — gesture callbacks read this, never the state */
   const micPermissionRef = useRef(micPermission);
 
@@ -103,12 +107,11 @@ export function useCameraRecorder() {
       return next;
     });
 
-    // Keep isRecording visually stable during the brief camera transition
+    // Keep isRecording visually stable during the brief camera transition.
+    // Also signal the recordAsync loop to auto-restart instead of finalizing.
     if (recordStateRef.current === "recording" || recordStateRef.current === "stopping") {
+      isFlippingRef.current = true;
       cameraSwitchingRef.current = true;
-      setTimeout(() => {
-        cameraSwitchingRef.current = false;
-      }, 400);
     }
 
     return true;
@@ -150,16 +153,14 @@ export function useCameraRecorder() {
   }, [mediaPermission?.granted, requestMediaPermission]);
 
   /** Start a single continuous recording up to MAX_VIDEO_SECONDS.
-   *  isRecording stays true the entire time; the ring animation reads
-   *  recordingStartedAtRef.current live for smooth progress. Call
-   *  stopRecording() to end the recording early. */
+   *  Uses a loop so that camera flips mid-recording auto-restart on the
+   *  new camera instead of ending the clip. Only user release or max
+   *  duration stops the loop. */
   const startRecording = useCallback(async (): Promise<void> => {
     if (!cameraRef.current) return;
     if (recordStateRef.current !== "idle") return;
     if (!canTransition()) return;
 
-    // Ensure microphone permission — read from the stable ref, not reactive state,
-    // so that this callback never becomes stale when micPermission changes.
     const currentMic = micPermissionRef.current;
     if (!currentMic?.granted) {
       console.log("[camera] Requesting microphone permission...");
@@ -174,29 +175,63 @@ export function useCameraRecorder() {
     console.log("[camera] START RECORDING");
     setRecordStateSync("recording");
     setError(null);
+    isFlippingRef.current = false;
     recordSessionIdRef.current = `rs_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     recordingStartedAtRef.current = Date.now();
+    accumulatedSegmentUrisRef.current = [];
     triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
 
-    try {
-      const result = await cameraRef.current.recordAsync({ maxDuration: MAX_VIDEO_SECONDS });
+    // Recording loop — restarts on camera flip, exits on user stop or max duration
+    let keepRecording = true;
+    while (keepRecording) {
+      try {
+        const result = await cameraRef.current.recordAsync({ maxDuration: MAX_VIDEO_SECONDS });
 
-      if (result?.uri) {
-        const dur = Date.now() - (recordingStartedAtRef.current ?? Date.now());
-        const clip: Clip = {
-          id: newClipId(),
-          uri: result.uri,
-          type: "video",
-          durationMs: dur,
-          recordingSessionId: recordSessionIdRef.current ?? undefined,
-        };
-        appendClip(clip);
-        saveToGallery(result.uri);
+        if (result?.uri) {
+          accumulatedSegmentUrisRef.current.push(result.uri);
+        }
+
+        // If the recording stopped because of a camera flip, restart immediately
+        if (isFlippingRef.current) {
+          console.log("[camera] Flip detected — restarting recording on new camera");
+          isFlippingRef.current = false;
+          cameraSwitchingRef.current = false;
+          // Keep recording — loop continues to new recordAsync call
+          continue;
+        }
+
+        // Normal stop — user released or max duration reached
+        keepRecording = false;
+      } catch (e) {
+        if (isFlippingRef.current) {
+          console.log("[camera] Flip error caught — restarting recording");
+          isFlippingRef.current = false;
+          cameraSwitchingRef.current = false;
+          continue;
+        }
+        if (recordStateRef.current !== "idle") {
+          const msg = e instanceof Error ? e.message : "Recording failed.";
+          setError(msg);
+        }
+        keepRecording = false;
       }
-    } catch (e) {
-      if (recordStateRef.current !== "idle") {
-        const msg = e instanceof Error ? e.message : "Recording failed.";
-        setError(msg);
+    }
+
+    // Finalize: create clip from first segment as primary, save all segments
+    const uris = accumulatedSegmentUrisRef.current;
+    if (uris.length > 0) {
+      const dur = Date.now() - (recordingStartedAtRef.current ?? Date.now());
+      console.log(`[camera] Recording finished — ${uris.length} segment(s), ${dur}ms total`);
+      const clip: Clip = {
+        id: newClipId(),
+        uri: uris[0],
+        type: "video",
+        durationMs: dur,
+        recordingSessionId: recordSessionIdRef.current ?? undefined,
+      };
+      appendClip(clip);
+      for (const uri of uris) {
+        saveToGallery(uri);
       }
     }
 
@@ -272,10 +307,13 @@ export function useCameraRecorder() {
   }, []);
 
   /** Synchronous recording check — use the ref for gesture handlers, not the derived boolean.
-   *  Stays true during camera flip transition so the recording indicator never flickers. */
+   *  Stays true during camera flip transition so the recording indicator never flickers.
+   *  NOTE: cameraSwitchingRef is now set in flipCamera and cleared by the recordAsync loop
+   *  on restart, rather than via a setTimeout — no stale flags that outlive the flip. */
   const isRecording =
     recordState === "recording" ||
     recordState === "stopping" ||
+    isFlippingRef.current ||
     cameraSwitchingRef.current;
   const recordingElapsedMs =
     recordingStartedAtRef.current != null
