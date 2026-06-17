@@ -266,9 +266,38 @@ export function useCameraRecorder() {
         keepRecording = false;
       } catch (e) {
         if (isFlippingRef.current) {
-          console.log("[camera] Flip error — restarting on new camera");
+          console.log("[camera] Flip error — waiting for camera to be ready");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
+          cameraReadyRef.current = false;
+
+          // Wait for onCameraReady (or timeout after 4 s)
+          let timedOut = false;
+          try {
+            await Promise.race([
+              new Promise<void>((resolve) => {
+                cameraReadyResolveRef.current = resolve;
+              }),
+              new Promise<void>((_, reject) =>
+                setTimeout(() => {
+                  timedOut = true;
+                  reject(new Error("timeout"));
+                }, 4000)
+              ),
+            ]);
+          } catch {
+            // Timeout
+          }
+          cameraReadyResolveRef.current = null;
+
+          if (timedOut || !cameraReadyRef.current) {
+            console.warn("[camera] Camera not ready after flip — aborting");
+            setError("Camera failed to restart after flip.");
+            keepRecording = false;
+            break;
+          }
+
+          console.log("[camera] Camera ready — resuming recording");
           continue;
         }
         if (recordStateRef.current !== "idle") {
