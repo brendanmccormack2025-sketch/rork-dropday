@@ -1374,12 +1374,14 @@ export default function EditScreen() {
                 isMuted={false}
                 onPlaybackStatusUpdate={onVideoStatus}
                 progressUpdateIntervalMillis={200}
+                pointerEvents="none"
               />
             ) : activeClip?.uri ? (
               <Image
                 source={{ uri: activeClip.uri }}
                 style={{ width: "100%", height: "100%" }}
                 contentFit="contain"
+                pointerEvents="none"
               />
             ) : (
               <View

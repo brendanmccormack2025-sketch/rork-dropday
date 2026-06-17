@@ -1069,7 +1069,7 @@ export default function TimelineEditor({
       <View
         style={[
           styles.playheadOverlay,
-          { left: playheadScreen - PLAYHEAD_ZONE / 2, borderWidth: 2, borderColor: "#00FFFF" },
+          { left: playheadScreen - PLAYHEAD_ZONE / 2 },
         ]}
         pointerEvents={dragState ? "none" : "auto"}
         {...playheadPan.panHandlers}
