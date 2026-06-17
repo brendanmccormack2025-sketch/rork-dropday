@@ -36,13 +36,20 @@ function triggerHaptic(style: Haptics.ImpactFeedbackStyle): void {
 }
 
 export function useCameraRecorder() {
-  const cameraRef = useRef<CameraView>(null);
+  // Two always-mounted CameraViews — one per facing direction.
+  // Neither ever receives a changed `facing` prop, so their native
+  // capture sessions survive across flips. This eliminates the
+  // session-teardown gap that happens with a single reactive CameraView.
+  const backCameraRef = useRef<CameraView>(null);
+  const frontCameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const [mediaPermission, requestMediaPermission] =
     MediaLibrary.usePermissions();
 
   const [facing, setFacing] = useState<"back" | "front">("back");
+  /** Stable ref mirror of `facing` — gesture & async callbacks read this, never the state */
+  const facingRef = useRef<"back" | "front">("back");
   const [torch, setTorch] = useState<boolean>(false);
   const [recordState, setRecordState] = useState<RecordState>("idle");
   const [isLocked, setIsLocked] = useState<boolean>(false);
@@ -79,8 +86,17 @@ export function useCameraRecorder() {
     setIsLocked(next);
   }, []);
 
+  // Keep facingRef in sync with the latest facing state
+  useEffect(() => { facingRef.current = facing; }, [facing]);
+
   // Keep micPermissionRef in sync with the latest micPermission state
   micPermissionRef.current = micPermission;
+
+  /** Return the CameraView ref that matches the CURRENT facing direction.
+   *  Always uses facingRef.current so async loops read the live value. */
+  const getActiveCamera = useCallback((): CameraView | null => {
+    return facingRef.current === "back" ? backCameraRef.current : frontCameraRef.current;
+  }, []);
 
   /** Guard against rapid state transitions */
   const canTransition = useCallback((): boolean => {
@@ -94,28 +110,32 @@ export function useCameraRecorder() {
   }, []);
 
   /** Toggle front/back camera.
-   *  During recording: flips the camera without stopping — the recording
-   *  continues as a single continuous clip, same as Snapchat/Instagram.
-   *  When idle: flips immediately. */
+   *  When idle: just swaps facing immediately.
+   *  During recording: explicitly stops the currently-recording camera,
+   *  swaps facing, and signals the recording loop to auto-restart on the
+   *  new (already-warm) camera. No session teardown/rebuild — both
+   *  CameraViews stay mounted with fixed `facing` props forever. */
   const flipCamera = useCallback((): boolean => {
-    // Toggle facing — CameraView handles the prop change at the native level.
-    // If the platform supports mid-recording camera switch (iOS multi-cam,
-    // Android CameraX), the flip is seamless. Otherwise the camera switches
-    // on the next recording start.
-    setFacing((f) => {
-      const next = f === "back" ? "front" : "back";
-      return next;
-    });
+    const recording = recordStateRef.current === "recording" || recordStateRef.current === "stopping";
 
-    // Keep isRecording visually stable during the brief camera transition.
-    // Also signal the recordAsync loop to auto-restart instead of finalizing.
-    if (recordStateRef.current === "recording" || recordStateRef.current === "stopping") {
+    if (recording) {
+      // Stop the currently-active camera so recordAsync resolves with
+      // the segment captured so far. The new camera is already warm
+      // (always mounted), so restarting is near-instant.
       isFlippingRef.current = true;
       cameraSwitchingRef.current = true;
+      const oldCam = getActiveCamera();
+      try { oldCam?.stopRecording(); } catch { /* ignore */ }
     }
 
+    // Swap facing — facingRef is read by getActiveCamera() inside the
+    // recording loop, so the next recordAsync call targets the new camera.
+    const next = facingRef.current === "back" ? "front" : "back";
+    facingRef.current = next;
+    setFacing(next);
+
     return true;
-  }, []);
+  }, [getActiveCamera]);
 
   /** Toggle torch */
   const toggleTorch = useCallback(() => {
@@ -123,14 +143,14 @@ export function useCameraRecorder() {
     setTorch((t) => !t);
   }, []);
 
-  /** Safely stop the camera recording */
+  /** Safely stop the currently active camera recording */
   const safeStop = useCallback((): void => {
     try {
-      cameraRef.current?.stopRecording();
+      getActiveCamera()?.stopRecording();
     } catch {
       // Swallow — recording may already be stopped
     }
-  }, []);
+  }, [getActiveCamera]);
 
   /** Append a clip to the session */
   const appendClip = useCallback((clip: Clip) => {
@@ -154,10 +174,11 @@ export function useCameraRecorder() {
 
   /** Start a single continuous recording up to MAX_VIDEO_SECONDS.
    *  Uses a loop so that camera flips mid-recording auto-restart on the
-   *  new camera instead of ending the clip. Only user release or max
-   *  duration stops the loop. */
+   *  new (pre-warmed) camera instead of ending the clip. Only user
+   *  release or max duration stops the loop. */
   const startRecording = useCallback(async (): Promise<void> => {
-    if (!cameraRef.current) return;
+    const activeCam = getActiveCamera();
+    if (!activeCam) return;
     if (recordStateRef.current !== "idle") return;
     if (!canTransition()) return;
 
@@ -181,24 +202,35 @@ export function useCameraRecorder() {
     accumulatedSegmentUrisRef.current = [];
     triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
 
-    // Recording loop — restarts on camera flip, exits on user stop or max duration
+    // Recording loop — restarts on camera flip, exits on user stop or max duration.
+    // Each iteration calls recordAsync on the CURRENTLY active camera (via
+    // getActiveCamera() which reads facingRef.current updated by flipCamera).
     let keepRecording = true;
     while (keepRecording) {
+      const cam = getActiveCamera();
+      if (!cam) {
+        // Camera not ready — brief wait then retry
+        await new Promise((r) => setTimeout(r, 50));
+        continue;
+      }
+
       try {
-        const result = await cameraRef.current.recordAsync({ maxDuration: MAX_VIDEO_SECONDS });
+        const result = await cam.recordAsync({ maxDuration: MAX_VIDEO_SECONDS });
 
         if (result?.uri) {
           accumulatedSegmentUrisRef.current.push(result.uri);
         }
 
-        // If the recording stopped because of a camera flip, restart after a
-        // brief delay so the native camera has time to reconfigure.
+        // The new camera is already warm (always mounted), so there is no
+        // session build-up delay. We restart immediately — only the
+        // stop-then-start round-trip latency (~50-100 ms) creates a gap,
+        // which the flip-flash animation covers.
         if (isFlippingRef.current) {
-          console.log("[camera] Flip detected — waiting 400ms then restarting on new camera");
+          console.log("[camera] Flip — restarting on new (pre-warmed) camera");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
-          await new Promise((r) => setTimeout(r, 400));
-          // Loop continues to a new recordAsync call on the reconfigured camera
+          // Loop continues — next iteration calls getActiveCamera() which
+          // returns the new camera's ref (facingRef was already updated).
           continue;
         }
 
@@ -206,10 +238,9 @@ export function useCameraRecorder() {
         keepRecording = false;
       } catch (e) {
         if (isFlippingRef.current) {
-          console.log("[camera] Flip error caught — waiting 400ms then restarting");
+          console.log("[camera] Flip error — restarting on new camera");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
-          await new Promise((r) => setTimeout(r, 400));
           continue;
         }
         if (recordStateRef.current !== "idle") {
@@ -272,15 +303,16 @@ export function useCameraRecorder() {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
   }, []);
 
-  /** Take a photo */
+  /** Take a photo from the currently active camera */
   const takePicture = useCallback(async (): Promise<void> => {
-    if (!cameraRef.current) return;
+    const cam = getActiveCamera();
+    if (!cam) return;
     if (recordStateRef.current !== "idle") return;
     if (!canTransition()) return;
 
     try {
       triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-      const photo = await cameraRef.current.takePictureAsync({
+      const photo = await cam.takePictureAsync({
         quality: 0.9,
         skipProcessing: false,
       });
@@ -297,7 +329,7 @@ export function useCameraRecorder() {
     } finally {
       lastTransitionRef.current = Date.now();
     }
-  }, [canTransition, appendClip]);
+  }, [canTransition, appendClip, getActiveCamera]);
 
   /** Clear clip list (e.g., after navigating away) */
   const clearClips = useCallback((): void => {
@@ -305,10 +337,11 @@ export function useCameraRecorder() {
     setError(null);
   }, []);
 
-  /** Ensure recording is stopped — call on unmount or navigation. */
+  /** Ensure recording is stopped on BOTH cameras — call on unmount or navigation. */
   const teardown = useCallback((): void => {
-    safeStop();
-  }, [safeStop]);
+    try { backCameraRef.current?.stopRecording(); } catch {}
+    try { frontCameraRef.current?.stopRecording(); } catch {}
+  }, []);
 
   /** Handle the CameraView.onCameraReady event */
   const handleCameraReady = useCallback((): void => {
@@ -330,8 +363,10 @@ export function useCameraRecorder() {
       : 0;
 
   return {
-    // Camera ref
-    cameraRef,
+    // Camera refs — one per facing direction, both always mounted
+    backCameraRef,
+    frontCameraRef,
+    facingRef,
     // Permissions
     permission,
     requestPermission,

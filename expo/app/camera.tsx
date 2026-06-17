@@ -43,42 +43,12 @@ const RING_WRAP = RING_SIZE + 28;
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-// ─── CameraPreview — React.memo'd wrapper to prevent unnecessary re-renders ───
-// and log mount/unmount events so we can verify the native CameraView is stable.
-const CameraPreview = React.memo(function CameraPreview({
-  cameraRef,
-  facing,
-  enableTorch,
-  zoom,
-  onCameraReady,
-}: {
-  cameraRef: React.RefObject<CameraView | null>;
-  facing: "back" | "front";
-  enableTorch: boolean;
-  zoom: number;
-  onCameraReady?: () => void;
-}) {
-  useEffect(() => {
-    return () => {
-      // CameraView unmounted
-    };
-  }, []);
-
-  return (
-    <CameraView
-      ref={cameraRef}
-      style={StyleSheet.absoluteFill}
-      facing={facing}
-      mode="video"
-      mute={false}
-      enableTorch={enableTorch}
-      zoom={zoom}
-      mirror={facing === "front"}
-      responsiveOrientationWhenOrientationLocked
-      onCameraReady={onCameraReady}
-    />
-  );
-});
+// Two always-mounted CameraViews — one for each facing direction.
+// Neither ever receives a changed `facing` prop, so the native capture
+// session survives across camera flips. Visibility is toggled via
+// opacity + pointerEvents, not by remounting or changing the prop.
+// This eliminates the session-teardown gap that causes dropped frames
+// and audio interruptions during mid-recording camera flips.
 
 const triggerHaptic = (style: Haptics.ImpactFeedbackStyle) => {
   if (Platform.OS !== "web") {
@@ -92,7 +62,8 @@ export default function CameraScreen() {
   const insets = useSafeAreaInsets();
 
   const {
-    cameraRef,
+    backCameraRef,
+    frontCameraRef,
     permission,
     requestPermission,
     micPermission,
@@ -487,15 +458,46 @@ export default function CameraScreen() {
     <GestureHandlerRootView style={styles.fullscreen}>
       <StatusBar style="light" hidden={false} />
 
-      {/* Camera preview — React.memo'd wrapper with mount/unmount diagnostics.
-          Never conditionally rendered; never keyed; stable across all state transitions. */}
-      <CameraPreview
-        cameraRef={cameraRef}
-        facing={facing}
-        enableTorch={torch && facing === "back"}
-        zoom={zoom}
-        onCameraReady={handleCameraReady}
-      />
+      {/* Two always-mounted CameraViews — one per facing direction.
+          Visibility is controlled by opacity + pointerEvents, so neither
+          native capture session is ever torn down by a prop change.
+          This keeps the inactive camera warm for instant flip restarts. */}
+      <View style={StyleSheet.absoluteFill}>
+        {/* Back camera — always mounted with fixed facing="back" */}
+        <CameraView
+          ref={backCameraRef}
+          style={[
+            StyleSheet.absoluteFill,
+            { opacity: facing === "back" ? 1 : 0 },
+          ]}
+          facing="back"
+          mode="video"
+          mute={false}
+          enableTorch={torch && facing === "back"}
+          zoom={zoom}
+          mirror={false}
+          responsiveOrientationWhenOrientationLocked
+          onCameraReady={handleCameraReady}
+          pointerEvents={facing === "back" ? "auto" : "none"}
+        />
+        {/* Front camera — always mounted with fixed facing="front" */}
+        <CameraView
+          ref={frontCameraRef}
+          style={[
+            StyleSheet.absoluteFill,
+            { opacity: facing === "front" ? 1 : 0 },
+          ]}
+          facing="front"
+          mode="video"
+          mute={false}
+          enableTorch={false}
+          zoom={zoom}
+          mirror={true}
+          responsiveOrientationWhenOrientationLocked
+          onCameraReady={handleCameraReady}
+          pointerEvents={facing === "front" ? "auto" : "none"}
+        />
+      </View>
 
       {/* Gesture zone — double-tap to flip, pinch to zoom.
           Simultaneous() allows both gestures to coexist on the same layer. */}

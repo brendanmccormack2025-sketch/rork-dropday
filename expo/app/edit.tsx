@@ -347,6 +347,31 @@ export default function EditScreen() {
       typeof status.durationMillis === "number" ? status.durationMillis : 0;
     const posMillis = status.positionMillis ?? 0;
 
+    // Persist the real video duration to the clip so the timeline
+    // shows correct widths instead of the minimum fallback (~450 ms).
+    if (sourceDur > 0) {
+      const idx = activeIndexRef.current;
+      const currentClips = clipsRef.current;
+      const clip = currentClips[idx];
+      if (
+        clip &&
+        clip.type === "video" &&
+        (clip.durationMs === undefined ||
+          clip.durationMs === 0 ||
+          Math.abs(clip.durationMs - sourceDur) > 100)
+      ) {
+        const updated = [...currentClips];
+        updated[idx] = {
+          ...clip,
+          durationMs: sourceDur,
+          trimEndMs: clip.trimEndMs !== undefined && clip.trimEndMs > 0
+            ? clip.trimEndMs
+            : sourceDur,
+        };
+        setClips(updated);
+      }
+    }
+
     if (!durationSetRef.current && sourceDur > 0) {
       durationSetRef.current = true;
       if (pendingSeekRef.current !== null) {
