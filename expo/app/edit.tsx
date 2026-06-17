@@ -1344,11 +1344,16 @@ export default function EditScreen() {
         </View>
 
         {/* ── Preview area ───────────────────────────────────────────── */}
-        <View
+        <Pressable
           style={styles.previewArea}
           onLayout={(e) => {
             const { width, height } = e.nativeEvent.layout;
             setPreviewAreaSize({ w: width, h: height });
+          }}
+          onPress={() => {
+            if (selectedClipId) {
+              handleDeselectAndPreview();
+            }
           }}
         >
           <View
@@ -1422,7 +1427,7 @@ export default function EditScreen() {
               />
             ))}
           </View>
-        </View>
+        </Pressable>
 
         {/* ── Timeline editor ────────────────────────────────────────── */}
         <TimelineEditor

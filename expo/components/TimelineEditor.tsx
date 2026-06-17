@@ -1158,13 +1158,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.05)",
   },
   clipBarSelected: {
-    borderColor: theme.accent,
-    borderWidth: 2,
-    shadowColor: theme.accent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 6,
+    backgroundColor: "#25252D",
   },
   clipBarGhost: {
     opacity: 0.25,
