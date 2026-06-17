@@ -35,6 +35,15 @@ import { theme, getDropWindowState } from "@/constants/theme";
 import { useCameraRecorder, type Clip, MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
 
 const LOCK_DRAG_DISTANCE = 70;
+
+/** Wraps a View, stripping `collapsable` so it never reaches the DOM.
+ *  react-native-gesture-handler's GestureDetector injects
+ *  `collapsable={false}` on its child, which causes React 19 errors
+ *  in react-native-web because `collapsable` is not a valid HTML attr. */
+const GestureView = React.forwardRef<
+  View,
+  React.ComponentProps<typeof View> & { collapsable?: boolean }
+>(({ collapsable: _, ...rest }, ref) => <View ref={ref} {...rest} />);
 const RING_SIZE = 96;
 const RING_STROKE = 5;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
@@ -481,7 +490,7 @@ export default function CameraScreen() {
           Simultaneous() allows both gestures to coexist on the same layer. */}
       <View style={[StyleSheet.absoluteFill, { zIndex: 5 }]} pointerEvents="box-none">
         <GestureDetector gesture={previewGestures}>
-          <View
+          <GestureView
             style={{ flex: 1 }}
             accessibilityRole="button"
             accessibilityLabel="Double-tap to flip camera, pinch to zoom"

@@ -13,6 +13,15 @@ interface FontSizeSliderProps {
   onChange: (size: number) => void;
 }
 
+/** Wraps a View, stripping `collapsable` so it never reaches the DOM.
+ *  react-native-gesture-handler's GestureDetector injects
+ *  `collapsable={false}` on its child, which causes React 19 errors
+ *  in react-native-web because `collapsable` is not a valid HTML attr. */
+const GestureView = React.forwardRef<
+  View,
+  React.ComponentProps<typeof View> & { collapsable?: boolean }
+>(({ collapsable: _, ...rest }, ref) => <View ref={ref} {...rest} />);
+
 const TRACK_H = 4;
 const THUMB_SIZE = 26;
 const TRACK_PAD = THUMB_SIZE / 2; // half thumb so it sits flush at edges
@@ -79,7 +88,7 @@ export default function FontSizeSlider({ value, onChange }: FontSizeSliderProps)
       <Text style={styles.label}>Font size</Text>
       <View style={styles.trackArea}>
         <GestureDetector gesture={panGesture}>
-          <View
+          <GestureView
             style={styles.trackContainer}
             onLayout={(e) => {
               const tw = e.nativeEvent.layout.width;
@@ -93,7 +102,7 @@ export default function FontSizeSlider({ value, onChange }: FontSizeSliderProps)
             <Animated.View style={[styles.trackFill, trackFillStyle]} />
             {/* Thumb */}
             <Animated.View style={[styles.thumb, thumbStyle]} />
-          </View>
+          </GestureView>
         </GestureDetector>
       </View>
       <Text style={styles.valueLabel}>{displayValue}</Text>
