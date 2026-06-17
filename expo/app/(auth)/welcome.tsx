@@ -1,0 +1,242 @@
+import React, { useEffect, useRef } from "react";
+import {
+  Animated,
+  Easing,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { router } from "expo-router";
+import * as AppleAuthentication from "expo-apple-authentication";
+import { Apple, Mail } from "lucide-react-native";
+
+import ScreenBackground from "@/components/ScreenBackground";
+import DropletLogo from "@/components/DropletLogo";
+import PrimaryButton from "@/components/PrimaryButton";
+import { theme } from "@/constants/theme";
+import { useAuth } from "@/providers/AuthProvider";
+
+export default function WelcomeScreen() {
+  const { signInWithApple, signInWithGoogle } = useAuth();
+  const floatAnim = useRef(new Animated.Value(0)).current;
+  const glowAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, {
+          toValue: 1,
+          duration: 3000,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(floatAnim, {
+          toValue: 0,
+          duration: 3000,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, {
+          toValue: 1,
+          duration: 2200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowAnim, {
+          toValue: 0,
+          duration: 2200,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, [floatAnim, glowAnim]);
+
+  const translateY = floatAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -8],
+  });
+
+  const ringOpacity = glowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 0.06],
+  });
+  const ringScale = glowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.55],
+  });
+
+  const handleApple = async () => {
+    try {
+      await signInWithApple();
+    } catch (e: any) {
+      console.warn("[welcome] apple", e?.message);
+    }
+  };
+
+  const handleGoogle = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (e: any) {
+      console.warn("[welcome] google", e?.message);
+    }
+  };
+
+  return (
+    <ScreenBackground>
+      <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+        {/* Hero */}
+        <View style={styles.hero}>
+          {/* Pulsing ring */}
+          <Animated.View
+            style={[
+              styles.ring,
+              {
+                opacity: ringOpacity,
+                transform: [{ scale: ringScale }],
+              },
+            ]}
+          />
+          {/* Logo */}
+          <Animated.View style={{ transform: [{ translateY }] }}>
+            <DropletLogo size={120} />
+          </Animated.View>
+          <Text style={styles.brand}>DropDay</Text>
+          <Text style={styles.tagline}>The night belongs to the moment.</Text>
+        </View>
+
+        {/* Actions */}
+        <View style={styles.actions}>
+          {/* Drop window badge */}
+          <View style={styles.windowBadge}>
+            <View style={styles.dot} />
+            <Text style={styles.windowText}>8 PM – 12 AM nightly</Text>
+          </View>
+
+          <PrimaryButton
+            label="Continue with Email"
+            icon={<Mail color="#fff" size={18} />}
+            onPress={() => router.push("/(auth)/sign-in")}
+          />
+
+          {Platform.OS === "ios" ? (
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={
+                AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+              }
+              buttonStyle={
+                AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+              }
+              cornerRadius={14}
+              style={styles.appleBtn}
+              onPress={handleApple}
+            />
+          ) : (
+            <PrimaryButton
+              label="Continue with Apple"
+              variant="outline"
+              icon={<Apple color={theme.text} size={18} />}
+              onPress={handleApple}
+            />
+          )}
+
+          <PrimaryButton
+            label="Continue with Google"
+            variant="outline"
+            icon={
+              <View style={styles.gIcon}>
+                <Text style={styles.gIconText}>G</Text>
+              </View>
+            }
+            onPress={handleGoogle}
+          />
+
+          <Text style={styles.legal}>
+            By continuing you agree to be part of the nightly drop.
+          </Text>
+        </View>
+      </SafeAreaView>
+    </ScreenBackground>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, paddingHorizontal: 24 },
+  hero: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  ring: {
+    position: "absolute",
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    borderWidth: 1.5,
+    borderColor: theme.accent,
+  },
+  brand: {
+    color: theme.text,
+    fontSize: 38,
+    fontWeight: "800" as const,
+    letterSpacing: -1,
+    marginTop: 4,
+  },
+  tagline: {
+    color: theme.textMuted,
+    fontSize: 15,
+    fontWeight: "500" as const,
+  },
+  actions: { gap: 12, paddingBottom: 8 },
+  windowBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "rgba(10,132,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(10,132,255,0.2)",
+    marginBottom: 4,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.accent,
+  },
+  windowText: {
+    color: theme.accent,
+    fontSize: 13,
+    fontWeight: "600" as const,
+    letterSpacing: 0.3,
+  },
+  appleBtn: { height: 52, width: "100%" },
+  gIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gIconText: {
+    color: "#0A0A0A",
+    fontWeight: "800" as const,
+    fontSize: 13,
+  },
+  legal: {
+    color: theme.textDim,
+    fontSize: 11,
+    textAlign: "center",
+    marginTop: 4,
+  },
+});

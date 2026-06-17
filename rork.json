@@ -1,0 +1,25 @@
+{
+  "$schema": "https://rork.com/schema/rork.json",
+  "apps": [
+    {
+      "name": "DropDay",
+      "path": "expo",
+      "framework": "react-native"
+    },
+    {
+      "name": "Functions",
+      "path": "functions",
+      "framework": "cloudflare"
+    },
+    {
+      "name": "Backend",
+      "path": "backend",
+      "framework": "supabase"
+    },
+    {
+      "name": "DropDay Camera",
+      "path": "ios-dropday-camera",
+      "framework": "swift"
+    }
+  ]
+}

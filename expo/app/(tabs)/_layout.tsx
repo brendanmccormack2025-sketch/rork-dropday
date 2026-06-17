@@ -1,0 +1,108 @@
+import { Tabs, useRouter } from "expo-router";
+import { MessageCircleReply, User, Users, Zap } from "lucide-react-native";
+import React, { useCallback } from "react";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
+import { BlurView } from "expo-blur";
+
+import CenterPostButton from "@/components/CenterPostButton";
+import { theme } from "@/constants/theme";
+
+export default function TabLayout() {
+  const router = useRouter();
+
+  const openCamera = useCallback(() => {
+    router.push("/camera");
+  }, [router]);
+
+  return (
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: theme.accent,
+        tabBarInactiveTintColor: theme.textDim,
+        tabBarStyle: styles.tabBar,
+        tabBarBackground: () =>
+          Platform.OS === "ios" ? (
+            <BlurView
+              tint="dark"
+              intensity={90}
+              style={StyleSheet.absoluteFill}
+            />
+          ) : (
+            <View
+              style={[StyleSheet.absoluteFill, { backgroundColor: "#0A0A0A" }]}
+            />
+          ),
+        tabBarLabelStyle: styles.label,
+      }}
+    >
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: "Drop",
+          tabBarIcon: ({ color, size }) => <Zap color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="reactions"
+        options={{
+          title: "Last Night",
+          tabBarIcon: ({ color, size }) => <MessageCircleReply color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="drop"
+        options={{
+          title: "",
+          tabBarButton: () => (
+            <Pressable
+              onPress={openCamera}
+              style={styles.centerSlot}
+              android_ripple={null}
+              hitSlop={12}
+            >
+              <CenterPostButton onPress={openCamera} />
+            </Pressable>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="friends"
+        options={{
+          title: "Friends",
+          tabBarIcon: ({ color, size }) => <Users color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
+          tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
+        }}
+      />
+    </Tabs>
+  );
+}
+
+const styles = StyleSheet.create({
+  tabBar: {
+    position: "absolute",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.04)",
+    backgroundColor: "transparent",
+    height: 88,
+    paddingTop: 6,
+  },
+  label: {
+    fontSize: 10,
+    fontWeight: "700" as const,
+    letterSpacing: 0.4,
+    marginBottom: 6,
+  },
+  centerSlot: {
+    flex: 1,
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});
