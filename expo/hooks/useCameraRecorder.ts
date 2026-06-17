@@ -58,11 +58,8 @@ export function useCameraRecorder() {
   const lastTransitionRef = useRef<number>(0);
   const recordSessionIdRef = useRef<string | null>(null);
   const recordingStartedAtRef = useRef<number | null>(null);
-  const shouldAutoRestartRef = useRef<boolean>(false);
-  /** True during the entire flip+restart window — keeps isRecording visually continuous */
+  /** True briefly after a camera flip during recording — keeps isRecording visually continuous */
   const cameraSwitchingRef = useRef<boolean>(false);
-  /** Callback set by the auto-restart effect, invoked by CameraView.onCameraReady */
-  const onCameraReadyCallbackRef = useRef<(() => void) | null>(null);
   /** Stable ref mirror of micPermission — gesture callbacks read this, never the state */
   const micPermissionRef = useRef(micPermission);
 
@@ -93,43 +90,29 @@ export function useCameraRecorder() {
   }, []);
 
   /** Toggle front/back camera.
-   *  During recording: stops the current clip (saved), flags for auto-restart
-   *  after the recording finalizes, then flips + resumes. Returns true when the
-   *  flip was initiated (or deferred via auto-restart). Returns false when
-   *  blocked (auto-restart already pending). */
+   *  During recording: flips the camera without stopping — the recording
+   *  continues as a single continuous clip, same as Snapchat/Instagram.
+   *  When idle: flips immediately. */
   const flipCamera = useCallback((): boolean => {
-    // Guard: don't allow flip while auto-restart is already pending
-    if (shouldAutoRestartRef.current) {
-      console.log("[camera] SWITCH CAMERA — blocked, auto-restart pending");
-      return false;
-    }
-
-    console.log("[camera] SWITCH CAMERA CALLED (state:", recordStateRef.current, ")");
-
-    if (recordStateRef.current === "recording" || recordStateRef.current === "stopping") {
-      // Mid-recording: stop to save the clip, then flip + restart after finalization.
-      // Set the switching flag immediately so isRecording stays true visually.
-      console.log("[camera] SWITCH CAMERA — mid-recording, stopping to save clip");
-      shouldAutoRestartRef.current = true;
-      cameraSwitchingRef.current = true;
-      // Use safeStop directly (via ref) to avoid dependency on stopRecording which is declared later
-      try {
-        cameraRef.current?.stopRecording();
-      } catch {
-        // Swallow — recording may already be stopped
-      }
-      setRecordStateSync("stopping");
-      return true;
-    }
-
-    // Not recording: flip immediately
+    // Toggle facing — CameraView handles the prop change at the native level.
+    // If the platform supports mid-recording camera switch (iOS multi-cam,
+    // Android CameraX), the flip is seamless. Otherwise the camera switches
+    // on the next recording start.
     setFacing((f) => {
       const next = f === "back" ? "front" : "back";
-      console.log("[camera] SWITCH CAMERA EXECUTED —", f, "→", next);
       return next;
     });
+
+    // Keep isRecording visually stable during the brief camera transition
+    if (recordStateRef.current === "recording" || recordStateRef.current === "stopping") {
+      cameraSwitchingRef.current = true;
+      setTimeout(() => {
+        cameraSwitchingRef.current = false;
+      }, 400);
+    }
+
     return true;
-  }, [setRecordStateSync]);
+  }, []);
 
   /** Toggle torch */
   const toggleTorch = useCallback(() => {
@@ -278,76 +261,14 @@ export function useCameraRecorder() {
     setError(null);
   }, []);
 
-  /** Ensure recording is stopped — call on unmount or navigation.
-   *  Sets flags so the while-loop breaks naturally; does NOT force state
-   *  to idle (the loop's cleanup block handles that). */
+  /** Ensure recording is stopped — call on unmount or navigation. */
   const teardown = useCallback((): void => {
-    shouldAutoRestartRef.current = false;
     safeStop();
   }, [safeStop]);
 
-  // ─── Auto-restart recording after mid-recording camera flip ─────
-  // When shouldAutoRestartRef is set (by flipCamera during recording),
-  // this effect waits for the recording to finalize (state → "idle"),
-  // then flips the camera. Instead of a blind timeout, it registers a
-  // callback on onCameraReadyCallbackRef that fires as soon as the
-  // CameraView's native AVCaptureSession is ready — typically 100–300ms.
-  // Falls back to a 1000ms safety timeout if onCameraReady never fires.
-  useEffect(() => {
-    if (!shouldAutoRestartRef.current) return;
-    if (recordState !== "idle") return;
-
-    console.log("[camera] AUTO-RESTART: recording finalized, flipping camera");
-
-    // Clear canTransition's MIN_STATE_MS guard manually so startRecording
-    // can fire immediately without the 400ms cooldown.
-    lastTransitionRef.current = 0;
-
-    setFacing((f) => {
-      const next = f === "back" ? "front" : "back";
-      console.log("[camera] AUTO-RESTART FLIP —", f, "→", next);
-      return next;
-    });
-
-    // Register the restart callback — CameraView.onCameraReady will fire it.
-    // Fallback timeout in case onCameraReady never fires (e.g. web or buggy native).
-    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
-
-    onCameraReadyCallbackRef.current = () => {
-      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
-      console.log("[camera] AUTO-RESTART: camera ready, starting new recording");
-      shouldAutoRestartRef.current = false;
-      cameraSwitchingRef.current = false;
-      startRecording();
-    };
-
-    fallbackTimer = setTimeout(() => {
-      if (onCameraReadyCallbackRef.current) {
-        console.log("[camera] AUTO-RESTART: fallback timeout — starting recording anyway");
-        const cb = onCameraReadyCallbackRef.current;
-        onCameraReadyCallbackRef.current = null;
-        shouldAutoRestartRef.current = false;
-        cameraSwitchingRef.current = false;
-        cb();
-      }
-    }, 1000);
-
-    return () => {
-      shouldAutoRestartRef.current = false;
-      cameraSwitchingRef.current = false;
-      onCameraReadyCallbackRef.current = null;
-      if (fallbackTimer) clearTimeout(fallbackTimer);
-    };
-  }, [recordState, startRecording]);
-
-  /** Handle the CameraView.onCameraReady event — fires the pending auto-restart callback */
+  /** Handle the CameraView.onCameraReady event */
   const handleCameraReady = useCallback((): void => {
-    if (onCameraReadyCallbackRef.current) {
-      console.log("[camera] onCameraReady fired — executing pending auto-restart");
-      const cb = onCameraReadyCallbackRef.current;
-      onCameraReadyCallbackRef.current = null;
-      cb();
-    }
+    // No-op: camera ready tracking for potential future use
   }, []);
 
   /** Synchronous recording check — use the ref for gesture handlers, not the derived boolean.

@@ -471,14 +471,41 @@ export default function EditScreen() {
       advanceToNextClip();
       return;
     }
+
+    // Auto-loop: when the player fires didJustFinish (end of file reached),
+    // restart playback instead of letting the video stop at the last frame.
+    if (status.didJustFinish) {
+      const tStart = trimStartRef.current;
+      if (isIsolatedRef.current) {
+        // Isolated mode: loop the selected clip
+        videoRef.current
+          ?.setPositionAsync(tStart)
+          .then(() => {
+            videoRef.current?.playAsync().catch(() => {});
+          })
+          .catch(() => {});
+      } else {
+        // Multi-clip or single: advance loops automatically
+        advanceToNextClip();
+      }
+      return;
+    }
   }, []);
 
   const advanceToNextClip = useCallback(() => {
     const selIdx = selectedClipIdxRef.current;
     if (isIsolatedRef.current && selIdx >= 0 && selIdx < clipsRef.current.length && selIdx === activeIndexRef.current) {
-      setIsPlaying(false);
+      // Auto-loop: restart the selected clip instead of stopping
+      setIsPlaying(true);
       const clip = clipsRef.current[selIdx];
-      setPositionMs(segmentOffsetRef.current + (clip ? effectiveDurationMs(clip) : 0));
+      const tStart = clip?.trimStartMs ?? 0;
+      videoRef.current
+        ?.setPositionAsync(tStart)
+        .then(() => {
+          videoRef.current?.playAsync().catch(() => {});
+        })
+        .catch(() => {});
+      setPositionMs(segmentOffsetRef.current);
       return;
     }
 

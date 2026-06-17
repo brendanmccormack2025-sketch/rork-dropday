@@ -147,7 +147,13 @@ export default function CoverPickerScreen() {
         setPositionMs(status.positionMillis);
       }
       if (status.didJustFinish) {
-        setIsPlaying(false);
+        // Auto-loop: restart from the beginning instead of stopping
+        videoRef.current
+          ?.setPositionAsync(0)
+          .then(() => {
+            videoRef.current?.playAsync().catch(() => {});
+          })
+          .catch(() => {});
       }
     },
     [],
