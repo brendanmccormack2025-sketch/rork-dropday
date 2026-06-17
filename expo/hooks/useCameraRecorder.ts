@@ -191,12 +191,14 @@ export function useCameraRecorder() {
           accumulatedSegmentUrisRef.current.push(result.uri);
         }
 
-        // If the recording stopped because of a camera flip, restart immediately
+        // If the recording stopped because of a camera flip, restart after a
+        // brief delay so the native camera has time to reconfigure.
         if (isFlippingRef.current) {
-          console.log("[camera] Flip detected — restarting recording on new camera");
+          console.log("[camera] Flip detected — waiting 400ms then restarting on new camera");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
-          // Keep recording — loop continues to new recordAsync call
+          await new Promise((r) => setTimeout(r, 400));
+          // Loop continues to a new recordAsync call on the reconfigured camera
           continue;
         }
 
@@ -204,9 +206,10 @@ export function useCameraRecorder() {
         keepRecording = false;
       } catch (e) {
         if (isFlippingRef.current) {
-          console.log("[camera] Flip error caught — restarting recording");
+          console.log("[camera] Flip error caught — waiting 400ms then restarting");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
+          await new Promise((r) => setTimeout(r, 400));
           continue;
         }
         if (recordStateRef.current !== "idle") {
@@ -217,21 +220,27 @@ export function useCameraRecorder() {
       }
     }
 
-    // Finalize: create clip from first segment as primary, save all segments
+    // Finalize: create ONE clip PER accumulated segment so all footage
+    // (pre-flip and post-flip) appears in the editor. All clips share the
+    // same recordingSessionId so the editor can group them if needed.
     const uris = accumulatedSegmentUrisRef.current;
     if (uris.length > 0) {
-      const dur = Date.now() - (recordingStartedAtRef.current ?? Date.now());
-      console.log(`[camera] Recording finished — ${uris.length} segment(s), ${dur}ms total`);
-      const clip: Clip = {
-        id: newClipId(),
-        uri: uris[0],
-        type: "video",
-        durationMs: dur,
-        recordingSessionId: recordSessionIdRef.current ?? undefined,
-      };
-      appendClip(clip);
+      const sessionId = recordSessionIdRef.current ?? undefined;
+      console.log(`[camera] Recording finished — ${uris.length} segment(s), creating ${uris.length} clip(s)`);
+      const segmentStart = recordingStartedAtRef.current ?? Date.now();
       for (const uri of uris) {
+        // Each segment gets its own clip so all footage is visible in the editor.
+        // Clips from the same session share recordingSessionId.
+        const clip: Clip = {
+          id: newClipId(),
+          uri,
+          type: "video",
+          durationMs: undefined, // per-segment duration unknown — editor computes it
+          recordingSessionId: sessionId,
+        };
+        appendClip(clip);
         saveToGallery(uri);
+        console.log(`[camera] Created clip: ${clip.id} from ${uri.slice(0, 60)}`);
       }
     }
 
