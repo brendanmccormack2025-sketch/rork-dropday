@@ -573,24 +573,6 @@ export default function CameraScreen() {
         </View>
       </View>
 
-      {/* Next button */}
-      {clips.length > 0 && !isRecording && (
-        <View
-          style={[styles.nextBtnRow, { top: insets.top + 72 }]}
-          pointerEvents="box-none"
-        >
-          <Pressable
-            onPress={goToEdit}
-            style={styles.nextBtn}
-            hitSlop={10}
-            accessibilityLabel="Next — review your drop"
-          >
-            <ArrowRight color="#fff" size={16} />
-            <Text style={styles.nextBtnText}>Next</Text>
-          </Pressable>
-        </View>
-      )}
-
       {/* Recording hint */}
       {!isRecording && clips.length === 0 && (
         <View

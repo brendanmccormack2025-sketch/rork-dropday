@@ -43,6 +43,8 @@ export function useCameraRecorder() {
   const cameraRef = useRef<CameraView>(null);
   /** True when the native camera session is ready for recording */
   const cameraReadyRef = useRef<boolean>(false);
+  /** Resolves when onCameraReady fires after a flip — avoids spin-waiting */
+  const cameraReadyResolveRef = useRef<(() => void) | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const [mediaPermission, requestMediaPermission] =
@@ -112,31 +114,30 @@ export function useCameraRecorder() {
 
   /** Toggle front/back camera.
    *  When idle: just swaps facing immediately.
-   *  During recording: explicitly stops the current recording so
-   *  recordAsync resolves with the segment captured so far, then
-   *  signals the recording loop to restart on the new camera after
-   *  it reports ready via onCameraReady. */
+   *  During recording: sets the flip flag so the recording loop restarts
+   *  on the new camera. Does NOT call stopRecording() — expo-camera
+   *  handles the session rebuild internally when facing changes.
+   *  recordAsync will resolve/reject naturally; the loop catches it. */
   const flipCamera = useCallback((): boolean => {
     const recording = recordStateRef.current === "recording" || recordStateRef.current === "stopping";
 
     if (recording) {
-      // Stop the current recording so recordAsync resolves.
-      // The recording loop will see isFlippingRef=true and restart.
+      // Signal the recording loop to restart after facing rebuild.
+      // We do NOT stop the recording ourselves — expo-camera tears
+      // down the old session and builds a new one when facing changes,
+      // which causes recordAsync to resolve/reject. Stopping manually
+      // races with that teardown and can crash the session.
       isFlippingRef.current = true;
       cameraSwitchingRef.current = true;
-      cameraReadyRef.current = false; // expect a new session
-      const oldCam = getActiveCamera();
-      try { oldCam?.stopRecording(); } catch { /* ignore */ }
     }
 
-    // Swap facing — the CameraView's facing prop will update on re-render,
-    // tearing down the old session and building the new one.
+    // Swap facing — CameraView re-renders with the new prop.
     const next = facingRef.current === "back" ? "front" : "back";
     facingRef.current = next;
     setFacing(next);
 
     return true;
-  }, [getActiveCamera]);
+  }, []);
 
   /** Toggle torch */
   const toggleTorch = useCallback(() => {
@@ -222,26 +223,42 @@ export function useCameraRecorder() {
           accumulatedSegmentUrisRef.current.push(result.uri);
         }
 
-        // When the camera flips, the session rebuilds. Wait until
-        // onCameraReady fires before calling recordAsync again.
+        // When the camera flips mid-recording, the session rebuilds.
+        // Wait for onCameraReady (via a promise, not spin-wait) before
+        // calling recordAsync on the new camera.
         if (isFlippingRef.current) {
           console.log("[camera] Flip — waiting for camera to be ready");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
-          // Spin until the new session reports ready (up to 3 s timeout)
-          const waited = Date.now();
-          while (!cameraReadyRef.current) {
-            if (Date.now() - waited > 3000) {
-              console.warn("[camera] Camera not ready after flip — aborting");
-              setError("Camera failed to restart after flip.");
-              keepRecording = false;
-              break;
-            }
-            await new Promise((r) => setTimeout(r, 30));
+          cameraReadyRef.current = false;
+
+          // Resolve via onCameraReady (or timeout after 4 s)
+          let timedOut = false;
+          try {
+            await Promise.race([
+              new Promise<void>((resolve) => {
+                cameraReadyResolveRef.current = resolve;
+              }),
+              new Promise<void>((_, reject) =>
+                setTimeout(() => {
+                  timedOut = true;
+                  reject(new Error("timeout"));
+                }, 4000)
+              ),
+            ]);
+          } catch {
+            // Timeout — camera didn't come back
           }
-          if (cameraReadyRef.current) {
-            console.log("[camera] Camera ready — resuming recording");
+          cameraReadyResolveRef.current = null;
+
+          if (timedOut || !cameraReadyRef.current) {
+            console.warn("[camera] Camera not ready after flip — aborting");
+            setError("Camera failed to restart after flip.");
+            keepRecording = false;
+            break;
           }
+
+          console.log("[camera] Camera ready — resuming recording");
           continue;
         }
 
@@ -355,9 +372,14 @@ export function useCameraRecorder() {
   }, []);
 
   /** Handle the CameraView.onCameraReady event — signals the recording
-   *  loop that the camera is ready to accept recordAsync. */
+   *  loop that the camera is ready to accept recordAsync. Also resolves
+   *  any pending flip-wait promise so the loop wakes immediately. */
   const handleCameraReady = useCallback((): void => {
     cameraReadyRef.current = true;
+    if (cameraReadyResolveRef.current) {
+      cameraReadyResolveRef.current();
+      cameraReadyResolveRef.current = null;
+    }
     console.log("[camera] onCameraReady — session is live");
   }, []);
 
