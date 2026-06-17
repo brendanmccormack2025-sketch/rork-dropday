@@ -864,12 +864,7 @@ export default function TimelineEditor({
   }, [dragState, layouts]);
 
   return (
-    <View
-      style={[styles.container, { borderWidth: 1, borderColor: "rgba(255,0,255,0.3)" }]}
-      onTouchStart={(e) => {
-        console.log("━━━ [TOUCH] TIMELINE container — pageX:", e.nativeEvent.pageX, "pageY:", e.nativeEvent.pageY);
-      }}
-    >
+    <View style={styles.container}>
       {/* ── Drag overlay (captures touch after long-press) ── */}
       {dragState && (
         <View
@@ -1078,9 +1073,6 @@ export default function TimelineEditor({
         ]}
         pointerEvents={dragState ? "none" : "auto"}
         {...playheadPan.panHandlers}
-        onTouchStart={(e) => {
-          console.log("━━━ [TOUCH] PLAYHEAD overlay — pageX:", e.nativeEvent.pageX, "pageY:", e.nativeEvent.pageY, "left:", playheadScreen - PLAYHEAD_ZONE / 2);
-        }}
       >
         <View style={styles.playheadLine} />
         <View

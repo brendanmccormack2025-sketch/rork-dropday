@@ -112,7 +112,6 @@ async function uriToBlob(uri: string): Promise<Uint8Array> {
     throw new Error(`File read returned empty data from ${uri.slice(0, 60)}`);
   }
   const fileData = new Uint8Array(decode(base64));
-  console.log(`[uriToBlob] decoded size=${fileData.byteLength} from ${uri.slice(0, 60)}`);
   return fileData;
 }
 
@@ -177,31 +176,21 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   }, []);
 
   const persistDraftProjects = useCallback(async (next: DraftProject[]) => {
-    console.log("[WORKFLOW:SAVE:DRAFT:PERSIST] writing", next.length, "projects");
     setDraftProjects(next);
     try {
       await AsyncStorage.setItem(DRAFTS_KEY, JSON.stringify(next));
-      console.log("[WORKFLOW:SAVE:DRAFT:PERSIST] AsyncStorage write OK");
     } catch (e) {
-      console.error("[WORKFLOW:SAVE:DRAFT:PERSIST] AsyncStorage write FAILED", e);
+      console.error("[drafts] persist error", e);
     }
   }, []);
 
   /** Save a full draft project — creates new or overwrites existing by id. */
   const saveDraftProject = useCallback(
     async (project: DraftProject) => {
-      console.log("[WORKFLOW:SAVE:DRAFT] saveDraftProject called", {
-        id: project.id,
-        clipsLen: project.clips.length,
-        hasThumbnail: !!project.coverThumbnailUri,
-        textOverlaysLen: project.textOverlays.length,
-      });
       const filtered = draftProjects.filter((d) => d.id !== project.id);
       const updated = { ...project, updatedAt: Date.now() };
       const next = [updated, ...filtered];
-      console.log("[WORKFLOW:SAVE:DRAFT] persisting", next.length, "projects to AsyncStorage");
       await persistDraftProjects(next);
-      console.log("[WORKFLOW:SAVE:DRAFT] persist OK");
       return updated;
     },
     [draftProjects, persistDraftProjects]
@@ -399,12 +388,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     retry: 1,
     staleTime: 0,
     queryFn: async (): Promise<MyProfile | null> => {
-      if (!user?.id) {
-        console.log("[profile:query] no user.id, returning null");
-        return null;
-      }
-
-      console.log("[profile:query] FETCHING for user", user.id.slice(0, 12));
+      if (!user?.id) return null;
       const { data, error } = await supabase
         .from("profiles")
         .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle")
@@ -422,13 +406,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       }
 
       if (data) {
-        console.log("[profile:query] SUCCESS — got row", {
-          id: data.id?.slice(0, 12),
-          username: data.username,
-          display_name: data.display_name,
-          bio: data.bio?.slice(0, 30),
-          avatar_url: data.avatar_url?.slice(0, 50),
-        });
         return {
           id: data.id as string,
           username: data.username as string,
@@ -441,7 +418,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         };
       }
 
-      console.log("[profile:query] NO ROW found for user", user.id.slice(0, 12));
       return null;
     },
   });
@@ -627,30 +603,15 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       textOverlays?: TextOverlay[];
       thumbnailUri?: string;
     }) => {
-      console.log("[createPost] START", {
-        uri: input.uri?.slice(0, 60),
-        mediaType: input.mediaType,
-        captionLength: input.caption?.length ?? 0,
-        hasCaption: !!input.caption,
-        parentPostId: input.parentPostId ?? null,
-        segmentCount: input.segmentUris?.length ?? 0,
-      });
-
-      if (!user?.id) {
-        console.error("[createPost] FAIL — no user.id");
-        throw new Error("Not signed in.");
-      }
+      if (!user?.id) throw new Error("Not signed in.");
 
       const win = getDropWindowState(new Date());
-      console.log("[createPost] dropWindow", { isOpen: win.isOpen });
       if (!win.isOpen) {
-        console.error("[createPost] FAIL — window closed");
         throw new Error("Drop window is closed. Save as draft and post when it opens at 8 PM.");
       }
 
       const baseTs = Date.now();
       const isRemoteUrl = input.uri.startsWith("http");
-      console.log("[createPost] isRemoteUrl:", isRemoteUrl);
 
       let mediaUrl: string;
       let segmentUrls: string[] | null = null;
@@ -658,13 +619,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (isRemoteUrl) {
         mediaUrl = input.uri;
         segmentUrls = input.segmentUris ?? null;
-        console.log("[createPost] using remote URL, skipping upload");
       } else {
         const urisToUpload = input.segmentUris && input.segmentUris.length > 0
           ? input.segmentUris
           : [input.uri];
-
-        console.log("[createPost] uploading", urisToUpload.length, "file(s) to bucket", BUCKET);
 
         const uploadedUrls: string[] = [];
         for (let i = 0; i < urisToUpload.length; i++) {
@@ -673,12 +631,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           const segPath = `${user.id}/${baseTs}_seg${i}.${segExt}`;
           const contentType = input.mediaType === "video" ? "video/mp4" : "image/jpeg";
 
-          console.log(`[createPost] upload [${i}]`, { path: segPath, uri: segUri?.slice(0, 60) });
-
           let body: Uint8Array;
           try {
             body = await uriToBlob(segUri);
-            console.log(`[createPost] decoded [${i}]`, { byteLength: body.byteLength });
           } catch (e) {
             console.error(`[createPost] uriToBlob FAIL [${i}]`, (e as Error)?.message ?? e);
             throw new Error(`Failed to read file: ${(e as Error)?.message ?? "unknown error"}`);
@@ -688,17 +643,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             .from(BUCKET)
             .upload(segPath, body, { contentType, upsert: false });
 
-          if (upErr) {
-            console.error(`[createPost] upload FAIL [${i}]`, {
-              message: upErr.message,
-              name: upErr.name,
-            });
-            throw upErr;
-          }
-          console.log(`[createPost] upload OK [${i}]`, { path: upData?.path });
+          if (upErr) throw upErr;
 
           const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(segPath);
-          console.log(`[createPost] publicUrl [${i}]`, pub?.publicUrl?.slice(0, 80));
           uploadedUrls.push(pub.publicUrl);
         }
 
@@ -746,13 +693,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (thumbnailUrl) {
         row.thumbnail_url = thumbnailUrl;
       }
-      console.log("[createPost] inserting row", {
-        keys: Object.keys(row),
-        media_url: mediaUrl.slice(0, 80),
-        hasTrimData: !!input.trimData?.length,
-        hasTextOverlays: !!input.textOverlays?.length,
-      });
-
       const { data: insData, error: insErr } = await supabase.from("posts").insert(row).select("id, created_at").single();
 
       if (insErr) {
@@ -764,8 +704,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         });
         throw insErr;
       }
-
-      console.log("[createPost] insert OK", { id: insData?.id, created_at: insData?.created_at });
 
       if (input.draftId) {
         await deleteDraftProject(input.draftId);
@@ -792,7 +730,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       } as Post;
     },
     onSuccess: (newPost) => {
-      console.log("[createPost] onSuccess — invalidating [\"posts\"] queries");
       qc.invalidateQueries({ queryKey: ["posts"] });
 
       // Optimistic: prepend the new post to the feed cache immediately
@@ -800,7 +737,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         if (!old) return old;
         // Avoid duplicates
         if (old.some((p) => p.id === newPost.id)) return old;
-        console.log("[createPost] optimistic prepend to feed cache");
         return [newPost, ...old];
       });
 

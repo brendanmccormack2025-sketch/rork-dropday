@@ -46,7 +46,7 @@ export default function CoverPickerScreen() {
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    console.log("[COVER_PICKER] Mounted");
+    // Screen mounted
   }, []);
   const {
     videoUri,

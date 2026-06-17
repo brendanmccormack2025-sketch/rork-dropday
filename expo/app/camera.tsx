@@ -59,9 +59,8 @@ const CameraPreview = React.memo(function CameraPreview({
   onCameraReady?: () => void;
 }) {
   useEffect(() => {
-    console.log("[camera] CameraView MOUNTED (React component)");
     return () => {
-      console.log("[camera] CameraView UNMOUNTED (React cleanup) — was this intentional?");
+      // CameraView unmounted
     };
   }, []);
 

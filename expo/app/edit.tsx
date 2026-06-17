@@ -1135,40 +1135,24 @@ export default function EditScreen() {
   }, [clips, primaryVideoUri, totalDurationMs, router]);
 
   const handlePostPress = useCallback(() => {
-    console.log("[POST] Handler Started");
-    console.log("[POST] primaryVideoUri =", primaryVideoUri);
-    console.log("[POST] clips.length =", clips.length);
-    console.log("[POST] totalDurationMs =", totalDurationMs);
-
-    if (clips.length === 0) {
-      console.log("[POST] GUARD: clips.length === 0, returning early");
-      return;
-    }
+    if (clips.length === 0) return;
 
     if (primaryVideoUri) {
-      console.log("[POST] About to navigate to /cover-picker");
       coverState.pendingAction = "publish";
       coverState.resultThumbnailUri = null;
       coverState.resultThumbnailMs = 0;
-      try {
-        router.push({
-          pathname: "/cover-picker",
-          params: {
-            videoUri: primaryVideoUri,
-            totalDurationMs: String(totalDurationMs),
-            mode: "publish",
-          },
-        });
-        console.log("[POST] router.push completed");
-      } catch (e: any) {
-        console.log("[POST] router.push THREW:", e?.message ?? e);
-      }
+      router.push({
+        pathname: "/cover-picker",
+        params: {
+          videoUri: primaryVideoUri,
+          totalDurationMs: String(totalDurationMs),
+          mode: "publish",
+        },
+      });
     } else {
-      console.log("[POST] No primaryVideoUri, calling executePost directly");
       setError(null);
       setSuccess(null);
       executePostRef.current(null).catch((e: any) => {
-        console.log("[POST] executePost direct call failed:", e?.message ?? e);
         setError(e instanceof Error ? e.message : "Could not post your drop.");
       });
     }
@@ -1179,25 +1163,15 @@ export default function EditScreen() {
       const action = coverState.pendingAction;
       const uri = coverState.resultThumbnailUri;
       const ms = coverState.resultThumbnailMs;
-      console.log("[POST:FOCUS] focus effect fired, action=", action, "uri=", uri, "ms=", ms);
       if (action && uri) {
-        console.log("[POST:FOCUS] action and uri present, consuming coverState");
         coverState.pendingAction = null;
         coverState.resultThumbnailUri = null;
         coverState.resultThumbnailMs = 0;
         if (action === "save-draft") {
-          console.log("[POST:FOCUS] calling executeSaveDraft");
-          executeSaveDraftRef.current(uri, ms).catch((e: any) => {
-            console.log("[POST:FOCUS] executeSaveDraft failed:", e?.message ?? e);
-          });
+          executeSaveDraftRef.current(uri, ms).catch(() => {});
         } else {
-          console.log("[POST:FOCUS] calling executePost");
-          executePostRef.current(uri).catch((e: any) => {
-            console.log("[POST:FOCUS] executePost failed:", e?.message ?? e);
-          });
+          executePostRef.current(uri).catch(() => {});
         }
-      } else {
-        console.log("[POST:FOCUS] no action/uri to consume (action=", action, "uri=", uri, ")");
       }
     }, []),
   );
@@ -1255,22 +1229,14 @@ export default function EditScreen() {
   }, [clips, draftId, draftProjects, textOverlays, saveDraftProject, router]);
 
   const executePost = useCallback(async (thumbnailUri: string | null) => {
-    console.log("[POST:EXEC] executePost called, thumbnailUri=", thumbnailUri);
-    console.log("[POST:EXEC] clips.length", clips.length);
-    if (clips.length === 0) {
-      console.log("[POST:EXEC] GUARD: clips.length === 0, returning");
-      return;
-    }
-    console.log("[POST:EXEC] Validation passed");
+    if (clips.length === 0) return;
     setError(null);
     setSuccess(null);
     try {
       const primary = clips[0]!;
-      console.log("[POST:EXEC] primary clip uri=", primary.uri, "type=", primary.type);
 
       const segmentUris =
         clips.length > 1 ? clips.map((c) => c.uri) : undefined;
-      console.log("[POST:EXEC] segmentUris", segmentUris);
 
       const hasAnyTrim = clips.some(
         (c) =>
@@ -1284,12 +1250,7 @@ export default function EditScreen() {
               trimEndMs: c.trimEndMs ?? (c.durationMs ?? 0),
             }))
           : undefined;
-      console.log("[POST:EXEC] hasAnyTrim", hasAnyTrim, "trimData", trimData);
-
       const overlaysForPost = textOverlays.length > 0 ? textOverlays : undefined;
-      console.log("[POST:EXEC] textOverlays count", textOverlays.length);
-
-      console.log("[POST:EXEC] Creating post payload, calling createPost.mutateAsync");
       await createPost.mutateAsync({
         uri: primary.uri,
         mediaType: primary.type,
@@ -1299,21 +1260,15 @@ export default function EditScreen() {
         textOverlays: overlaysForPost,
         thumbnailUri: thumbnailUri ?? undefined,
       });
-      console.log("[POST:EXEC] createPost.mutateAsync succeeded");
-
       if (draftId) {
-        console.log("[POST:EXEC] deleting draft", draftId);
         await deleteDraftProject(draftId);
-        console.log("[POST:EXEC] draft deleted");
       }
       setSuccess("Posted to tonight's drop");
-      console.log("[POST:EXEC] Post complete, navigating back in 1200ms");
       setTimeout(() => {
         router.back();
         router.back();
       }, 1200);
     } catch (e: any) {
-      console.log("[POST:EXEC] FAILED:", e?.message ?? e);
       setError(e instanceof Error ? e.message : "Could not post your drop.");
     }
   }, [clips, draftId, textOverlays, createPost, deleteDraftProject, router]);
@@ -1632,15 +1587,12 @@ export default function EditScreen() {
           </View>
         )}
 
-        {/* ── Bottom section: TEST BUTTONS ─────────────────────────── */}
+        {/* ── Bottom section: Actions ─────────────────────────────── */}
         <View
           style={[
             styles.bottomSection,
             { paddingBottom: insets.bottom + 8 },
           ]}
-          onTouchStart={(e) => {
-            console.log("[TOUCH] bottomSection — pageX:", e.nativeEvent.pageX, "pageY:", e.nativeEvent.pageY);
-          }}
         >
           {error && (
             <View style={styles.bannerError}>
@@ -1652,23 +1604,28 @@ export default function EditScreen() {
               <Text style={styles.bannerSuccessText}>{success}</Text>
             </View>
           )}
-          <View
-            style={styles.actionRow}
-            onTouchStart={(e) => {
-              console.log("[TOUCH] actionRow — pageX:", e.nativeEvent.pageX, "pageY:", e.nativeEvent.pageY);
-            }}
-          >
+          <View style={styles.actionRow}>
             <Pressable
-              onPress={() => console.log("[TEST BUTTON] Save Draft FIRED")}
-              style={({ pressed }) => [styles.draftBtn, pressed && { opacity: 0.7 }]}
+              onPress={handleSaveDraftPress}
+              disabled={clips.length === 0}
+              style={({ pressed }) => [
+                styles.draftBtn,
+                clips.length === 0 && { opacity: 0.35 },
+                pressed && { opacity: 0.7 },
+              ]}
             >
-              <Text style={styles.draftBtnText}>TEST Save Draft</Text>
+              <Text style={styles.draftBtnText}>Save Draft</Text>
             </Pressable>
             <Pressable
-              onPress={() => console.log("[TEST BUTTON] Post FIRED")}
-              style={({ pressed }) => [styles.postBtn, pressed && { opacity: 0.7 }]}
+              onPress={handlePostPress}
+              disabled={clips.length === 0}
+              style={({ pressed }) => [
+                styles.postBtn,
+                clips.length === 0 && { opacity: 0.35 },
+                pressed && { opacity: 0.8 },
+              ]}
             >
-              <Text style={styles.postBtnText}>TEST Post</Text>
+              <Text style={styles.postBtnText}>Post Drop</Text>
             </Pressable>
           </View>
         </View>

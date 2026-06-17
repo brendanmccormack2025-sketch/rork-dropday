@@ -72,8 +72,9 @@ function RootLayoutNav() {
       <Stack.Screen
         name="cover-picker"
         options={{
-          presentation: "card",
+          presentation: "fullScreenModal",
           animation: "slide_from_right",
+          gestureEnabled: false,
           headerShown: false,
           contentStyle: { backgroundColor: "#08080B" },
         }}
