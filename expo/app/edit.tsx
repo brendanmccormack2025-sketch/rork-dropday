@@ -1454,8 +1454,17 @@ export default function EditScreen() {
         optimisticTempId: tempId,
       });
 
-      // 4. Navigate to feed with a single atomic call — avoids double-pop race
-      router.replace("/(tabs)");
+      // 4. Dismiss the modal stack (camera → cover-picker → edit) then navigate
+      //    to the feed. router.replace alone doesn't clear modal presentation
+      //    containers, which leaves the Stack showing only the contentStyle
+      //    background (#050505) — the black screen bug.
+      if (router.canDismiss()) {
+        router.dismissAll();
+      }
+      // Small delay lets dismissAll complete its native animation before replacing
+      setTimeout(() => {
+        router.replace("/(tabs)");
+      }, 50);
     } catch (postErr) {
       console.error("[edit] executePost: unhandled error", (postErr as Error)?.message ?? postErr);
       setError(

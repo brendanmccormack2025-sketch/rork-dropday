@@ -66,7 +66,7 @@ create trigger on_auth_user_created
 -- Step 1: create the table if it doesn't exist yet (fresh database)
 create table if not exists public.posts (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
   media_url text not null,
   media_type text not null check (media_type in ('image', 'video')),
   caption text,
@@ -99,6 +99,32 @@ alter table public.posts
 
 alter table public.posts
   add column if not exists thumbnail_url text;
+
+-- Step 2.5: repair FK — if posts.user_id still points at auth.users, fix it so
+-- PostgREST can resolve profiles(*) joins. Safe to run on any database state.
+do $$
+declare
+  _con text;
+begin
+  select con.conname into _con
+  from pg_constraint con
+  join pg_class rel on con.conrelid = rel.oid
+  join pg_namespace nsp on rel.relnamespace = nsp.oid
+  where nsp.nspname = 'public'
+    and rel.relname = 'posts'
+    and con.contype = 'f'
+    and con.conkey = (select array_agg(a.attnum order by a.attnum)
+                      from pg_attribute a
+                      where a.attrelid = rel.oid and a.attname = 'user_id');
+  if _con is not null then
+    execute format('alter table public.posts drop constraint %I', _con);
+  end if;
+end $$;
+
+alter table public.posts
+  add constraint posts_user_id_fkey
+  foreign key (user_id) references public.profiles(id) on delete cascade
+  not valid;
 
 -- Step 3: create indexes (safe because columns are guaranteed to exist now)
 create index if not exists posts_created_at_idx
