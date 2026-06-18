@@ -662,8 +662,8 @@ export default function CameraScreen() {
         </View>
       )}
 
-      {/* Recording indicator */}
-      {isRecording && (
+      {/* Recording indicator — hidden during merge so only the processing overlay shows */}
+      {isRecording && !isMerging && (
         <View
           style={[styles.recTimerWrap, { top: insets.top + 74 }]}
           pointerEvents="none"
@@ -701,7 +701,8 @@ export default function CameraScreen() {
         </View>
       )}
 
-      {/* Bottom: capture button + lock UI */}
+      {/* Bottom: capture button + lock UI — hidden during merge */}
+      {!isMerging && (
       <View
         style={[styles.cameraBottom, { paddingBottom: insets.bottom + 28 }]}
         pointerEvents="box-none"
@@ -806,6 +807,7 @@ export default function CameraScreen() {
 
         {error && <Text style={styles.cameraErrorText}>{error}</Text>}
       </View>
+      )}
     </GestureHandlerRootView>
   );
 }

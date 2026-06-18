@@ -510,8 +510,11 @@ export async function concatMP4Files(
     throw new Error(`Merged file is empty after write: ${outputUri.slice(0, 60)}`);
   }
   if ((outInfo.size ?? 0) !== merged.length) {
-    console.warn(
-      `[concatMP4] Size mismatch — in-memory: ${merged.length}, on-disk: ${outInfo.size}. The file may be corrupted.`,
+    console.error(
+      `[concatMP4] Size mismatch — in-memory: ${merged.length}, on-disk: ${outInfo.size}. The merged file is corrupted.`,
+    );
+    throw new Error(
+      `Merged file size mismatch: expected ${merged.length} bytes, got ${outInfo.size}. The file is corrupted and cannot be played.`,
     );
   }
 

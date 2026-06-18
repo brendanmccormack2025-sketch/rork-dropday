@@ -62,6 +62,12 @@ export function useCameraRecorder() {
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(0);
   const [isMerging, setIsMerging] = useState<boolean>(false);
+  /** Synchronous ref mirror of isMerging — prevents starting a new recording during merge */
+  const isMergingRef = useRef<boolean>(false);
+  const setIsMergingSync = useCallback((val: boolean): void => {
+    isMergingRef.current = val;
+    setIsMerging(val);
+  }, []);
 
   // ─── Synchronous refs — the TRUE single source of truth for gesture handlers ───
   // State setters below always update BOTH the ref AND the React state atomically.
@@ -203,6 +209,10 @@ export function useCameraRecorder() {
     if (!activeCam) return;
     if (recordStateRef.current !== "idle") return;
     if (!canTransition()) return;
+    if (isMergingRef.current) {
+      console.log("[camera] Cannot start recording — merge in progress");
+      return;
+    }
 
     const currentMic = micPermissionRef.current;
     if (!currentMic?.granted) {
@@ -417,13 +427,21 @@ export function useCameraRecorder() {
       }
     }
 
+    // IMMEDIATELY mark recording as finished so the REC indicator and
+    // recording UI disappear BEFORE the merge/processing starts. The
+    // merge overlay (isMerging) is the only thing the user should see
+    // while we concatenate segments.
+    console.log("[camera] RECORDING FINISHED");
+    setRecordStateSync("idle");
+    setIsLockedSync(false);
+
     // Finalize: merge all accumulated segments into ONE continuous video file.
     // This eliminates playback gaps in the editor and ensures the editor always
     // receives a single merged file — just like TikTok/Snapchat.
     const uris = accumulatedSegmentUrisRef.current;
     if (uris.length > 0) {
       const sessionId = recordSessionIdRef.current ?? undefined;
-      console.log(`[camera] Recording finished — ${uris.length} segment(s)`);
+      console.log(`[camera] Finalize — ${uris.length} segment(s) to process`);
 
       try {
         let finalUri: string;
@@ -445,13 +463,13 @@ export function useCameraRecorder() {
           }
         } else {
           // Multiple segments (camera flips) — merge into one file
-          setIsMerging(true);
+          setIsMergingSync(true);
           console.log(`[camera] Merging ${uris.length} segments into one video...`);
 
           const mergedUri = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}merged_${Date.now()}.mp4`;
           finalUri = await concatMP4Files(uris, mergedUri);
-          console.log(`[camera] Merge complete: ${finalUri.slice(0, 60)}`);
-          setIsMerging(false);
+          console.log(`[camera] Merge complete — output: ${finalUri.slice(0, 60)}`);
+          setIsMergingSync(false);
 
           // Verify the merged output file exists and has content
           const mergedInfo = await FileSystem.getInfoAsync(finalUri);
@@ -475,11 +493,11 @@ export function useCameraRecorder() {
         };
         appendClip(clip);
         saveToGallery(finalUri);
-        console.log(`[camera] Created merged clip: ${clip.id}`);
+        console.log(`[camera] Clip created — id: ${clip.id}, uri: ${finalUri.slice(0, 60)}`);
       } catch (mergeErr) {
         const errMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
         console.error("[camera] Finalize failed:", errMsg, mergeErr);
-        setIsMerging(false);
+        setIsMergingSync(false);
 
         // Fallback: create individual clips only if the error is from the merge step.
         // If the error is a file-not-found / empty-file validation error, do NOT
@@ -509,9 +527,6 @@ export function useCameraRecorder() {
       }
     }
 
-    console.log("[camera] RECORDING FINISHED");
-    setRecordStateSync("idle");
-    setIsLockedSync(false);
     recordingStartedAtRef.current = null;
     recordSessionIdRef.current = null;
     // Reset transition guard to allow back-to-back recordings.
@@ -655,6 +670,7 @@ export function useCameraRecorder() {
     setZoom,
     // Merge state
     isMerging,
+    isMergingRef,
     // Error
     error,
     setError,
