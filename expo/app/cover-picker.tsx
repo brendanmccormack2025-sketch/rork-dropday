@@ -74,6 +74,11 @@ export default function CoverPickerScreen() {
   const positionRef = useRef(0);
   const durationRef = useRef(totalDurationMs);
   const isScrubbingRef = useRef(false);
+  // Refs to always read latest thumbnail state (avoids stale closure in handleConfirm)
+  const previewUriRef = useRef<string | null>(null);
+  const thumbUriRef = useRef<string | null>(null);
+  useEffect(() => { previewUriRef.current = previewUri; }, [previewUri]);
+  useEffect(() => { thumbUriRef.current = thumbUri; }, [thumbUri]);
 
   useEffect(() => {
     positionRef.current = positionMs;
@@ -239,14 +244,15 @@ export default function CoverPickerScreen() {
   const handleConfirm = useCallback(async () => {
     setIsGenerating(true);
     try {
-      let finalUri = thumbUri;
-      let finalTime = thumbTimeMs;
+      let finalUri: string | null = thumbUriRef.current ?? thumbUri;
+      let finalTime: number | null = thumbTimeMs;
 
       if (!finalUri || finalTime !== Math.round(positionMs)) {
         await generateAtTime(positionMs);
-        // Wait for async gen to settle
-        await new Promise((r) => setTimeout(r, 350));
-        finalUri = previewUri ?? thumbUri;
+        // Wait for async gen to settle (state may have updated by now)
+        await new Promise((r) => setTimeout(r, 400));
+        // Read latest values from refs (not stale closure)
+        finalUri = previewUriRef.current ?? thumbUriRef.current ?? thumbUri;
         finalTime = positionMs;
       }
 

@@ -9,6 +9,8 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 import { getDropWindowState, DROP_WINDOW } from "@/constants/theme";
 
+export type OptimisticStatus = "uploading" | "failed";
+
 export type Post = {
   id: string;
   user_id: string;
@@ -29,6 +31,13 @@ export type Post = {
     display_name: string | null;
     avatar_url: string | null;
   } | null;
+  /** Present only on optimistic (not-yet-uploaded) posts */
+  _optimistic?: {
+    tempId: string;
+    status: OptimisticStatus;
+    error?: string;
+    retryPayload?: string;
+  };
 };
 
 export type SuggestedUser = {
@@ -98,6 +107,18 @@ export type DraftProject = {
 
 const BUCKET = "drops";
 const DRAFTS_KEY = "dropday:draftProjects:v2";
+const OPTIMISTIC_POSTS_KEY = "dropday:optimisticPosts";
+
+type OptimisticRetryPayload = {
+  uri: string;
+  mediaType: "image" | "video";
+  caption?: string;
+  draftId?: string;
+  segmentUris?: string[];
+  trimData?: Array<{ trimStartMs: number; trimEndMs: number }>;
+  textOverlays?: TextOverlay[];
+  thumbnailUri?: string;
+};
 
 /**
  * Read a local file URI into a Uint8Array for Supabase upload.
@@ -591,6 +612,135 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     });
   }, [myPostsQuery.data, nowForWindow]);
 
+  // ── Optimistic posts ──────────────────────────────────────────────────────
+  const [optimisticPosts, setOptimisticPosts] = useState<Post[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(OPTIMISTIC_POSTS_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as Post[];
+          const fixed = parsed.map((p) =>
+            p._optimistic?.status === "uploading"
+              ? {
+                  ...p,
+                  _optimistic: {
+                    ...p._optimistic,
+                    status: "failed" as const,
+                    error: "App was closed during upload. Tap to retry.",
+                  },
+                }
+              : p
+          );
+          setOptimisticPosts(fixed);
+        }
+      } catch (e) {
+        console.warn("[optimistic] load error", e);
+      }
+    })();
+  }, []);
+
+  const persistOptimisticPosts = useCallback(async (next?: Post[]) => {
+    const toSave = next ?? optimisticPosts;
+    try {
+      if (toSave.length === 0) {
+        await AsyncStorage.removeItem(OPTIMISTIC_POSTS_KEY);
+      } else {
+        await AsyncStorage.setItem(OPTIMISTIC_POSTS_KEY, JSON.stringify(toSave));
+      }
+    } catch (e) {
+      console.warn("[optimistic] persist error", e);
+    }
+  }, [optimisticPosts]);
+
+  const addOptimisticPost = useCallback(
+    (payload: OptimisticRetryPayload): string => {
+      const tempId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const optPost: Post = {
+        id: tempId,
+        user_id: user?.id ?? "",
+        media_url: payload.uri,
+        media_type: payload.mediaType,
+        caption: payload.caption ?? null,
+        parent_post_id: null,
+        segments: payload.segmentUris ?? null,
+        audio_url: null,
+        trim_data: payload.trimData ?? null,
+        thumbnail_url: payload.thumbnailUri ?? null,
+        created_at: new Date().toISOString(),
+        like_count: 0,
+        comment_count: 0,
+        reaction_count: 0,
+        profile: null,
+        _optimistic: {
+          tempId,
+          status: "uploading",
+          retryPayload: JSON.stringify(payload),
+        },
+      };
+
+      setOptimisticPosts((prev) => {
+        const next = [optPost, ...prev];
+        persistOptimisticPosts(next);
+        return next;
+      });
+
+      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+        if (!old) return [optPost];
+        return [optPost, ...old];
+      });
+      qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
+        if (!old) return [optPost];
+        return [optPost, ...old];
+      });
+
+      return tempId;
+    },
+    [user?.id, qc, persistOptimisticPosts]
+  );
+
+  const finalizeOptimisticPost = useCallback(
+    (tempId: string, _realPost: Post) => {
+      setOptimisticPosts((prev) => {
+        const next = prev.filter((p) => p._optimistic?.tempId !== tempId);
+        persistOptimisticPosts(next);
+        return next;
+      });
+    },
+    [persistOptimisticPosts]
+  );
+
+  const failOptimisticPost = useCallback(
+    (tempId: string, error: string) => {
+      setOptimisticPosts((prev) => {
+        const next = prev.map((p) =>
+          p._optimistic?.tempId === tempId
+            ? {
+                ...p,
+                _optimistic: { ...p._optimistic, status: "failed" as const, error },
+              }
+            : p
+        );
+        persistOptimisticPosts(next);
+        return next;
+      });
+
+      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+        if (!old) return old;
+        return old.map((p) =>
+          p._optimistic?.tempId === tempId
+            ? {
+                ...p,
+                _optimistic: { ...p._optimistic!, status: "failed" as const, error },
+              }
+            : p
+        );
+      });
+    },
+    [user?.id, qc, persistOptimisticPosts]
+  );
+
   const createPost = useMutation({
     mutationFn: async (input: {
       uri: string;
@@ -602,6 +752,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       trimData?: Array<{ trimStartMs: number; trimEndMs: number }>;
       textOverlays?: TextOverlay[];
       thumbnailUri?: string;
+      optimisticTempId?: string;
     }) => {
       if (!user?.id) throw new Error("Not signed in.");
 
@@ -729,27 +880,95 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         profile: null,
       } as Post;
     },
-    onSuccess: (newPost) => {
+    onSuccess: (newPost, variables) => {
       qc.invalidateQueries({ queryKey: ["posts"] });
 
-      // Optimistic: prepend the new post to the feed cache immediately
+      if (variables.optimisticTempId) {
+        finalizeOptimisticPost(variables.optimisticTempId, newPost);
+      }
+
       qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
         if (!old) return old;
-        // Avoid duplicates
-        if (old.some((p) => p.id === newPost.id)) return old;
-        return [newPost, ...old];
+        const filtered = old.filter(
+          (p) => p._optimistic?.tempId !== variables.optimisticTempId
+        );
+        if (filtered.some((p) => p.id === newPost.id)) return filtered;
+        return [newPost, ...filtered];
       });
 
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
         if (!old) return old;
-        if (old.some((p) => p.id === newPost.id)) return old;
-        return [newPost, ...old];
+        const filtered = (old ?? []).filter(
+          (p) => p._optimistic?.tempId !== variables.optimisticTempId
+        );
+        if (filtered.some((p) => p.id === newPost.id)) return filtered;
+        return [newPost, ...filtered];
       });
+
+      persistOptimisticPosts();
     },
-    onError: (err) => {
+    onError: (err, variables) => {
       console.error("[createPost] onError", (err as Error)?.message ?? err);
+      if (variables.optimisticTempId) {
+        failOptimisticPost(
+          variables.optimisticTempId,
+          (err as Error)?.message ?? "Upload failed"
+        );
+      }
     },
   });
+
+  const retryOptimisticPost = useCallback(
+    (tempId: string) => {
+      const post = optimisticPosts.find((p) => p._optimistic?.tempId === tempId);
+      if (!post?._optimistic?.retryPayload) return;
+
+      setOptimisticPosts((prev) => {
+        const next = prev.map((p) =>
+          p._optimistic?.tempId === tempId
+            ? {
+                ...p,
+                _optimistic: { ...p._optimistic!, status: "uploading" as const, error: undefined },
+              }
+            : p
+        );
+        persistOptimisticPosts(next);
+        return next;
+      });
+
+      // Also update the feed cache
+      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+        if (!old) return old;
+        return old.map((p) =>
+          p._optimistic?.tempId === tempId
+            ? {
+                ...p,
+                _optimistic: { ...p._optimistic!, status: "uploading" as const, error: undefined },
+              }
+            : p
+        );
+      });
+
+      try {
+        const payload: OptimisticRetryPayload = JSON.parse(post._optimistic.retryPayload);
+        createPost.mutate({
+          uri: payload.uri,
+          mediaType: payload.mediaType,
+          caption: payload.caption,
+          draftId: payload.draftId,
+          segmentUris: payload.segmentUris,
+          trimData: payload.trimData,
+          textOverlays: payload.textOverlays,
+          thumbnailUri: payload.thumbnailUri,
+          optimisticTempId: tempId,
+        });
+      } catch (e) {
+        console.error("[optimistic] retry parse error", e);
+        failOptimisticPost(tempId, "Could not retry. Please try posting again.");
+      }
+    },
+    [optimisticPosts, createPost, failOptimisticPost, persistOptimisticPosts, user?.id, qc]
+  );
 
   return useMemo(
     () => ({
@@ -779,6 +998,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       reactionsByParent: allReactionsQuery.data ?? {},
       reactionsLoading: allReactionsQuery.isLoading,
       refetchReactions: allReactionsQuery.refetch,
+      optimisticPosts,
+      addOptimisticPost,
+      retryOptimisticPost,
     }),
     [
       feedQuery,
@@ -797,6 +1019,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       saveDraftProject,
       deleteDraftProject,
       createPost,
+      optimisticPosts,
+      addOptimisticPost,
+      retryOptimisticPost,
     ]
   );
 });

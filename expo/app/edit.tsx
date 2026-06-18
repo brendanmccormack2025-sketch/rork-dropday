@@ -91,7 +91,7 @@ function calcFrameDims(areaW: number, areaH: number, aspect: number) {
 export default function EditScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { createPost, saveDraftProject, deleteDraftProject, draftProjects, draftsLoaded } =
+  const { createPost, saveDraftProject, deleteDraftProject, draftProjects, draftsLoaded, addOptimisticPost } =
     usePosts();
   const {
     clips: clipsJson,
@@ -1216,14 +1216,24 @@ export default function EditScreen() {
       const uri = coverState.resultThumbnailUri;
       const ms = coverState.resultThumbnailMs;
       if (action && uri) {
+        console.log("[edit] useFocusEffect: triggering", action, uri.slice(-40));
         coverState.pendingAction = null;
         coverState.resultThumbnailUri = null;
         coverState.resultThumbnailMs = 0;
         if (action === "save-draft") {
-          executeSaveDraftRef.current(uri, ms).catch(() => {});
+          executeSaveDraftRef.current(uri, ms).catch((e: any) => {
+            console.error("[edit] save-draft failed", (e as Error)?.message ?? e);
+            setError(e instanceof Error ? e.message : "Could not save draft.");
+          });
         } else {
-          executePostRef.current(uri).catch(() => {});
+          executePostRef.current(uri).catch((e: any) => {
+            console.error("[edit] post failed", (e as Error)?.message ?? e);
+            setError(e instanceof Error ? e.message : "Could not post your drop.");
+          });
         }
+      } else if (action && !uri) {
+        console.warn("[edit] useFocusEffect: action set but no thumbnail uri — clearing");
+        coverState.pendingAction = null;
       }
     }, []),
   );
@@ -1281,49 +1291,66 @@ export default function EditScreen() {
   }, [clips, draftId, draftProjects, textOverlays, saveDraftProject, router]);
 
   const executePost = useCallback(async (thumbnailUri: string | null) => {
-    if (clips.length === 0) return;
+    if (clips.length === 0) {
+      console.error("[edit] executePost: clips array is empty — cannot post");
+      setError("Nothing to post. Please record or select media first.");
+      return;
+    }
+    console.log("[edit] executePost: starting optimistic post with", clips.length, "clip(s)");
     setError(null);
     setSuccess(null);
-    try {
-      const primary = clips[0]!;
 
-      const segmentUris =
-        clips.length > 1 ? clips.map((c) => c.uri) : undefined;
+    const primary = clips[0]!;
+    const segmentUris =
+      clips.length > 1 ? clips.map((c) => c.uri) : undefined;
+    const hasAnyTrim = clips.some(
+      (c) =>
+        (c.trimStartMs ?? 0) > 0 ||
+        (c.trimEndMs ?? 0) < (c.durationMs ?? Infinity),
+    );
+    const trimData: Array<{ trimStartMs: number; trimEndMs: number }> | undefined =
+      hasAnyTrim
+        ? clips.map((c) => ({
+            trimStartMs: c.trimStartMs ?? 0,
+            trimEndMs: c.trimEndMs ?? (c.durationMs ?? 0),
+          }))
+        : undefined;
+    const overlaysForPost = textOverlays.length > 0 ? textOverlays : undefined;
 
-      const hasAnyTrim = clips.some(
-        (c) =>
-          (c.trimStartMs ?? 0) > 0 ||
-          (c.trimEndMs ?? 0) < (c.durationMs ?? Infinity),
-      );
-      const trimData: Array<{ trimStartMs: number; trimEndMs: number }> | undefined =
-        hasAnyTrim
-          ? clips.map((c) => ({
-              trimStartMs: c.trimStartMs ?? 0,
-              trimEndMs: c.trimEndMs ?? (c.durationMs ?? 0),
-            }))
-          : undefined;
-      const overlaysForPost = textOverlays.length > 0 ? textOverlays : undefined;
-      await createPost.mutateAsync({
-        uri: primary.uri,
-        mediaType: primary.type,
-        draftId: draftId ?? undefined,
-        segmentUris,
-        trimData,
-        textOverlays: overlaysForPost,
-        thumbnailUri: thumbnailUri ?? undefined,
-      });
-      if (draftId) {
-        await deleteDraftProject(draftId);
-      }
-      setSuccess("Posted to tonight's drop");
-      setTimeout(() => {
-        router.back();
-        router.back();
-      }, 1200);
-    } catch (e: any) {
-      setError(e instanceof Error ? e.message : "Could not post your drop.");
+    // 1. Create optimistic post — appears immediately in the feed
+    const tempId = addOptimisticPost({
+      uri: primary.uri,
+      mediaType: primary.type,
+      caption: undefined,
+      draftId: draftId ?? undefined,
+      segmentUris,
+      trimData,
+      textOverlays: overlaysForPost,
+      thumbnailUri: thumbnailUri ?? undefined,
+    });
+
+    // 2. Clear cover state and clean up draft
+    if (draftId) {
+      deleteDraftProject(draftId).catch(() => {});
     }
-  }, [clips, draftId, textOverlays, createPost, deleteDraftProject, router]);
+
+    // 3. Navigate back to feed immediately — upload happens in background
+    //    Two router.back() calls: edit → camera → feed
+    router.back();
+    setTimeout(() => router.back(), 50);
+
+    // 4. Fire the actual upload in the background (not awaited)
+    createPost.mutate({
+      uri: primary.uri,
+      mediaType: primary.type,
+      draftId: draftId ?? undefined,
+      segmentUris,
+      trimData,
+      textOverlays: overlaysForPost,
+      thumbnailUri: thumbnailUri ?? undefined,
+      optimisticTempId: tempId,
+    });
+  }, [clips, draftId, textOverlays, createPost, deleteDraftProject, addOptimisticPost, router]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
   useEffect(() => { executePostRef.current = executePost; }, [executePost]);

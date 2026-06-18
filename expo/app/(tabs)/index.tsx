@@ -31,7 +31,7 @@ import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
 import DropletLogo from "@/components/DropletLogo";
 import { theme, getDropWindowState, formatCountdown } from "@/constants/theme";
-import { usePosts, type Post } from "@/providers/PostsProvider";
+import { usePosts, type Post, type OptimisticStatus } from "@/providers/PostsProvider";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
@@ -39,7 +39,7 @@ const FREE_VIEWS_BEFORE_GATE = 5;
 
 export default function FeedScreen() {
   const router = useRouter();
-  const { feed, feedLoading, refetchFeed, refetchMyPosts, hasPostedInWindow } = usePosts();
+  const { feed, feedLoading, refetchFeed, refetchMyPosts, hasPostedInWindow, retryOptimisticPost } = usePosts();
   const [now, setNow] = useState<Date>(new Date());
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -116,9 +116,10 @@ export default function FeedScreen() {
         live={win.isOpen}
         onShare={() => setSharePost(item)}
         onReactions={() => router.push(`/post/${item.id}/reactions` as never)}
+        onRetry={() => retryOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),
-    [activeIndex, win.isOpen, router]
+    [activeIndex, win.isOpen, router, retryOptimisticPost]
   );
 
   return (
@@ -230,12 +231,14 @@ const FeedItem = memo(function FeedItem({
   live,
   onShare,
   onReactions,
+  onRetry,
 }: {
   post: Post;
   active: boolean;
   live: boolean;
   onShare: () => void;
   onReactions: () => void;
+  onRetry: () => void;
 }) {
   const [liked, setLiked] = useState<boolean>(false);
   // Multi-segment playback: if post.segments exists, cycle through them
@@ -368,6 +371,37 @@ const FeedItem = memo(function FeedItem({
           contentFit="cover"
           transition={150}
         />
+      )}
+
+      {/* Optimistic posting overlay */}
+      {post._optimistic?.status === "uploading" && (
+        <View style={styles.optOverlay} pointerEvents="auto">
+          <LinearGradient
+            colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0.55)"]}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={styles.optInner}>
+            <View style={styles.optSpinner} />
+            <Text style={styles.optTitle}>Posting your drop</Text>
+            <Text style={styles.optSub}>It'll appear here once uploaded</Text>
+          </View>
+        </View>
+      )}
+      {post._optimistic?.status === "failed" && (
+        <View style={styles.optOverlay} pointerEvents="auto">
+          <LinearGradient
+            colors={["rgba(0,0,0,0.65)", "rgba(0,0,0,0.65)"]}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={styles.optInner}>
+            <Text style={styles.optErrorIcon}>!</Text>
+            <Text style={styles.optTitle}>Upload failed</Text>
+            <Text style={styles.optSub} numberOfLines={2}>{post._optimistic?.error ?? "Something went wrong."}</Text>
+            <Pressable onPress={onRetry} style={styles.optRetryBtn}>
+              <Text style={styles.optRetryText}>Retry</Text>
+            </Pressable>
+          </View>
+        </View>
       )}
 
       <LinearGradient
@@ -1102,5 +1136,69 @@ const styles = StyleSheet.create({
     top: 12,
     right: 12,
     padding: 6,
+  },
+
+  /* Optimistic posting overlay */
+  optOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  optInner: {
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 32,
+  },
+  optSpinner: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 3,
+    borderColor: "rgba(255,255,255,0.15)",
+    borderTopColor: theme.accent,
+  },
+  optTitle: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "800" as const,
+    textAlign: "center",
+  },
+  optSub: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 13,
+    fontWeight: "600" as const,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  optErrorIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: theme.danger,
+    color: "#fff",
+    fontSize: 24,
+    fontWeight: "800" as const,
+    textAlign: "center",
+    lineHeight: 48,
+    overflow: "hidden",
+  },
+  optRetryBtn: {
+    marginTop: 8,
+    backgroundColor: theme.accent,
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderRadius: 999,
+    shadowColor: theme.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  optRetryText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800" as const,
+    letterSpacing: 0.3,
   },
 });
