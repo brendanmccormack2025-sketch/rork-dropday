@@ -31,6 +31,8 @@ import {
 } from "lucide-react-native";
 
 import PrimaryButton from "@/components/PrimaryButton";
+import * as FileSystem from "expo-file-system/legacy";
+
 import { theme, getDropWindowState } from "@/constants/theme";
 import { useCameraRecorder, type Clip, MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
 
@@ -408,8 +410,35 @@ export default function CameraScreen() {
     router.back();
   }, [router, teardown]);
 
-  const goToEdit = useCallback(() => {
+  const goToEdit = useCallback(async () => {
     if (clips.length === 0) return;
+
+    // Verify every clip's file exists and is non-empty before navigating.
+    // If the merge step produced a corrupt / empty / missing file, surface
+    // a visible error instead of sending the editor a dead URI (black screen).
+    for (const clip of clips) {
+      if (clip.type === "video" && clip.uri) {
+        try {
+          const info = await FileSystem.getInfoAsync(clip.uri);
+          console.log(
+            `[camera] goToEdit — clip ${clip.id}: ${clip.uri.slice(0, 60)}, exists: ${info.exists}, size: ${info.exists ? (info.size ?? 0) : "N/A"}`,
+          );
+          if (!info.exists) {
+            setError("Video file is missing. Please record again.");
+            return;
+          }
+          if ((info.size ?? 0) === 0) {
+            setError("Video file is empty. Please record again.");
+            return;
+          }
+        } catch (e) {
+          console.error("[camera] goToEdit — file check failed", e);
+          setError("Could not verify video file. Please try again.");
+          return;
+        }
+      }
+    }
+
     router.push({
       pathname: "/edit",
       params: {
@@ -417,7 +446,7 @@ export default function CameraScreen() {
         reactingTo: reactingTo ?? "",
       },
     });
-  }, [clips, reactingTo, router]);
+  }, [clips, reactingTo, router, setError]);
 
 
   // ─── Permissions: loading ──────────────────────────────────────

@@ -498,6 +498,23 @@ export async function concatMP4Files(
   );
   await writeBufferToFile(outputUri, merged);
 
+  // Verify the output file exists and has the expected size
+  const outInfo = await FileSystem.getInfoAsync(outputUri);
+  console.log(
+    `[concatMP4] Output check — exists: ${outInfo.exists}, size: ${outInfo.exists ? (outInfo.size ?? 0) : "N/A"} bytes (expected ${merged.length})`,
+  );
+  if (!outInfo.exists) {
+    throw new Error(`Merged file was not written to disk: ${outputUri.slice(0, 60)}`);
+  }
+  if ((outInfo.size ?? 0) === 0) {
+    throw new Error(`Merged file is empty after write: ${outputUri.slice(0, 60)}`);
+  }
+  if ((outInfo.size ?? 0) !== merged.length) {
+    console.warn(
+      `[concatMP4] Size mismatch — in-memory: ${merged.length}, on-disk: ${outInfo.size}. The file may be corrupted.`,
+    );
+  }
+
   return outputUri;
 }
 

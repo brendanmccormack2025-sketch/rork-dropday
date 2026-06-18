@@ -431,6 +431,18 @@ export function useCameraRecorder() {
           // Single segment — no merge needed
           finalUri = uris[0]!;
           console.log(`[camera] Single segment, no merge needed: ${finalUri.slice(0, 60)}`);
+
+          // Verify the single segment file exists and has content
+          const segInfo = await FileSystem.getInfoAsync(finalUri);
+          console.log(
+            `[camera] Segment file check — exists: ${segInfo.exists}, size: ${segInfo.exists ? (segInfo.size ?? 0) : 'N/A'} bytes`,
+          );
+          if (!segInfo.exists) {
+            throw new Error("Recording file was not saved. Please try recording again.");
+          }
+          if ((segInfo.size ?? 0) === 0) {
+            throw new Error("Recording file is empty (0 bytes). Please try recording again.");
+          }
         } else {
           // Multiple segments (camera flips) — merge into one file
           setIsMerging(true);
@@ -440,6 +452,18 @@ export function useCameraRecorder() {
           finalUri = await concatMP4Files(uris, mergedUri);
           console.log(`[camera] Merge complete: ${finalUri.slice(0, 60)}`);
           setIsMerging(false);
+
+          // Verify the merged output file exists and has content
+          const mergedInfo = await FileSystem.getInfoAsync(finalUri);
+          console.log(
+            `[camera] Merged file check — exists: ${mergedInfo.exists}, size: ${mergedInfo.exists ? (mergedInfo.size ?? 0) : 'N/A'} bytes`,
+          );
+          if (!mergedInfo.exists) {
+            throw new Error("Merged video file was not created. Please try recording again.");
+          }
+          if ((mergedInfo.size ?? 0) === 0) {
+            throw new Error("Merged video file is empty (0 bytes). Please try recording again.");
+          }
         }
 
         const clip: Clip = {
@@ -453,22 +477,35 @@ export function useCameraRecorder() {
         saveToGallery(finalUri);
         console.log(`[camera] Created merged clip: ${clip.id}`);
       } catch (mergeErr) {
-        console.error("[camera] Merge failed — falling back to individual clips", mergeErr);
+        const errMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+        console.error("[camera] Finalize failed:", errMsg, mergeErr);
         setIsMerging(false);
 
-        // Fallback: create individual clips (graceful degradation)
-        for (const uri of uris) {
-          const clip: Clip = {
-            id: newClipId(),
-            uri,
-            type: "video",
-            durationMs: undefined,
-            recordingSessionId: sessionId,
-          };
-          appendClip(clip);
-          saveToGallery(uri);
+        // Fallback: create individual clips only if the error is from the merge step.
+        // If the error is a file-not-found / empty-file validation error, do NOT
+        // create clips — the underlying files are missing/corrupted.
+        const isValidationError =
+          errMsg.includes("not saved") ||
+          errMsg.includes("empty (0 bytes)") ||
+          errMsg.includes("not created");
+
+        if (!isValidationError) {
+          console.warn("[camera] Merge failed — falling back to individual clips");
+          for (const uri of uris) {
+            const clip: Clip = {
+              id: newClipId(),
+              uri,
+              type: "video",
+              durationMs: undefined,
+              recordingSessionId: sessionId,
+            };
+            appendClip(clip);
+            saveToGallery(uri).catch(() => {});
+          }
+          setError("Video merge failed. Clips are saved individually.");
+        } else {
+          setError(errMsg);
         }
-        setError("Video merge failed. Clips are saved individually.");
       }
     }
 
