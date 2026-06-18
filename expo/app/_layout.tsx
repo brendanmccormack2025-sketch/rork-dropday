@@ -13,7 +13,6 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { PostsProvider } from "@/providers/PostsProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { DebugOverlay } from "@/components/DebugOverlay";
 import { theme } from "@/constants/theme";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -105,7 +104,6 @@ function RootLayoutNav() {
           }}
         />
       </Stack>
-      <DebugOverlay />
     </View>
   );
 }
