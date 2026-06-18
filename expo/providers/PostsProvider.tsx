@@ -844,6 +844,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (thumbnailUrl) {
         row.thumbnail_url = thumbnailUrl;
       }
+      console.log("[createPost] inserting row:", JSON.stringify(row, null, 2));
       const { data: insData, error: insErr } = await supabase.from("posts").insert(row).select("id, created_at").single();
 
       if (insErr) {
