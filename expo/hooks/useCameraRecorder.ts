@@ -245,10 +245,9 @@ export function useCameraRecorder() {
         // Wait for onCameraReady (via a promise, not spin-wait) before
         // calling recordAsync on the new camera.
         if (isFlippingRef.current) {
-          console.log("[camera] Flip — waiting for camera to be ready");
+          console.log("[camera] Flip detected — session may have rebuilt");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
-          cameraReadyRef.current = false;
 
           // If the user already requested stop while we were flipping,
           // don't restart recording — just finalize and exit.
@@ -258,38 +257,48 @@ export function useCameraRecorder() {
             break;
           }
 
-          // Resolve via onCameraReady (or timeout after 4 s)
-          let timedOut = false;
-          try {
-            await Promise.race([
-              new Promise<void>((resolve) => {
-                cameraReadyResolveRef.current = resolve;
-              }),
-              new Promise<void>((_, reject) =>
-                setTimeout(() => {
-                  timedOut = true;
-                  reject(new Error("timeout"));
-                }, 4000)
-              ),
-            ]);
-          } catch {
-            // Timeout — camera didn't come back
-          }
-          cameraReadyResolveRef.current = null;
+          // Check if onCameraReady has ALREADY fired (the new session
+          // finished building before recordAsync resolved). In that
+          // case the camera is live right now — skip the wait.
+          if (!cameraReadyRef.current) {
+            console.log("[camera] Flip — waiting for camera to be ready");
+            cameraReadyRef.current = false;
 
-          // Re-check stopRequested after the wait — user may have
-          // tapped stop while we were waiting for onCameraReady.
-          if (stopRequestedRef.current) {
-            console.log("[camera] Stop requested during flip-wait — finalizing");
-            keepRecording = false;
-            break;
-          }
+            // Resolve via onCameraReady (or timeout after 4 s)
+            let timedOut = false;
+            try {
+              await Promise.race([
+                new Promise<void>((resolve) => {
+                  cameraReadyResolveRef.current = resolve;
+                }),
+                new Promise<void>((_, reject) =>
+                  setTimeout(() => {
+                    timedOut = true;
+                    reject(new Error("timeout"));
+                  }, 4000)
+                ),
+              ]);
+            } catch {
+              // Timeout — camera didn't come back
+            }
+            cameraReadyResolveRef.current = null;
 
-          if (timedOut || !cameraReadyRef.current) {
-            console.warn("[camera] Camera not ready after flip — aborting");
-            setError("Camera failed to restart after flip.");
-            keepRecording = false;
-            break;
+            // Re-check stopRequested after the wait — user may have
+            // tapped stop while we were waiting for onCameraReady.
+            if (stopRequestedRef.current) {
+              console.log("[camera] Stop requested during flip-wait — finalizing");
+              keepRecording = false;
+              break;
+            }
+
+            if (timedOut || !cameraReadyRef.current) {
+              console.warn("[camera] Camera not ready after flip — aborting");
+              setError("Camera failed to restart after flip.");
+              keepRecording = false;
+              break;
+            }
+          } else {
+            console.log("[camera] Camera already ready — resuming immediately");
           }
 
           console.log("[camera] Camera ready — resuming recording");
@@ -300,10 +309,9 @@ export function useCameraRecorder() {
         keepRecording = false;
       } catch (e) {
         if (isFlippingRef.current) {
-          console.log("[camera] Flip error — waiting for camera to be ready");
+          console.log("[camera] Flip error detected — session may have rebuilt");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
-          cameraReadyRef.current = false;
 
           // If the user already requested stop, don't restart.
           if (stopRequestedRef.current) {
@@ -312,37 +320,47 @@ export function useCameraRecorder() {
             break;
           }
 
-          // Wait for onCameraReady (or timeout after 4 s)
-          let timedOut = false;
-          try {
-            await Promise.race([
-              new Promise<void>((resolve) => {
-                cameraReadyResolveRef.current = resolve;
-              }),
-              new Promise<void>((_, reject) =>
-                setTimeout(() => {
-                  timedOut = true;
-                  reject(new Error("timeout"));
-                }, 4000)
-              ),
-            ]);
-          } catch {
-            // Timeout
-          }
-          cameraReadyResolveRef.current = null;
+          // Check if onCameraReady has ALREADY fired (the new session
+          // finished building before recordAsync threw). In that
+          // case the camera is live right now — skip the wait.
+          if (!cameraReadyRef.current) {
+            console.log("[camera] Flip error — waiting for camera to be ready");
+            cameraReadyRef.current = false;
 
-          // Re-check after the wait.
-          if (stopRequestedRef.current) {
-            console.log("[camera] Stop requested during flip-error wait — finalizing");
-            keepRecording = false;
-            break;
-          }
+            // Wait for onCameraReady (or timeout after 4 s)
+            let timedOut = false;
+            try {
+              await Promise.race([
+                new Promise<void>((resolve) => {
+                  cameraReadyResolveRef.current = resolve;
+                }),
+                new Promise<void>((_, reject) =>
+                  setTimeout(() => {
+                    timedOut = true;
+                    reject(new Error("timeout"));
+                  }, 4000)
+                ),
+              ]);
+            } catch {
+              // Timeout
+            }
+            cameraReadyResolveRef.current = null;
 
-          if (timedOut || !cameraReadyRef.current) {
-            console.warn("[camera] Camera not ready after flip — aborting");
-            setError("Camera failed to restart after flip.");
-            keepRecording = false;
-            break;
+            // Re-check after the wait.
+            if (stopRequestedRef.current) {
+              console.log("[camera] Stop requested during flip-error wait — finalizing");
+              keepRecording = false;
+              break;
+            }
+
+            if (timedOut || !cameraReadyRef.current) {
+              console.warn("[camera] Camera not ready after flip — aborting");
+              setError("Camera failed to restart after flip.");
+              keepRecording = false;
+              break;
+            }
+          } else {
+            console.log("[camera] Camera already ready — resuming immediately");
           }
 
           console.log("[camera] Camera ready — resuming recording");
