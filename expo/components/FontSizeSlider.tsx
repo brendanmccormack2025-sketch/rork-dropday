@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
@@ -13,14 +13,21 @@ interface FontSizeSliderProps {
   onChange: (size: number) => void;
 }
 
-/** Wraps a View, stripping `collapsable` so it never reaches the DOM.
- *  react-native-gesture-handler's GestureDetector injects
- *  `collapsable={false}` on its child, which causes React 19 errors
- *  in react-native-web because `collapsable` is not a valid HTML attr. */
+/** Wraps a View, stripping `collapsable` only on web so it
+ *  never reaches the DOM. On native, `collapsable={false}` is
+ *  required by react-native-gesture-handler to prevent the
+ *  underlying native view from being collapsed/optimized away
+ *  — stripping it on native breaks gesture recognizer attachment. */
 const GestureView = React.forwardRef<
   View,
   React.ComponentProps<typeof View> & { collapsable?: boolean }
->(({ collapsable: _, ...rest }, ref) => <View ref={ref} {...rest} />);
+>((props, ref) => {
+  if (Platform.OS === "web") {
+    const { collapsable: _, ...rest } = props;
+    return <View ref={ref} {...rest} />;
+  }
+  return <View ref={ref} {...props} />;
+});
 
 const TRACK_H = 4;
 const THUMB_SIZE = 26;

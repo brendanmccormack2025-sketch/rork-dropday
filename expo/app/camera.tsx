@@ -36,14 +36,21 @@ import { useCameraRecorder, type Clip, MAX_VIDEO_SECONDS } from "@/hooks/useCame
 
 const LOCK_DRAG_DISTANCE = 70;
 
-/** Wraps a View, stripping `collapsable` so it never reaches the DOM.
- *  react-native-gesture-handler's GestureDetector injects
- *  `collapsable={false}` on its child, which causes React 19 errors
- *  in react-native-web because `collapsable` is not a valid HTML attr. */
+/** Wraps a View, stripping `collapsable` only on web so it
+ *  never reaches the DOM. On native, `collapsable={false}` is
+ *  required by react-native-gesture-handler to prevent the
+ *  underlying native view from being collapsed/optimized away
+ *  — stripping it on native breaks gesture recognizer attachment. */
 const GestureView = React.forwardRef<
   View,
   React.ComponentProps<typeof View> & { collapsable?: boolean }
->(({ collapsable: _, ...rest }, ref) => <View ref={ref} {...rest} />);
+>((props, ref) => {
+  if (Platform.OS === "web") {
+    const { collapsable: _, ...rest } = props;
+    return <View ref={ref} {...rest} />;
+  }
+  return <View ref={ref} {...props} />;
+});
 const RING_SIZE = 96;
 const RING_STROKE = 5;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
@@ -610,6 +617,23 @@ export default function CameraScreen() {
         >
           <View style={styles.recDot} />
           <Text style={styles.recTimerText}>REC</Text>
+        </View>
+      )}
+
+      {/* Next button — appears when clips are ready and not actively recording */}
+      {clips.length > 0 && !isRecording && (
+        <View
+          style={[styles.nextBtnRow, { bottom: insets.bottom + 170 }]}
+          pointerEvents="box-none"
+        >
+          <Pressable
+            onPress={goToEdit}
+            style={styles.nextBtn}
+            accessibilityLabel="Proceed to editor"
+          >
+            <Text style={styles.nextBtnText}>Next</Text>
+            <ArrowRight color="#fff" size={15} strokeWidth={2.5} />
+          </Pressable>
         </View>
       )}
 
