@@ -7,6 +7,11 @@
  * WITHOUT re-encoding, so it is fast and lossless.
  *
  * Uses expo-file-system (base64 read/write) and base64-arraybuffer for binary I/O.
+ *
+ * NOTE: This implementation correctly handles multi-track files (video + audio)
+ * by storing and rebuilding per-track sample tables independently. A previous
+ * version only stored the first track's data, causing audio tracks to be rebuilt
+ * with video sample tables — producing corrupt, unplayable files.
  */
 
 import * as FileSystem from "expo-file-system/legacy";
@@ -221,6 +226,17 @@ function parseChunkOffsets(buf: Uint8Array, box: Mp4Box): ChunkOffsetTable {
   return { is64, offsets };
 }
 
+// ── Per-track sample table data ───────────────────────────────────────────────
+
+/** Sample table data for a single track (video or audio) in one input file */
+interface TrackTableData {
+  chunkTable: ChunkOffsetTable;
+  stszSizes: number[];
+  stscEntries: StscEntry[];
+  sttsEntries: SttsEntry[];
+  numChunks: number;
+}
+
 // ── mdat extraction ───────────────────────────────────────────────────────────
 
 interface MdatInfo {
@@ -242,6 +258,50 @@ function findMdatBox(boxes: Mp4Box[]): Mp4Box | null {
     if (found) return found;
   }
   return null;
+}
+
+// ── Main types ────────────────────────────────────────────────────────────────
+
+interface SegmentInfo {
+  boxes: Mp4Box[];
+  mdat: MdatInfo;
+  moovBox: Mp4Box;
+  /** Per-track sample table data — tracks[0] = video, tracks[1] = audio (usually) */
+  tracks: TrackTableData[];
+}
+
+// ── Read / write helpers ─────────────────────────────────────────────────────
+
+async function readFileAsBuffer(uri: string): Promise<Uint8Array> {
+  const base64 = await FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  if (!base64 || base64.length === 0) {
+    throw new Error(`Empty file: ${uri.slice(0, 60)}`);
+  }
+  return new Uint8Array(decode(base64));
+}
+
+async function writeBufferToFile(uri: string, buf: Uint8Array): Promise<void> {
+  const base64 = encode(buf.buffer as ArrayBuffer);
+  await FileSystem.writeAsStringAsync(uri, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+}
+
+// ── Duration helper ───────────────────────────────────────────────────────────
+
+/** Compute total duration for a specific track index across all segments */
+function computeTrackDuration(allSegments: SegmentInfo[], trakIdx: number): number {
+  let totalDuration = 0;
+  for (const seg of allSegments) {
+    const track = seg.tracks[trakIdx];
+    if (!track) continue;
+    for (const entry of track.sttsEntries) {
+      totalDuration += entry.sampleCount * entry.sampleDelta;
+    }
+  }
+  return totalDuration;
 }
 
 // ── Chunk size computation ────────────────────────────────────────────────────
@@ -283,34 +343,6 @@ function computeChunkSizes(
 
 // ── Main concatenation logic ──────────────────────────────────────────────────
 
-interface SegmentInfo {
-  boxes: Mp4Box[];
-  mdat: MdatInfo;
-  moovBox: Mp4Box;
-  chunkTable: ChunkOffsetTable;
-  stszSizes: number[];
-  stscEntries: StscEntry[];
-  sttsEntries: SttsEntry[];
-  numChunks: number;
-}
-
-async function readFileAsBuffer(uri: string): Promise<Uint8Array> {
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  if (!base64 || base64.length === 0) {
-    throw new Error(`Empty file: ${uri.slice(0, 60)}`);
-  }
-  return new Uint8Array(decode(base64));
-}
-
-async function writeBufferToFile(uri: string, buf: Uint8Array): Promise<void> {
-  const base64 = encode(buf.buffer as ArrayBuffer);
-  await FileSystem.writeAsStringAsync(uri, base64, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-}
-
 /**
  * Concatenate multiple MP4 video files into a single continuous MP4 file.
  *
@@ -318,10 +350,13 @@ async function writeBufferToFile(uri: string, buf: Uint8Array): Promise<void> {
  * (identical codec, resolution, frame rate). This is guaranteed when
  * all URIs come from the same expo-camera session.
  *
+ * Each source file is validated on disk before processing. Corrupted or
+ * empty files are skipped with a warning instead of poisoning the export.
+ *
  * @param inputUris - Array of local file URIs to concatenate, in order
- * @param outputUri - Where to write the merged file
+ * @param outputUri - Where to write the merged file (must end in .mp4)
  * @returns The output URI on success
- * @throws If any file cannot be read, is empty, or has incompatible structure
+ * @throws If all files are invalid, or the merge produces an unplayable result
  */
 export async function concatMP4Files(
   inputUris: string[],
@@ -331,39 +366,83 @@ export async function concatMP4Files(
     throw new Error("No input files to concatenate.");
   }
 
-  if (inputUris.length === 1) {
+  // ── 0. Validate source files on disk ────────────────────────────────
+  const validUris: string[] = [];
+  for (const uri of inputUris) {
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      if (!info.exists) {
+        console.warn(`[concatMP4] Source file missing — skipping: ${uri.slice(0, 60)}`);
+        continue;
+      }
+      if ((info.size ?? 0) === 0) {
+        console.warn(`[concatMP4] Source file is empty (0 bytes) — skipping: ${uri.slice(0, 60)}`);
+        continue;
+      }
+      console.log(
+        `[concatMP4] Source file validated: ${uri.slice(0, 60)} — ${info.size} bytes`,
+      );
+      validUris.push(uri);
+    } catch (e) {
+      console.warn(
+        `[concatMP4] Could not check source file — skipping: ${uri.slice(0, 60)}`,
+        e,
+      );
+    }
+  }
+
+  if (validUris.length === 0) {
+    throw new Error("All source files are missing or empty. Cannot merge.");
+  }
+
+  if (validUris.length === 1) {
     // Single file — just copy it
-    const sourceBase64 = await FileSystem.readAsStringAsync(inputUris[0]!, {
+    console.log(`[concatMP4] Single valid file — copying to output`);
+    const sourceBase64 = await FileSystem.readAsStringAsync(validUris[0]!, {
       encoding: FileSystem.EncodingType.Base64,
     });
     await FileSystem.writeAsStringAsync(outputUri, sourceBase64, {
       encoding: FileSystem.EncodingType.Base64,
     });
+
+    // Verify the copy
+    const outInfo = await FileSystem.getInfoAsync(outputUri);
+    console.log(
+      `[concatMP4] Copy check — exists: ${outInfo.exists}, size: ${outInfo.exists ? (outInfo.size ?? 0) : "N/A"} bytes`,
+    );
+    if (!outInfo.exists || (outInfo.size ?? 0) === 0) {
+      throw new Error("Failed to copy source file to output location.");
+    }
     return outputUri;
   }
 
-  console.log(`[concatMP4] Merging ${inputUris.length} file(s)...`);
+  console.log(`[concatMP4] Merging ${validUris.length} file(s)...`);
 
-  // 1. Read and parse all input files
+  // ── 1. Read, validate, and parse all input files ────────────────────
   const segments: SegmentInfo[] = [];
-  for (const uri of inputUris) {
-    const buf = await readFileAsBuffer(uri);
+
+  for (const uri of validUris) {
+    let buf: Uint8Array;
+    try {
+      buf = await readFileAsBuffer(uri);
+    } catch (e) {
+      console.warn(`[concatMP4] Failed to read source file — skipping: ${uri.slice(0, 60)}`, e);
+      continue;
+    }
+
     const boxes = parseBoxes(buf, 0, buf.length);
 
     const mdatBox = findMdatBox(boxes);
     if (!mdatBox) {
-      throw new Error(`No mdat box found in ${uri.slice(0, 60)}`);
+      console.warn(`[concatMP4] No mdat box in source — skipping: ${uri.slice(0, 60)}`);
+      continue;
     }
 
     const moovBox = boxes.find((b) => b.type === "moov") ?? null;
     if (!moovBox) {
-      throw new Error(`No moov box found in ${uri.slice(0, 60)}`);
+      console.warn(`[concatMP4] No moov box in source — skipping: ${uri.slice(0, 60)}`);
+      continue;
     }
-
-    // Find chunk offset table for video track (first track with stco/co64)
-    const trakBoxes = moovBox.children.filter((c) => c.type === "trak");
-    // We'll process all tracks below; for mdat extraction we just need
-    // the offset of the mdat payload from the start of the file
 
     const mdatInfo: MdatInfo = {
       fileOffset: mdatBox.offset,
@@ -372,14 +451,10 @@ export async function concatMP4Files(
       buffer: buf,
     };
 
-    // Parse sample tables for each track (to rebuild moov later)
-    const trackTables: Array<{
-      chunkTable: ChunkOffsetTable;
-      stszSizes: number[];
-      stscEntries: StscEntry[];
-      sttsEntries: SttsEntry[];
-      numChunks: number;
-    }> = [];
+    // Parse sample tables for EACH track (video + audio) — store ALL of them
+    // so the rebuild phase can use the correct track's data for each trak.
+    const trakBoxes = moovBox.children.filter((c) => c.type === "trak");
+    const trackTables: TrackTableData[] = [];
 
     for (const trak of trakBoxes) {
       const stbl = boxAtPath(trak, ["mdia", "minf", "stbl"]);
@@ -407,25 +482,43 @@ export async function concatMP4Files(
     }
 
     if (trackTables.length === 0) {
-      throw new Error(`No tracks found in ${uri.slice(0, 60)}`);
+      console.warn(`[concatMP4] No tracks with sample tables — skipping: ${uri.slice(0, 60)}`);
+      continue;
     }
 
-    // Use the first track's tables as the primary representation
-    const primary = trackTables[0]!;
     segments.push({
       boxes,
       mdat: mdatInfo,
       moovBox,
-      chunkTable: primary.chunkTable,
-      stszSizes: primary.stszSizes,
-      stscEntries: primary.stscEntries,
-      sttsEntries: primary.sttsEntries,
-      numChunks: primary.numChunks,
+      tracks: trackTables,
     });
+
+    console.log(
+      `[concatMP4] Parsed segment: ${trackTables.length} track(s), ${mdatInfo.payloadSize} bytes mdat`,
+    );
   }
 
-  // 2. Build merged mdat: concatenate all mdat payloads
-  // Also track cumulative byte offsets for chunk offset recalculation
+  if (segments.length === 0) {
+    throw new Error("No valid segments could be parsed from source files.");
+  }
+
+  if (segments.length === 1) {
+    // After validation, only one segment remains — just copy it
+    console.log(`[concatMP4] Only one valid segment after parsing — copying to output`);
+    const singleBuf = segments[0]!.mdat.buffer;
+    const base64 = encode(singleBuf.buffer as ArrayBuffer);
+    await FileSystem.writeAsStringAsync(outputUri, base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    const outInfo = await FileSystem.getInfoAsync(outputUri);
+    if (!outInfo.exists || (outInfo.size ?? 0) === 0) {
+      throw new Error("Failed to write merged file to disk.");
+    }
+    return outputUri;
+  }
+
+  // ── 2. Build merged mdat: concatenate all mdat payloads ────────────
   const mdatParts: Uint8Array[] = [];
   const cumulativeOffsets: number[] = [];
   let cumulativeOffset = 0;
@@ -442,50 +535,31 @@ export async function concatMP4Files(
 
   const mergedMdat = concatUint8Arrays(mdatParts);
 
-  // 3. Clone and modify the first file's moov
+  // ── 3. Clone and modify the first file's moov ──────────────────────
 
-  // Read the first file's buffer for moov cloning
   const firstSeg = segments[0]!;
   const firstBuf = firstSeg.mdat.buffer;
 
-  // We need to extract the moov box data from the first file and rebuild it.
-  // The moov box contains absolute file offsets (in stco/co64) that reference
-  // positions in the ORIGINAL file. We need to recalculate these for the merged file.
-
-  // Strategy: deep-clone the moov box bytes, then update stco/co64 in each trak.
-  const moovStart = firstSeg.moovBox.offset;
-  const moovEnd = moovStart + firstSeg.moovBox.size;
-  const moovBytes = new Uint8Array(firstBuf.slice(moovStart, moovEnd));
-
-  // For each track in the moov, update the chunk offset table
-  // We need to walk through the cloned moov and find/replace stco/co64 boxes
-
-  // First, find the ftyp box
+  // Extract ftyp box
   const ftypBox = firstSeg.boxes.find((b) => b.type === "ftyp");
   let ftypBytes: Uint8Array;
   if (ftypBox) {
     ftypBytes = new Uint8Array(firstBuf.slice(ftypBox.offset, ftypBox.offset + ftypBox.size));
   } else {
-    // Fallback: create a minimal ftyp
     ftypBytes = createMinimalFtyp();
   }
 
-  // 4. Rebuild moov with updated chunk offsets for ALL tracks across ALL files
+  // ── 4. Rebuild moov with updated chunk offsets for ALL tracks ─────
+
   const rebuiltMoov = rebuildMoov(
     firstBuf,
     firstSeg.moovBox,
-    firstSeg.boxes,
     segments,
     cumulativeOffsets,
   );
 
-  // 5. Compute total merged file size and update top-level box sizes
-  const mergedFileSize = ftypBytes.length + rebuiltMoov.length + mergedMdat.length;
+  // ── 5. Write the merged file ──────────────────────────────────────
 
-  // Update moov size if it changed (it likely grew due to more chunks)
-  // The moov size is already correct in rebuiltMoov since we rebuild it.
-
-  // 6. Write the merged file
   const merged = concatUint8Arrays([ftypBytes, rebuiltMoov, mergedMdat]);
 
   // Quick sanity: make sure the file starts with ftyp
@@ -494,30 +568,37 @@ export async function concatMP4Files(
   }
 
   console.log(
-    `[concatMP4] Merged ${inputUris.length} file(s) → ${(merged.length / 1024 / 1024).toFixed(1)} MB`,
+    `[concatMP4] Merged ${segments.length} segment(s) → ${(merged.length / 1024 / 1024).toFixed(1)} MB`,
   );
   await writeBufferToFile(outputUri, merged);
 
-  // Verify the output file exists and has the expected size
+  // ── 6. Verify the output file ─────────────────────────────────────
+
   const outInfo = await FileSystem.getInfoAsync(outputUri);
   console.log(
     `[concatMP4] Output check — exists: ${outInfo.exists}, size: ${outInfo.exists ? (outInfo.size ?? 0) : "N/A"} bytes (expected ${merged.length})`,
   );
+
   if (!outInfo.exists) {
-    throw new Error(`Merged file was not written to disk: ${outputUri.slice(0, 60)}`);
+    throw new Error(
+      `Merged file was not written to disk: ${outputUri.slice(0, 60)}`,
+    );
   }
   if ((outInfo.size ?? 0) === 0) {
-    throw new Error(`Merged file is empty after write: ${outputUri.slice(0, 60)}`);
+    throw new Error(
+      `Merged file is empty after write (0 bytes). Export failed. Output: ${outputUri.slice(0, 60)}`,
+    );
   }
   if ((outInfo.size ?? 0) !== merged.length) {
     console.error(
-      `[concatMP4] Size mismatch — in-memory: ${merged.length}, on-disk: ${outInfo.size}. The merged file is corrupted.`,
+      `[concatMP4] SIZE MISMATCH — in-memory: ${merged.length}, on-disk: ${outInfo.size}. The merged file is corrupted.`,
     );
     throw new Error(
       `Merged file size mismatch: expected ${merged.length} bytes, got ${outInfo.size}. The file is corrupted and cannot be played.`,
     );
   }
 
+  console.log(`[concatMP4] Merge complete — output validated: ${outputUri.slice(0, 60)}`);
   return outputUri;
 }
 
@@ -535,7 +616,7 @@ function concatUint8Arrays(arrays: Uint8Array[]): Uint8Array {
 }
 
 function createMinimalFtyp(): Uint8Array {
-  // Minimal ftyp box: size=20, type='ftyp', major_brand='isom', minor_version=0,
+  // Minimal ftyp box: size=24, type='ftyp', major_brand='isom', minor_version=0,
   // compatible_brands=['isom', 'mp42']
   const buf = new Uint8Array(24);
   writeU32(buf, 0, 24);
@@ -547,29 +628,22 @@ function createMinimalFtyp(): Uint8Array {
   return buf;
 }
 
+// ── Moov rebuilding ───────────────────────────────────────────────────────────
+
 /**
  * Rebuild the moov box with updated chunk offsets spanning all segments.
  *
- * This clones the first file's moov structure and updates:
- * - stco/co64: chunk offsets recalculated for merged mdat positions
- * - stts: concatenated entries from all segments
- * - stsc: concatenated entries from all segments (with adjusted firstChunk values)
- * - stsz: concatenated sizes from all segments
- * - mvhd: updated duration
- * - tkhd: updated duration
- * - Box sizes recalculated throughout the tree
+ * Each trak (video + audio) is rebuilt independently using its own per-track
+ * sample table data from every segment. This is the critical fix: a previous
+ * version only stored the first track's data and applied it to all traks,
+ * producing corrupt audio track metadata and unplayable files.
  */
 function rebuildMoov(
   firstBuf: Uint8Array,
   firstMoov: Mp4Box,
-  firstBoxes: Mp4Box[],
   allSegments: SegmentInfo[],
   cumulativeOffsets: number[],
 ): Uint8Array {
-  // We'll build the new moov by cloning and patching
-  // Strategy: walk the box tree, clone non-stbl boxes, rebuild stbl boxes
-
-  // First, extract the trak boxes and their stbl children
   const trakBoxes = firstMoov.children.filter((c) => c.type === "trak");
   const rebuiltTraks: Uint8Array[] = [];
 
@@ -589,29 +663,21 @@ function rebuildMoov(
   const nonTrakChildren: Uint8Array[] = [];
   for (const child of firstMoov.children) {
     if (child.type === "trak") continue;
-    // Clone the box as-is (mvhd, udta, etc.)
-    nonTrakChildren.push(new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size)));
+    nonTrakChildren.push(
+      new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size)),
+    );
   }
 
-  // Update mvhd duration if present
+  // Update mvhd duration using the VIDEO track's stts (trakIdx 0)
   const mvhdBox = firstMoov.children.find((c) => c.type === "mvhd");
-  let mvhdBytes: Uint8Array | null = null;
   if (mvhdBox) {
-    mvhdBytes = new Uint8Array(firstBuf.slice(mvhdBox.offset, mvhdBox.offset + mvhdBox.size));
-    // Update duration in mvhd: it's at offset 24 (4 bytes version + flags, then
-    // creation time, modification time, timescale, duration)
-    // For version 0: duration at byte 24 (4 bytes after timescale at 20)
+    const mvhdBytes = new Uint8Array(
+      firstBuf.slice(mvhdBox.offset, mvhdBox.offset + mvhdBox.size),
+    );
     const version = readU32(mvhdBytes, 0) >>> 24;
     if (version === 0) {
-      // timescale at offset 20, duration at offset 24
       const timescale = readU32(mvhdBytes, 20);
-      // Compute total duration from all segments' stts entries
-      let totalDuration = 0;
-      for (const seg of allSegments) {
-        for (const entry of seg.sttsEntries) {
-          totalDuration += entry.sampleCount * entry.sampleDelta;
-        }
-      }
+      const totalDuration = computeTrackDuration(allSegments, 0);
       writeU32(mvhdBytes, 24, totalDuration);
     }
     // Replace in nonTrakChildren array
@@ -623,10 +689,9 @@ function rebuildMoov(
     }
   }
 
-  // Build new moov: concatenate mvhd + other non-trak + all traks
+  // Build new moov
   const moovContent = concatUint8Arrays([...nonTrakChildren, ...rebuiltTraks]);
 
-  // Build moov header
   const moovHeader = new Uint8Array(8);
   writeU32(moovHeader, 0, 8 + moovContent.length);
   writeType(moovHeader, 4, "moov");
@@ -641,37 +706,35 @@ function rebuildTrak(
   allSegments: SegmentInfo[],
   cumulativeOffsets: number[],
 ): Uint8Array {
-  // Walk: trak → tkhd, mdia → mdhd, hdlr, minf → vmhd/smhd, dinf, stbl
   const mdiaBox = findChild(trak, "mdia");
-  const minfBox = mdiaBox ? findChild(mdiaBox, "minf") : null;
-  const stblBox = minfBox ? findChild(minfBox, "stbl") : null;
-
-  // Clone non-stbl parts of the trak as-is
   const trakParts: Uint8Array[] = [];
 
   for (const child of trak.children) {
     if (child.type === "mdia") {
-      // Rebuild mdia with updated stbl
-      const rebuiltMdia = rebuildMdia(firstBuf, child, trakIdx, allSegments, cumulativeOffsets);
+      const rebuiltMdia = rebuildMdia(
+        firstBuf,
+        child,
+        trakIdx,
+        allSegments,
+        cumulativeOffsets,
+      );
       trakParts.push(rebuiltMdia);
     } else if (child.type === "tkhd") {
-      // Update tkhd duration
-      const tkhdBytes = new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size));
+      // Update tkhd duration using THIS track's stts data
+      const tkhdBytes = new Uint8Array(
+        firstBuf.slice(child.offset, child.offset + child.size),
+      );
       const version = readU32(tkhdBytes, 0) >>> 24;
       if (version === 0) {
-        let totalDuration = 0;
-        for (const seg of allSegments) {
-          for (const entry of seg.sttsEntries) {
-            totalDuration += entry.sampleCount * entry.sampleDelta;
-          }
-        }
+        const totalDuration = computeTrackDuration(allSegments, trakIdx);
         // tkhd duration at offset 28 (version 0)
         writeU32(tkhdBytes, 28, totalDuration);
       }
       trakParts.push(tkhdBytes);
     } else {
-      // Clone as-is
-      trakParts.push(new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size)));
+      trakParts.push(
+        new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size)),
+      );
     }
   }
 
@@ -694,24 +757,29 @@ function rebuildMdia(
 
   for (const child of mdia.children) {
     if (child.type === "minf") {
-      const rebuiltMinf = rebuildMinf(firstBuf, child, trakIdx, allSegments, cumulativeOffsets);
+      const rebuiltMinf = rebuildMinf(
+        firstBuf,
+        child,
+        trakIdx,
+        allSegments,
+        cumulativeOffsets,
+      );
       mdiaParts.push(rebuiltMinf);
     } else if (child.type === "mdhd") {
-      // Update mdhd duration
-      const mdhdBytes = new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size));
+      // Update mdhd duration using THIS track's stts data
+      const mdhdBytes = new Uint8Array(
+        firstBuf.slice(child.offset, child.offset + child.size),
+      );
       const version = readU32(mdhdBytes, 0) >>> 24;
       if (version === 0) {
-        let totalDuration = 0;
-        for (const seg of allSegments) {
-          for (const entry of seg.sttsEntries) {
-            totalDuration += entry.sampleCount * entry.sampleDelta;
-          }
-        }
+        const totalDuration = computeTrackDuration(allSegments, trakIdx);
         writeU32(mdhdBytes, 24, totalDuration);
       }
       mdiaParts.push(mdhdBytes);
     } else {
-      mdiaParts.push(new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size)));
+      mdiaParts.push(
+        new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size)),
+      );
     }
   }
 
@@ -734,10 +802,18 @@ function rebuildMinf(
 
   for (const child of minf.children) {
     if (child.type === "stbl") {
-      const rebuiltStbl = rebuildStbl(firstBuf, child, trakIdx, allSegments, cumulativeOffsets);
+      const rebuiltStbl = rebuildStbl(
+        firstBuf,
+        child,
+        trakIdx,
+        allSegments,
+        cumulativeOffsets,
+      );
       minfParts.push(rebuiltStbl);
     } else {
-      minfParts.push(new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size)));
+      minfParts.push(
+        new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size)),
+      );
     }
   }
 
@@ -756,47 +832,41 @@ function rebuildStbl(
   allSegments: SegmentInfo[],
   cumulativeOffsets: number[],
 ): Uint8Array {
-  // Collect sample table data from all segments for this track
-  // For trakIdx 0 = video, trakIdx 1 = audio (usually)
-  // Since all segments have the same track structure, we match by index
-
   const stblParts: Uint8Array[] = [];
 
   for (const child of stbl.children) {
     switch (child.type) {
       case "stco":
       case "co64": {
-        // Rebuild chunk offset table
         const newStco = rebuildChunkOffsets(
           firstBuf,
           child,
           allSegments,
           cumulativeOffsets,
+          trakIdx,
         );
         stblParts.push(newStco);
         break;
       }
       case "stsz": {
-        // Concatenate sample sizes
-        const newStsz = rebuildStsz(firstBuf, child, allSegments);
+        const newStsz = rebuildStsz(firstBuf, child, allSegments, trakIdx);
         stblParts.push(newStsz);
         break;
       }
       case "stsc": {
-        // Concatenate sample-to-chunk entries
-        const newStsc = rebuildStsc(firstBuf, child, allSegments);
+        const newStsc = rebuildStsc(firstBuf, child, allSegments, trakIdx);
         stblParts.push(newStsc);
         break;
       }
       case "stts": {
-        // Concatenate time-to-sample entries
-        const newStts = rebuildStts(firstBuf, child, allSegments);
+        const newStts = rebuildStts(firstBuf, child, allSegments, trakIdx);
         stblParts.push(newStts);
         break;
       }
       default: {
-        // Clone as-is (stsd, stss, etc.)
-        stblParts.push(new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size)));
+        stblParts.push(
+          new Uint8Array(firstBuf.slice(child.offset, child.offset + child.size)),
+        );
         break;
       }
     }
@@ -810,35 +880,29 @@ function rebuildStbl(
   return concatUint8Arrays([stblHeader, stblContent]);
 }
 
+// ── Sample table rebuilders (all track-indexed) ───────────────────────────────
+
 function rebuildChunkOffsets(
   firstBuf: Uint8Array,
   stcoBox: Mp4Box,
   allSegments: SegmentInfo[],
   cumulativeOffsets: number[],
+  trakIdx: number,
 ): Uint8Array {
   const is64 = stcoBox.type === "co64";
 
-  // Collect all chunks from all segments for this track
-  // Compute new offsets: original_offset - original_mdat_start + cumulativeOffset + new_mdat_start
-  // But since we're putting mdat right after moov, the new mdat start will be:
-  // ftyp.length + rebuilt_moov.length (unknown at this point, but we can use
-  // relative offsets within mdat, then add the final mdat_start later)
-
-  // Actually, since all chunks are in the mdat, and we're concatenating all mdat payloads
-  // together, the new chunk offset is:
-  //   cumulativeOffsets[segIdx] + (originalOffset - originalMdatPayloadStart)
-  // where cumulativeOffsets[segIdx] is the byte position of this segment's mdat data
-  // in the merged mdat, and (originalOffset - originalMdatPayloadStart) is the
-  // relative offset within that segment's mdat.
-
+  // Collect chunk offsets from the SPECIFIC track across all segments
   const allNewOffsets: number[] = [];
 
   for (let segIdx = 0; segIdx < allSegments.length; segIdx++) {
     const seg = allSegments[segIdx]!;
+    const track = seg.tracks[trakIdx];
+    if (!track) continue; // segment doesn't have this track — skip
+
     const mdatPayloadStart = seg.mdat.payloadOffset;
     const baseOffset = cumulativeOffsets[segIdx]!;
 
-    for (const originalOffset of seg.chunkTable.offsets) {
+    for (const originalOffset of track.chunkTable.offsets) {
       const relativeOffset = originalOffset - mdatPayloadStart;
       allNewOffsets.push(baseOffset + relativeOffset);
     }
@@ -846,21 +910,22 @@ function rebuildChunkOffsets(
 
   // Build new stco/co64 box
   const entrySize = is64 ? 8 : 4;
-  // Full box header: size(4) + type(4) + version(1) + flags(3) + entryCount(4) + entries
   const boxPayloadSize = 8 + allNewOffsets.length * entrySize;
   const boxSize = 8 + boxPayloadSize;
   const buf = new Uint8Array(boxSize);
 
   writeU32(buf, 0, boxSize);
   writeType(buf, 4, stcoBox.type);
-  // version = 0, flags = 0 (copy from original)
+
+  // Copy version/flags from original
   const origView = new DataView(
     firstBuf.buffer,
     firstBuf.byteOffset + stcoBox.dataOffset,
     stcoBox.dataSize,
   );
   const origVersion = origView.getUint8(0);
-  const origFlags = (origView.getUint8(1) << 16) | (origView.getUint8(2) << 8) | origView.getUint8(3);
+  const origFlags =
+    (origView.getUint8(1) << 16) | (origView.getUint8(2) << 8) | origView.getUint8(3);
   buf[8] = origVersion;
   buf[9] = (origFlags >> 16) & 0xff;
   buf[10] = (origFlags >> 8) & 0xff;
@@ -884,11 +949,14 @@ function rebuildStsz(
   firstBuf: Uint8Array,
   stszBox: Mp4Box,
   allSegments: SegmentInfo[],
+  trakIdx: number,
 ): Uint8Array {
-  // Concatenate all sample sizes from all segments
+  // Concatenate sample sizes from the SPECIFIC track across all segments
   const allSizes: number[] = [];
   for (const seg of allSegments) {
-    for (const sz of seg.stszSizes) {
+    const track = seg.tracks[trakIdx];
+    if (!track) continue;
+    for (const sz of track.stszSizes) {
       allSizes.push(sz);
     }
   }
@@ -899,10 +967,9 @@ function rebuildStsz(
 
   if (allSame && allSizes.length > 0) {
     // Constant sample size mode
-    const buf = new Uint8Array(20); // 8 header + 4 version/flags + 4 sampleSize + 4 sampleCount
+    const buf = new Uint8Array(20);
     writeU32(buf, 0, 20);
     writeType(buf, 4, "stsz");
-    // Copy version/flags from original
     const origView = new DataView(
       firstBuf.buffer,
       firstBuf.byteOffset + stszBox.dataOffset,
@@ -923,7 +990,6 @@ function rebuildStsz(
   const buf = new Uint8Array(boxSize);
   writeU32(buf, 0, boxSize);
   writeType(buf, 4, "stsz");
-  // Copy version/flags
   const origView = new DataView(
     firstBuf.buffer,
     firstBuf.byteOffset + stszBox.dataOffset,
@@ -945,19 +1011,22 @@ function rebuildStsc(
   firstBuf: Uint8Array,
   stscBox: Mp4Box,
   allSegments: SegmentInfo[],
+  trakIdx: number,
 ): Uint8Array {
-  // Concatenate stsc entries, adjusting firstChunk for each segment
+  // Concatenate stsc entries from the SPECIFIC track, adjusting firstChunk
   const allEntries: StscEntry[] = [];
   let cumulativeChunks = 0;
 
   for (const seg of allSegments) {
-    for (const entry of seg.stscEntries) {
+    const track = seg.tracks[trakIdx];
+    if (!track) continue;
+    for (const entry of track.stscEntries) {
       allEntries.push({
         ...entry,
         firstChunk: entry.firstChunk + cumulativeChunks,
       });
     }
-    cumulativeChunks += seg.numChunks;
+    cumulativeChunks += track.numChunks;
   }
 
   // Deduplicate consecutive entries with same samplesPerChunk
@@ -965,7 +1034,6 @@ function rebuildStsc(
   for (const entry of allEntries) {
     const last = deduped[deduped.length - 1];
     if (last && last.samplesPerChunk === entry.samplesPerChunk) {
-      // Same samplesPerChunk — skip (keep the earlier firstChunk)
       continue;
     }
     deduped.push(entry);
@@ -976,7 +1044,6 @@ function rebuildStsc(
   const buf = new Uint8Array(boxSize);
   writeU32(buf, 0, boxSize);
   writeType(buf, 4, "stsc");
-  // Copy version/flags
   const origView = new DataView(
     firstBuf.buffer,
     firstBuf.byteOffset + stscBox.dataOffset,
@@ -1000,11 +1067,14 @@ function rebuildStts(
   firstBuf: Uint8Array,
   sttsBox: Mp4Box,
   allSegments: SegmentInfo[],
+  trakIdx: number,
 ): Uint8Array {
-  // Concatenate stts entries
+  // Concatenate stts entries from the SPECIFIC track
   const allEntries: SttsEntry[] = [];
   for (const seg of allSegments) {
-    for (const entry of seg.sttsEntries) {
+    const track = seg.tracks[trakIdx];
+    if (!track) continue;
+    for (const entry of track.sttsEntries) {
       allEntries.push({ ...entry });
     }
   }

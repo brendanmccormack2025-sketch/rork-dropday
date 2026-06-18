@@ -103,6 +103,15 @@ export default function EditScreen() {
     draftId?: string;
   }>();
 
+  // ── Debug: log what params the edit screen received ─────────────────────
+  useEffect(() => {
+    console.log("[edit] Screen mounted — received params:");
+    console.log("  clipsJson length:", clipsJson?.length ?? 0);
+    console.log("  clipsJson first 200 chars:", clipsJson?.slice(0, 200));
+    console.log("  nativeVideoUrl:", nativeVideoUrl?.slice(0, 80));
+    console.log("  draftId:", draftId);
+  }, []);
+
   // ── Frame measurement ────────────────────────────────────────────────────
   const [previewAreaSize, setPreviewAreaSize] = useState({
     w: SCREEN_W,
@@ -118,18 +127,28 @@ export default function EditScreen() {
   const initialClips: DraftClip[] = useMemo(() => {
     if (draftId) {
       const draft = draftProjects.find((d) => d.id === draftId);
-      if (draft) return draft.clips;
+      if (draft) {
+        console.log("[edit] Loading clips from draft:", draft.id, "—", draft.clips.length, "clip(s)");
+        return draft.clips;
+      }
     }
     if (nativeVideoUrl && !clipsJson) {
+      console.log("[edit] Using nativeVideoUrl:", nativeVideoUrl.slice(0, 80));
       return [{ id: newClipId(), uri: nativeVideoUrl, type: "video" as const }];
     }
     try {
-      return (JSON.parse(clipsJson ?? "[]") as DraftClip[]).map((c) => ({
+      const parsed = JSON.parse(clipsJson ?? "[]") as DraftClip[];
+      console.log("[edit] Parsed", parsed.length, "clip(s) from clipsJson");
+      parsed.forEach((c, i) => {
+        console.log(`  clip[${i}]: id=${c.id}, uri=${c.uri?.slice(0, 60)}, type=${c.type}, durationMs=${c.durationMs}`);
+      });
+      return parsed.map((c) => ({
         ...c,
         trimStartMs: c.trimStartMs ?? 0,
         trimEndMs: c.trimEndMs ?? c.durationMs,
       }));
-    } catch {
+    } catch (e) {
+      console.error("[edit] Failed to parse clipsJson:", e);
       return [];
     }
   }, [clipsJson, nativeVideoUrl, draftId, draftProjects]);
@@ -340,9 +359,22 @@ export default function EditScreen() {
     isIsolatedRef.current = selectedClipId !== null;
   }, [selectedClipId]);
 
+  // ── Video error state ────────────────────────────────────────────────────
+  const [videoLoadError, setVideoLoadError] = useState<string | null>(null);
+
   // ── Playback status handler ───────────────────────────────────────────────
   const onVideoStatus = useCallback((status: AVPlaybackStatus) => {
+    // Error variant has isLoaded=false and an optional error field.
+    // Check this BEFORE the isLoaded guard so errors aren't silently swallowed.
+    if (!status.isLoaded && "error" in status && status.error) {
+      console.error("[edit] Video playback error:", status.error);
+      setVideoLoadError(status.error);
+      setIsPlaying(false);
+      return;
+    }
+
     if (!status.isLoaded) return;
+
     const sourceDur =
       typeof status.durationMillis === "number" ? status.durationMillis : 0;
     const posMillis = status.positionMillis ?? 0;
@@ -1443,18 +1475,38 @@ export default function EditScreen() {
           >
             {/* Video or Image */}
             {isVideo && videoSource ? (
-              <Video
-                ref={videoRef}
-                source={videoSource}
-                style={{ width: "100%", height: "100%" }}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={isPlaying}
-                isLooping={false}
-                isMuted={false}
-                onPlaybackStatusUpdate={onVideoStatus}
-                progressUpdateIntervalMillis={200}
-                pointerEvents="none"
-              />
+              <>
+                <Video
+                  ref={videoRef}
+                  source={videoSource}
+                  style={{ width: "100%", height: "100%" }}
+                  resizeMode={ResizeMode.CONTAIN}
+                  shouldPlay={isPlaying}
+                  isLooping={false}
+                  isMuted={false}
+                  onPlaybackStatusUpdate={onVideoStatus}
+                  onError={(err: string) => {
+                    console.error("[edit] Video onError fired:", err);
+                    setVideoLoadError(err);
+                    setIsPlaying(false);
+                  }}
+                  onLoad={(status: AVPlaybackStatus) => {
+                    if (status.isLoaded) {
+                      console.log("[edit] Video loaded successfully — duration:", "durationMillis" in status ? status.durationMillis : "N/A");
+                      setVideoLoadError(null);
+                    }
+                  }}
+                  progressUpdateIntervalMillis={200}
+                  pointerEvents="none"
+                />
+                {videoLoadError && (
+                  <View style={styles.videoErrorOverlay}>
+                    <Text style={styles.videoErrorText}>
+                      Video failed to load: {videoLoadError}
+                    </Text>
+                  </View>
+                )}
+              </>
             ) : activeClip?.uri ? (
               <Image
                 source={{ uri: activeClip.uri }}
@@ -1850,6 +1902,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
+  },
+
+  // ── Video error overlay ──
+  videoErrorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.85)",
+    padding: 24,
+  },
+  videoErrorText: {
+    color: theme.danger,
+    fontSize: 13,
+    fontWeight: "600" as const,
+    textAlign: "center",
+    lineHeight: 19,
   },
 
   // ── Toolbar ──
