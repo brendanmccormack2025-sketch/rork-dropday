@@ -46,7 +46,7 @@ export default function CoverPickerScreen() {
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    // Screen mounted
+    console.log("[cover-picker] Screen mounted");
   }, []);
   const {
     videoUri,
@@ -57,6 +57,16 @@ export default function CoverPickerScreen() {
     totalDurationMs: string;
     mode: "save-draft" | "publish";
   }>();
+
+  // ── Crash instrumentation: log what params we received ─────────────────
+  useEffect(() => {
+    console.log("[cover-picker] Received params:", {
+      videoUriLen: (videoUri as string)?.length ?? 0,
+      videoUriPrefix: (videoUri as string)?.slice(0, 40) ?? "(empty)",
+      totalDurationMsParam: (totalDurationMsParam as string) ?? "(empty)",
+      mode: (mode as string) ?? "(empty)",
+    });
+  }, [videoUri, totalDurationMsParam, mode]);
 
   const totalDurationMs = Number(totalDurationMsParam ?? "0");
   const videoRef = useRef<Video>(null);
@@ -141,7 +151,12 @@ export default function CoverPickerScreen() {
 
   const handlePlaybackStatus = useCallback(
     (status: AVPlaybackStatus) => {
-      if (!status.isLoaded) return;
+      if (!status.isLoaded) {
+        if ("error" in status && status.error) {
+          console.error("[cover-picker] Video load error:", status.error);
+        }
+        return;
+      }
       if (
         typeof status.durationMillis === "number" &&
         status.durationMillis > 0

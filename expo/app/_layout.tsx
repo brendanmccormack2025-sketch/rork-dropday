@@ -1,3 +1,7 @@
+// Must import before any JSX is evaluated — patches the JSX runtime on web
+// to strip `collapsable` from DOM-bound elements (React 19 compat).
+import "@/lib/webCompat";
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";

@@ -1255,20 +1255,33 @@ export default function EditScreen() {
         }
         console.log("[edit] handlePostPress: navigating to cover-picker", {
           uriLen: primaryVideoUri.length,
+          uriPrefix: primaryVideoUri.slice(0, 40),
+          uriSuffix: primaryVideoUri.slice(-20),
           durationMs: totalDurationMs,
         });
 
         coverState.pendingAction = "publish";
         coverState.resultThumbnailUri = null;
         coverState.resultThumbnailMs = 0;
-        router.push({
-          pathname: "/cover-picker",
-          params: {
-            videoUri: primaryVideoUri,
-            totalDurationMs: durationStr,
-            mode: "publish",
-          },
-        });
+
+        // Wrap router.push in its own try/catch to catch navigation crashes
+        try {
+          console.log("[edit] handlePostPress: calling router.push");
+          router.push({
+            pathname: "/cover-picker",
+            params: {
+              videoUri: primaryVideoUri,
+              totalDurationMs: durationStr,
+              mode: "publish",
+            },
+          });
+          console.log("[edit] handlePostPress: router.push returned successfully");
+        } catch (navErr) {
+          console.error("[edit] handlePostPress: router.push THREW", (navErr as Error)?.message ?? navErr);
+          console.error("[edit] handlePostPress: router.push stack", (navErr as Error)?.stack?.slice(0, 500));
+          setError("Navigation failed. Please try again.");
+          return;
+        }
       } else {
         console.log("[edit] handlePostPress: posting directly (no cover-picker)");
         setError(null);
