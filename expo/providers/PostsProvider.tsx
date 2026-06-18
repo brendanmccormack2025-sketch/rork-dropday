@@ -756,10 +756,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     }) => {
       if (!user?.id) throw new Error("Not signed in.");
 
-      const win = getDropWindowState(new Date());
-      if (!win.isOpen) {
-        throw new Error("Drop window is closed. Save as draft and post when it opens at 8 PM.");
-      }
+      // TODO: Re-enable drop window check before launch
+      // const win = getDropWindowState(new Date());
+      // if (!win.isOpen) {
+      //   throw new Error("Drop window is closed. Save as draft and post when it opens at 8 PM.");
+      // }
 
       const baseTs = Date.now();
       const isRemoteUrl = input.uri.startsWith("http");

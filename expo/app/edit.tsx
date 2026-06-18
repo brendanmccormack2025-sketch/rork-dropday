@@ -38,6 +38,7 @@ import {
 
 import { theme } from "@/constants/theme";
 import { coverState } from "@/lib/coverState";
+import { useAuth } from "@/providers/AuthProvider";
 import {
   usePosts,
   type DraftClip,
@@ -91,6 +92,7 @@ function calcFrameDims(areaW: number, areaH: number, aspect: number) {
 export default function EditScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user, session } = useAuth();
   const { createPost, saveDraftProject, deleteDraftProject, draftProjects, draftsLoaded, addOptimisticPost } =
     usePosts();
   const {
@@ -1219,28 +1221,71 @@ export default function EditScreen() {
   }, [clips, primaryVideoUri, totalDurationMs, router]);
 
   const handlePostPress = useCallback(() => {
-    if (clips.length === 0) return;
+    console.log("[edit] handlePostPress: Post Drop tapped");
 
-    if (primaryVideoUri) {
-      coverState.pendingAction = "publish";
-      coverState.resultThumbnailUri = null;
-      coverState.resultThumbnailMs = 0;
-      router.push({
-        pathname: "/cover-picker",
-        params: {
-          videoUri: primaryVideoUri,
-          totalDurationMs: String(totalDurationMs),
-          mode: "publish",
-        },
-      });
-    } else {
-      setError(null);
-      setSuccess(null);
-      executePostRef.current(null).catch((e: any) => {
-        setError(e instanceof Error ? e.message : "Could not post your drop.");
-      });
+    try {
+      // ── Null-safety guards ──────────────────────────────────────────
+      if (!router) {
+        console.error("[edit] handlePostPress: router is null/undefined");
+        setError("Navigation is not available. Please restart the app.");
+        return;
+      }
+      if (!clips || clips.length === 0) {
+        console.warn("[edit] handlePostPress: no clips to post");
+        return;
+      }
+      if (!primaryVideoUri) {
+        console.warn("[edit] handlePostPress: primaryVideoUri is null — posting without cover-picker");
+      }
+
+      // ── Auth check ──────────────────────────────────────────────────
+      if (!user?.id || !session) {
+        console.error("[edit] handlePostPress: not authenticated", { hasUser: !!user, hasSession: !!session });
+        setError("You must be signed in to post. Please sign in and try again.");
+        return;
+      }
+
+      if (primaryVideoUri) {
+        // ── Validate navigation params ────────────────────────────────
+        const durationStr = String(totalDurationMs ?? 0);
+        if (!primaryVideoUri || primaryVideoUri.length === 0) {
+          console.error("[edit] handlePostPress: videoUri is empty");
+          setError("Video is not available. Please re-record.");
+          return;
+        }
+        console.log("[edit] handlePostPress: navigating to cover-picker", {
+          uriLen: primaryVideoUri.length,
+          durationMs: totalDurationMs,
+        });
+
+        coverState.pendingAction = "publish";
+        coverState.resultThumbnailUri = null;
+        coverState.resultThumbnailMs = 0;
+        router.push({
+          pathname: "/cover-picker",
+          params: {
+            videoUri: primaryVideoUri,
+            totalDurationMs: durationStr,
+            mode: "publish",
+          },
+        });
+      } else {
+        console.log("[edit] handlePostPress: posting directly (no cover-picker)");
+        setError(null);
+        setSuccess(null);
+        executePostRef.current(null).catch((e: any) => {
+          console.error("[edit] handlePostPress: executePost failed", (e as Error)?.message ?? e);
+          setError(e instanceof Error ? e.message : "Could not post your drop.");
+        });
+      }
+    } catch (err) {
+      console.error("[edit] handlePostPress: CRASH in handler", (err as Error)?.message ?? err);
+      console.error("[edit] handlePostPress: stack", (err as Error)?.stack?.slice(0, 500));
+      setError(
+        err instanceof Error ? err.message : "Something went wrong. Please try again.",
+      );
     }
-  }, [clips, primaryVideoUri, totalDurationMs, router]);
+  }, [clips, primaryVideoUri, totalDurationMs, router, user, session]);
 
   useFocusEffect(
     useCallback(() => {
@@ -1323,65 +1368,96 @@ export default function EditScreen() {
   }, [clips, draftId, draftProjects, textOverlays, saveDraftProject, router]);
 
   const executePost = useCallback(async (thumbnailUri: string | null) => {
-    if (clips.length === 0) {
-      console.error("[edit] executePost: clips array is empty — cannot post");
-      setError("Nothing to post. Please record or select media first.");
-      return;
+    try {
+      if (clips.length === 0) {
+        console.error("[edit] executePost: clips array is empty — cannot post");
+        setError("Nothing to post. Please record or select media first.");
+        return;
+      }
+      console.log("[edit] executePost: starting optimistic post with", clips.length, "clip(s)");
+      setError(null);
+      setSuccess(null);
+
+      const primary = clips[0]!;
+
+      // Validate the primary file exists on disk and has non-zero size
+      try {
+        const fileInfo = await FileSystem.getInfoAsync(primary.uri);
+        if (!fileInfo.exists) {
+          throw new Error(`Primary clip file not found: ${primary.uri.slice(0, 60)}`);
+        }
+        if (fileInfo.size != null && fileInfo.size === 0) {
+          throw new Error(`Primary clip file is empty (0 bytes): ${primary.uri.slice(0, 60)}`);
+        }
+        console.log("[edit] executePost: primary file exists, size:", fileInfo.size ?? "unknown");
+      } catch (fileErr) {
+        console.error("[edit] executePost: file validation failed", (fileErr as Error)?.message);
+        setError(`Cannot post: ${(fileErr as Error)?.message ?? "file validation failed"}`);
+        return;
+      }
+
+      const segmentUris =
+        clips.length > 1 ? clips.map((c) => c.uri) : undefined;
+      const hasAnyTrim = clips.some(
+        (c) =>
+          (c.trimStartMs ?? 0) > 0 ||
+          (c.trimEndMs ?? 0) < (c.durationMs ?? Infinity),
+      );
+      const trimData: Array<{ trimStartMs: number; trimEndMs: number }> | undefined =
+        hasAnyTrim
+          ? clips.map((c) => ({
+              trimStartMs: c.trimStartMs ?? 0,
+              trimEndMs: c.trimEndMs ?? (c.durationMs ?? 0),
+            }))
+          : undefined;
+      const overlaysForPost = textOverlays.length > 0 ? textOverlays : undefined;
+
+      // 1. Create optimistic post — appears immediately in the feed
+      const tempId = addOptimisticPost({
+        uri: primary.uri,
+        mediaType: primary.type,
+        caption: undefined,
+        draftId: draftId ?? undefined,
+        segmentUris,
+        trimData,
+        textOverlays: overlaysForPost,
+        thumbnailUri: thumbnailUri ?? undefined,
+      });
+
+      // 2. Clear cover state and clean up draft
+      if (draftId) {
+        deleteDraftProject(draftId).catch(() => {});
+      }
+
+      // 3. Fire the actual upload in the background
+      createPost.mutate({
+        uri: primary.uri,
+        mediaType: primary.type,
+        draftId: draftId ?? undefined,
+        segmentUris,
+        trimData,
+        textOverlays: overlaysForPost,
+        thumbnailUri: thumbnailUri ?? undefined,
+        optimisticTempId: tempId,
+      });
+
+      // 4. Navigate back to feed only AFTER mutation is queued
+      if (router.canGoBack()) {
+        router.back();
+        setTimeout(() => {
+          if (router.canGoBack()) {
+            router.back();
+          }
+        }, 100);
+      } else {
+        router.replace("/(tabs)");
+      }
+    } catch (postErr) {
+      console.error("[edit] executePost: unhandled error", (postErr as Error)?.message ?? postErr);
+      setError(
+        postErr instanceof Error ? postErr.message : "Could not post your drop. Please try again.",
+      );
     }
-    console.log("[edit] executePost: starting optimistic post with", clips.length, "clip(s)");
-    setError(null);
-    setSuccess(null);
-
-    const primary = clips[0]!;
-    const segmentUris =
-      clips.length > 1 ? clips.map((c) => c.uri) : undefined;
-    const hasAnyTrim = clips.some(
-      (c) =>
-        (c.trimStartMs ?? 0) > 0 ||
-        (c.trimEndMs ?? 0) < (c.durationMs ?? Infinity),
-    );
-    const trimData: Array<{ trimStartMs: number; trimEndMs: number }> | undefined =
-      hasAnyTrim
-        ? clips.map((c) => ({
-            trimStartMs: c.trimStartMs ?? 0,
-            trimEndMs: c.trimEndMs ?? (c.durationMs ?? 0),
-          }))
-        : undefined;
-    const overlaysForPost = textOverlays.length > 0 ? textOverlays : undefined;
-
-    // 1. Create optimistic post — appears immediately in the feed
-    const tempId = addOptimisticPost({
-      uri: primary.uri,
-      mediaType: primary.type,
-      caption: undefined,
-      draftId: draftId ?? undefined,
-      segmentUris,
-      trimData,
-      textOverlays: overlaysForPost,
-      thumbnailUri: thumbnailUri ?? undefined,
-    });
-
-    // 2. Clear cover state and clean up draft
-    if (draftId) {
-      deleteDraftProject(draftId).catch(() => {});
-    }
-
-    // 3. Navigate back to feed immediately — upload happens in background
-    //    Two router.back() calls: edit → camera → feed
-    router.back();
-    setTimeout(() => router.back(), 50);
-
-    // 4. Fire the actual upload in the background (not awaited)
-    createPost.mutate({
-      uri: primary.uri,
-      mediaType: primary.type,
-      draftId: draftId ?? undefined,
-      segmentUris,
-      trimData,
-      textOverlays: overlaysForPost,
-      thumbnailUri: thumbnailUri ?? undefined,
-      optimisticTempId: tempId,
-    });
   }, [clips, draftId, textOverlays, createPost, deleteDraftProject, addOptimisticPost, router]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
