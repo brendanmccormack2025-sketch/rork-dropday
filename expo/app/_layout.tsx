@@ -26,9 +26,18 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (loading) return;
+
     const inAuthGroup = segments[0] === "(auth)";
+
     if (!session && !inAuthGroup) {
-      router.replace("/(auth)/welcome");
+      // Debounce: don't redirect on a single transient null-session render.
+      // If session flips back to non-null within 400ms (e.g. a token
+      // refresh momentarily emits SIGNED_OUT before SIGNED_IN), this
+      // effect re-runs and the cleanup below cancels the redirect.
+      const timeout = setTimeout(() => {
+        router.replace("/(auth)/welcome");
+      }, 400);
+      return () => clearTimeout(timeout);
     } else if (session && inAuthGroup) {
       router.replace("/(tabs)");
     }
