@@ -72,6 +72,8 @@ export function useCameraRecorder() {
   const cameraSwitchingRef = useRef<boolean>(false);
   /** Set true when a flip happens mid-recording — tells the recordAsync loop to restart, not finalize */
   const isFlippingRef = useRef<boolean>(false);
+  /** Set true by stopRecording() — the recording loop checks this after flip-wait before restarting */
+  const stopRequestedRef = useRef<boolean>(false);
   /** Accumulates URIs from each segment of a multi-flip recording session */
   const accumulatedSegmentUrisRef = useRef<string[]>([]);
   /** Stable ref mirror of micPermission — gesture callbacks read this, never the state */
@@ -145,8 +147,23 @@ export function useCameraRecorder() {
     setTorch((t) => !t);
   }, []);
 
-  /** Safely stop the currently active camera recording */
+  /** Safely stop the currently active camera recording.
+   *  Only calls native stopRecording() when the camera is actually in a
+   *  recording state — calling it mid-flip (session rebuild in progress)
+   *  crashes the native camera process and kills the entire app. */
   const safeStop = useCallback((): void => {
+    // If we're mid-flip, the old session is already torn down and the
+    // new session hasn't started recording yet. Calling native
+    // stopRecording() at this point crashes the camera process.
+    if (isFlippingRef.current) {
+      console.log("[camera] safeStop skipped — camera is mid-flip, no active recording");
+      return;
+    }
+    // If recordState is idle, there's nothing to stop.
+    if (recordStateRef.current === "idle") {
+      console.log("[camera] safeStop skipped — already idle");
+      return;
+    }
     try {
       getActiveCamera()?.stopRecording();
     } catch {
@@ -199,6 +216,7 @@ export function useCameraRecorder() {
     setRecordStateSync("recording");
     setError(null);
     isFlippingRef.current = false;
+    stopRequestedRef.current = false;
     recordSessionIdRef.current = `rs_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     recordingStartedAtRef.current = Date.now();
     accumulatedSegmentUrisRef.current = [];
@@ -232,6 +250,14 @@ export function useCameraRecorder() {
           cameraSwitchingRef.current = false;
           cameraReadyRef.current = false;
 
+          // If the user already requested stop while we were flipping,
+          // don't restart recording — just finalize and exit.
+          if (stopRequestedRef.current) {
+            console.log("[camera] Stop requested during flip — finalizing");
+            keepRecording = false;
+            break;
+          }
+
           // Resolve via onCameraReady (or timeout after 4 s)
           let timedOut = false;
           try {
@@ -250,6 +276,14 @@ export function useCameraRecorder() {
             // Timeout — camera didn't come back
           }
           cameraReadyResolveRef.current = null;
+
+          // Re-check stopRequested after the wait — user may have
+          // tapped stop while we were waiting for onCameraReady.
+          if (stopRequestedRef.current) {
+            console.log("[camera] Stop requested during flip-wait — finalizing");
+            keepRecording = false;
+            break;
+          }
 
           if (timedOut || !cameraReadyRef.current) {
             console.warn("[camera] Camera not ready after flip — aborting");
@@ -271,6 +305,13 @@ export function useCameraRecorder() {
           cameraSwitchingRef.current = false;
           cameraReadyRef.current = false;
 
+          // If the user already requested stop, don't restart.
+          if (stopRequestedRef.current) {
+            console.log("[camera] Stop requested during flip error — finalizing");
+            keepRecording = false;
+            break;
+          }
+
           // Wait for onCameraReady (or timeout after 4 s)
           let timedOut = false;
           try {
@@ -289,6 +330,13 @@ export function useCameraRecorder() {
             // Timeout
           }
           cameraReadyResolveRef.current = null;
+
+          // Re-check after the wait.
+          if (stopRequestedRef.current) {
+            console.log("[camera] Stop requested during flip-error wait — finalizing");
+            keepRecording = false;
+            break;
+          }
 
           if (timedOut || !cameraReadyRef.current) {
             console.warn("[camera] Camera not ready after flip — aborting");
@@ -341,13 +389,15 @@ export function useCameraRecorder() {
     lastTransitionRef.current = 0;
   }, [requestMicPermission, canTransition, appendClip, saveToGallery, setError, setRecordStateSync, setIsLockedSync]);
 
-  /** Stop the current recording. Safe to call at any time. */
+  /** Stop the current recording. Safe to call at any time.
+   *  Sets stopRequestedRef so the recording loop won't restart after a flip. */
   const stopRecording = useCallback((): void => {
     if (recordStateRef.current !== "recording" && recordStateRef.current !== "stopping") {
       console.log("[camera] STOP RECORDING SKIPPED — not recording (state:", recordStateRef.current, ")");
       return;
     }
     console.log("[camera] STOP RECORDING");
+    stopRequestedRef.current = true;
     setRecordStateSync("stopping");
     safeStop();
   }, [safeStop]);
@@ -452,6 +502,7 @@ export function useCameraRecorder() {
     // Recording — synchronous refs for gesture handlers
     recordState,
     recordStateRef,
+    stopRequestedRef,
     isRecording,
     cameraSwitchingRef,
     handleCameraReady,

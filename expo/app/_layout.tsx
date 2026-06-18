@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { PostsProvider } from "@/providers/PostsProvider";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { theme } from "@/constants/theme";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -98,19 +99,21 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
-        <View style={{ flex: 1, backgroundColor: theme.bg }}>
-          <StatusBar style="light" />
-          <AuthProvider>
-            <PostsProvider>
-              <AuthGate>
-                <RootLayoutNav />
-              </AuthGate>
-            </PostsProvider>
-          </AuthProvider>
-        </View>
-      </SafeAreaProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider>
+          <View style={{ flex: 1, backgroundColor: theme.bg }}>
+            <StatusBar style="light" />
+            <AuthProvider>
+              <PostsProvider>
+                <AuthGate>
+                  <RootLayoutNav />
+                </AuthGate>
+              </PostsProvider>
+            </AuthProvider>
+          </View>
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

@@ -230,71 +230,94 @@ export default function CameraScreen() {
   // ─── Gesture handlers ──────────────────────────────────────────
 
   const handleLongPressStart = useCallback(() => {
-    if (isLockedRef.current) {
-      stopRecording();
-      return;
+    try {
+      if (isLockedRef.current) {
+        stopRecording();
+        return;
+      }
+      didLongPress.current = false;
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+      longPressTimer.current = setTimeout(() => {
+        didLongPress.current = true;
+        startRecording().catch((e) => {
+          console.error("[camera] startRecording failed:", e);
+          setError(e instanceof Error ? e.message : "Recording failed to start.");
+        });
+      }, 260);
+    } catch (e) {
+      console.error("[camera] handleLongPressStart error:", e);
+      setError("Something went wrong. Please try again.");
     }
-    didLongPress.current = false;
-    if (longPressTimer.current) clearTimeout(longPressTimer.current);
-    longPressTimer.current = setTimeout(() => {
-      didLongPress.current = true;
-      startRecording();
-    }, 260);
-  }, [startRecording, stopRecording]);
+  }, [startRecording, stopRecording, setError]);
 
   const handleDragMove = useCallback(
     (_: unknown, g: { dy: number }) => {
-      if (recordStateRef.current !== "recording" && recordStateRef.current !== "stopping") return;
-      if (isLockedRef.current) return;
-      const upward = -g.dy;
-      const pct = Math.max(0, Math.min(1, upward / LOCK_DRAG_DISTANCE));
-      lockDrag.setValue(pct);
-      if (upward >= LOCK_DRAG_DISTANCE) {
-        lockRecording();
-        Animated.spring(lockDrag, {
-          toValue: 1,
-          useNativeDriver: false,
-          friction: 6,
-        }).start();
+      try {
+        if (recordStateRef.current !== "recording" && recordStateRef.current !== "stopping") return;
+        if (isLockedRef.current) return;
+        const upward = -g.dy;
+        const pct = Math.max(0, Math.min(1, upward / LOCK_DRAG_DISTANCE));
+        lockDrag.setValue(pct);
+        if (upward >= LOCK_DRAG_DISTANCE) {
+          lockRecording();
+          Animated.spring(lockDrag, {
+            toValue: 1,
+            useNativeDriver: false,
+            friction: 6,
+          }).start();
+        }
+      } catch (e) {
+        console.error("[camera] handleDragMove error:", e);
       }
     },
     [lockDrag, lockRecording]
   );
 
   const handleRelease = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-    if (isLockedRef.current) return;
-    if (didLongPress.current || recordStateRef.current === "recording") {
-      stopRecording();
-    } else {
-      if (torch && facing === "front") {
-        triggerFrontFlashPhoto();
+    try {
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
       }
-      takePicture();
+      if (isLockedRef.current) return;
+      if (didLongPress.current || recordStateRef.current === "recording") {
+        stopRecording();
+      } else {
+        if (torch && facing === "front") {
+          triggerFrontFlashPhoto();
+        }
+        takePicture().catch((e) => {
+          console.error("[camera] takePicture failed:", e);
+        });
+      }
+      Animated.timing(lockDrag, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: false,
+      }).start();
+    } catch (e) {
+      console.error("[camera] handleRelease error:", e);
+      setError("Something went wrong. Please try again.");
     }
-    Animated.timing(lockDrag, {
-      toValue: 0,
-      duration: 180,
-      useNativeDriver: false,
-    }).start();
-  }, [stopRecording, takePicture, lockDrag, torch, facing, triggerFrontFlashPhoto]);
+  }, [stopRecording, takePicture, lockDrag, torch, facing, triggerFrontFlashPhoto, setError]);
 
   const handleTerminate = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
+    try {
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      if (!isLockedRef.current && recordStateRef.current === "recording") {
+        stopRecording();
+      }
+      Animated.timing(lockDrag, {
+        toValue: isLockedRef.current ? 1 : 0,
+        duration: 180,
+        useNativeDriver: false,
+      }).start();
+    } catch (e) {
+      console.error("[camera] handleTerminate error:", e);
     }
-    if (!isLockedRef.current && recordStateRef.current === "recording") {
-      stopRecording();
-    }
-    Animated.timing(lockDrag, {
-      toValue: isLockedRef.current ? 1 : 0,
-      duration: 180,
-      useNativeDriver: false,
-    }).start();
   }, [stopRecording, lockDrag]);
 
   const capturePan = useMemo(
