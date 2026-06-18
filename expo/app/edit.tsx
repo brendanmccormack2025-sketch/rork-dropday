@@ -1320,50 +1320,59 @@ export default function EditScreen() {
 
       const primary = clips[0]!;
 
+      // ── 1. Copy all clip files to a stable permanent location ────────
+      //    The draft directory may be cleaned up during/after upload, so we
+      //    must copy files OUT of drafts/ before the upload reads them.
+      const stableDir = `${FileSystem.cacheDirectory}post_uploads/`;
+      await FileSystem.makeDirectoryAsync(stableDir, { intermediates: true });
+
+      const copiedClips = await Promise.all(
+        clips.map(async (c, i) => {
+          const ext = c.uri.match(/\.(\w+)(?:\?|$)/)?.[1] ?? (c.type === "video" ? "mp4" : "jpg");
+          const stableUri = `${stableDir}clip_${i}_${Date.now()}.${ext}`;
+          console.log(`[edit] executePost: copying clip[${i}] from ${c.uri.slice(0, 60)} → ${stableUri.slice(-40)}`);
+          await FileSystem.copyAsync({ from: c.uri, to: stableUri });
+          // Verify the copy succeeded
+          const copiedInfo = await FileSystem.getInfoAsync(stableUri);
+          if (!copiedInfo.exists || (copiedInfo.size ?? 0) === 0) {
+            throw new Error(`Failed to copy clip[${i}] to stable location. Source: ${c.uri.slice(0, 60)}`);
+          }
+          console.log(`[edit] executePost: clip[${i}] copied — ${copiedInfo.size} bytes`);
+          return { ...c, uri: stableUri };
+        }),
+      );
+
+      const stablePrimary = copiedClips[0]!;
+      console.log("[edit] executePost: all clips copied to stable location — primary:", stablePrimary.uri.slice(-40));
+
       // ── Auto-generate cover thumbnail from first video frame ──────────
       let thumbnailUri: string | null = null;
-      const firstVideo = clips.find((c) => c.type === "video");
+      const firstVideo = copiedClips.find((c) => c.type === "video");
       if (firstVideo) {
         thumbnailUri = await generateThumbnail(firstVideo.uri);
         console.log("[edit] executePost: thumbnail generated", thumbnailUri ? thumbnailUri.slice(-40) : "FAILED — continuing without thumbnail");
       }
 
-      // Validate the primary file exists on disk and has non-zero size
-      try {
-        const fileInfo = await FileSystem.getInfoAsync(primary.uri);
-        if (!fileInfo.exists) {
-          throw new Error(`Primary clip file not found: ${primary.uri.slice(0, 60)}`);
-        }
-        if (fileInfo.size != null && fileInfo.size === 0) {
-          throw new Error(`Primary clip file is empty (0 bytes): ${primary.uri.slice(0, 60)}`);
-        }
-        console.log("[edit] executePost: primary file exists, size:", fileInfo.size ?? "unknown");
-      } catch (fileErr) {
-        console.error("[edit] executePost: file validation failed", (fileErr as Error)?.message);
-        setError(`Cannot post: ${(fileErr as Error)?.message ?? "file validation failed"}`);
-        return;
-      }
-
       const segmentUris =
-        clips.length > 1 ? clips.map((c) => c.uri) : undefined;
-      const hasAnyTrim = clips.some(
+        copiedClips.length > 1 ? copiedClips.map((c) => c.uri) : undefined;
+      const hasAnyTrim = copiedClips.some(
         (c) =>
           (c.trimStartMs ?? 0) > 0 ||
           (c.trimEndMs ?? 0) < (c.durationMs ?? Infinity),
       );
       const trimData: Array<{ trimStartMs: number; trimEndMs: number }> | undefined =
         hasAnyTrim
-          ? clips.map((c) => ({
+          ? copiedClips.map((c) => ({
               trimStartMs: c.trimStartMs ?? 0,
               trimEndMs: c.trimEndMs ?? (c.durationMs ?? 0),
             }))
           : undefined;
       const overlaysForPost = textOverlays.length > 0 ? textOverlays : undefined;
 
-      // 1. Create optimistic post — appears immediately in the feed
+      // 2. Create optimistic post — appears immediately in the feed
       const tempId = addOptimisticPost({
-        uri: primary.uri,
-        mediaType: primary.type,
+        uri: stablePrimary.uri,
+        mediaType: stablePrimary.type,
         caption: undefined,
         draftId: draftId ?? undefined,
         segmentUris,
@@ -1372,15 +1381,11 @@ export default function EditScreen() {
         thumbnailUri: thumbnailUri ?? undefined,
       });
 
-      // 2. Clean up draft
-      if (draftId) {
-        deleteDraftProject(draftId).catch(() => {});
-      }
-
-      // 3. Fire the actual upload in the background
+      // 3. Fire the actual upload using the STABLE file paths
+      //    (draft cleanup happens inside createPost after successful upload)
       createPost.mutate({
-        uri: primary.uri,
-        mediaType: primary.type,
+        uri: stablePrimary.uri,
+        mediaType: stablePrimary.type,
         draftId: draftId ?? undefined,
         segmentUris,
         trimData,
@@ -1410,7 +1415,7 @@ export default function EditScreen() {
         postErr instanceof Error ? postErr.message : "Could not post your drop. Please try again.",
       );
     }
-  }, [clips, draftId, textOverlays, createPost, deleteDraftProject, addOptimisticPost, generateThumbnail, router]);
+  }, [clips, draftId, textOverlays, createPost, addOptimisticPost, generateThumbnail, router]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
   useEffect(() => { executePostRef.current = executePost; }, [executePost]);

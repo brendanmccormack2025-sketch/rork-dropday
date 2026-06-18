@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
-import { decode } from "base64-arraybuffer";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 import { getDropWindowState, DROP_WINDOW } from "@/constants/theme";
@@ -122,18 +121,22 @@ type OptimisticRetryPayload = {
 
 /**
  * Read a local file URI into a Uint8Array for Supabase upload.
- * Uses expo-file-system base64 reading + base64-arraybuffer decode
- * because React Native does not support Blob/ArrayBuffer uploads with Supabase.
+ * Uses fetch + arrayBuffer() — the modern RN approach for reading binary files
+ * that avoids the confusing readAsStringAsync naming (even though Base64 mode
+ * works, this is cleaner and more explicit about binary intent).
  */
 async function uriToBlob(uri: string): Promise<Uint8Array> {
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  if (!base64 || base64.length === 0) {
+  const response = await fetch(uri);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch file: HTTP ${response.status} — ${uri.slice(0, 60)}`,
+    );
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  if (arrayBuffer.byteLength === 0) {
     throw new Error(`File read returned empty data from ${uri.slice(0, 60)}`);
   }
-  const fileData = new Uint8Array(decode(base64));
-  return fileData;
+  return new Uint8Array(arrayBuffer);
 }
 
 function rankFeed(posts: Post[], followingIds: string[]): Post[] {
@@ -777,6 +780,23 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const uploadedUrls: string[] = [];
         for (let i = 0; i < urisToUpload.length; i++) {
           const segUri = urisToUpload[i]!;
+
+          // Verify the file exists on disk BEFORE attempting to read it.
+          // If the file was in a temp/drafts directory that got cleaned up,
+          // this will catch it early with a clear error message.
+          const fileInfo = await FileSystem.getInfoAsync(segUri);
+          if (!fileInfo.exists) {
+            const errMsg = `File does not exist at upload time: ${segUri.slice(0, 80)}`;
+            console.error(`[createPost] ${errMsg}`);
+            throw new Error(errMsg);
+          }
+          if ((fileInfo.size ?? 0) === 0) {
+            const errMsg = `File is empty (0 bytes) at upload time: ${segUri.slice(0, 80)}`;
+            console.error(`[createPost] ${errMsg}`);
+            throw new Error(errMsg);
+          }
+          console.log(`[createPost] File verified [${i}]: ${segUri.slice(0, 60)} — ${fileInfo.size} bytes`);
+
           const segExt = input.mediaType === "video" ? "mp4" : "jpg";
           const segPath = `${user.id}/${baseTs}_seg${i}.${segExt}`;
           const contentType = input.mediaType === "video" ? "video/mp4" : "image/jpeg";
