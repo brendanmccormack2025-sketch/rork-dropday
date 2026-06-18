@@ -45,6 +45,7 @@ export type Database = {
           media_url: string
           parent_post_id: string | null
           segments: Json | null
+          thumbnail_url: string | null
           user_id: string
         }
         Insert: {
@@ -55,6 +56,7 @@ export type Database = {
           media_url: string
           parent_post_id?: string | null
           segments?: Json | null
+          thumbnail_url?: string | null
           user_id: string
         }
         Update: {
@@ -65,6 +67,7 @@ export type Database = {
           media_url?: string
           parent_post_id?: string | null
           segments?: Json | null
+          thumbnail_url?: string | null
           user_id?: string
         }
         Relationships: [
