@@ -6,7 +6,9 @@ import {
   useMicrophonePermissions,
 } from "expo-camera";
 import * as MediaLibrary from "expo-media-library";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
+import { concatMP4Files } from "@/lib/concatMP4";
 
 export type Clip = {
   id: string;
@@ -59,6 +61,7 @@ export function useCameraRecorder() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(0);
+  const [isMerging, setIsMerging] = useState<boolean>(false);
 
   // ─── Synchronous refs — the TRUE single source of truth for gesture handlers ───
   // State setters below always update BOTH the ref AND the React state atomically.
@@ -229,9 +232,42 @@ export function useCameraRecorder() {
     while (keepRecording) {
       const cam = getActiveCamera();
       if (!cam) {
-        // Camera not ready — brief wait then retry
+        // Camera ref not attached yet — brief wait then retry
         await new Promise((r) => setTimeout(r, 50));
         continue;
+      }
+
+      // Wait for the native camera session to be ready before calling
+      // recordAsync.  After a previous recording finishes the native
+      // session may briefly need time to reset.  Calling recordAsync
+      // on an unready session can resolve with a null URI — producing
+      // a "phantom" recording that never appears in the timeline.
+      if (!cameraReadyRef.current) {
+        console.log("[camera] Camera not ready — waiting for onCameraReady");
+        let timedOut = false;
+        try {
+          await Promise.race([
+            new Promise<void>((resolve) => {
+              cameraReadyResolveRef.current = resolve;
+            }),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => {
+                timedOut = true;
+                reject(new Error("timeout"));
+              }, 2000)
+            ),
+          ]);
+        } catch {
+          // Timeout — camera didn't come back
+        }
+        cameraReadyResolveRef.current = null;
+        if (timedOut || !cameraReadyRef.current) {
+          console.warn("[camera] Camera not ready before recordAsync — aborting");
+          setError("Camera not ready. Please try again.");
+          keepRecording = false;
+          break;
+        }
+        console.log("[camera] Camera ready — starting recordAsync");
       }
 
       try {
@@ -239,6 +275,13 @@ export function useCameraRecorder() {
 
         if (result?.uri) {
           accumulatedSegmentUrisRef.current.push(result.uri);
+          console.log(`[camera] recordAsync resolved — collected URI: ${result.uri.slice(0, 60)}`);
+        } else {
+          // recordAsync resolved without a URI — the native session likely
+          // wasn't fully ready.  Surface this as a visible error instead of
+          // silently dropping the clip.
+          console.warn("[camera] recordAsync resolved with NO URI — clip will be lost");
+          setError("Recording could not be saved. Please try again.");
         }
 
         // When the camera flips mid-recording, the session rebuilds.
@@ -374,27 +417,58 @@ export function useCameraRecorder() {
       }
     }
 
-    // Finalize: create ONE clip PER accumulated segment so all footage
-    // (pre-flip and post-flip) appears in the editor. All clips share the
-    // same recordingSessionId so the editor can group them if needed.
+    // Finalize: merge all accumulated segments into ONE continuous video file.
+    // This eliminates playback gaps in the editor and ensures the editor always
+    // receives a single merged file — just like TikTok/Snapchat.
     const uris = accumulatedSegmentUrisRef.current;
     if (uris.length > 0) {
       const sessionId = recordSessionIdRef.current ?? undefined;
-      console.log(`[camera] Recording finished — ${uris.length} segment(s), creating ${uris.length} clip(s)`);
-      const segmentStart = recordingStartedAtRef.current ?? Date.now();
-      for (const uri of uris) {
-        // Each segment gets its own clip so all footage is visible in the editor.
-        // Clips from the same session share recordingSessionId.
+      console.log(`[camera] Recording finished — ${uris.length} segment(s)`);
+
+      try {
+        let finalUri: string;
+        if (uris.length === 1) {
+          // Single segment — no merge needed
+          finalUri = uris[0]!;
+          console.log(`[camera] Single segment, no merge needed: ${finalUri.slice(0, 60)}`);
+        } else {
+          // Multiple segments (camera flips) — merge into one file
+          setIsMerging(true);
+          console.log(`[camera] Merging ${uris.length} segments into one video...`);
+
+          const mergedUri = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}merged_${Date.now()}.mp4`;
+          finalUri = await concatMP4Files(uris, mergedUri);
+          console.log(`[camera] Merge complete: ${finalUri.slice(0, 60)}`);
+          setIsMerging(false);
+        }
+
         const clip: Clip = {
           id: newClipId(),
-          uri,
+          uri: finalUri,
           type: "video",
-          durationMs: undefined, // per-segment duration unknown — editor computes it
+          durationMs: undefined, // editor computes it from the merged file
           recordingSessionId: sessionId,
         };
         appendClip(clip);
-        saveToGallery(uri);
-        console.log(`[camera] Created clip: ${clip.id} from ${uri.slice(0, 60)}`);
+        saveToGallery(finalUri);
+        console.log(`[camera] Created merged clip: ${clip.id}`);
+      } catch (mergeErr) {
+        console.error("[camera] Merge failed — falling back to individual clips", mergeErr);
+        setIsMerging(false);
+
+        // Fallback: create individual clips (graceful degradation)
+        for (const uri of uris) {
+          const clip: Clip = {
+            id: newClipId(),
+            uri,
+            type: "video",
+            durationMs: undefined,
+            recordingSessionId: sessionId,
+          };
+          appendClip(clip);
+          saveToGallery(uri);
+        }
+        setError("Video merge failed. Clips are saved individually.");
       }
     }
 
@@ -403,8 +477,12 @@ export function useCameraRecorder() {
     setIsLockedSync(false);
     recordingStartedAtRef.current = null;
     recordSessionIdRef.current = null;
-    // Reset transition guard so the user can immediately record again
-    lastTransitionRef.current = 0;
+    // Reset transition guard to allow back-to-back recordings.
+    // The 260ms long-press timer provides most of the natural delay;
+    // we give a 300ms credit so the MIN_STATE_MS guard passes as soon
+    // as the timer fires, while still blocking sub-100ms re-triggers
+    // that could race the native session reset.
+    lastTransitionRef.current = Date.now() - 300;
   }, [requestMicPermission, canTransition, appendClip, saveToGallery, setError, setRecordStateSync, setIsLockedSync]);
 
   /** Stop the current recording. Safe to call at any time.
@@ -538,6 +616,8 @@ export function useCameraRecorder() {
     // Zoom
     zoom,
     setZoom,
+    // Merge state
+    isMerging,
     // Error
     error,
     setError,

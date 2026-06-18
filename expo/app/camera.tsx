@@ -92,6 +92,7 @@ export default function CameraScreen() {
     clips,
     zoom,
     setZoom,
+    isMerging,
     error,
     setError,
     cameraMountError,
@@ -643,8 +644,19 @@ export default function CameraScreen() {
         </View>
       )}
 
-      {/* Next button — appears when clips are ready and not actively recording */}
-      {clips.length > 0 && !isRecording && (
+      {/* Merging indicator — shown while multiple segments are being combined */}
+      {isMerging && (
+        <View
+          style={[styles.mergeOverlay, { paddingBottom: insets.bottom + 40 }]}
+          pointerEvents="none"
+        >
+          <ActivityIndicator color={theme.accent} size="large" />
+          <Text style={styles.mergeText}>Processing video...</Text>
+        </View>
+      )}
+
+      {/* Next button — appears when clips are ready and not actively recording or merging */}
+      {clips.length > 0 && !isRecording && !isMerging && (
         <View
           style={[styles.nextBtnRow, { bottom: insets.bottom + 170 }]}
           pointerEvents="box-none"
@@ -1054,5 +1066,24 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
     textAlign: "center",
     lineHeight: 20,
+  },
+
+  mergeOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    zIndex: 20,
+  },
+  mergeText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600" as const,
+    letterSpacing: 0.3,
   },
 });
