@@ -259,7 +259,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     queryKey: ["posts", "fyp", user?.id],
     retry: 1,
     queryFn: async (): Promise<Post[]> => {
-      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       let data: unknown[] | null = null;
       try {
         const res = await supabase
@@ -268,7 +267,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
-          .gte("created_at", since.toISOString())
           .order("created_at", { ascending: false })
           .limit(300);
         if (res.error) {

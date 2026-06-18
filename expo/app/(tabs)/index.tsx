@@ -134,7 +134,7 @@ export default function FeedScreen() {
               <Text style={styles.emptySub}>Loading drops…</Text>
             </View>
           ) : (
-            <EmptyState live={win.isOpen} />
+            <EmptyState />
           )
         }
         contentContainerStyle={
@@ -492,16 +492,12 @@ function ActionButton({
   );
 }
 
-function EmptyState({ live }: { live: boolean }) {
+function EmptyState() {
   return (
     <SafeAreaView style={styles.emptyWrap}>
       <DropletLogo size={56} />
       <Text style={styles.emptyTitle}>No drops yet</Text>
-      <Text style={styles.emptySub}>
-        {live
-          ? "Be the first to drop tonight."
-          : "Prep your drop now — posting opens at 8 PM."}
-      </Text>
+      <Text style={styles.emptySub}>Be the first to drop.</Text>
     </SafeAreaView>
   );
 }
