@@ -19,7 +19,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
-import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
@@ -36,8 +36,8 @@ import {
   Pencil,
 } from "lucide-react-native";
 
+import { getThumbnailAsync } from "expo-video-thumbnails";
 import { theme } from "@/constants/theme";
-import { coverState } from "@/lib/coverState";
 import { useAuth } from "@/providers/AuthProvider";
 import {
   usePosts,
@@ -216,9 +216,9 @@ export default function EditScreen() {
   const clipsRef = useRef(clips);
   const safeSeekActiveRef = useRef<boolean>(false);
 
-  // Stable refs for cover-picker execution functions
-  const executeSaveDraftRef = useRef<(uri: string | null, ms: number) => Promise<void>>(async () => {});
-  const executePostRef = useRef<(uri: string | null) => Promise<void>>(async () => {});
+  // Stable refs for execution functions (no params — thumbnails auto-generated)
+  const executeSaveDraftRef = useRef<() => Promise<void>>(async () => {});
+  const executePostRef = useRef<() => Promise<void>>(async () => {});
 
   // Stable refs for undo/redo handlers
   const clipsForUndoRef = useRef(clips);
@@ -322,10 +322,13 @@ export default function EditScreen() {
   const isVideo = activeClip?.type === "video";
   const displayPosition = isVideo ? Math.min(positionMs, totalDurationMs) : 0;
 
-  const videoSource = useMemo(
-    () => (activeClip?.uri ? { uri: activeClip.uri } : undefined),
-    [activeClip?.uri],
-  );
+  const videoSource = useMemo(() => {
+    const uri = activeClip?.uri;
+    if (uri) {
+      console.log("[edit] videoSource memo — uri:", uri.slice(0, 80), "type:", activeClip?.type);
+    }
+    return uri ? { uri } : undefined;
+  }, [activeClip?.uri, activeClip?.type]);
 
   const canSplit = useMemo(() => {
     if (!selectedClipId) return false;
@@ -1186,45 +1189,35 @@ export default function EditScreen() {
     textEditSnapshotTakenRef.current = false;
   }, [redo, pushSnapshot]);
 
-  // ── Cover thumbnail flow ──────────────────────────────────────────────────
+  // ── Thumbnail generation helper ────────────────────────────────────────────
 
-  const primaryVideoUri = useMemo(() => {
-    if (clips.length === 0) return null;
-    if (selectedClipId) {
-      const clip = clips.find((c) => c.id === selectedClipId);
-      if (clip && clip.type === "video") return clip.uri;
+  const generateThumbnail = useCallback(async (videoUri: string): Promise<string | null> => {
+    try {
+      const result = await getThumbnailAsync(videoUri, { time: 0 });
+      if (!result?.uri) return null;
+      const permanentDir = `${FileSystem.documentDirectory}thumbnails/`;
+      await FileSystem.makeDirectoryAsync(permanentDir, { intermediates: true });
+      const permanentUri = `${permanentDir}cover_${Date.now()}.jpg`;
+      await FileSystem.copyAsync({ from: result.uri, to: permanentUri });
+      return permanentUri;
+    } catch {
+      return null;
     }
-    return clips[0]?.type === "video" ? clips[0].uri : (clips.find((c) => c.type === "video")?.uri ?? null);
-  }, [clips, selectedClipId]);
+  }, []);
 
   const handleSaveDraftPress = useCallback(() => {
     if (clips.length === 0) return;
-    if (primaryVideoUri) {
-      coverState.pendingAction = "save-draft";
-      coverState.resultThumbnailUri = null;
-      coverState.resultThumbnailMs = 0;
-      router.push({
-        pathname: "/cover-picker",
-        params: {
-          videoUri: primaryVideoUri,
-          totalDurationMs: String(totalDurationMs),
-          mode: "save-draft",
-        },
-      });
-    } else {
-      setError(null);
-      setSuccess(null);
-      executeSaveDraftRef.current(null, 0).catch((e: any) => {
-        setError(e instanceof Error ? e.message : "Could not save draft.");
-      });
-    }
-  }, [clips, primaryVideoUri, totalDurationMs, router]);
+    setError(null);
+    setSuccess(null);
+    executeSaveDraftRef.current().catch((e: any) => {
+      setError(e instanceof Error ? e.message : "Could not save draft.");
+    });
+  }, [clips]);
 
   const handlePostPress = useCallback(() => {
     console.log("[edit] handlePostPress: Post Drop tapped");
 
     try {
-      // ── Null-safety guards ──────────────────────────────────────────
       if (!router) {
         console.error("[edit] handlePostPress: router is null/undefined");
         setError("Navigation is not available. Please restart the app.");
@@ -1234,104 +1227,38 @@ export default function EditScreen() {
         console.warn("[edit] handlePostPress: no clips to post");
         return;
       }
-      if (!primaryVideoUri) {
-        console.warn("[edit] handlePostPress: primaryVideoUri is null — posting without cover-picker");
-      }
-
-      // ── Auth check ──────────────────────────────────────────────────
       if (!user?.id || !session) {
         console.error("[edit] handlePostPress: not authenticated", { hasUser: !!user, hasSession: !!session });
         setError("You must be signed in to post. Please sign in and try again.");
         return;
       }
 
-      if (primaryVideoUri) {
-        // ── Validate navigation params ────────────────────────────────
-        const durationStr = String(totalDurationMs ?? 0);
-        if (!primaryVideoUri || primaryVideoUri.length === 0) {
-          console.error("[edit] handlePostPress: videoUri is empty");
-          setError("Video is not available. Please re-record.");
-          return;
-        }
-        console.log("[edit] handlePostPress: navigating to cover-picker", {
-          uriLen: primaryVideoUri.length,
-          uriPrefix: primaryVideoUri.slice(0, 40),
-          uriSuffix: primaryVideoUri.slice(-20),
-          durationMs: totalDurationMs,
-        });
-
-        coverState.pendingAction = "publish";
-        coverState.resultThumbnailUri = null;
-        coverState.resultThumbnailMs = 0;
-
-        // Wrap router.push in its own try/catch to catch navigation crashes
-        try {
-          console.log("[edit] handlePostPress: calling router.push");
-          router.push({
-            pathname: "/cover-picker",
-            params: {
-              videoUri: primaryVideoUri,
-              totalDurationMs: durationStr,
-              mode: "publish",
-            },
-          });
-          console.log("[edit] handlePostPress: router.push returned successfully");
-        } catch (navErr) {
-          console.error("[edit] handlePostPress: router.push THREW", (navErr as Error)?.message ?? navErr);
-          console.error("[edit] handlePostPress: router.push stack", (navErr as Error)?.stack?.slice(0, 500));
-          setError("Navigation failed. Please try again.");
-          return;
-        }
-      } else {
-        console.log("[edit] handlePostPress: posting directly (no cover-picker)");
-        setError(null);
-        setSuccess(null);
-        executePostRef.current(null).catch((e: any) => {
-          console.error("[edit] handlePostPress: executePost failed", (e as Error)?.message ?? e);
-          setError(e instanceof Error ? e.message : "Could not post your drop.");
-        });
-      }
+      setError(null);
+      setSuccess(null);
+      console.log("[edit] handlePostPress: posting directly (auto-thumbnail)");
+      executePostRef.current().catch((e: any) => {
+        console.error("[edit] handlePostPress: executePost failed", (e as Error)?.message ?? e);
+        setError(e instanceof Error ? e.message : "Could not post your drop.");
+      });
     } catch (err) {
       console.error("[edit] handlePostPress: CRASH in handler", (err as Error)?.message ?? err);
-      console.error("[edit] handlePostPress: stack", (err as Error)?.stack?.slice(0, 500));
       setError(
         err instanceof Error ? err.message : "Something went wrong. Please try again.",
       );
     }
-  }, [clips, primaryVideoUri, totalDurationMs, router, user, session]);
+  }, [clips, router, user, session]);
 
-  useFocusEffect(
-    useCallback(() => {
-      const action = coverState.pendingAction;
-      const uri = coverState.resultThumbnailUri;
-      const ms = coverState.resultThumbnailMs;
-      if (action && uri) {
-        console.log("[edit] useFocusEffect: triggering", action, uri.slice(-40));
-        coverState.pendingAction = null;
-        coverState.resultThumbnailUri = null;
-        coverState.resultThumbnailMs = 0;
-        if (action === "save-draft") {
-          executeSaveDraftRef.current(uri, ms).catch((e: any) => {
-            console.error("[edit] save-draft failed", (e as Error)?.message ?? e);
-            setError(e instanceof Error ? e.message : "Could not save draft.");
-          });
-        } else {
-          executePostRef.current(uri).catch((e: any) => {
-            console.error("[edit] post failed", (e as Error)?.message ?? e);
-            setError(e instanceof Error ? e.message : "Could not post your drop.");
-          });
-        }
-      } else if (action && !uri) {
-        console.warn("[edit] useFocusEffect: action set but no thumbnail uri — clearing");
-        coverState.pendingAction = null;
-      }
-    }, []),
-  );
-
-  const executeSaveDraft = useCallback(async (thumbnailUri: string | null, thumbnailMs: number) => {
+  const executeSaveDraft = useCallback(async () => {
     if (clips.length === 0) return;
     setError(null);
     try {
+      // Auto-generate cover thumbnail from first video frame
+      const firstVideo = clips.find((c) => c.type === "video");
+      const thumbnailUri = firstVideo ? await generateThumbnail(firstVideo.uri) : null;
+      if (firstVideo) {
+        console.log("[edit] executeSaveDraft: thumbnail generated", thumbnailUri ? thumbnailUri.slice(-40) : "FAILED");
+      }
+
       const draftIdFinal: string =
         draftId ??
         `draft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1360,7 +1287,7 @@ export default function EditScreen() {
         caption: "",
         textOverlays,
         coverThumbnailUri: thumbnailUri ?? undefined,
-        coverThumbnailMs: thumbnailUri ? thumbnailMs : undefined,
+        coverThumbnailMs: thumbnailUri ? 0 : undefined,
         createdAt: draftId
           ? (draftProjects.find((d) => d.id === draftId)?.createdAt ??
             Date.now())
@@ -1378,9 +1305,9 @@ export default function EditScreen() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save draft.");
     }
-  }, [clips, draftId, draftProjects, textOverlays, saveDraftProject, router]);
+  }, [clips, draftId, draftProjects, textOverlays, saveDraftProject, generateThumbnail, router]);
 
-  const executePost = useCallback(async (thumbnailUri: string | null) => {
+  const executePost = useCallback(async () => {
     try {
       if (clips.length === 0) {
         console.error("[edit] executePost: clips array is empty — cannot post");
@@ -1392,6 +1319,14 @@ export default function EditScreen() {
       setSuccess(null);
 
       const primary = clips[0]!;
+
+      // ── Auto-generate cover thumbnail from first video frame ──────────
+      let thumbnailUri: string | null = null;
+      const firstVideo = clips.find((c) => c.type === "video");
+      if (firstVideo) {
+        thumbnailUri = await generateThumbnail(firstVideo.uri);
+        console.log("[edit] executePost: thumbnail generated", thumbnailUri ? thumbnailUri.slice(-40) : "FAILED — continuing without thumbnail");
+      }
 
       // Validate the primary file exists on disk and has non-zero size
       try {
@@ -1437,7 +1372,7 @@ export default function EditScreen() {
         thumbnailUri: thumbnailUri ?? undefined,
       });
 
-      // 2. Clear cover state and clean up draft
+      // 2. Clean up draft
       if (draftId) {
         deleteDraftProject(draftId).catch(() => {});
       }
@@ -1454,24 +1389,28 @@ export default function EditScreen() {
         optimisticTempId: tempId,
       });
 
-      // 4. Dismiss the modal stack (camera → cover-picker → edit) then navigate
-      //    to the feed. router.replace alone doesn't clear modal presentation
-      //    containers, which leaves the Stack showing only the contentStyle
-      //    background (#050505) — the black screen bug.
-      if (router.canDismiss()) {
-        router.dismissAll();
+      // 4. Navigate to the feed — dismiss the modal stack first, then replace.
+      //    Using dismissAll + setTimeout prevents the black-screen bug where the
+      //    modal container stays mounted with only the contentStyle background.
+      try {
+        if (router.canDismiss()) {
+          router.dismissAll();
+        }
+      } catch {
+        // canDismiss / dismissAll may not be available on all Expo Router versions
       }
-      // Small delay lets dismissAll complete its native animation before replacing
       setTimeout(() => {
         router.replace("/(tabs)");
-      }, 50);
+      }, 100);
+
+      setSuccess("Posted!");
     } catch (postErr) {
       console.error("[edit] executePost: unhandled error", (postErr as Error)?.message ?? postErr);
       setError(
         postErr instanceof Error ? postErr.message : "Could not post your drop. Please try again.",
       );
     }
-  }, [clips, draftId, textOverlays, createPost, deleteDraftProject, addOptimisticPost, router]);
+  }, [clips, draftId, textOverlays, createPost, deleteDraftProject, addOptimisticPost, generateThumbnail, router]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
   useEffect(() => { executePostRef.current = executePost; }, [executePost]);
@@ -1566,6 +1505,7 @@ export default function EditScreen() {
             {isVideo && videoSource ? (
               <>
                 <Video
+                  key={activeClip?.uri ?? "no-uri"}
                   ref={videoRef}
                   source={videoSource}
                   style={{ width: "100%", height: "100%" }}
@@ -1581,7 +1521,7 @@ export default function EditScreen() {
                   }}
                   onLoad={(status: AVPlaybackStatus) => {
                     if (status.isLoaded) {
-                      console.log("[edit] Video loaded successfully — duration:", "durationMillis" in status ? status.durationMillis : "N/A");
+                      console.log("[edit] Video loaded — duration:", "durationMillis" in status ? status.durationMillis : "N/A", "uri:", activeClip?.uri?.slice(0, 60));
                       setVideoLoadError(null);
                     }
                   }}
@@ -1591,7 +1531,7 @@ export default function EditScreen() {
                 {videoLoadError && (
                   <View style={styles.videoErrorOverlay}>
                     <Text style={styles.videoErrorText}>
-                      Video failed to load: {videoLoadError}
+                      Video failed to load: {videoLoadError}{"\n"}URI: {activeClip?.uri?.slice(0, 50)}...
                     </Text>
                   </View>
                 )}
