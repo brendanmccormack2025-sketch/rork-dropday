@@ -13,6 +13,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { PostsProvider } from "@/providers/PostsProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { DebugOverlay } from "@/components/DebugOverlay";
 import { theme } from "@/constants/theme";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -48,61 +49,64 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
 function RootLayoutNav() {
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: theme.bg },
-      }}
-    >
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen
-        name="camera"
-        options={{
-          presentation: "fullScreenModal",
-          animation: "slide_from_bottom",
-          gestureEnabled: false,
-          contentStyle: { backgroundColor: "#000" },
-        }}
-      />
-      <Stack.Screen
-        name="edit"
-        options={{
-          presentation: "fullScreenModal",
-          animation: "slide_from_right",
-          gestureEnabled: false,
-          contentStyle: { backgroundColor: "#000" },
-        }}
-      />
-      <Stack.Screen
-        name="post/[id]/reactions"
-        options={{
-          presentation: "card",
-          animation: "slide_from_right",
+    <View style={{ flex: 1 }}>
+      <Stack
+        screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: theme.bg },
         }}
-      />
-      <Stack.Screen
-        name="cover-picker"
-        options={{
-          presentation: "fullScreenModal",
-          animation: "slide_from_right",
-          gestureEnabled: false,
-          headerShown: false,
-          contentStyle: { backgroundColor: "#08080B" },
-        }}
-      />
-      <Stack.Screen
-        name="edit-profile"
-        options={{
-          presentation: "fullScreenModal",
-          animation: "slide_from_bottom",
-          headerShown: false,
-          contentStyle: { backgroundColor: theme.bg },
-        }}
-      />
-    </Stack>
+      >
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen
+          name="camera"
+          options={{
+            presentation: "fullScreenModal",
+            animation: "slide_from_bottom",
+            gestureEnabled: false,
+            contentStyle: { backgroundColor: "#000" },
+          }}
+        />
+        <Stack.Screen
+          name="edit"
+          options={{
+            presentation: "fullScreenModal",
+            animation: "slide_from_right",
+            gestureEnabled: false,
+            contentStyle: { backgroundColor: "#000" },
+          }}
+        />
+        <Stack.Screen
+          name="post/[id]/reactions"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
+        <Stack.Screen
+          name="cover-picker"
+          options={{
+            presentation: "fullScreenModal",
+            animation: "slide_from_right",
+            gestureEnabled: false,
+            headerShown: false,
+            contentStyle: { backgroundColor: "#08080B" },
+          }}
+        />
+        <Stack.Screen
+          name="edit-profile"
+          options={{
+            presentation: "fullScreenModal",
+            animation: "slide_from_bottom",
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
+      </Stack>
+      <DebugOverlay />
+    </View>
   );
 }
 
