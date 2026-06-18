@@ -1454,17 +1454,8 @@ export default function EditScreen() {
         optimisticTempId: tempId,
       });
 
-      // 4. Navigate back to feed only AFTER mutation is queued
-      if (router.canGoBack()) {
-        router.back();
-        setTimeout(() => {
-          if (router.canGoBack()) {
-            router.back();
-          }
-        }, 100);
-      } else {
-        router.replace("/(tabs)");
-      }
+      // 4. Navigate to feed with a single atomic call — avoids double-pop race
+      router.replace("/(tabs)");
     } catch (postErr) {
       console.error("[edit] executePost: unhandled error", (postErr as Error)?.message ?? postErr);
       setError(
