@@ -36,7 +36,7 @@ function LogLine({ entry }: { entry: LogEntry }) {
 
 export function DebugOverlay() {
   const { entries, clear } = useDebugLogs();
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const insets = useSafeAreaInsets();
   const scrollRef = React.useRef<ScrollView>(null);
 
