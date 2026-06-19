@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
   FlatList,
@@ -152,15 +152,22 @@ export default function ReactionTreeScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item, index }: { item: Post; index: number }) => (
-      <TreeItem
-        post={item}
-        active={index === activeIndex}
-        isRoot={index === 0}
-        replyingTo={replyingToMap.get(item.id)}
-      />
-    ),
-    [activeIndex, replyingToMap],
+    ({ item, index }: { item: Post; index: number }) => {
+      const parentPost =
+        index > 0 && item.parent_post_id
+          ? (posts.find((p) => p.id === item.parent_post_id) ?? null)
+          : null;
+      return (
+        <TreeItem
+          post={item}
+          active={index === activeIndex}
+          isRoot={index === 0}
+          replyingTo={replyingToMap.get(item.id)}
+          parentPost={parentPost}
+        />
+      );
+    },
+    [activeIndex, replyingToMap, posts],
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -261,11 +268,53 @@ function TreeItem({
   active,
   isRoot,
   replyingTo,
+  parentPost,
 }: {
   post: Post;
   active: boolean;
   isRoot: boolean;
   replyingTo?: string;
+  parentPost?: Post | null;
+}) {
+  // Root Drop — full-screen, unchanged
+  if (isRoot) {
+    return <RootItem post={post} active={active} />;
+  }
+
+  // Reaction — split view (fall back to full-screen if parent data missing)
+  if (!parentPost) {
+    return (
+      <RootItem
+        post={post}
+        active={active}
+        replyingTo={replyingTo}
+        isRoot={false}
+      />
+    );
+  }
+
+  return (
+    <ReactionSplitItem
+      parentPost={parentPost}
+      reactionPost={post}
+      active={active}
+      replyingTo={replyingTo}
+    />
+  );
+}
+
+// ── Root Item (full-screen, unchanged from original) ────────────────────────
+
+function RootItem({
+  post,
+  active,
+  replyingTo,
+  isRoot = true,
+}: {
+  post: Post;
+  active: boolean;
+  replyingTo?: string;
+  isRoot?: boolean;
 }) {
   const [liked, setLiked] = useState<boolean>(false);
   const name =
@@ -332,7 +381,6 @@ function TreeItem({
 
       {/* Bottom info */}
       <View style={styles.bottom} pointerEvents="box-none">
-        {/* Replying-to tag — only for reactions, not the root */}
         {!isRoot && replyingTo && (
           <View style={styles.replyingRow}>
             <Reply color={theme.accent} size={11} strokeWidth={2.5} />
@@ -360,6 +408,250 @@ function TreeItem({
     </View>
   );
 }
+
+// ── Reaction Split Item ─────────────────────────────────────────────────────
+
+function ReactionSplitItem({
+  parentPost,
+  reactionPost,
+  active,
+  replyingTo,
+}: {
+  parentPost: Post;
+  reactionPost: Post;
+  active: boolean;
+  replyingTo?: string;
+}) {
+  const [parentPlaying, setParentPlaying] = useState<boolean>(true);
+  const [reactionPlaying, setReactionPlaying] = useState<boolean>(true);
+  const [parentVolume, setParentVolume] = useState<number>(80);
+  const [reactionVolume, setReactionVolume] = useState<number>(80);
+
+  // Autoplay when scrolled into view; pause when scrolled away
+  useEffect(() => {
+    if (active) {
+      setParentPlaying(true);
+      setReactionPlaying(true);
+    } else {
+      setParentPlaying(false);
+      setReactionPlaying(false);
+    }
+  }, [active]);
+
+  const topHeight = SCREEN_H * 0.58;
+  const bottomHeight = SCREEN_H * 0.42;
+  const reactionName =
+    reactionPost.profile?.display_name ||
+    reactionPost.profile?.username ||
+    "dropper";
+
+  return (
+    <View style={styles.item}>
+      {/* ── Top: Parent clip ────────────────────────────────────────────── */}
+      <Pressable
+        onPress={() => setParentPlaying((v) => !v)}
+        style={[styles.splitTop, { height: topHeight }]}
+      >
+        {parentPost.media_type === "video" ? (
+          <Video
+            source={{ uri: parentPost.media_url }}
+            style={StyleSheet.absoluteFill}
+            resizeMode={ResizeMode.COVER}
+            isLooping
+            shouldPlay={active && parentPlaying}
+            isMuted
+            useNativeControls={false}
+            progressUpdateIntervalMillis={50}
+          />
+        ) : (
+          <Image
+            source={{ uri: parentPost.media_url }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            transition={150}
+          />
+        )}
+
+        <LinearGradient
+          colors={["rgba(0,0,0,0.45)", "transparent"]}
+          style={styles.splitGradTop}
+          pointerEvents="none"
+        />
+        <LinearGradient
+          colors={["transparent", "rgba(0,0,0,0.7)"]}
+          style={styles.splitGradBottom}
+          pointerEvents="none"
+        />
+
+        {/* Volume slider */}
+        <View style={styles.volumeRow} pointerEvents="box-none">
+          <VolumeSlider
+            value={parentVolume}
+            onValueChange={setParentVolume}
+            color={theme.accent}
+          />
+        </View>
+
+        {/* Play/pause indicator overlay */}
+        {!parentPlaying && (
+          <View style={styles.pauseOverlay} pointerEvents="none">
+            <View style={styles.pauseIcon}>
+              <Text style={styles.pauseIconText}>▶</Text>
+            </View>
+          </View>
+        )}
+      </Pressable>
+
+      {/* ── Divider ──────────────────────────────────────────────────────── */}
+      <View style={styles.splitDivider} />
+
+      {/* ── Bottom: Reaction clip ────────────────────────────────────────── */}
+      <Pressable
+        onPress={() => setReactionPlaying((v) => !v)}
+        style={[styles.splitBottom, { height: bottomHeight }]}
+      >
+        {reactionPost.media_type === "video" ? (
+          <Video
+            source={{ uri: reactionPost.media_url }}
+            style={StyleSheet.absoluteFill}
+            resizeMode={ResizeMode.COVER}
+            isLooping
+            shouldPlay={active && reactionPlaying}
+            isMuted
+            useNativeControls={false}
+            progressUpdateIntervalMillis={50}
+          />
+        ) : (
+          <Image
+            source={{ uri: reactionPost.media_url }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            transition={150}
+          />
+        )}
+
+        <LinearGradient
+          colors={["rgba(0,0,0,0.45)", "transparent"]}
+          style={styles.splitGradTop}
+          pointerEvents="none"
+        />
+        <LinearGradient
+          colors={["transparent", "rgba(0,0,0,0.85)"]}
+          style={styles.splitGradBottom}
+          pointerEvents="none"
+        />
+
+        {/* Volume slider */}
+        <View style={styles.volumeRow} pointerEvents="box-none">
+          <VolumeSlider
+            value={reactionVolume}
+            onValueChange={setReactionVolume}
+            color={theme.danger}
+          />
+        </View>
+
+        {/* Play/pause indicator overlay */}
+        {!reactionPlaying && (
+          <View style={styles.pauseOverlay} pointerEvents="none">
+            <View style={styles.pauseIcon}>
+              <Text style={styles.pauseIconText}>▶</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Bottom info — reaction author */}
+        <View style={styles.splitInfo} pointerEvents="box-none">
+          {replyingTo && (
+            <View style={styles.replyingRow}>
+              <Reply color={theme.accent} size={11} strokeWidth={2.5} />
+              <Text style={styles.replyingText}>
+                replying to @{replyingTo}
+              </Text>
+            </View>
+          )}
+
+          <View style={styles.userRow}>
+            <View style={styles.avatar}>
+              <FeedAvatar profile={reactionPost.profile} name={reactionName} />
+            </View>
+            <Text style={styles.username}>
+              @{reactionPost.profile?.username ?? "dropper"}
+            </Text>
+          </View>
+
+          {reactionPost.caption ? (
+            <Text style={styles.caption} numberOfLines={2}>
+              {reactionPost.caption}
+            </Text>
+          ) : null}
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
+// ── Volume Slider ───────────────────────────────────────────────────────────
+
+function VolumeSlider({
+  value,
+  onValueChange: _onValueChange,
+  color,
+}: {
+  value: number;
+  onValueChange: (v: number) => void;
+  color: string;
+}) {
+  const pct = Math.max(0, Math.min(100, value));
+
+  return (
+    <View style={volStyles.wrapper}>
+      <View style={volStyles.track}>
+        <View
+          style={[volStyles.fill, { width: `${pct}%`, backgroundColor: color }]}
+        />
+        <View
+          style={[
+            volStyles.thumb,
+            { left: `${pct}%`, backgroundColor: color },
+          ]}
+        />
+      </View>
+    </View>
+  );
+}
+
+const volStyles = StyleSheet.create({
+  wrapper: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  track: {
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    justifyContent: "center",
+  },
+  fill: {
+    height: 3,
+    borderRadius: 1.5,
+    position: "absolute",
+    left: 0,
+    top: 0,
+  },
+  thumb: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    position: "absolute",
+    top: -4.5,
+    marginLeft: -6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.4,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+});
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 
@@ -538,5 +830,68 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800" as const,
     letterSpacing: 0.2,
+  },
+
+  /* Split view */
+  splitTop: {
+    width: SCREEN_W,
+    overflow: "hidden",
+    backgroundColor: "#000",
+  },
+  splitBottom: {
+    width: SCREEN_W,
+    overflow: "hidden",
+    backgroundColor: "#000",
+  },
+  splitDivider: {
+    width: SCREEN_W,
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  splitGradTop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 80,
+  },
+  splitGradBottom: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 120,
+  },
+  splitInfo: {
+    position: "absolute",
+    left: 16,
+    right: 80,
+    bottom: 12,
+    gap: 6,
+  },
+  volumeRow: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 4,
+  },
+  pauseOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pauseIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pauseIconText: {
+    color: "#fff",
+    fontSize: 18,
+    marginLeft: 3,
   },
 });

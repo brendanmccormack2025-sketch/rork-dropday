@@ -167,6 +167,31 @@ export type Database = {
           username: string
         }[]
       }
+      get_reaction_tree: {
+        Args: { root_id: string }
+        Returns: {
+          audio_url: string | null
+          caption: string | null
+          comment_count: number | null
+          created_at: string | null
+          id: string
+          like_count: number | null
+          media_type: string
+          media_url: string
+          parent_post_id: string | null
+          segments: Json | null
+          text_overlays: Json | null
+          thumbnail_url: string | null
+          trim_data: Json | null
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "posts"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       user_id: { Args: never; Returns: string }
     }
     Enums: {
