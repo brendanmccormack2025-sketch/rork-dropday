@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { documentDirectory, getInfoAsync, deleteAsync } from "@/lib/fileSystemCompat";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseUrl } from "@/lib/supabase";
+import { uploadAsync, FileSystemUploadType } from "expo-file-system/legacy";
 import { useAuth } from "@/providers/AuthProvider";
 import { getDropWindowState, DROP_WINDOW } from "@/constants/theme";
 
@@ -120,10 +121,8 @@ type OptimisticRetryPayload = {
 };
 
 /**
- * Read a local file URI into a Uint8Array for Supabase upload.
- * Uses fetch + arrayBuffer() — the modern RN approach for reading binary files
- * that avoids the confusing readAsStringAsync naming (even though Base64 mode
- * works, this is cleaner and more explicit about binary intent).
+ * Read a local file URI into a Uint8Array.
+ * Used only on web where expo-file-system's streaming upload isn't available.
  */
 async function uriToBlob(uri: string): Promise<Uint8Array> {
   const response = await fetch(uri);
@@ -137,6 +136,159 @@ async function uriToBlob(uri: string): Promise<Uint8Array> {
     throw new Error(`File read returned empty data from ${uri.slice(0, 60)}`);
   }
   return new Uint8Array(arrayBuffer);
+}
+
+/**
+ * Upload a file to Supabase Storage with streaming, retry, and timing logs.
+ *
+ * On native (iOS/Android), uses expo-file-system's uploadAsync which streams
+ * the file directly from disk — far more reliable for large video files than
+ * loading the entire file into memory first.
+ *
+ * On web, falls back to fetch + FormData (converts data: URIs to Blob first).
+ *
+ * Retries once automatically on timeout with a 2-second delay.
+ */
+async function uploadToStorage(
+  fileUri: string,
+  storagePath: string,
+  contentType: string,
+  sizeMB: string,
+  attempt: number = 1,
+): Promise<void> {
+  const maxRetries = 2;
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token;
+  if (!token) {
+    throw new Error("Not authenticated — cannot upload files.");
+  }
+
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${BUCKET}/${storagePath}`;
+
+  console.log(
+    `[uploadToStorage] START — ${sizeMB} MB → ${BUCKET}/${storagePath} (${contentType}, attempt ${attempt}/${maxRetries})`,
+  );
+  const startTime = Date.now();
+
+  try {
+    if (Platform.OS === "ios" || Platform.OS === "android") {
+      // ── Native: stream directly from disk via expo-file-system ─────
+      const result = await uploadAsync(uploadUrl, fileUri, {
+        httpMethod: "POST",
+        uploadType: FileSystemUploadType.MULTIPART,
+        fieldName: "file",
+        mimeType: contentType,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "x-upsert": "false",
+        },
+      });
+
+      const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(
+        `[uploadToStorage] DONE in ${durationSec}s — HTTP ${result.status}`,
+      );
+
+      if (result.status < 200 || result.status >= 300) {
+        const errBody = result.body?.slice(0, 300) ?? "no body";
+        console.error(
+          `[uploadToStorage] FAIL HTTP ${result.status}: ${errBody}`,
+        );
+        throw new Error(
+          `Storage returned HTTP ${result.status}: ${errBody}`,
+        );
+      }
+    } else {
+      // ── Web: fetch + FormData ──────────────────────────────────────
+      let body: Blob | { uri: string; type: string; name: string };
+
+      if (fileUri.startsWith("data:")) {
+        body = await fetch(fileUri).then((r) => r.blob());
+      } else {
+        body = {
+          uri: fileUri,
+          type: contentType,
+          name: storagePath.split("/").pop() ?? "file",
+        } as unknown as { uri: string; type: string; name: string };
+      }
+
+      const formData = new FormData();
+      formData.append("file", body as unknown as Blob);
+
+      const response = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "x-upsert": "false",
+        },
+        body: formData,
+      });
+
+      const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(
+        `[uploadToStorage] DONE in ${durationSec}s — HTTP ${response.status}`,
+      );
+
+      if (!response.ok) {
+        const errText = await response
+          .text()
+          .catch(() => "could not read error body");
+        throw new Error(
+          `Storage returned HTTP ${response.status}: ${errText.slice(0, 200)}`,
+        );
+      }
+    }
+  } catch (err) {
+    const durationMs = Date.now() - startTime;
+    const durationSec = (durationMs / 1000).toFixed(1);
+
+    const errAny = err as unknown as Record<string, unknown> | undefined;
+    const errMsg = (err as Error)?.message ?? String(err);
+    const statusCode =
+      errAny?.status ?? errAny?.statusCode ?? errAny?.code ?? "?";
+    const isTimeout =
+      errMsg.toLowerCase().includes("timeout") ||
+      errMsg.toLowerCase().includes("timed out") ||
+      statusCode === 408 ||
+      durationMs > 25000;
+
+    console.error(
+      `[uploadToStorage] FAILED after ${durationSec}s (attempt ${attempt}/${maxRetries})`,
+      {
+        message: errMsg,
+        name: (err as Error)?.name,
+        status: errAny?.status,
+        statusCode: errAny?.statusCode,
+        code: errAny?.code,
+        isTimeout,
+        bucket: BUCKET,
+        path: storagePath,
+        contentType,
+        fileSizeMB: sizeMB,
+        durationMs,
+      },
+    );
+
+    if (attempt < maxRetries && isTimeout) {
+      console.log(`[uploadToStorage] Retrying in 2s...`);
+      await new Promise((r) => setTimeout(r, 2000));
+      return uploadToStorage(
+        fileUri,
+        storagePath,
+        contentType,
+        sizeMB,
+        attempt + 1,
+      );
+    }
+
+    if (isTimeout) {
+      throw new Error(
+        `Upload timed out after ${durationSec}s (${sizeMB} MB file). The network may be slow. Please try again.`,
+      );
+    }
+    throw err;
+  }
 }
 
 function rankFeed(posts: Post[], followingIds: string[]): Post[] {
@@ -785,9 +937,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         for (let i = 0; i < urisToUpload.length; i++) {
           const segUri = urisToUpload[i]!;
 
-          // Verify the file exists on disk BEFORE attempting to read it.
-          // If the file was in a temp/drafts directory that got cleaned up,
-          // this will catch it early with a clear error message.
+          // Verify the file exists on disk BEFORE attempting to upload.
           const fileInfo = await getInfoAsync(segUri);
           if (!fileInfo.exists) {
             const errMsg = `File does not exist at upload time: ${segUri.slice(0, 80)}`;
@@ -799,16 +949,14 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             console.error(`[createPost] ${errMsg}`);
             throw new Error(errMsg);
           }
-          console.log(`[createPost] File verified [${i}]: ${segUri.slice(0, 60)} — ${fileInfo.size} bytes`);
+          const sizeMB = ((fileInfo.size ?? 0) / (1024 * 1024)).toFixed(2);
+          console.log(`[createPost] File verified [${i}]: ${sizeMB} MB — ${segUri.slice(0, 60)}`);
 
-          // Determine file extension from the URI, not from mediaType.
-          // A video file might be .mov (QuickTime) or .mp4 — we keep the
-          // original extension so content-type detection is accurate.
+          // Determine file extension and MIME type from the URI
           const uriExt = segUri.match(/\.(\w+)(?:\?|$)/)?.[1]?.toLowerCase();
           const segExt = uriExt ?? (input.mediaType === "video" ? "mp4" : "jpg");
           const segPath = `${user.id}/${baseTs}_seg${i}.${segExt}`;
 
-          // Map extension to MIME type
           const mimeByExt: Record<string, string> = {
             mp4: "video/mp4",
             mov: "video/quicktime",
@@ -822,79 +970,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           };
           const contentType = mimeByExt[segExt] ?? (input.mediaType === "video" ? "video/mp4" : "image/jpeg");
 
-          let body: Uint8Array;
-          try {
-            body = await uriToBlob(segUri);
-          } catch (e) {
-            const errAny = e as Record<string, unknown> | undefined;
-            console.error(`[createPost] uriToBlob FAIL [${i}]`, {
-              message: (e as Error)?.message ?? String(e),
-              code: errAny?.code,
-              status: errAny?.status,
-              details: errAny?.details,
-              hint: errAny?.hint,
-              uri: segUri.slice(0, 60),
-            });
-            throw new Error(`Failed to read file: ${(e as Error)?.message ?? "unknown error"}`);
-          }
+          console.log(`[createPost] Uploading [${i}]: ${sizeMB} MB → ${BUCKET}/${segPath}`);
 
-          const sizeMB = (body.byteLength / (1024 * 1024)).toFixed(2);
-          console.log(`[createPost] Uploading [${i}]: ${sizeMB} MB → ${segPath}`);
+          await uploadToStorage(segUri, segPath, contentType, sizeMB);
 
-          console.log(`[createPost] BEFORE upload [${i}] — calling supabase.storage.from("${BUCKET}").upload(${segPath}, ${body.byteLength} bytes, ${contentType})`);
-          let upData: unknown;
-          let upErr: { message: string; statusCode?: string; error?: string; name?: string } | null = null;
-          try {
-            const result = await supabase.storage
-              .from(BUCKET)
-              .upload(segPath, body, { contentType, upsert: false });
-            console.log(`[createPost] AFTER upload [${i}] — raw result:`, JSON.stringify({ hasData: !!result.data, hasError: !!result.error, path: result.data?.path }));
-            upData = result.data;
-            upErr = result.error
-              ? {
-                  message: result.error.message,
-                  statusCode: (result.error as unknown as Record<string, unknown>)?.statusCode as string | undefined,
-                  error: (result.error as unknown as Record<string, unknown>)?.error as string | undefined,
-                  name: result.error.name,
-                }
-              : null;
-          } catch (uploadCatchErr) {
-            const ue = uploadCatchErr as unknown as Record<string, unknown> | undefined;
-            console.error(`[createPost] upload FAIL [${i}]`, {
-              message: (uploadCatchErr as Error)?.message ?? String(uploadCatchErr),
-              name: (uploadCatchErr as Error)?.name,
-              code: ue?.code,
-              status: ue?.status,
-              statusCode: ue?.statusCode,
-              details: ue?.details,
-              hint: ue?.hint,
-              error: ue?.error,
-              bucket: BUCKET,
-              path: segPath,
-              contentType,
-              fileBytes: body.byteLength,
-              fileSizeMB: sizeMB,
-            });
-            throw new Error(
-              `Storage upload failed: ${(uploadCatchErr as Error)?.message ?? "Network request failed"} (${sizeMB} MB file to ${BUCKET}/${segPath})`,
-            );
-          }
-
-          if (upErr) {
-            console.error(`[createPost] upload error response [${i}]`, {
-              message: upErr.message,
-              statusCode: upErr.statusCode,
-              error: upErr.error,
-              name: upErr.name,
-              bucket: BUCKET,
-              path: segPath,
-              contentType,
-              fileSizeMB: sizeMB,
-            });
-            throw new Error(
-              `Storage upload rejected: ${upErr.message} (status=${upErr.statusCode ?? "?"})`,
-            );
-          }
+          console.log(`[createPost] Upload SUCCESS [${i}] — ${BUCKET}/${segPath}`);
 
           const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(segPath);
           uploadedUrls.push(pub.publicUrl);

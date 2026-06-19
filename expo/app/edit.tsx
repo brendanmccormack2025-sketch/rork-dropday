@@ -1402,8 +1402,19 @@ export default function EditScreen() {
       const stableDir = `${documentDirectory}post_uploads/`;
       await makeDirectoryAsync(stableDir, { intermediates: true });
 
+      const isWeb = Platform.OS === "web";
+
       const copiedClips = await Promise.all(
         clips.map(async (c, i) => {
+          // ── data: URIs (web preview) are self-contained — no copy needed ──
+          if (isWeb && c.uri.startsWith("data:")) {
+            const estimatedKB = Math.round(c.uri.length * 0.75 / 1024);
+            console.log(
+              `[edit] executePost: clip[${i}] is a data: URI (~${estimatedKB} KB) — skipping copy`,
+            );
+            return c;
+          }
+
           // Verify the source file exists and is non-zero BEFORE attempting copy.
           const srcInfo = await getInfoAsync(c.uri);
           if (!srcInfo.exists) {

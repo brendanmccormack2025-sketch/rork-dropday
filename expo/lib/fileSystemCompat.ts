@@ -13,6 +13,9 @@ import * as NativeFS from "expo-file-system/legacy";
 // ── Re-export constants ──────────────────────────────────────────────────────
 
 export const EncodingType = NativeFS.EncodingType;
+export const FileSystemUploadType = NativeFS.FileSystemUploadType;
+export type FileSystemUploadResult = NativeFS.FileSystemUploadResult;
+export type FileSystemUploadOptions = NativeFS.FileSystemUploadOptions;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -124,6 +127,32 @@ export async function writeAsStringAsync(
     );
   }
   return NativeFS.writeAsStringAsync(uri, contents, options);
+}
+
+// ── uploadAsync ─────────────────────────────────────────────────────────────
+
+/**
+ * Upload a file from a local URI to a remote server.
+ *
+ * On native (iOS/Android), this delegates to expo-file-system's uploadAsync
+ * which streams the file directly from disk — much more reliable for large
+ * video files than loading the entire file into memory first.
+ *
+ * On web, throws a clear error since the web preview doesn't have a real
+ * file system and uses data: URIs instead.
+ */
+export async function uploadAsync(
+  url: string,
+  fileUri: string,
+  options?: NativeFS.FileSystemUploadOptions,
+): Promise<NativeFS.FileSystemUploadResult> {
+  if (Platform.OS === "web") {
+    throw new Error(
+      "File upload is not available in the web preview. " +
+        "Use the iOS or Android app to post drops.",
+    );
+  }
+  return NativeFS.uploadAsync(url, fileUri, options);
 }
 
 // ── deleteAsync ──────────────────────────────────────────────────────────────
