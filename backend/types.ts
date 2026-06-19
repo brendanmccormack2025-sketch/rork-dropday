@@ -158,6 +158,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_avatar_debug: {
+        Args: never
+        Returns: {
+          avatar_url: string
+          display_name: string
+          id: string
+          username: string
+        }[]
+      }
       user_id: { Args: never; Returns: string }
     }
     Enums: {

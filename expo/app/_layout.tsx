@@ -85,6 +85,15 @@ function RootLayoutNav() {
           }}
         />
         <Stack.Screen
+          name="post/[id]/reaction-tree"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
+        <Stack.Screen
           name="edit-profile"
           options={{
             presentation: "fullScreenModal",

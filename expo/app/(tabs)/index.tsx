@@ -118,7 +118,7 @@ export default function FeedScreen() {
         active={index === activeIndex}
         live={win.isOpen}
         onShare={() => setSharePost(item)}
-        onReactions={() => router.push(`/post/${item.id}/reactions` as never)}
+        onReactions={() => router.push(`/post/${item.id}/reaction-tree` as never)}
         onRetry={() => retryOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),
