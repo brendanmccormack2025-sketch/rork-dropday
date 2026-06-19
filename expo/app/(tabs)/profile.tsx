@@ -28,6 +28,7 @@ import {
 } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
+import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
 import { usePosts, type MyProfile, type Post, type DraftProject } from "@/providers/PostsProvider";
 
@@ -118,11 +119,6 @@ function ProfileHeader({
   onEditProfile: () => void;
   onSignOut: () => void;
 }) {
-  const avatarSource = useMemo(() => {
-    if (myProfile?.avatar_url) return { uri: myProfile.avatar_url };
-    return null;
-  }, [myProfile?.avatar_url]);
-
   const hasLinks = !!(
     myProfile?.website ||
     myProfile?.instagram_handle ||
@@ -134,19 +130,10 @@ function ProfileHeader({
       {/* Profile row */}
       <View style={styles.profileRow}>
         <View style={styles.avatar}>
-          {avatarSource ? (
-            <Image
-              source={avatarSource}
-              style={StyleSheet.absoluteFill}
-              contentFit="cover"
-              transition={100}
-              cachePolicy="memory"
-            />
-          ) : (
-            <Text style={styles.avatarText}>
-              {displayName.charAt(0).toUpperCase()}
-            </Text>
-          )}
+          <ProfileAvatar
+            avatarUrl={myProfile?.avatar_url}
+            name={displayName}
+          />
         </View>
         <View style={styles.profileInfo}>
           <Text style={styles.displayName} numberOfLines={1}>

@@ -30,6 +30,7 @@ import {
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
 import DropletLogo from "@/components/DropletLogo";
+import { FeedAvatar } from "@/components/Avatar";
 import { theme, getDropWindowState, formatCountdown } from "@/constants/theme";
 import { usePosts, type Post, type OptimisticStatus } from "@/providers/PostsProvider";
 
@@ -451,7 +452,10 @@ const FeedItem = memo(function FeedItem({
         )}
         <View style={styles.userRow}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{name.charAt(0).toUpperCase()}</Text>
+            <FeedAvatar
+              profile={post.profile}
+              name={name}
+            />
           </View>
           <Text style={styles.username}>@{post.profile?.username ?? "dropper"}</Text>
           <Text style={styles.dotSep}>·</Text>
@@ -839,6 +843,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1.5,
     borderColor: theme.accent,
+    overflow: "hidden",
   },
   avatarText: {
     color: "#fff",

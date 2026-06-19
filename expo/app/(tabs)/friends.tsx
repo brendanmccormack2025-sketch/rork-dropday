@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Send, Users, UserPlus, UserCheck } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
+import { FeedAvatar } from "@/components/Avatar";
 import { usePosts } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -167,7 +168,10 @@ export default function FriendsScreen() {
             return (
               <View style={styles.userRow}>
                 <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{initial}</Text>
+                  <FeedAvatar
+                    profile={item}
+                    name={displayName}
+                  />
                 </View>
                 <View style={styles.userInfo}>
                   <Text style={styles.userName} numberOfLines={1}>

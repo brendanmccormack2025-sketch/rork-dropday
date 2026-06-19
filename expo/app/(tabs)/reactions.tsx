@@ -16,6 +16,7 @@ import { Heart, Sparkles } from "lucide-react-native";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
 import DropletLogo from "@/components/DropletLogo";
+import { FeedAvatar } from "@/components/Avatar";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post } from "@/providers/PostsProvider";
 
@@ -229,9 +230,10 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
       <View style={styles.bottom} pointerEvents="box-none">
         <View style={styles.userRow}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {name.charAt(0).toUpperCase()}
-            </Text>
+            <FeedAvatar
+              profile={post.profile}
+              name={name}
+            />
           </View>
           <Text style={styles.username}>
             @{post.profile?.username ?? "dropper"}
@@ -344,6 +346,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1.5,
     borderColor: theme.violet,
+    overflow: "hidden",
   },
   avatarText: {
     color: "#fff",

@@ -108,6 +108,22 @@ export type DraftProject = {
 
 const BUCKET = "drops";
 const DRAFTS_KEY = "dropday:draftProjects:v2";
+
+/**
+ * Resolve an avatar_url value into a full public URL suitable for Image source.
+ *
+ * Handles three cases:
+ * 1. Already a full https:// URL → returns as-is
+ * 2. A Supabase storage path like "user_id/avatar_123.jpg" → constructs full public URL
+ * 3. null / undefined / empty → returns null (caller should show initials fallback)
+ */
+export function resolveAvatarUrl(raw: string | null | undefined): string | null {
+  if (!raw || raw.length === 0) return null;
+  if (raw.startsWith("http")) return raw;
+  // Looks like a storage path — construct the full public URL
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(raw);
+  return data?.publicUrl ?? null;
+}
 const OPTIMISTIC_POSTS_KEY = "dropday:optimisticPosts";
 
 type OptimisticRetryPayload = {
