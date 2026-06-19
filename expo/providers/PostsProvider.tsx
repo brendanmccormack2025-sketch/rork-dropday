@@ -1,7 +1,7 @@
 import createContextHook from "@nkzw/create-context-hook";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Platform } from "react-native";
+import { Alert, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { documentDirectory, getInfoAsync, deleteAsync } from "@/lib/fileSystemCompat";
 import { supabase, supabaseUrl } from "@/lib/supabase";
@@ -165,11 +165,17 @@ async function uploadToStorage(
 ): Promise<void> {
   const maxRetries = 2;
 
+  console.log(
+    `[uploadToStorage] CALLED — fileUri: "${fileUri.slice(0, 80)}", sizeMB: ${sizeMB}, contentType: ${contentType}, attempt: ${attempt}/${maxRetries}`,
+  );
+
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;
   if (!token) {
+    console.error("[uploadToStorage] ABORT — no access token from session");
     throw new Error("Not authenticated — cannot upload files.");
   }
+  console.log("[uploadToStorage] Auth token obtained — length:", token.length);
 
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${BUCKET}/${storagePath}`;
 
@@ -245,48 +251,99 @@ async function uploadToStorage(
       });
     } else {
       // ── Web: fetch + FormData ──────────────────────────────────────
+      console.log("[uploadToStorage] WEB path — preparing FormData...");
+
+      // Fire initial progress so the UI updates from "Uploading... 0%"
+      if (onProgress) onProgress(0, 1);
+
       let body: Blob | { uri: string; type: string; name: string };
 
       if (fileUri.startsWith("data:")) {
-        body = await fetch(fileUri).then((r) => r.blob());
+        console.log("[uploadToStorage] WEB — resolving data: URI to Blob...");
+        const blobStart = Date.now();
+        try {
+          body = await fetch(fileUri).then((r) => r.blob());
+          console.log(
+            `[uploadToStorage] WEB — Blob created in ${Date.now() - blobStart}ms, size: ${(body as Blob).size} bytes, type: ${(body as Blob).type}`,
+          );
+        } catch (blobErr) {
+          console.error("[uploadToStorage] WEB — FAILED to create Blob from data URI:", {
+            message: (blobErr as Error)?.message,
+            name: (blobErr as Error)?.name,
+            fileUriStart: fileUri.slice(0, 60),
+          });
+          throw blobErr;
+        }
+        // Show "preparing" progress
+        if (onProgress) onProgress(0.1, 1);
       } else {
         body = {
           uri: fileUri,
           type: contentType,
           name: storagePath.split("/").pop() ?? "file",
         } as unknown as { uri: string; type: string; name: string };
+        console.log("[uploadToStorage] WEB — using file URI object");
       }
 
       const formData = new FormData();
       formData.append("file", body as unknown as Blob);
+      console.log("[uploadToStorage] WEB — FormData built, starting fetch POST...");
 
-      const response = await fetch(uploadUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "x-upsert": "false",
-        },
-        body: formData,
-      });
+      // Show "uploading" progress after prep
+      if (onProgress) onProgress(0.2, 1);
+
+      let response: Response;
+      try {
+        response = await fetch(uploadUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "x-upsert": "false",
+          },
+          body: formData,
+        });
+      } catch (fetchErr) {
+        const fetchErrAny = fetchErr as unknown as Record<string, unknown> | undefined;
+        console.error("[uploadToStorage] WEB — fetch() THREW:", {
+          message: (fetchErr as Error)?.message,
+          name: (fetchErr as Error)?.name,
+          cause: fetchErrAny?.cause,
+          stack: (fetchErr as Error)?.stack?.slice(0, 300),
+        });
+        throw fetchErr;
+      }
 
       const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
       console.log(
-        `[uploadToStorage] DONE in ${durationSec}s — HTTP ${response.status}`,
+        `[uploadToStorage] WEB — fetch completed in ${durationSec}s — HTTP ${response.status} ${response.statusText}`,
       );
+
+      // Log response headers for debugging
+      const headers: Record<string, string> = {};
+      response.headers.forEach((v, k) => { headers[k] = v; });
+      console.log("[uploadToStorage] WEB — response headers:", JSON.stringify(headers).slice(0, 300));
 
       if (!response.ok) {
         const errText = await response
           .text()
           .catch(() => "could not read error body");
+        console.error(
+          `[uploadToStorage] WEB — FAIL HTTP ${response.status}: ${errText.slice(0, 300)}`,
+        );
         throw new Error(
           `Storage returned HTTP ${response.status}: ${errText.slice(0, 200)}`,
         );
       }
+
+      // Fire 100% on success
+      if (onProgress) onProgress(1, 1);
+      console.log("[uploadToStorage] WEB — upload SUCCESS");
     }
   } catch (err) {
     const durationMs = Date.now() - startTime;
     const durationSec = (durationMs / 1000).toFixed(1);
 
+    // Dump the FULL error object — not just message
     const errAny = err as unknown as Record<string, unknown> | undefined;
     const errMsg = (err as Error)?.message ?? String(err);
     const statusCode =
@@ -302,15 +359,18 @@ async function uploadToStorage(
       {
         message: errMsg,
         name: (err as Error)?.name,
+        stack: (err as Error)?.stack?.slice(0, 500),
         status: errAny?.status,
         statusCode: errAny?.statusCode,
         code: errAny?.code,
+        cause: errAny?.cause,
         isTimeout,
         bucket: BUCKET,
         path: storagePath,
         contentType,
         fileSizeMB: sizeMB,
         durationMs,
+        fullError: JSON.stringify(errAny, null, 2).slice(0, 500),
       },
     );
 
@@ -954,7 +1014,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       optimisticTempId?: string;
       onProgress?: (percent: number) => void;
     }) => {
-      console.log("[createPost] mutationFn START — user:", user?.id?.slice(0, 8), "mediaType:", input.mediaType, "hasSegmentUris:", !!input.segmentUris?.length, "hasThumbnail:", !!input.thumbnailUri, "draftId:", input.draftId?.slice(0, 8));
+      console.log("[createPost] mutationFn START — user:", user?.id?.slice(0, 8), "mediaType:", input.mediaType, "hasSegmentUris:", !!input.segmentUris?.length, "hasThumbnail:", !!input.thumbnailUri, "draftId:", input.draftId?.slice(0, 8), "platform:", Platform.OS, "uriStart:", input.uri.slice(0, 60));
 
       if (!user?.id) {
         console.error("[createPost] mutationFn ABORT — no user.id");
@@ -984,9 +1044,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const uploadedUrls: string[] = [];
         for (let i = 0; i < urisToUpload.length; i++) {
           const segUri = urisToUpload[i]!;
+          console.log(`[createPost] STEP [${i}]: checking file — ${segUri.slice(0, 60)}`);
 
           // Verify the file exists on disk BEFORE attempting to upload.
           const fileInfo = await getInfoAsync(segUri);
+          console.log(`[createPost] STEP [${i}]: getInfoAsync result — exists=${fileInfo.exists}, size=${fileInfo.size}, isDir=${fileInfo.isDirectory ?? false}`);
           if (!fileInfo.exists) {
             const errMsg = `File does not exist at upload time: ${segUri.slice(0, 80)}`;
             console.error(`[createPost] ${errMsg}`);
@@ -1018,7 +1080,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           };
           const contentType = mimeByExt[segExt] ?? (input.mediaType === "video" ? "video/mp4" : "image/jpeg");
 
-          console.log(`[createPost] Uploading [${i}]: ${sizeMB} MB → ${BUCKET}/${segPath}`);
+          console.log(`[createPost] Uploading [${i}]: ${sizeMB} MB → ${BUCKET}/${segPath}, contentType: ${contentType}`);
 
           // Track per-file progress and compute overall percentage
           await uploadToStorage(
@@ -1028,6 +1090,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             sizeMB,
             1,
             (loaded, total) => {
+              console.log(`[createPost] UPLOAD PROGRESS [${i}]: loaded=${loaded}, total=${total}, computable=${total > 0}`);
               if (total > 0 && input.onProgress) {
                 const fileProgress = loaded / total;
                 const overall = ((i + fileProgress) / urisToUpload.length) * 100;
@@ -1097,14 +1160,23 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
       if (insErr) {
         const insErrAny = insErr as unknown as Record<string, unknown>;
-        console.error("[createPost] insert FAIL", {
+        const errMeta = {
           message: insErr.message,
           code: insErr.code,
           details: insErr.details,
           hint: insErr.hint,
           status: insErrAny?.status,
           statusCode: insErrAny?.statusCode,
-        });
+        };
+        console.error("[createPost] insert FAIL", errMeta);
+        // Persist the error so we can retrieve it after the fact
+        AsyncStorage.setItem("dropday:lastInsertError", JSON.stringify({ ...errMeta, ts: Date.now() })).catch(() => {});
+        // Show a visible alert so the user DEFINITELY sees the error
+        Alert.alert(
+          "Post Failed",
+          insErr.message || "Database insert failed.",
+          [{ text: "OK" }]
+        );
         throw insErr;
       }
 
@@ -1179,7 +1251,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
     onError: (err, variables) => {
       const errAny = err as unknown as Record<string, unknown> | undefined;
-      console.error("[createPost] onError — FULL ERROR OBJECT", {
+      const errMeta = {
         message: (err as Error)?.message ?? String(err),
         name: (err as Error)?.name,
         code: errAny?.code,
@@ -1189,7 +1261,18 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         statusCode: errAny?.statusCode,
         error: errAny?.error,
         cause: errAny?.cause,
-      });
+      };
+      console.error("[createPost] onError — FULL ERROR OBJECT", errMeta);
+      // Persist the error so we can retrieve it after the fact
+      AsyncStorage.setItem("dropday:lastMutationError", JSON.stringify({ ...errMeta, ts: Date.now() })).catch(() => {});
+      // Show a visible alert so the user DEFINITELY sees the error
+      // (Only show if the inner mutation didn't already show one — the inner
+      //  Alert covers insert failures; this covers upload/network failures.)
+      const msg = (err as Error)?.message ?? "Upload failed";
+      // ALWAYS show an alert — the inner mutationFn already shows one for
+      // insert failures, but the user might dismiss it. Show again here as
+      // a safety net so the error is NEVER invisible.
+      Alert.alert("Post Failed", msg, [{ text: "OK" }]);
       if (variables.optimisticTempId) {
         failOptimisticPost(
           variables.optimisticTempId,

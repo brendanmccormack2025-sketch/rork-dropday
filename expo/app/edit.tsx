@@ -1518,6 +1518,7 @@ export default function EditScreen() {
 
       setUploading(true);
       setUploadPercent(0);
+      console.log("[edit] executePost: setUploading=true, uploadPercent=0 — calling createPost.mutateAsync...");
 
       let newPost: Post | undefined;
       try {
@@ -1531,26 +1532,51 @@ export default function EditScreen() {
           thumbnailUri: thumbnailUri ?? undefined,
           optimisticTempId: tempId,
           onProgress: (percent: number) => {
+            console.log(`[edit] executePost: onProgress callback fired — ${percent}%`);
             setUploadPercent(percent);
           },
         });
       } catch (mutateErr) {
         setUploading(false);
-        console.error("[edit] executePost: mutateAsync REJECTED", (mutateErr as Error)?.message ?? mutateErr);
-        throw mutateErr; // re-throw so handlePostPress's .catch() sees it too
+        // Dump the FULL error object
+        const errAny = mutateErr as unknown as Record<string, unknown> | undefined;
+        console.error("[edit] executePost: mutateAsync REJECTED — FULL ERROR:", {
+          message: (mutateErr as Error)?.message,
+          name: (mutateErr as Error)?.name,
+          stack: (mutateErr as Error)?.stack?.slice(0, 500),
+          code: errAny?.code,
+          details: errAny?.details,
+          hint: errAny?.hint,
+          status: errAny?.status,
+          statusCode: errAny?.statusCode,
+        });
+        // DO NOT re-throw — the outer catch will show Alert
+        throw mutateErr;
       }
 
       console.log("[edit] executePost: AFTER createPost.mutateAsync — resolved. Post id:", newPost?.id, "media_url:", newPost?.media_url?.slice(0, 50));
 
-      // ── Validate the returned post ──────────────────────────────────
+      // ── CRITICAL: Validate the returned post BEFORE navigating ─────
+      // If mutateAsync resolved but the data is garbage, we MUST throw
+      // and stay on the edit screen. Do NOT navigate on bad data.
       if (!newPost || !newPost.id) {
+        setUploading(false);
         console.error("[edit] executePost: mutateAsync resolved but returned invalid Post —", JSON.stringify(newPost));
-        throw new Error("Post was created but server returned an invalid response. The post may not have been saved.");
+        const errMsg = "Post was created but server returned an invalid response. The post may not have been saved.";
+        Alert.alert("Post Failed", errMsg, [{ text: "OK" }]);
+        setError(errMsg);
+        return; // ← DO NOT navigate — stay on edit screen
       }
       if (!newPost.media_url || newPost.media_url === newPost.id) {
+        setUploading(false);
         console.error("[edit] executePost: mutateAsync resolved but media_url looks invalid —", newPost.media_url?.slice(0, 60));
-        throw new Error("Post media failed to upload. The video may not have been saved to storage.");
+        const errMsg = "Post media failed to upload. The video may not have been saved to storage.";
+        Alert.alert("Post Failed", errMsg, [{ text: "OK" }]);
+        setError(errMsg);
+        return; // ← DO NOT navigate — stay on edit screen
       }
+
+      setUploading(false);
 
       setUploading(false);
 
@@ -1563,19 +1589,32 @@ export default function EditScreen() {
       } catch {
         // canDismiss / dismissAll may not be available on all Expo Router versions
       }
+      // IMPORTANT: use replace to avoid stacking the edit screen in history
       router.replace("/(tabs)");
 
       setSuccess("Posted!");
     } catch (postErr) {
       setUploading(false);
       const errMsg = postErr instanceof Error ? postErr.message : "Could not post your drop. Please try again.";
+      const errAny = postErr as unknown as Record<string, unknown> | undefined;
+      // Dump FULL error for debugging
       console.error("[edit] executePost: FAILED —", errMsg);
+      console.error("[edit] executePost: FULL ERROR DUMP:", {
+        message: (postErr as Error)?.message,
+        name: (postErr as Error)?.name,
+        stack: (postErr as Error)?.stack?.slice(0, 500),
+        code: errAny?.code,
+        details: errAny?.details,
+        hint: errAny?.hint,
+        status: errAny?.status,
+        statusCode: errAny?.statusCode,
+        raw: JSON.stringify(errAny, null, 2).slice(0, 500),
+      });
       // Show a visible alert so the user DEFINITELY sees the error
       Alert.alert("Post Failed", errMsg, [{ text: "OK" }]);
       // Also set the banner error for persistence
       setError(errMsg);
-      // DO NOT re-throw — the Alert is already shown, and re-throwing
-      // would trigger handlePostPress's .catch() with a duplicate message.
+      // DO NOT re-throw and DO NOT navigate. Stay on the edit screen.
     }
   }, [clips, draftId, textOverlays, createPost, addOptimisticPost, generateThumbnail, router]);
 
