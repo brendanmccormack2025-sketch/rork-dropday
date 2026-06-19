@@ -224,7 +224,32 @@ export default function ReactionTreeScreen() {
         />
       )}
 
-      {/* React button anchor — will be wired in a follow-up */}
+      {/* React button — fixed at bottom, targets the currently-viewed post */}
+      {posts.length > 0 && !treeQuery.isLoading && (
+        <SafeAreaView edges={["bottom"]} style={styles.reactSafe}>
+          <Pressable
+            onPress={() => {
+              const targetId = posts[activeIndex]?.id;
+              if (!targetId) return;
+              router.push(`/camera?reactingTo=${targetId}` as never);
+            }}
+            disabled={activeIndex >= posts.length}
+            style={({ pressed }) => [
+              styles.reactBtn,
+              activeIndex >= posts.length && styles.reactBtnDisabled,
+              pressed && styles.reactBtnPressed,
+            ]}
+          >
+            <Reply color="#fff" size={18} strokeWidth={2.5} />
+            <Text style={styles.reactBtnText}>
+              React
+              {posts[activeIndex]?.profile?.username
+                ? ` to @${posts[activeIndex]!.profile!.username}`
+                : ""}
+            </Text>
+          </Pressable>
+        </SafeAreaView>
+      )}
     </View>
   );
 }
@@ -475,5 +500,43 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     lineHeight: 19,
+  },
+
+  /* React button */
+  reactSafe: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  reactBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 14,
+    minHeight: 50,
+    borderRadius: 14,
+    backgroundColor: theme.accent,
+    shadowColor: theme.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  reactBtnDisabled: {
+    opacity: 0.3,
+  },
+  reactBtnPressed: {
+    opacity: 0.75,
+  },
+  reactBtnText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800" as const,
+    letterSpacing: 0.2,
   },
 });
