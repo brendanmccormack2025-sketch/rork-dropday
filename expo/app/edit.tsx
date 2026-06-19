@@ -326,6 +326,20 @@ export default function EditScreen() {
     const uri = activeClip?.uri;
     if (uri) {
       console.log("[edit] videoSource memo — uri:", uri.slice(0, 80), "type:", activeClip?.type);
+      // Log the actual file size on disk BEFORE the Video component tries to load it.
+      // This confirms whether the file is valid video data or empty/corrupted.
+      FileSystem.getInfoAsync(uri).then((info) => {
+        console.log(
+          `[edit] videoSource — file on disk: exists=${info.exists}, size=${info.exists ? (info.size ?? 0) : 0} bytes, uri=${uri.slice(0, 60)}`,
+        );
+        if (!info.exists) {
+          console.error(`[edit] videoSource — FILE DOES NOT EXIST: ${uri.slice(0, 80)}`);
+        } else if ((info.size ?? 0) === 0) {
+          console.error(`[edit] videoSource — FILE IS EMPTY (0 bytes): ${uri.slice(0, 80)}`);
+        }
+      }).catch((e) => {
+        console.error(`[edit] videoSource — could not stat file: ${uri.slice(0, 60)}`, (e as Error)?.message ?? e);
+      });
     }
     return uri ? { uri } : undefined;
   }, [activeClip?.uri, activeClip?.type]);
@@ -1267,13 +1281,50 @@ export default function EditScreen() {
       await FileSystem.makeDirectoryAsync(draftDir, { intermediates: true });
 
       const permanentClips = await Promise.all(
-        clips.map(async (c) => {
+        clips.map(async (c, i) => {
+          // Verify the source file exists and is non-zero BEFORE attempting copy.
+          const srcInfo = await FileSystem.getInfoAsync(c.uri);
+          if (!srcInfo.exists || (srcInfo.size ?? 0) === 0) {
+            console.warn(
+              `[edit] executeSaveDraft: source clip[${i}] missing or empty — keeping original URI`,
+            );
+            return c;
+          }
+          const srcSize = srcInfo.size ?? 0;
+
           const ext = c.uri.match(/\.(\w+)(?:\?|$)/)?.[1] ?? (c.type === "video" ? "mp4" : "jpg");
           const destUri = `${draftDir}${c.id}.${ext}`;
           if (c.uri !== destUri) {
             try {
               await FileSystem.copyAsync({ from: c.uri, to: destUri });
+              // Verify destination size matches source size
+              const destInfo = await FileSystem.getInfoAsync(destUri);
+              if (!destInfo.exists) {
+                console.warn(
+                  `[edit] executeSaveDraft: copy failed for clip[${i}] — destination missing, keeping original URI`,
+                );
+                return c;
+              }
+              const destSize = destInfo.size;
+              if (destSize === 0) {
+                console.warn(
+                  `[edit] executeSaveDraft: copy produced empty file for clip[${i}] — keeping original URI`,
+                );
+                return c;
+              }
+              if (destSize !== srcSize) {
+                console.error(
+                  `[edit] executeSaveDraft: SIZE MISMATCH clip[${i}] — source: ${srcSize}, dest: ${destSize}. Keeping original URI.`,
+                );
+                return c;
+              }
+              console.log(
+                `[edit] executeSaveDraft: clip[${i}] copied & verified — ${destSize} bytes (matches source)`,
+              );
             } catch {
+              console.warn(
+                `[edit] executeSaveDraft: copy threw for clip[${i}] — keeping original URI`,
+              );
               return c;
             }
           }
@@ -1323,21 +1374,58 @@ export default function EditScreen() {
       // ── 1. Copy all clip files to a stable permanent location ────────
       //    The draft directory may be cleaned up during/after upload, so we
       //    must copy files OUT of drafts/ before the upload reads them.
-      const stableDir = `${FileSystem.cacheDirectory}post_uploads/`;
+      const stableDir = `${FileSystem.documentDirectory}post_uploads/`;
       await FileSystem.makeDirectoryAsync(stableDir, { intermediates: true });
 
       const copiedClips = await Promise.all(
         clips.map(async (c, i) => {
+          // Verify the source file exists and is non-zero BEFORE attempting copy.
+          const srcInfo = await FileSystem.getInfoAsync(c.uri);
+          if (!srcInfo.exists) {
+            throw new Error(
+              `Source file missing before copy — clip[${i}]: ${c.uri.slice(0, 60)}`,
+            );
+          }
+          const srcSize = srcInfo.size ?? 0;
+          if (srcSize === 0) {
+            throw new Error(
+              `Source file is empty (0 bytes) before copy — clip[${i}]: ${c.uri.slice(0, 60)}`,
+            );
+          }
+          console.log(
+            `[edit] executePost: source verified — clip[${i}] ${c.uri.slice(0, 50)} — ${srcSize} bytes`,
+          );
+
           const ext = c.uri.match(/\.(\w+)(?:\?|$)/)?.[1] ?? (c.type === "video" ? "mp4" : "jpg");
           const stableUri = `${stableDir}clip_${i}_${Date.now()}.${ext}`;
-          console.log(`[edit] executePost: copying clip[${i}] from ${c.uri.slice(0, 60)} → ${stableUri.slice(-40)}`);
+          console.log(
+            `[edit] executePost: copying clip[${i}] — ${srcSize} bytes → ${stableUri.slice(-50)}`,
+          );
+
+          // Use copyAsync (not move) to preserve the original file.
           await FileSystem.copyAsync({ from: c.uri, to: stableUri });
-          // Verify the copy succeeded
-          const copiedInfo = await FileSystem.getInfoAsync(stableUri);
-          if (!copiedInfo.exists || (copiedInfo.size ?? 0) === 0) {
-            throw new Error(`Failed to copy clip[${i}] to stable location. Source: ${c.uri.slice(0, 60)}`);
+
+          // Verify the destination file exists, is non-zero, AND matches source size.
+          const destInfo = await FileSystem.getInfoAsync(stableUri);
+          if (!destInfo.exists) {
+            throw new Error(
+              `Copy failed — destination missing clip[${i}]: ${stableUri.slice(0, 60)}`,
+            );
           }
-          console.log(`[edit] executePost: clip[${i}] copied — ${copiedInfo.size} bytes`);
+          const destSize = destInfo.size;
+          if (destSize === 0) {
+            throw new Error(
+              `Copy failed — destination is empty (0 bytes) clip[${i}]: ${stableUri.slice(0, 60)}`,
+            );
+          }
+          if (destSize !== srcSize) {
+            throw new Error(
+              `Copy failed — size mismatch clip[${i}]: source ${srcSize} bytes, destination ${destSize} bytes. File may be corrupted.`,
+            );
+          }
+          console.log(
+            `[edit] executePost: clip[${i}] copied & verified — ${destSize} bytes (matches source)`,
+          );
           return { ...c, uri: stableUri };
         }),
       );
