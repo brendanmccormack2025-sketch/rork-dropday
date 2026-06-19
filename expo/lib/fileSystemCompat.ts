@@ -46,6 +46,20 @@ export async function getInfoAsync(
   options?: { size?: boolean; md5?: boolean },
 ): Promise<FileInfo> {
   if (Platform.OS === "web") {
+    // On the web preview, media pickers return inline data: URIs
+    // (e.g. data:image/png;base64,...). These contain the actual
+    // image/video data and are valid — estimate the size from the
+    // base64 payload length (each char ≈ 6 bits).
+    if (uri.startsWith("data:")) {
+      const base64Idx = uri.indexOf(";base64,");
+      if (base64Idx !== -1) {
+        const base64Data = uri.slice(base64Idx + 8);
+        const estimatedSize = Math.round(base64Data.length * 0.75);
+        return { exists: true, size: estimatedSize };
+      }
+      // Plain data URI (no base64) — still valid, just can't estimate size
+      return { exists: true, size: 0 };
+    }
     return { exists: false, size: 0 };
   }
   return NativeFS.getInfoAsync(uri, options);

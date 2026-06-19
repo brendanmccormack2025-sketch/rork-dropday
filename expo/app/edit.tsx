@@ -326,25 +326,35 @@ export default function EditScreen() {
 
   const videoSource = useMemo(() => {
     const uri = activeClip?.uri;
-    if (uri) {
-      console.log("[edit] videoSource memo — uri:", uri.slice(0, 80), "type:", activeClip?.type);
-      // Log the actual file size on disk BEFORE the Video component tries to load it.
-      // This confirms whether the file is valid video data or empty/corrupted.
-      // getInfoAsync is a no-op on web (returns exists: false, size: 0).
-      getInfoAsync(uri).then((info) => {
-        console.log(
-          `[edit] videoSource — file on disk: exists=${info.exists}, size=${info.exists ? (info.size ?? 0) : 0} bytes, uri=${uri.slice(0, 60)}`,
-        );
-        if (!info.exists) {
-          console.error(`[edit] videoSource — FILE DOES NOT EXIST: ${uri.slice(0, 80)}`);
-        } else if ((info.size ?? 0) === 0) {
-          console.error(`[edit] videoSource — FILE IS EMPTY (0 bytes): ${uri.slice(0, 80)}`);
-        }
-      }).catch((e) => {
-        console.error(`[edit] videoSource — could not stat file: ${uri.slice(0, 60)}`, (e as Error)?.message ?? e);
-      });
-    }
     return uri ? { uri } : undefined;
+  }, [activeClip?.uri, activeClip?.type]);
+
+  // Log file size for debugging — but skip data: URIs (inline base64, always valid on web)
+  useEffect(() => {
+    const uri = activeClip?.uri;
+    if (!uri) return;
+    const slice = uri.slice(0, 60);
+    console.log("[edit] videoSource — uri:", uri.slice(0, 80), "type:", activeClip?.type);
+
+    // Data URIs (data:image/png;base64,...) contain inline data — they're always valid,
+    // and expo-file-system can't stat them on web. Skip the disk check entirely.
+    if (uri.startsWith("data:")) {
+      console.log(`[edit] videoSource — inline data URI (skipping disk check): ${slice}`);
+      return;
+    }
+
+    getInfoAsync(uri).then((info) => {
+      console.log(
+        `[edit] videoSource — file on disk: exists=${info.exists}, size=${info.exists ? (info.size ?? 0) : 0} bytes, uri=${slice}`,
+      );
+      if (!info.exists) {
+        console.error(`[edit] videoSource — FILE DOES NOT EXIST: ${uri.slice(0, 80)}`);
+      } else if ((info.size ?? 0) === 0) {
+        console.error(`[edit] videoSource — FILE IS EMPTY (0 bytes): ${uri.slice(0, 80)}`);
+      }
+    }).catch((e) => {
+      console.error(`[edit] videoSource — could not stat file: ${slice}`, (e as Error)?.message ?? e);
+    });
   }, [activeClip?.uri, activeClip?.type]);
 
   const canSplit = useMemo(() => {
