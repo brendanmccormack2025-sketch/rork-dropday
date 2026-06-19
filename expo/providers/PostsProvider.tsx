@@ -754,7 +754,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       thumbnailUri?: string;
       optimisticTempId?: string;
     }) => {
-      if (!user?.id) throw new Error("Not signed in.");
+      console.log("[createPost] mutationFn START — user:", user?.id?.slice(0, 8), "mediaType:", input.mediaType, "hasSegmentUris:", !!input.segmentUris?.length, "hasThumbnail:", !!input.thumbnailUri, "draftId:", input.draftId?.slice(0, 8));
+
+      if (!user?.id) {
+        console.error("[createPost] mutationFn ABORT — no user.id");
+        throw new Error("Not signed in.");
+      }
 
       // TODO: Re-enable drop window check before launch
       // const win = getDropWindowState(new Date());
@@ -939,9 +944,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (thumbnailUrl) {
         row.thumbnail_url = thumbnailUrl;
       }
-      console.log("[createPost] BEFORE insert — row:", JSON.stringify(row, null, 2));
+      console.log("[createPost] BEFORE insert — row keys:", Object.keys(row), "media_url:", (row.media_url as string)?.slice(0, 50));
       const { data: insData, error: insErr } = await supabase.from("posts").insert(row).select("id, created_at").single();
-      console.log("[createPost] AFTER insert — result:", JSON.stringify({ hasData: !!insData, hasError: !!insErr, id: insData?.id, errorMessage: insErr?.message }));
+      console.log("[createPost] AFTER insert — result:", JSON.stringify({ hasData: !!insData, hasError: !!insErr, id: insData?.id, created_at: insData?.created_at, errorMessage: insErr?.message, errorCode: insErr?.code }));
 
       if (insErr) {
         const insErrAny = insErr as unknown as Record<string, unknown>;
@@ -956,13 +961,19 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         throw insErr;
       }
 
+      // ── Validate insert returned actual data ────────────────────────
+      if (!insData || !insData.id) {
+        console.error("[createPost] insert returned no data — insData:", JSON.stringify(insData));
+        throw new Error("Database insert completed but returned no row data. The post may not have been saved.");
+      }
+
       if (input.draftId) {
         await deleteDraftProject(input.draftId);
       }
 
       // Return the inserted row data for optimistic updates
       return {
-        id: insData!.id as string,
+        id: insData.id as string,
         user_id: user.id,
         media_url: mediaUrl,
         media_type: input.mediaType,
@@ -973,7 +984,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         trim_data: input.trimData ?? null,
         text_overlays: input.textOverlays ?? null,
         thumbnail_url: thumbnailUrl,
-        created_at: insData!.created_at as string,
+        created_at: insData.created_at as string,
         like_count: 0,
         comment_count: 0,
         reaction_count: 0,

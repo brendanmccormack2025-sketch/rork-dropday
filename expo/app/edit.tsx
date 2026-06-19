@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -41,6 +42,7 @@ import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
   usePosts,
+  type Post,
   type DraftClip,
   type DraftProject,
   type TextOverlay,
@@ -1229,7 +1231,7 @@ export default function EditScreen() {
   }, [clips]);
 
   const handlePostPress = useCallback(() => {
-    console.log("[edit] handlePostPress: Post Drop tapped");
+    console.log("[edit] handlePostPress: Post Drop tapped — clips:", clips.length, "user:", !!user?.id);
 
     try {
       if (!router) {
@@ -1249,13 +1251,25 @@ export default function EditScreen() {
 
       setError(null);
       setSuccess(null);
-      console.log("[edit] handlePostPress: posting directly (auto-thumbnail)");
-      executePostRef.current().catch((e: any) => {
-        console.error("[edit] handlePostPress: executePost failed", (e as Error)?.message ?? e);
+      console.log("[edit] handlePostPress: calling executePost...");
+      const postPromise = executePostRef.current();
+      if (!postPromise || typeof postPromise.catch !== "function") {
+        console.error("[edit] handlePostPress: executePost did not return a Promise — got", typeof postPromise);
+        setError("Something went wrong. Please try again.");
+        return;
+      }
+      postPromise.catch((e: any) => {
+        console.error("[edit] handlePostPress: executePost FAILED (fallback)", (e as Error)?.message ?? e);
+        // executePost already showed Alert.alert() — just set banner as fallback
         setError(e instanceof Error ? e.message : "Could not post your drop.");
       });
     } catch (err) {
       console.error("[edit] handlePostPress: CRASH in handler", (err as Error)?.message ?? err);
+      Alert.alert(
+        "Post Failed",
+        err instanceof Error ? err.message : "Something went wrong. Please try again.",
+        [{ text: "OK" }]
+      );
       setError(
         err instanceof Error ? err.message : "Something went wrong. Please try again.",
       );
@@ -1472,20 +1486,43 @@ export default function EditScreen() {
       // 3. Fire the actual upload using the STABLE file paths.
       //    Use mutateAsync so we can await the result — on failure we stay on the
       //    edit screen and show the error. Only navigate on success.
-      console.log("[edit] executePost: BEFORE createPost.mutateAsync");
-      await createPost.mutateAsync({
-        uri: stablePrimary.uri,
-        mediaType: stablePrimary.type,
-        draftId: draftId ?? undefined,
-        segmentUris,
-        trimData,
-        textOverlays: overlaysForPost,
-        thumbnailUri: thumbnailUri ?? undefined,
-        optimisticTempId: tempId,
-      });
-      console.log("[edit] executePost: AFTER createPost.mutateAsync — SUCCESS");
+      console.log("[edit] executePost: BEFORE createPost.mutateAsync — stablePrimary.uri:", stablePrimary.uri.slice(-50), "size:", stablePrimary.type);
+
+      if (!createPost || typeof createPost.mutateAsync !== "function") {
+        throw new Error("createPost.mutateAsync is not available. The post service may not be ready.");
+      }
+
+      let newPost: Post | undefined;
+      try {
+        newPost = await createPost.mutateAsync({
+          uri: stablePrimary.uri,
+          mediaType: stablePrimary.type,
+          draftId: draftId ?? undefined,
+          segmentUris,
+          trimData,
+          textOverlays: overlaysForPost,
+          thumbnailUri: thumbnailUri ?? undefined,
+          optimisticTempId: tempId,
+        });
+      } catch (mutateErr) {
+        console.error("[edit] executePost: mutateAsync REJECTED", (mutateErr as Error)?.message ?? mutateErr);
+        throw mutateErr; // re-throw so handlePostPress's .catch() sees it too
+      }
+
+      console.log("[edit] executePost: AFTER createPost.mutateAsync — resolved. Post id:", newPost?.id, "media_url:", newPost?.media_url?.slice(0, 50));
+
+      // ── Validate the returned post ──────────────────────────────────
+      if (!newPost || !newPost.id) {
+        console.error("[edit] executePost: mutateAsync resolved but returned invalid Post —", JSON.stringify(newPost));
+        throw new Error("Post was created but server returned an invalid response. The post may not have been saved.");
+      }
+      if (!newPost.media_url || newPost.media_url === newPost.id) {
+        console.error("[edit] executePost: mutateAsync resolved but media_url looks invalid —", newPost.media_url?.slice(0, 60));
+        throw new Error("Post media failed to upload. The video may not have been saved to storage.");
+      }
 
       // 4. Navigate to the feed only on confirmed success.
+      console.log("[edit] executePost: Post confirmed valid (id:", newPost.id, ") — navigating to feed");
       try {
         if (router.canDismiss()) {
           router.dismissAll();
@@ -1493,17 +1530,18 @@ export default function EditScreen() {
       } catch {
         // canDismiss / dismissAll may not be available on all Expo Router versions
       }
-      setTimeout(() => {
-        router.replace("/(tabs)");
-      }, 100);
+      router.replace("/(tabs)");
 
       setSuccess("Posted!");
     } catch (postErr) {
-      console.error("[edit] executePost: FAILED — staying on edit screen", (postErr as Error)?.message ?? postErr);
-      // Do NOT navigate — keep the user on the edit screen so they see the error.
-      setError(
-        postErr instanceof Error ? postErr.message : "Could not post your drop. Please try again.",
-      );
+      const errMsg = postErr instanceof Error ? postErr.message : "Could not post your drop. Please try again.";
+      console.error("[edit] executePost: FAILED —", errMsg);
+      // Show a visible alert so the user DEFINITELY sees the error
+      Alert.alert("Post Failed", errMsg, [{ text: "OK" }]);
+      // Also set the banner error for persistence
+      setError(errMsg);
+      // DO NOT re-throw — the Alert is already shown, and re-throwing
+      // would trigger handlePostPress's .catch() with a duplicate message.
     }
   }, [clips, draftId, textOverlays, createPost, addOptimisticPost, generateThumbnail, router]);
 
