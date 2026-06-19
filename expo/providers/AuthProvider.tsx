@@ -7,7 +7,12 @@ import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import { supabase, SUPABASE_READY } from "@/lib/supabase";
 
-async function ensureProfile(user: User, displayNameOverride?: string) {
+/**
+ * Ensures a profile row exists for the given user. Safe to call multiple times —
+ * it checks for an existing profile first and handles duplicate-key errors gracefully.
+ * Exported so createPost and other mutations can self-heal when a profile is missing.
+ */
+export async function ensureProfile(user: User, displayNameOverride?: string) {
   console.log("[auth:ensureProfile] checking profile for", user.id.slice(0, 12));
   const { data: existing, error: selErr } = await supabase
     .from("profiles")
@@ -36,6 +41,33 @@ async function ensureProfile(user: User, displayNameOverride?: string) {
     console.log("[auth:ensureProfile] duplicate key (23505) — profile already exists");
   } else {
     console.log("[auth:ensureProfile] profile created successfully");
+  }
+}
+
+/**
+ * Lightweight version that only needs a user ID (no full User object).
+ * Used by createPost for self-healing when the full User object isn't available.
+ */
+export async function ensureProfileById(userId: string) {
+  console.log("[auth:ensureProfileById] checking profile for", userId.slice(0, 12));
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (existing) {
+    console.log("[auth:ensureProfileById] profile already exists");
+    return;
+  }
+  const fallback = `dropper_${userId.slice(0, 8)}`;
+  console.log("[auth:ensureProfileById] creating profile with fallback username", fallback);
+  const { error: insErr } = await supabase
+    .from("profiles")
+    .insert({ id: userId, username: fallback, display_name: fallback });
+  if (insErr && insErr.code !== "23505") {
+    console.warn("[auth] ensureProfileById insert error", insErr.message, insErr);
+  } else {
+    console.log("[auth:ensureProfileById] profile created or already exists");
   }
 }
 
@@ -96,11 +128,17 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         user: session?.user ?? null,
         loading: false,
       }));
-      if (event === "SIGNED_IN" && session?.user) {
-        console.log("[auth:event] SIGNED_IN — calling ensureProfile");
-        ensureProfile(session.user).catch((err) => {
-          console.warn("[auth] ensureProfile failed", err?.message ?? err);
-        });
+      // Call ensureProfile on ANY event that provides a user, not just SIGNED_IN.
+      // INITIAL_SESSION fires when the session is restored from AsyncStorage (app
+      // restart / refresh) and SIGNED_IN won't fire again, so without this the
+      // profile is never created and posts fail with FK violations.
+      if (event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") {
+        if (session?.user) {
+          console.log("[auth:event]", event, "— calling ensureProfile");
+          ensureProfile(session.user).catch((err) => {
+            console.warn("[auth] ensureProfile failed", err?.message ?? err);
+          });
+        }
       }
     });
     return () => {
@@ -143,9 +181,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           },
         });
         if (error) throw error;
-        // Profile row is created by the on_auth_user_created trigger.
+        // Profile row is created by ensureProfile() on the auth state change
+        // event (SIGNED_IN, INITIAL_SESSION, or TOKEN_REFRESHED).
         // If email confirmation is enabled, no session is returned here —
-        // ensureProfile() will run on SIGNED_IN to backfill if needed.
+        // ensureProfile() will run when the session becomes active.
       } finally {
         inFlight.current.signUp = false;
       }

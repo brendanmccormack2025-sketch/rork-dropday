@@ -7,7 +7,7 @@ import { documentDirectory, getInfoAsync, deleteAsync } from "@/lib/fileSystemCo
 import { showAlert } from "@/lib/showAlert";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 
-import { useAuth } from "@/providers/AuthProvider";
+import { useAuth, ensureProfileById } from "@/providers/AuthProvider";
 import { getDropWindowState, DROP_WINDOW } from "@/constants/theme";
 
 export type OptimisticStatus = "uploading" | "failed";
@@ -1158,6 +1158,18 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (thumbnailUrl) {
         row.thumbnail_url = thumbnailUrl;
       }
+      // ── Self-healing: ensure a profile row exists before inserting ────
+      // If ensureProfile was never called (e.g. INITIAL_SESSION event didn't
+      // trigger it), the FK on posts.user_id → profiles.id will fail. This
+      // call creates the profile on-the-fly so the post always succeeds.
+      console.log("[createPost] ensuring profile exists for", user.id.slice(0, 12));
+      try {
+        await ensureProfileById(user.id);
+        console.log("[createPost] profile check complete");
+      } catch (profileErr) {
+        console.warn("[createPost] ensureProfileById failed (non-fatal)", (profileErr as Error)?.message);
+      }
+
       console.log("[createPost] BEFORE insert — row keys:", Object.keys(row), "media_url:", (row.media_url as string)?.slice(0, 50));
       const { data: insData, error: insErr } = await supabase.from("posts").insert(row).select("id, created_at").single();
       console.log("[createPost] AFTER insert — result:", JSON.stringify({ hasData: !!insData, hasError: !!insErr, id: insData?.id, created_at: insData?.created_at, errorMessage: insErr?.message, errorCode: insErr?.code }));
