@@ -5,7 +5,7 @@ import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { documentDirectory, getInfoAsync, deleteAsync } from "@/lib/fileSystemCompat";
 import { supabase, supabaseUrl } from "@/lib/supabase";
-import { uploadAsync, FileSystemUploadType } from "expo-file-system/legacy";
+
 import { useAuth } from "@/providers/AuthProvider";
 import { getDropWindowState, DROP_WINDOW } from "@/constants/theme";
 
@@ -139,15 +139,21 @@ async function uriToBlob(uri: string): Promise<Uint8Array> {
 }
 
 /**
- * Upload a file to Supabase Storage with streaming, retry, and timing logs.
+ * Upload a file to Supabase Storage using a FOREGROUND HTTP request.
  *
- * On native (iOS/Android), uses expo-file-system's uploadAsync which streams
- * the file directly from disk — far more reliable for large video files than
- * loading the entire file into memory first.
+ * On native (iOS/Android), uses XMLHttpRequest which creates a standard
+ * NSURLSessionDataTask — this is a FOREGROUND task that does NOT use the
+ * fragile background transfer service. Background uploads (expo-file-system's
+ * uploadAsync) get terminated when the app loses focus, producing -997 errors.
+ *
+ * XMLHttpRequest also fires upload.onprogress events, giving us real
+ * percentage tracking so the user can see upload progress.
  *
  * On web, falls back to fetch + FormData (converts data: URIs to Blob first).
  *
- * Retries once automatically on timeout with a 2-second delay.
+ * Retries once automatically on timeout with a 2-second delay. Each retry
+ * creates a completely fresh XMLHttpRequest/request — we never reuse a broken
+ * session or task reference.
  */
 async function uploadToStorage(
   fileUri: string,
@@ -155,6 +161,7 @@ async function uploadToStorage(
   contentType: string,
   sizeMB: string,
   attempt: number = 1,
+  onProgress?: (loaded: number, total: number) => void,
 ): Promise<void> {
   const maxRetries = 2;
 
@@ -173,32 +180,69 @@ async function uploadToStorage(
 
   try {
     if (Platform.OS === "ios" || Platform.OS === "android") {
-      // ── Native: stream directly from disk via expo-file-system ─────
-      const result = await uploadAsync(uploadUrl, fileUri, {
-        httpMethod: "POST",
-        uploadType: FileSystemUploadType.MULTIPART,
-        fieldName: "file",
-        mimeType: contentType,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "x-upsert": "false",
-        },
+      // ── Native: FOREGROUND upload via XMLHttpRequest ───────────────
+      //    This creates a standard NSURLSessionDataTask (NOT background),
+      //    avoiding the -997 "Lost connection to background transfer
+      //    service" error that expo-file-system's uploadAsync produces.
+      //    Each retry creates a completely new XHR — never reuse a
+      //    broken session.
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", uploadUrl);
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhr.setRequestHeader("x-upsert", "false");
+
+        // Fire progress events so the UI can show "Uploading... 45%"
+        xhr.upload.onprogress = (event: ProgressEvent) => {
+          if (event.lengthComputable && onProgress) {
+            onProgress(event.loaded, event.total);
+          }
+        };
+
+        xhr.onload = () => {
+          const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+          console.log(
+            `[uploadToStorage] DONE in ${durationSec}s — HTTP ${xhr.status}`,
+          );
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            const errBody = (xhr.responseText ?? "no body").slice(0, 300);
+            console.error(
+              `[uploadToStorage] FAIL HTTP ${xhr.status}: ${errBody}`,
+            );
+            reject(
+              new Error(
+                `Storage returned HTTP ${xhr.status}: ${errBody}`,
+              ),
+            );
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(
+            new Error(
+              `Network request failed (status=${xhr.status || "?"})`,
+            ),
+          );
+        };
+
+        xhr.ontimeout = () => {
+          reject(new Error("Upload timed out"));
+        };
+
+        // Build FormData with the local file URI.
+        // React Native streams the file directly from disk — no need
+        // to load the entire video into memory.
+        const formData = new FormData();
+        formData.append("file", {
+          uri: fileUri,
+          type: contentType,
+          name: storagePath.split("/").pop() ?? "file",
+        } as unknown as Blob);
+
+        xhr.send(formData);
       });
-
-      const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(
-        `[uploadToStorage] DONE in ${durationSec}s — HTTP ${result.status}`,
-      );
-
-      if (result.status < 200 || result.status >= 300) {
-        const errBody = result.body?.slice(0, 300) ?? "no body";
-        console.error(
-          `[uploadToStorage] FAIL HTTP ${result.status}: ${errBody}`,
-        );
-        throw new Error(
-          `Storage returned HTTP ${result.status}: ${errBody}`,
-        );
-      }
     } else {
       // ── Web: fetch + FormData ──────────────────────────────────────
       let body: Blob | { uri: string; type: string; name: string };
@@ -271,7 +315,8 @@ async function uploadToStorage(
     );
 
     if (attempt < maxRetries && isTimeout) {
-      console.log(`[uploadToStorage] Retrying in 2s...`);
+      console.log(`[uploadToStorage] Retrying in 2s (fresh request)...`);
+      // Wait so any lingering broken session fully closes before retrying
       await new Promise((r) => setTimeout(r, 2000));
       return uploadToStorage(
         fileUri,
@@ -279,6 +324,7 @@ async function uploadToStorage(
         contentType,
         sizeMB,
         attempt + 1,
+        onProgress,
       );
     }
 
@@ -413,6 +459,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const feedQuery = useQuery({
     queryKey: ["posts", "fyp", user?.id],
     retry: 1,
+    staleTime: 10_000,
     queryFn: async (): Promise<Post[]> => {
       let data: unknown[] | null = null;
       try {
@@ -905,6 +952,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       textOverlays?: TextOverlay[];
       thumbnailUri?: string;
       optimisticTempId?: string;
+      onProgress?: (percent: number) => void;
     }) => {
       console.log("[createPost] mutationFn START — user:", user?.id?.slice(0, 8), "mediaType:", input.mediaType, "hasSegmentUris:", !!input.segmentUris?.length, "hasThumbnail:", !!input.thumbnailUri, "draftId:", input.draftId?.slice(0, 8));
 
@@ -972,7 +1020,26 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
           console.log(`[createPost] Uploading [${i}]: ${sizeMB} MB → ${BUCKET}/${segPath}`);
 
-          await uploadToStorage(segUri, segPath, contentType, sizeMB);
+          // Track per-file progress and compute overall percentage
+          await uploadToStorage(
+            segUri,
+            segPath,
+            contentType,
+            sizeMB,
+            1,
+            (loaded, total) => {
+              if (total > 0 && input.onProgress) {
+                const fileProgress = loaded / total;
+                const overall = ((i + fileProgress) / urisToUpload.length) * 100;
+                input.onProgress(Math.round(overall));
+              }
+            },
+          );
+
+          // Mark this file as fully done (100% contribution of this file)
+          if (input.onProgress) {
+            input.onProgress(Math.round(((i + 1) / urisToUpload.length) * 100));
+          }
 
           console.log(`[createPost] Upload SUCCESS [${i}] — ${BUCKET}/${segPath}`);
 
@@ -1072,14 +1139,22 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       } as Post;
     },
     onSuccess: (newPost, variables) => {
-      qc.invalidateQueries({ queryKey: ["posts"] });
+      // Remove optimistic post and insert the real post into both caches.
+      // We do NOT invalidateQueries({ queryKey: ["posts"] }) here because that
+      // triggers a background refetch that races with setQueryData — on Supabase
+      // eventual consistency, the refetch may return before the new row is visible
+      // and overwrite the cache, making the post disappear.
+      //
+      // Instead, setQueryData surgically updates the feed + mine caches with the
+      // full post data we already have. The useFocusEffect refetchFeed() in the
+      // feed screen will eventually refresh from the DB for correctness.
 
       if (variables.optimisticTempId) {
         finalizeOptimisticPost(variables.optimisticTempId, newPost);
       }
 
       qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
-        if (!old) return old;
+        if (!old) return [newPost];
         const filtered = old.filter(
           (p) => p._optimistic?.tempId !== variables.optimisticTempId
         );
@@ -1088,13 +1163,17 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       });
 
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
-        if (!old) return old;
+        if (!old) return [newPost];
         const filtered = (old ?? []).filter(
           (p) => p._optimistic?.tempId !== variables.optimisticTempId
         );
         if (filtered.some((p) => p.id === newPost.id)) return filtered;
         return [newPost, ...filtered];
       });
+
+      // Only invalidate the last-night query — it depends on the full posts table
+      // and we can't surgically update it without re-running the window filter.
+      qc.invalidateQueries({ queryKey: ["posts", "last-night"] });
 
       persistOptimisticPosts();
     },

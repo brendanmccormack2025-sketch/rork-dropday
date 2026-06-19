@@ -187,6 +187,8 @@ export default function EditScreen() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState(0);
 
   // ── Drag-to-trash tracking ───────────────────────────────────────────────
   const [dragOverlayInfo, setDragOverlayInfo] = useState<{
@@ -1514,6 +1516,9 @@ export default function EditScreen() {
         throw new Error("createPost.mutateAsync is not available. The post service may not be ready.");
       }
 
+      setUploading(true);
+      setUploadPercent(0);
+
       let newPost: Post | undefined;
       try {
         newPost = await createPost.mutateAsync({
@@ -1525,8 +1530,12 @@ export default function EditScreen() {
           textOverlays: overlaysForPost,
           thumbnailUri: thumbnailUri ?? undefined,
           optimisticTempId: tempId,
+          onProgress: (percent: number) => {
+            setUploadPercent(percent);
+          },
         });
       } catch (mutateErr) {
+        setUploading(false);
         console.error("[edit] executePost: mutateAsync REJECTED", (mutateErr as Error)?.message ?? mutateErr);
         throw mutateErr; // re-throw so handlePostPress's .catch() sees it too
       }
@@ -1543,6 +1552,8 @@ export default function EditScreen() {
         throw new Error("Post media failed to upload. The video may not have been saved to storage.");
       }
 
+      setUploading(false);
+
       // 4. Navigate to the feed only on confirmed success.
       console.log("[edit] executePost: Post confirmed valid (id:", newPost.id, ") — navigating to feed");
       try {
@@ -1556,6 +1567,7 @@ export default function EditScreen() {
 
       setSuccess("Posted!");
     } catch (postErr) {
+      setUploading(false);
       const errMsg = postErr instanceof Error ? postErr.message : "Could not post your drop. Please try again.";
       console.error("[edit] executePost: FAILED —", errMsg);
       // Show a visible alert so the user DEFINITELY sees the error
@@ -1926,6 +1938,21 @@ export default function EditScreen() {
               <Text style={styles.bannerSuccessText}>{success}</Text>
             </View>
           )}
+          {uploading && (
+            <View style={styles.uploadProgressWrap}>
+              <View style={styles.uploadProgressTrack}>
+                <View
+                  style={[
+                    styles.uploadProgressFill,
+                    { width: `${Math.min(uploadPercent, 100)}%` as unknown as number },
+                  ]}
+                />
+              </View>
+              <Text style={styles.uploadProgressText}>
+                Uploading... {uploadPercent}%
+              </Text>
+            </View>
+          )}
           <View style={styles.actionRow}>
             <Pressable
               onPress={handleSaveDraftPress}
@@ -1940,14 +1967,21 @@ export default function EditScreen() {
             </Pressable>
             <Pressable
               onPress={handlePostPress}
-              disabled={clips.length === 0}
+              disabled={clips.length === 0 || uploading}
               style={({ pressed }) => [
                 styles.postBtn,
-                clips.length === 0 && { opacity: 0.35 },
-                pressed && { opacity: 0.8 },
+                (clips.length === 0 || uploading) && { opacity: 0.35 },
+                pressed && !uploading && { opacity: 0.8 },
               ]}
             >
-              <Text style={styles.postBtnText}>Post Drop</Text>
+              {uploading ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text style={styles.postBtnText}>Posting...</Text>
+                </View>
+              ) : (
+                <Text style={styles.postBtnText}>Post Drop</Text>
+              )}
             </Pressable>
           </View>
         </View>
@@ -2176,6 +2210,29 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
     textAlign: "center",
   },
+
+  // ── Upload progress ──
+  uploadProgressWrap: {
+    gap: 8,
+  },
+  uploadProgressTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    overflow: "hidden",
+  },
+  uploadProgressFill: {
+    height: "100%" as unknown as number,
+    borderRadius: 3,
+    backgroundColor: theme.accent,
+  },
+  uploadProgressText: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 12,
+    fontWeight: "700" as const,
+    textAlign: "center",
+  },
+
   postBtn: {
     flex: 1,
     alignItems: "center",
