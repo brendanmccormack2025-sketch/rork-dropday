@@ -60,7 +60,9 @@ export default function FeedScreen() {
   );
 
   const viewedCount = viewedIds.size;
-  const gateActive = !hasPostedInWindow && viewedCount >= FREE_VIEWS_BEFORE_GATE;
+  // MVP: participation gate disabled — all users can scroll the full feed.
+  // Re-enable before launch by restoring: !hasPostedInWindow && viewedCount >= FREE_VIEWS_BEFORE_GATE
+  const gateActive = false;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

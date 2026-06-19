@@ -604,14 +604,13 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     return () => clearInterval(id);
   }, []);
 
-  // Has the current user posted within tonight's drop window?
+  // MVP: time-window filter disabled — check if the user has ANY post at all.
+  // Before launch, restore the per-window check:
+  //   const win = getDropWindowState(nowForWindow);
+  //   (myPostsQuery.data ?? []).some((p) => { const t = new Date(p.created_at); return t >= win.windowStart && t < win.windowEnd; });
   const hasPostedInWindow = useMemo(() => {
-    const win = getDropWindowState(nowForWindow);
-    return (myPostsQuery.data ?? []).some((p) => {
-      const t = new Date(p.created_at);
-      return t >= win.windowStart && t < win.windowEnd;
-    });
-  }, [myPostsQuery.data, nowForWindow]);
+    return (myPostsQuery.data ?? []).length > 0;
+  }, [myPostsQuery.data]);
 
   // ── Optimistic posts ──────────────────────────────────────────────────────
   const [optimisticPosts, setOptimisticPosts] = useState<Post[]>([]);
