@@ -49,16 +49,22 @@ export async function getInfoAsync(
     // On the web preview, media pickers return inline data: URIs
     // (e.g. data:image/png;base64,...). These contain the actual
     // image/video data and are valid — estimate the size from the
-    // base64 payload length (each char ≈ 6 bits).
+    // base64 payload length (each char ≈ 6 bits) or the URI length.
     if (uri.startsWith("data:")) {
+      const commaIdx = uri.indexOf(",");
+      if (commaIdx === -1) return { exists: true, size: 0 };
+      const payload = uri.slice(commaIdx + 1);
       const base64Idx = uri.indexOf(";base64,");
       if (base64Idx !== -1) {
-        const base64Data = uri.slice(base64Idx + 8);
-        const estimatedSize = Math.round(base64Data.length * 0.75);
-        return { exists: true, size: estimatedSize };
+        // Base64: each char encodes 6 bits → 0.75 bytes per char
+        const estimatedSize = Math.round(payload.length * 0.75);
+        return { exists: true, size: Math.max(estimatedSize, 1) };
       }
-      // Plain data URI (no base64) — still valid, just can't estimate size
-      return { exists: true, size: 0 };
+      // URL-encoded data URI (no base64 marker) — estimate from URI length.
+      // URL decoding expands percent-encoded bytes, so payload length is a
+      // reasonable lower bound. Never return 0 to avoid the "empty file" guard.
+      const estimatedSize = Math.max(Math.round(payload.length * 0.5), 1);
+      return { exists: true, size: estimatedSize };
     }
     return { exists: false, size: 0 };
   }

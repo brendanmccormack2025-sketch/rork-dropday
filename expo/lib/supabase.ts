@@ -22,7 +22,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export { supabaseUrl };
+export { supabaseUrl, supabaseAnonKey };
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {

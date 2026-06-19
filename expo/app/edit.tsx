@@ -7,7 +7,6 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -38,6 +37,7 @@ import {
 } from "lucide-react-native";
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
+import { showAlert } from "@/lib/showAlert";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -1278,10 +1278,9 @@ export default function EditScreen() {
       });
     } catch (err) {
       console.error("[edit] handlePostPress: CRASH in handler", (err as Error)?.message ?? err);
-      Alert.alert(
+      showAlert(
         "Post Failed",
         err instanceof Error ? err.message : "Something went wrong. Please try again.",
-        [{ text: "OK" }]
       );
       setError(
         err instanceof Error ? err.message : "Something went wrong. Please try again.",
@@ -1563,7 +1562,7 @@ export default function EditScreen() {
         setUploading(false);
         console.error("[edit] executePost: mutateAsync resolved but returned invalid Post —", JSON.stringify(newPost));
         const errMsg = "Post was created but server returned an invalid response. The post may not have been saved.";
-        Alert.alert("Post Failed", errMsg, [{ text: "OK" }]);
+        showAlert("Post Failed", errMsg);
         setError(errMsg);
         return; // ← DO NOT navigate — stay on edit screen
       }
@@ -1571,7 +1570,7 @@ export default function EditScreen() {
         setUploading(false);
         console.error("[edit] executePost: mutateAsync resolved but media_url looks invalid —", newPost.media_url?.slice(0, 60));
         const errMsg = "Post media failed to upload. The video may not have been saved to storage.";
-        Alert.alert("Post Failed", errMsg, [{ text: "OK" }]);
+        showAlert("Post Failed", errMsg);
         setError(errMsg);
         return; // ← DO NOT navigate — stay on edit screen
       }
@@ -1611,7 +1610,7 @@ export default function EditScreen() {
         raw: JSON.stringify(errAny, null, 2).slice(0, 500),
       });
       // Show a visible alert so the user DEFINITELY sees the error
-      Alert.alert("Post Failed", errMsg, [{ text: "OK" }]);
+      showAlert("Post Failed", errMsg);
       // Also set the banner error for persistence
       setError(errMsg);
       // DO NOT re-throw and DO NOT navigate. Stay on the edit screen.

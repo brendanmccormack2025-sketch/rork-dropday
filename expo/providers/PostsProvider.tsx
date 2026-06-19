@@ -1,10 +1,11 @@
 import createContextHook from "@nkzw/create-context-hook";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Platform } from "react-native";
+import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { documentDirectory, getInfoAsync, deleteAsync } from "@/lib/fileSystemCompat";
-import { supabase, supabaseUrl } from "@/lib/supabase";
+import { showAlert } from "@/lib/showAlert";
+import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 
 import { useAuth } from "@/providers/AuthProvider";
 import { getDropWindowState, DROP_WINDOW } from "@/constants/theme";
@@ -195,6 +196,7 @@ async function uploadToStorage(
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", uploadUrl);
+        xhr.setRequestHeader("apikey", supabaseAnonKey);
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
         xhr.setRequestHeader("x-upsert", "false");
 
@@ -297,6 +299,7 @@ async function uploadToStorage(
         response = await fetch(uploadUrl, {
           method: "POST",
           headers: {
+            apikey: supabaseAnonKey,
             Authorization: `Bearer ${token}`,
             "x-upsert": "false",
           },
@@ -1119,6 +1122,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // Upload thumbnail if provided (always JPEG)
       let thumbnailUrl: string | null = null;
       if (input.thumbnailUri) {
+        console.log("[createPost] THUMBNAIL — before uriToBlob, thumbnailUri:", input.thumbnailUri.slice(0, 60));
         const thumbPath = `${user.id}/${baseTs}_thumb.jpg`;
         try {
           const thumbBody = await uriToBlob(input.thumbnailUri);
@@ -1172,10 +1176,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         // Persist the error so we can retrieve it after the fact
         AsyncStorage.setItem("dropday:lastInsertError", JSON.stringify({ ...errMeta, ts: Date.now() })).catch(() => {});
         // Show a visible alert so the user DEFINITELY sees the error
-        Alert.alert(
+        showAlert(
           "Post Failed",
           insErr.message || "Database insert failed.",
-          [{ text: "OK" }]
         );
         throw insErr;
       }
@@ -1272,7 +1275,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // ALWAYS show an alert — the inner mutationFn already shows one for
       // insert failures, but the user might dismiss it. Show again here as
       // a safety net so the error is NEVER invisible.
-      Alert.alert("Post Failed", msg, [{ text: "OK" }]);
+      showAlert("Post Failed", msg);
       if (variables.optimisticTempId) {
         failOptimisticPost(
           variables.optimisticTempId,
