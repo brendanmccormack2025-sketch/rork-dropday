@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as FileSystem from "expo-file-system/legacy";
+import { documentDirectory, getInfoAsync, deleteAsync } from "@/lib/fileSystemCompat";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 import { getDropWindowState, DROP_WINDOW } from "@/constants/theme";
@@ -224,11 +224,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const deleteDraftProject = useCallback(
     async (id: string) => {
       // Remove permanent media files from document directory
-      const draftDir = `${FileSystem.documentDirectory}drafts/${id}/`;
+      const draftDir = `${documentDirectory}drafts/${id}/`;
       try {
-        const dirInfo = await FileSystem.getInfoAsync(draftDir);
+        const dirInfo = await getInfoAsync(draftDir);
         if (dirInfo.exists) {
-          await FileSystem.deleteAsync(draftDir, { idempotent: true });
+          await deleteAsync(draftDir, { idempotent: true });
         }
       } catch (e) {
         console.warn("[drafts] cleanup error for", id, e);
@@ -788,7 +788,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           // Verify the file exists on disk BEFORE attempting to read it.
           // If the file was in a temp/drafts directory that got cleaned up,
           // this will catch it early with a clear error message.
-          const fileInfo = await FileSystem.getInfoAsync(segUri);
+          const fileInfo = await getInfoAsync(segUri);
           if (!fileInfo.exists) {
             const errMsg = `File does not exist at upload time: ${segUri.slice(0, 80)}`;
             console.error(`[createPost] ${errMsg}`);

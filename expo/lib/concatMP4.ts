@@ -14,7 +14,7 @@
  * with video sample tables — producing corrupt, unplayable files.
  */
 
-import * as FileSystem from "expo-file-system/legacy";
+import { EncodingType, getInfoAsync, readAsStringAsync, writeAsStringAsync } from "@/lib/fileSystemCompat";
 import { decode, encode } from "base64-arraybuffer";
 
 // ── Binary helpers ────────────────────────────────────────────────────────────
@@ -273,8 +273,8 @@ interface SegmentInfo {
 // ── Read / write helpers ─────────────────────────────────────────────────────
 
 async function readFileAsBuffer(uri: string): Promise<Uint8Array> {
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
+  const base64 = await readAsStringAsync(uri, {
+    encoding: EncodingType.Base64,
   });
   if (!base64 || base64.length === 0) {
     throw new Error(`Empty file: ${uri.slice(0, 60)}`);
@@ -284,8 +284,8 @@ async function readFileAsBuffer(uri: string): Promise<Uint8Array> {
 
 async function writeBufferToFile(uri: string, buf: Uint8Array): Promise<void> {
   const base64 = encode(buf.buffer as ArrayBuffer);
-  await FileSystem.writeAsStringAsync(uri, base64, {
-    encoding: FileSystem.EncodingType.Base64,
+  await writeAsStringAsync(uri, base64, {
+    encoding: EncodingType.Base64,
   });
 }
 
@@ -370,7 +370,7 @@ export async function concatMP4Files(
   const validUris: string[] = [];
   for (const uri of inputUris) {
     try {
-      const info = await FileSystem.getInfoAsync(uri);
+      const info = await getInfoAsync(uri);
       if (!info.exists) {
         console.warn(`[concatMP4] Source file missing — skipping: ${uri.slice(0, 60)}`);
         continue;
@@ -398,15 +398,15 @@ export async function concatMP4Files(
   if (validUris.length === 1) {
     // Single file — just copy it
     console.log(`[concatMP4] Single valid file — copying to output`);
-    const sourceBase64 = await FileSystem.readAsStringAsync(validUris[0]!, {
-      encoding: FileSystem.EncodingType.Base64,
+    const sourceBase64 = await readAsStringAsync(validUris[0]!, {
+      encoding: EncodingType.Base64,
     });
-    await FileSystem.writeAsStringAsync(outputUri, sourceBase64, {
-      encoding: FileSystem.EncodingType.Base64,
+    await writeAsStringAsync(outputUri, sourceBase64, {
+      encoding: EncodingType.Base64,
     });
 
     // Verify the copy
-    const outInfo = await FileSystem.getInfoAsync(outputUri);
+    const outInfo = await getInfoAsync(outputUri);
     console.log(
       `[concatMP4] Copy check — exists: ${outInfo.exists}, size: ${outInfo.exists ? (outInfo.size ?? 0) : "N/A"} bytes`,
     );
@@ -507,11 +507,11 @@ export async function concatMP4Files(
     console.log(`[concatMP4] Only one valid segment after parsing — copying to output`);
     const singleBuf = segments[0]!.mdat.buffer;
     const base64 = encode(singleBuf.buffer as ArrayBuffer);
-    await FileSystem.writeAsStringAsync(outputUri, base64, {
-      encoding: FileSystem.EncodingType.Base64,
+    await writeAsStringAsync(outputUri, base64, {
+      encoding: EncodingType.Base64,
     });
 
-    const outInfo = await FileSystem.getInfoAsync(outputUri);
+    const outInfo = await getInfoAsync(outputUri);
     if (!outInfo.exists || (outInfo.size ?? 0) === 0) {
       throw new Error("Failed to write merged file to disk.");
     }
@@ -574,7 +574,7 @@ export async function concatMP4Files(
 
   // ── 6. Verify the output file ─────────────────────────────────────
 
-  const outInfo = await FileSystem.getInfoAsync(outputUri);
+  const outInfo = await getInfoAsync(outputUri);
   console.log(
     `[concatMP4] Output check — exists: ${outInfo.exists}, size: ${outInfo.exists ? (outInfo.size ?? 0) : "N/A"} bytes (expected ${merged.length})`,
   );

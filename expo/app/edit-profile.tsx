@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system/legacy";
+import { EncodingType, readAsStringAsync } from "@/lib/fileSystemCompat";
 import { decode } from "base64-arraybuffer";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -42,8 +42,8 @@ const BUCKET = "drops";
  * because React Native does not support Blob/ArrayBuffer uploads with Supabase.
  */
 async function uriToBlob(uri: string): Promise<Uint8Array> {
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
+  const base64 = await readAsStringAsync(uri, {
+    encoding: EncodingType.Base64,
   });
   if (!base64 || base64.length === 0) {
     throw new Error(`File read returned empty data from ${uri.slice(0, 60)}`);

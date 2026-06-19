@@ -31,7 +31,7 @@ import {
 } from "lucide-react-native";
 
 import PrimaryButton from "@/components/PrimaryButton";
-import * as FileSystem from "expo-file-system/legacy";
+import { getInfoAsync } from "@/lib/fileSystemCompat";
 
 import { theme, getDropWindowState } from "@/constants/theme";
 import { useCameraRecorder, type Clip, MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
@@ -419,7 +419,7 @@ export default function CameraScreen() {
     for (const clip of clips) {
       if (clip.type === "video" && clip.uri) {
         try {
-          const info = await FileSystem.getInfoAsync(clip.uri);
+          const info = await getInfoAsync(clip.uri);
           console.log(
             `[camera] goToEdit — clip ${clip.id}: ${clip.uri.slice(0, 60)}, exists: ${info.exists}, size: ${info.exists ? (info.size ?? 0) : "N/A"}`,
           );

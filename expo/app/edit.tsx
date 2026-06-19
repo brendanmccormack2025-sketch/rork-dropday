@@ -22,7 +22,7 @@ import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
-import * as FileSystem from "expo-file-system/legacy";
+import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync } from "@/lib/fileSystemCompat";
 import * as Haptics from "expo-haptics";
 import {
   Play,
@@ -330,7 +330,8 @@ export default function EditScreen() {
       console.log("[edit] videoSource memo — uri:", uri.slice(0, 80), "type:", activeClip?.type);
       // Log the actual file size on disk BEFORE the Video component tries to load it.
       // This confirms whether the file is valid video data or empty/corrupted.
-      FileSystem.getInfoAsync(uri).then((info) => {
+      // getInfoAsync is a no-op on web (returns exists: false, size: 0).
+      getInfoAsync(uri).then((info) => {
         console.log(
           `[edit] videoSource — file on disk: exists=${info.exists}, size=${info.exists ? (info.size ?? 0) : 0} bytes, uri=${uri.slice(0, 60)}`,
         );
@@ -1211,10 +1212,10 @@ export default function EditScreen() {
     try {
       const result = await getThumbnailAsync(videoUri, { time: 0 });
       if (!result?.uri) return null;
-      const permanentDir = `${FileSystem.documentDirectory}thumbnails/`;
-      await FileSystem.makeDirectoryAsync(permanentDir, { intermediates: true });
+      const permanentDir = `${documentDirectory}thumbnails/`;
+      await makeDirectoryAsync(permanentDir, { intermediates: true });
       const permanentUri = `${permanentDir}cover_${Date.now()}.jpg`;
-      await FileSystem.copyAsync({ from: result.uri, to: permanentUri });
+      await copyAsync({ from: result.uri, to: permanentUri });
       return permanentUri;
     } catch {
       return null;
@@ -1291,13 +1292,13 @@ export default function EditScreen() {
         draftId ??
         `draft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-      const draftDir = `${FileSystem.documentDirectory}drafts/${draftIdFinal}/`;
-      await FileSystem.makeDirectoryAsync(draftDir, { intermediates: true });
+      const draftDir = `${documentDirectory}drafts/${draftIdFinal}/`;
+      await makeDirectoryAsync(draftDir, { intermediates: true });
 
       const permanentClips = await Promise.all(
         clips.map(async (c, i) => {
           // Verify the source file exists and is non-zero BEFORE attempting copy.
-          const srcInfo = await FileSystem.getInfoAsync(c.uri);
+          const srcInfo = await getInfoAsync(c.uri);
           if (!srcInfo.exists || (srcInfo.size ?? 0) === 0) {
             console.warn(
               `[edit] executeSaveDraft: source clip[${i}] missing or empty — keeping original URI`,
@@ -1310,9 +1311,9 @@ export default function EditScreen() {
           const destUri = `${draftDir}${c.id}.${ext}`;
           if (c.uri !== destUri) {
             try {
-              await FileSystem.copyAsync({ from: c.uri, to: destUri });
+              await copyAsync({ from: c.uri, to: destUri });
               // Verify destination size matches source size
-              const destInfo = await FileSystem.getInfoAsync(destUri);
+              const destInfo = await getInfoAsync(destUri);
               if (!destInfo.exists) {
                 console.warn(
                   `[edit] executeSaveDraft: copy failed for clip[${i}] — destination missing, keeping original URI`,
@@ -1388,13 +1389,13 @@ export default function EditScreen() {
       // ── 1. Copy all clip files to a stable permanent location ────────
       //    The draft directory may be cleaned up during/after upload, so we
       //    must copy files OUT of drafts/ before the upload reads them.
-      const stableDir = `${FileSystem.documentDirectory}post_uploads/`;
-      await FileSystem.makeDirectoryAsync(stableDir, { intermediates: true });
+      const stableDir = `${documentDirectory}post_uploads/`;
+      await makeDirectoryAsync(stableDir, { intermediates: true });
 
       const copiedClips = await Promise.all(
         clips.map(async (c, i) => {
           // Verify the source file exists and is non-zero BEFORE attempting copy.
-          const srcInfo = await FileSystem.getInfoAsync(c.uri);
+          const srcInfo = await getInfoAsync(c.uri);
           if (!srcInfo.exists) {
             throw new Error(
               `Source file missing before copy — clip[${i}]: ${c.uri.slice(0, 60)}`,
@@ -1417,10 +1418,10 @@ export default function EditScreen() {
           );
 
           // Use copyAsync (not move) to preserve the original file.
-          await FileSystem.copyAsync({ from: c.uri, to: stableUri });
+          await copyAsync({ from: c.uri, to: stableUri });
 
           // Verify the destination file exists, is non-zero, AND matches source size.
-          const destInfo = await FileSystem.getInfoAsync(stableUri);
+          const destInfo = await getInfoAsync(stableUri);
           if (!destInfo.exists) {
             throw new Error(
               `Copy failed — destination missing clip[${i}]: ${stableUri.slice(0, 60)}`,

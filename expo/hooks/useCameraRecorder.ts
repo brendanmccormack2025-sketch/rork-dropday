@@ -6,7 +6,7 @@ import {
   useMicrophonePermissions,
 } from "expo-camera";
 import * as MediaLibrary from "expo-media-library";
-import * as FileSystem from "expo-file-system/legacy";
+import { cacheDirectory, documentDirectory, getInfoAsync } from "@/lib/fileSystemCompat";
 import * as Haptics from "expo-haptics";
 import { concatMP4Files } from "@/lib/concatMP4";
 
@@ -451,7 +451,7 @@ export function useCameraRecorder() {
           console.log(`[camera] Single segment, no merge needed: ${finalUri.slice(0, 60)}`);
 
           // Verify the single segment file exists and has content
-          const segInfo = await FileSystem.getInfoAsync(finalUri);
+          const segInfo = await getInfoAsync(finalUri);
           console.log(
             `[camera] Segment file check — exists: ${segInfo.exists}, size: ${segInfo.exists ? (segInfo.size ?? 0) : 'N/A'} bytes`,
           );
@@ -466,13 +466,13 @@ export function useCameraRecorder() {
           setIsMergingSync(true);
           console.log(`[camera] Merging ${uris.length} segments into one video...`);
 
-          const mergedUri = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}merged_${Date.now()}.mp4`;
+          const mergedUri = `${cacheDirectory || documentDirectory}merged_${Date.now()}.mp4`;
           finalUri = await concatMP4Files(uris, mergedUri);
           console.log(`[camera] Merge complete — output: ${finalUri.slice(0, 60)}`);
           setIsMergingSync(false);
 
           // Verify the merged output file exists and has content
-          const mergedInfo = await FileSystem.getInfoAsync(finalUri);
+          const mergedInfo = await getInfoAsync(finalUri);
           console.log(
             `[camera] Merged file check — exists: ${mergedInfo.exists}, size: ${mergedInfo.exists ? (mergedInfo.size ?? 0) : 'N/A'} bytes`,
           );
