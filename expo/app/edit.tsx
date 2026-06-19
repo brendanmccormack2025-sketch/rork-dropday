@@ -1469,9 +1469,11 @@ export default function EditScreen() {
         thumbnailUri: thumbnailUri ?? undefined,
       });
 
-      // 3. Fire the actual upload using the STABLE file paths
-      //    (draft cleanup happens inside createPost after successful upload)
-      createPost.mutate({
+      // 3. Fire the actual upload using the STABLE file paths.
+      //    Use mutateAsync so we can await the result — on failure we stay on the
+      //    edit screen and show the error. Only navigate on success.
+      console.log("[edit] executePost: BEFORE createPost.mutateAsync");
+      await createPost.mutateAsync({
         uri: stablePrimary.uri,
         mediaType: stablePrimary.type,
         draftId: draftId ?? undefined,
@@ -1481,10 +1483,9 @@ export default function EditScreen() {
         thumbnailUri: thumbnailUri ?? undefined,
         optimisticTempId: tempId,
       });
+      console.log("[edit] executePost: AFTER createPost.mutateAsync — SUCCESS");
 
-      // 4. Navigate to the feed — dismiss the modal stack first, then replace.
-      //    Using dismissAll + setTimeout prevents the black-screen bug where the
-      //    modal container stays mounted with only the contentStyle background.
+      // 4. Navigate to the feed only on confirmed success.
       try {
         if (router.canDismiss()) {
           router.dismissAll();
@@ -1498,7 +1499,8 @@ export default function EditScreen() {
 
       setSuccess("Posted!");
     } catch (postErr) {
-      console.error("[edit] executePost: unhandled error", (postErr as Error)?.message ?? postErr);
+      console.error("[edit] executePost: FAILED — staying on edit screen", (postErr as Error)?.message ?? postErr);
+      // Do NOT navigate — keep the user on the edit screen so they see the error.
       setError(
         postErr instanceof Error ? postErr.message : "Could not post your drop. Please try again.",
       );

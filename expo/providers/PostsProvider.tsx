@@ -797,23 +797,100 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           }
           console.log(`[createPost] File verified [${i}]: ${segUri.slice(0, 60)} — ${fileInfo.size} bytes`);
 
-          const segExt = input.mediaType === "video" ? "mp4" : "jpg";
+          // Determine file extension from the URI, not from mediaType.
+          // A video file might be .mov (QuickTime) or .mp4 — we keep the
+          // original extension so content-type detection is accurate.
+          const uriExt = segUri.match(/\.(\w+)(?:\?|$)/)?.[1]?.toLowerCase();
+          const segExt = uriExt ?? (input.mediaType === "video" ? "mp4" : "jpg");
           const segPath = `${user.id}/${baseTs}_seg${i}.${segExt}`;
-          const contentType = input.mediaType === "video" ? "video/mp4" : "image/jpeg";
+
+          // Map extension to MIME type
+          const mimeByExt: Record<string, string> = {
+            mp4: "video/mp4",
+            mov: "video/quicktime",
+            m4v: "video/x-m4v",
+            avi: "video/x-msvideo",
+            jpg: "image/jpeg",
+            jpeg: "image/jpeg",
+            png: "image/png",
+            webp: "image/webp",
+            heic: "image/heic",
+          };
+          const contentType = mimeByExt[segExt] ?? (input.mediaType === "video" ? "video/mp4" : "image/jpeg");
 
           let body: Uint8Array;
           try {
             body = await uriToBlob(segUri);
           } catch (e) {
-            console.error(`[createPost] uriToBlob FAIL [${i}]`, (e as Error)?.message ?? e);
+            const errAny = e as Record<string, unknown> | undefined;
+            console.error(`[createPost] uriToBlob FAIL [${i}]`, {
+              message: (e as Error)?.message ?? String(e),
+              code: errAny?.code,
+              status: errAny?.status,
+              details: errAny?.details,
+              hint: errAny?.hint,
+              uri: segUri.slice(0, 60),
+            });
             throw new Error(`Failed to read file: ${(e as Error)?.message ?? "unknown error"}`);
           }
 
-          const { data: upData, error: upErr } = await supabase.storage
-            .from(BUCKET)
-            .upload(segPath, body, { contentType, upsert: false });
+          const sizeMB = (body.byteLength / (1024 * 1024)).toFixed(2);
+          console.log(`[createPost] Uploading [${i}]: ${sizeMB} MB → ${segPath}`);
 
-          if (upErr) throw upErr;
+          console.log(`[createPost] BEFORE upload [${i}] — calling supabase.storage.from("${BUCKET}").upload(${segPath}, ${body.byteLength} bytes, ${contentType})`);
+          let upData: unknown;
+          let upErr: { message: string; statusCode?: string; error?: string; name?: string } | null = null;
+          try {
+            const result = await supabase.storage
+              .from(BUCKET)
+              .upload(segPath, body, { contentType, upsert: false });
+            console.log(`[createPost] AFTER upload [${i}] — raw result:`, JSON.stringify({ hasData: !!result.data, hasError: !!result.error, path: result.data?.path }));
+            upData = result.data;
+            upErr = result.error
+              ? {
+                  message: result.error.message,
+                  statusCode: (result.error as unknown as Record<string, unknown>)?.statusCode as string | undefined,
+                  error: (result.error as unknown as Record<string, unknown>)?.error as string | undefined,
+                  name: result.error.name,
+                }
+              : null;
+          } catch (uploadCatchErr) {
+            const ue = uploadCatchErr as unknown as Record<string, unknown> | undefined;
+            console.error(`[createPost] upload FAIL [${i}]`, {
+              message: (uploadCatchErr as Error)?.message ?? String(uploadCatchErr),
+              name: (uploadCatchErr as Error)?.name,
+              code: ue?.code,
+              status: ue?.status,
+              statusCode: ue?.statusCode,
+              details: ue?.details,
+              hint: ue?.hint,
+              error: ue?.error,
+              bucket: BUCKET,
+              path: segPath,
+              contentType,
+              fileBytes: body.byteLength,
+              fileSizeMB: sizeMB,
+            });
+            throw new Error(
+              `Storage upload failed: ${(uploadCatchErr as Error)?.message ?? "Network request failed"} (${sizeMB} MB file to ${BUCKET}/${segPath})`,
+            );
+          }
+
+          if (upErr) {
+            console.error(`[createPost] upload error response [${i}]`, {
+              message: upErr.message,
+              statusCode: upErr.statusCode,
+              error: upErr.error,
+              name: upErr.name,
+              bucket: BUCKET,
+              path: segPath,
+              contentType,
+              fileSizeMB: sizeMB,
+            });
+            throw new Error(
+              `Storage upload rejected: ${upErr.message} (status=${upErr.statusCode ?? "?"})`,
+            );
+          }
 
           const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(segPath);
           uploadedUrls.push(pub.publicUrl);
@@ -863,15 +940,19 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (thumbnailUrl) {
         row.thumbnail_url = thumbnailUrl;
       }
-      console.log("[createPost] inserting row:", JSON.stringify(row, null, 2));
+      console.log("[createPost] BEFORE insert — row:", JSON.stringify(row, null, 2));
       const { data: insData, error: insErr } = await supabase.from("posts").insert(row).select("id, created_at").single();
+      console.log("[createPost] AFTER insert — result:", JSON.stringify({ hasData: !!insData, hasError: !!insErr, id: insData?.id, errorMessage: insErr?.message }));
 
       if (insErr) {
+        const insErrAny = insErr as unknown as Record<string, unknown>;
         console.error("[createPost] insert FAIL", {
           message: insErr.message,
           code: insErr.code,
           details: insErr.details,
           hint: insErr.hint,
+          status: insErrAny?.status,
+          statusCode: insErrAny?.statusCode,
         });
         throw insErr;
       }
@@ -928,7 +1009,18 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       persistOptimisticPosts();
     },
     onError: (err, variables) => {
-      console.error("[createPost] onError", (err as Error)?.message ?? err);
+      const errAny = err as unknown as Record<string, unknown> | undefined;
+      console.error("[createPost] onError — FULL ERROR OBJECT", {
+        message: (err as Error)?.message ?? String(err),
+        name: (err as Error)?.name,
+        code: errAny?.code,
+        details: errAny?.details,
+        hint: errAny?.hint,
+        status: errAny?.status,
+        statusCode: errAny?.statusCode,
+        error: errAny?.error,
+        cause: errAny?.cause,
+      });
       if (variables.optimisticTempId) {
         failOptimisticPost(
           variables.optimisticTempId,
