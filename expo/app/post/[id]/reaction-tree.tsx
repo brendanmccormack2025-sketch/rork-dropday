@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Dimensions,
   FlatList,
@@ -12,7 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Video, ResizeMode } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Heart, Sparkles, Reply } from "lucide-react-native";
 
@@ -106,6 +107,7 @@ export default function ReactionTreeScreen() {
     },
   });
 
+  const qc = useQueryClient();
   const posts = treeQuery.data?.posts ?? [];
   const profileMap = treeQuery.data?.profileMap ?? new Map<string, ProfileCard>();
 
@@ -129,6 +131,13 @@ export default function ReactionTreeScreen() {
     }
     return result;
   }, [posts, profileMap]);
+
+  // ── Refetch on focus so the tree stays current after posting a reaction ──
+  useFocusEffect(
+    useCallback(() => {
+      qc.invalidateQueries({ queryKey: ["reaction-tree", id] });
+    }, [qc, id]),
+  );
 
   // ── FlatList config ───────────────────────────────────────────────────────
   const onViewableItemsChanged = useRef(
@@ -440,7 +449,7 @@ function ReactionSplitItem({
             resizeMode={ResizeMode.COVER}
             isLooping
             shouldPlay={active}
-            isMuted
+            isMuted={!active}
             useNativeControls={false}
             progressUpdateIntervalMillis={50}
           />
@@ -477,7 +486,7 @@ function ReactionSplitItem({
             resizeMode={ResizeMode.COVER}
             isLooping
             shouldPlay={active}
-            isMuted
+            isMuted={!active}
             useNativeControls={false}
             progressUpdateIntervalMillis={50}
           />

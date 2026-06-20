@@ -1277,6 +1277,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // Only invalidate the last-night query — it depends on the full posts table
       // and we can't surgically update it without re-running the window filter.
       qc.invalidateQueries({ queryKey: ["posts", "last-night"] });
+      qc.invalidateQueries({ queryKey: ["reaction-tree"] });
 
       persistOptimisticPosts();
     },
