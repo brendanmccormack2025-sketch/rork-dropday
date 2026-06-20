@@ -37,6 +37,7 @@ export default function ReactionTreeScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [activeIndex, setActiveIndex] = useState<number>(0);
+  const [screenFocused, setScreenFocused] = useState<boolean>(true);
 
   // ── Data: RPC → enrich with profiles ──────────────────────────────────────
   const treeQuery = useQuery({
@@ -133,9 +134,14 @@ export default function ReactionTreeScreen() {
   }, [posts, profileMap]);
 
   // ── Refetch on focus so the tree stays current after posting a reaction ──
+  // Also pause all videos on blur so audio doesn't bleed into unrelated screens.
   useFocusEffect(
     useCallback(() => {
       qc.invalidateQueries({ queryKey: ["reaction-tree", id] });
+      setScreenFocused(true);
+      return () => {
+        setScreenFocused(false);
+      };
     }, [qc, id]),
   );
 
@@ -169,14 +175,14 @@ export default function ReactionTreeScreen() {
       return (
         <TreeItem
           post={item}
-          active={index === activeIndex}
+          active={index === activeIndex && screenFocused}
           isRoot={index === 0}
           replyingTo={replyingToMap.get(item.id)}
           parentPost={parentPost}
         />
       );
     },
-    [activeIndex, replyingToMap, posts],
+    [activeIndex, screenFocused, replyingToMap, posts],
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -326,13 +332,22 @@ function RootItem({
   isRoot?: boolean;
 }) {
   const [liked, setLiked] = useState<boolean>(false);
+  const videoRef = useRef<Video>(null);
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
+
+  // Release native player resources on unmount
+  useEffect(() => {
+    return () => {
+      videoRef.current?.unloadAsync().catch(() => {});
+    };
+  }, []);
 
   return (
     <View style={styles.item}>
       {post.media_type === "video" ? (
         <Video
+          ref={videoRef}
           source={{ uri: post.media_url }}
           style={StyleSheet.absoluteFill}
           resizeMode={ResizeMode.COVER}
@@ -444,14 +459,23 @@ function ReactionSplitItem({
   // ── Resource cleanup & sync restart ──────────────────────────────────
   // When inactive: videos unmount → native decoders/buffers released.
   // When active: both mount fresh, sync to position 0 for frame-lock start.
+  // On unmount (screen blur / navigation away): unloadAsync to stop audio.
   useEffect(() => {
     if (active) {
       const timer = setTimeout(() => {
         parentVideoRef.current?.setPositionAsync(0);
         reactionVideoRef.current?.setPositionAsync(0);
       }, 50);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        parentVideoRef.current?.unloadAsync().catch(() => {});
+        reactionVideoRef.current?.unloadAsync().catch(() => {});
+      };
     }
+    return () => {
+      parentVideoRef.current?.unloadAsync().catch(() => {});
+      reactionVideoRef.current?.unloadAsync().catch(() => {});
+    };
   }, [active]);
 
   return (
@@ -468,6 +492,7 @@ function ReactionSplitItem({
               isLooping
               shouldPlay
               isMuted={false}
+              volume={0.35}
               useNativeControls={false}
               progressUpdateIntervalMillis={50}
             />
@@ -510,6 +535,7 @@ function ReactionSplitItem({
               isLooping
               shouldPlay
               isMuted={false}
+              volume={1.0}
               useNativeControls={false}
               progressUpdateIntervalMillis={50}
             />
