@@ -294,6 +294,8 @@ export default function EditScreen() {
     pendingSeekRef.current = clip.trimStartMs ?? 0;
     durationSetRef.current = false;
     lastPositionUpdate.current = 0;
+    setVideoReady(false);
+    videoRetryCountRef.current = 0;
   }, [activeIndex, clips]);
 
   const selectedClipIdxRef = useRef<number>(-1);
@@ -400,14 +402,41 @@ export default function EditScreen() {
   // ── Video error state ────────────────────────────────────────────────────
   const [videoLoadError, setVideoLoadError] = useState<string | null>(null);
 
+  const maxVideoRetries = 2;
+  const videoRetryCountRef = useRef<number>(0);
+  const [videoKey, setVideoKey] = useState<number>(0);
+  const [videoReady, setVideoReady] = useState<boolean>(false);
+
+  const handleVideoLoadError = useCallback((errorMsg: string) => {
+    const isAssetError =
+      errorMsg.includes("isPlayable") ||
+      errorMsg.includes("AVAsset") ||
+      errorMsg.includes("not supported");
+    if (isAssetError && videoRetryCountRef.current < maxVideoRetries) {
+      videoRetryCountRef.current += 1;
+      console.log(
+        `[edit] Video load error (attempt ${videoRetryCountRef.current}/${maxVideoRetries}): ${errorMsg} — retrying...`,
+      );
+      setVideoReady(false);
+      setTimeout(() => {
+        setVideoKey((k) => k + 1);
+      }, 500);
+      return;
+    }
+    console.error(
+      `[edit] Video load failed after ${videoRetryCountRef.current} retries: ${errorMsg}`,
+    );
+    setVideoLoadError("Video failed to process, please try recording again.");
+    setIsPlaying(false);
+  }, []);
+
   // ── Playback status handler ───────────────────────────────────────────────
   const onVideoStatus = useCallback((status: AVPlaybackStatus) => {
     // Error variant has isLoaded=false and an optional error field.
     // Check this BEFORE the isLoaded guard so errors aren't silently swallowed.
     if (!status.isLoaded && "error" in status && status.error) {
       console.error("[edit] Video playback error:", status.error);
-      setVideoLoadError(status.error);
-      setIsPlaying(false);
+      handleVideoLoadError(status.error);
       return;
     }
 
@@ -585,7 +614,7 @@ export default function EditScreen() {
       }
       return;
     }
-  }, []);
+  }, [handleVideoLoadError]);
 
   const advanceToNextClip = useCallback(() => {
     const selIdx = selectedClipIdxRef.current;
@@ -1715,24 +1744,29 @@ export default function EditScreen() {
             {isVideo && videoSource ? (
               <>
                 <Video
-                  key={activeClip?.uri ?? "no-uri"}
+                  key={`${activeClip?.uri ?? "no-uri"}-${videoKey}`}
                   ref={videoRef}
                   source={videoSource}
                   style={{ width: "100%", height: "100%" }}
                   resizeMode={ResizeMode.CONTAIN}
-                  shouldPlay={isPlaying}
+                  shouldPlay={isPlaying && videoReady}
                   isLooping={false}
                   isMuted={false}
+                  onReadyForDisplay={() => {
+                    console.log("[edit] Video ready for display");
+                    setVideoReady(true);
+                  }}
                   onPlaybackStatusUpdate={onVideoStatus}
                   onError={(err: string) => {
                     console.error("[edit] Video onError fired:", err);
-                    setVideoLoadError(err);
-                    setIsPlaying(false);
+                    handleVideoLoadError(err);
                   }}
                   onLoad={(status: AVPlaybackStatus) => {
                     if (status.isLoaded) {
                       console.log("[edit] Video loaded — duration:", "durationMillis" in status ? status.durationMillis : "N/A", "uri:", activeClip?.uri?.slice(0, 60));
+                      videoRetryCountRef.current = 0;
                       setVideoLoadError(null);
+                      setVideoReady(true);
                     }
                   }}
                   progressUpdateIntervalMillis={200}
@@ -1740,9 +1774,13 @@ export default function EditScreen() {
                 />
                 {videoLoadError && (
                   <View style={styles.videoErrorOverlay}>
-                    <Text style={styles.videoErrorText}>
-                      Video failed to load: {videoLoadError}{"\n"}URI: {activeClip?.uri?.slice(0, 50)}...
-                    </Text>
+                    <Text style={styles.videoErrorText}>{videoLoadError}</Text>
+                    <Pressable
+                      onPress={() => router.back()}
+                      style={styles.videoErrorBackBtn}
+                    >
+                      <Text style={styles.videoErrorBackBtnText}>Go Back</Text>
+                    </Pressable>
                   </View>
                 )}
               </>
@@ -2179,6 +2217,20 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
     textAlign: "center",
     lineHeight: 19,
+    marginBottom: 20,
+  },
+  videoErrorBackBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  videoErrorBackBtnText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 14,
+    fontWeight: "700" as const,
   },
 
   // ── Toolbar ──
