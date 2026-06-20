@@ -1670,7 +1670,7 @@ export default function EditScreen() {
             <ArrowLeft size={20} color="#fff" strokeWidth={2.5} />
           </TouchableOpacity>
           <Text style={styles.topTitle}>
-            {draftId ? "Edit Draft" : "Edit Drop"}
+            {draftId ? "Edit Draft" : reactingTo ? "Edit Reaction" : "Edit Drop"}
           </Text>
           <View style={styles.topBtnRow}>
             <TouchableOpacity
@@ -2021,7 +2021,7 @@ export default function EditScreen() {
                   <Text style={styles.postBtnText}>Posting...</Text>
                 </View>
               ) : (
-                <Text style={styles.postBtnText}>Post Drop</Text>
+                <Text style={styles.postBtnText}>{reactingTo ? "Post Reaction" : "Post Drop"}</Text>
               )}
             </Pressable>
           </View>

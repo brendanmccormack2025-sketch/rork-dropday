@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
   FlatList,
@@ -422,22 +422,6 @@ function ReactionSplitItem({
   active: boolean;
   replyingTo?: string;
 }) {
-  const [parentPlaying, setParentPlaying] = useState<boolean>(true);
-  const [reactionPlaying, setReactionPlaying] = useState<boolean>(true);
-  const [parentVolume, setParentVolume] = useState<number>(80);
-  const [reactionVolume, setReactionVolume] = useState<number>(80);
-
-  // Autoplay when scrolled into view; pause when scrolled away
-  useEffect(() => {
-    if (active) {
-      setParentPlaying(true);
-      setReactionPlaying(true);
-    } else {
-      setParentPlaying(false);
-      setReactionPlaying(false);
-    }
-  }, [active]);
-
   const topHeight = SCREEN_H * 0.58;
   const bottomHeight = SCREEN_H * 0.42;
   const reactionName =
@@ -447,18 +431,15 @@ function ReactionSplitItem({
 
   return (
     <View style={styles.item}>
-      {/* ── Top: Parent clip ────────────────────────────────────────────── */}
-      <Pressable
-        onPress={() => setParentPlaying((v) => !v)}
-        style={[styles.splitTop, { height: topHeight }]}
-      >
+      {/* ── Top: Parent clip (autoplay only, no controls) ──────────────── */}
+      <View style={[styles.splitTop, { height: topHeight }]}>
         {parentPost.media_type === "video" ? (
           <Video
             source={{ uri: parentPost.media_url }}
             style={StyleSheet.absoluteFill}
             resizeMode={ResizeMode.COVER}
             isLooping
-            shouldPlay={active && parentPlaying}
+            shouldPlay={active}
             isMuted
             useNativeControls={false}
             progressUpdateIntervalMillis={50}
@@ -482,41 +463,20 @@ function ReactionSplitItem({
           style={styles.splitGradBottom}
           pointerEvents="none"
         />
-
-        {/* Volume slider */}
-        <View style={styles.volumeRow} pointerEvents="box-none">
-          <VolumeSlider
-            value={parentVolume}
-            onValueChange={setParentVolume}
-            color={theme.accent}
-          />
-        </View>
-
-        {/* Play/pause indicator overlay */}
-        {!parentPlaying && (
-          <View style={styles.pauseOverlay} pointerEvents="none">
-            <View style={styles.pauseIcon}>
-              <Text style={styles.pauseIconText}>▶</Text>
-            </View>
-          </View>
-        )}
-      </Pressable>
+      </View>
 
       {/* ── Divider ──────────────────────────────────────────────────────── */}
       <View style={styles.splitDivider} />
 
-      {/* ── Bottom: Reaction clip ────────────────────────────────────────── */}
-      <Pressable
-        onPress={() => setReactionPlaying((v) => !v)}
-        style={[styles.splitBottom, { height: bottomHeight }]}
-      >
+      {/* ── Bottom: Reaction clip (autoplay only, no controls) ──────────── */}
+      <View style={[styles.splitBottom, { height: bottomHeight }]}>
         {reactionPost.media_type === "video" ? (
           <Video
             source={{ uri: reactionPost.media_url }}
             style={StyleSheet.absoluteFill}
             resizeMode={ResizeMode.COVER}
             isLooping
-            shouldPlay={active && reactionPlaying}
+            shouldPlay={active}
             isMuted
             useNativeControls={false}
             progressUpdateIntervalMillis={50}
@@ -540,24 +500,6 @@ function ReactionSplitItem({
           style={styles.splitGradBottom}
           pointerEvents="none"
         />
-
-        {/* Volume slider */}
-        <View style={styles.volumeRow} pointerEvents="box-none">
-          <VolumeSlider
-            value={reactionVolume}
-            onValueChange={setReactionVolume}
-            color={theme.danger}
-          />
-        </View>
-
-        {/* Play/pause indicator overlay */}
-        {!reactionPlaying && (
-          <View style={styles.pauseOverlay} pointerEvents="none">
-            <View style={styles.pauseIcon}>
-              <Text style={styles.pauseIconText}>▶</Text>
-            </View>
-          </View>
-        )}
 
         {/* Bottom info — reaction author */}
         <View style={styles.splitInfo} pointerEvents="box-none">
@@ -585,73 +527,10 @@ function ReactionSplitItem({
             </Text>
           ) : null}
         </View>
-      </Pressable>
-    </View>
-  );
-}
-
-// ── Volume Slider ───────────────────────────────────────────────────────────
-
-function VolumeSlider({
-  value,
-  onValueChange: _onValueChange,
-  color,
-}: {
-  value: number;
-  onValueChange: (v: number) => void;
-  color: string;
-}) {
-  const pct = Math.max(0, Math.min(100, value));
-
-  return (
-    <View style={volStyles.wrapper}>
-      <View style={volStyles.track}>
-        <View
-          style={[volStyles.fill, { width: `${pct}%`, backgroundColor: color }]}
-        />
-        <View
-          style={[
-            volStyles.thumb,
-            { left: `${pct}%`, backgroundColor: color },
-          ]}
-        />
       </View>
     </View>
   );
 }
-
-const volStyles = StyleSheet.create({
-  wrapper: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-  },
-  track: {
-    height: 3,
-    borderRadius: 1.5,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    justifyContent: "center",
-  },
-  fill: {
-    height: 3,
-    borderRadius: 1.5,
-    position: "absolute",
-    left: 0,
-    top: 0,
-  },
-  thumb: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    position: "absolute",
-    top: -4.5,
-    marginLeft: -6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.4,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-});
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 
@@ -869,29 +748,5 @@ const styles = StyleSheet.create({
     bottom: 12,
     gap: 6,
   },
-  volumeRow: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 4,
-  },
-  pauseOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.25)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pauseIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pauseIconText: {
-    color: "#fff",
-    fontSize: 18,
-    marginLeft: 3,
-  },
+
 });
