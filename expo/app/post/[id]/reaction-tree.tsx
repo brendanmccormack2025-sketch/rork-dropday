@@ -654,7 +654,7 @@ const styles = StyleSheet.create({
   actions: {
     position: "absolute",
     right: 12,
-    bottom: 120,
+    bottom: 150,
     alignItems: "center",
     gap: 22,
   },
@@ -672,7 +672,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 16,
     right: 80,
-    bottom: 80,
+    bottom: 130,
     gap: 8,
   },
   replyingRow: {
@@ -780,7 +780,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 16,
     right: 80,
-    bottom: 12,
+    bottom: 130,
     gap: 6,
   },
 

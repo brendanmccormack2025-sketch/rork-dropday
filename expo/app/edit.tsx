@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -34,10 +35,13 @@ import {
   Undo2,
   Redo2,
   Pencil,
+  Pause,
+  Volume2,
 } from "lucide-react-native";
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
+import { supabase } from "@/lib/supabase";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -191,6 +195,63 @@ export default function EditScreen() {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
+
+  // ── Reaction PIP state ─────────────────────────────────────────────────
+  const isReaction = !!reactingTo;
+  const [parentPost, setParentPost] = useState<{ media_url: string } | null>(null);
+  const [parentPlaying, setParentPlaying] = useState(true);
+  const [parentVolume, setParentVolume] = useState(0.35);
+  const parentVideoRef = useRef<Video>(null);
+  const parentPlayingRef = useRef(true);
+  const volumeTrackWidthRef = useRef(0);
+
+  // Fetch parent post when reactingTo is set
+  useEffect(() => {
+    if (!reactingTo) return;
+    supabase
+      .from("posts")
+      .select("media_url")
+      .eq("id", reactingTo)
+      .single()
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("[edit] Failed to fetch parent post:", error);
+        } else if (data) {
+          setParentPost(data as { media_url: string });
+        }
+      });
+  }, [reactingTo]);
+
+  // PIP: toggle parent clip playback
+  const toggleParentPlayback = useCallback(() => {
+    if (parentPlayingRef.current) {
+      parentVideoRef.current?.pauseAsync().catch(() => {});
+    } else {
+      parentVideoRef.current?.playAsync().catch(() => {});
+    }
+    parentPlayingRef.current = !parentPlayingRef.current;
+    setParentPlaying(parentPlayingRef.current);
+  }, []);
+
+  // PIP: custom volume slider
+  const handleVolumeChange = useCallback((x: number) => {
+    const w = volumeTrackWidthRef.current;
+    if (w <= 0) return;
+    const pct = Math.max(0, Math.min(1, x / w));
+    setParentVolume(pct);
+    parentVideoRef.current?.setVolumeAsync(pct).catch(() => {});
+  }, []);
+
+  const volumePan = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (e) => handleVolumeChange(e.nativeEvent.locationX),
+        onPanResponderMove: (e) => handleVolumeChange(e.nativeEvent.locationX),
+      }),
+    [handleVolumeChange],
+  );
 
   // ── Drag-to-trash tracking ───────────────────────────────────────────────
   const [dragOverlayInfo, setDragOverlayInfo] = useState<{
@@ -1797,6 +1858,77 @@ export default function EditScreen() {
               />
             ))}
           </View>
+
+          {/* ── Reaction PIP: parent clip preview ── */}
+          {isReaction && parentPost && !textEditorVisible && (
+            <View
+              style={styles.pipContainer}
+              pointerEvents="box-none"
+            >
+              {/* PIP video card */}
+              <Pressable
+                onPress={toggleParentPlayback}
+                style={styles.pipCard}
+                accessibilityLabel={
+                  parentPlaying ? "Pause parent clip" : "Play parent clip"
+                }
+              >
+                <Video
+                  ref={parentVideoRef}
+                  source={{ uri: parentPost.media_url }}
+                  style={styles.pipVideo}
+                  resizeMode={ResizeMode.COVER}
+                  shouldPlay
+                  isLooping
+                  isMuted={false}
+                  volume={parentVolume}
+                />
+                {!parentPlaying && (
+                  <View style={styles.pipPauseOverlay}>
+                    <Pause color="#fff" size={18} fill="rgba(255,255,255,0.9)" />
+                  </View>
+                )}
+              </Pressable>
+
+              {/* Volume slider + label */}
+              <View style={styles.pipVolumeRow}>
+                <Volume2
+                  color={
+                    parentVolume === 0
+                      ? "rgba(255,255,255,0.25)"
+                      : "rgba(255,255,255,0.8)"
+                  }
+                  size={11}
+                />
+                <View
+                  onLayout={(e) => {
+                    volumeTrackWidthRef.current = e.nativeEvent.layout.width;
+                  }}
+                  style={styles.pipVolumeTrack}
+                  {...volumePan.panHandlers}
+                >
+                  <View
+                    style={[
+                      styles.pipVolumeFill,
+                      { width: `${parentVolume * 100}%` as any },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.pipVolumeThumb,
+                      {
+                        left: `${parentVolume * 100}%` as any,
+                        marginLeft: -6,
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+              <Text style={styles.pipHonestLabel}>
+                Heard while recording — mixing into your post coming soon
+              </Text>
+            </View>
+          )}
         </Pressable>
 
         {/* ── Timeline editor ────────────────────────────────────────── */}
@@ -2380,5 +2512,75 @@ const styles = StyleSheet.create({
   },
   trashLabelActive: {
     color: "#FF453A",
+  },
+
+  // ── Reaction PIP ────────────────────────────────────────────────
+  pipContainer: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: 120,
+    zIndex: 15,
+    gap: 6,
+    paddingTop: 8,
+    paddingRight: 8,
+  },
+  pipCard: {
+    width: 120,
+    height: 213,
+    borderRadius: 10,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(10,10,10,0.55)",
+  },
+  pipVideo: {
+    width: "100%",
+    height: "100%",
+  },
+  pipPauseOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pipVolumeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  pipVolumeTrack: {
+    flex: 1,
+    height: 20,
+    justifyContent: "center",
+  },
+  pipVolumeFill: {
+    position: "absolute",
+    left: 0,
+    top: 9,
+    height: 2,
+    backgroundColor: "rgba(255,255,255,0.7)",
+    borderRadius: 1,
+  },
+  pipVolumeThumb: {
+    position: "absolute",
+    top: 5,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#fff",
+  },
+  pipHonestLabel: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 8,
+    fontWeight: "500" as const,
+    textAlign: "center",
+    lineHeight: 11,
+    paddingHorizontal: 2,
   },
 });
