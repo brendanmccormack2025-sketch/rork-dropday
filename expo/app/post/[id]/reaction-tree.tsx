@@ -253,7 +253,7 @@ export default function ReactionTreeScreen() {
             onPress={() => {
               const targetId = posts[activeIndex]?.id;
               if (!targetId) return;
-              router.push(`/camera?reactingTo=${targetId}` as never);
+              router.push(`/watch-and-react?postId=${targetId}` as never);
             }}
             disabled={activeIndex >= posts.length}
             style={({ pressed }) => [

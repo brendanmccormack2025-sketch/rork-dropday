@@ -29,15 +29,11 @@ import {
   Square,
   ArrowRight,
   Reply,
-  Pause,
-  Volume2,
 } from "lucide-react-native";
 
 import PrimaryButton from "@/components/PrimaryButton";
 import { getInfoAsync } from "@/lib/fileSystemCompat";
 import { supabase } from "@/lib/supabase";
-import { Video, ResizeMode } from "expo-av";
-
 import { theme, getDropWindowState } from "@/constants/theme";
 import { useCameraRecorder, type Clip, MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
 
@@ -120,14 +116,6 @@ export default function CameraScreen() {
   const frontFlashOpacity = useRef(new Animated.Value(0)).current;
   const frontFlashHighlightOpacity = useRef(new Animated.Value(0)).current;
 
-  // ─── Parent-clip PIP state (reaction mode) ─────────────────────
-  const [parentPost, setParentPost] = useState<{ media_url: string } | null>(null);
-  const [parentPlaying, setParentPlaying] = useState(true);
-  const [parentVolume, setParentVolume] = useState(0.35);
-  const parentVideoRef = useRef<Video>(null);
-  const parentPlayingRef = useRef(true);
-  const volumeTrackWidthRef = useRef(0);
-
   // Gesture-local refs
   const didLongPress = useRef<boolean>(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -159,23 +147,6 @@ export default function CameraScreen() {
       teardown();
     };
   }, [teardown]);
-
-  // ─── Fetch parent post when reactingTo is set ──────────────────
-  useEffect(() => {
-    if (!reactingTo) return;
-    supabase
-      .from("posts")
-      .select("media_url")
-      .eq("id", reactingTo)
-      .single()
-      .then(({ data, error }) => {
-        if (error) {
-          console.error("[camera] Failed to fetch parent post:", error);
-        } else if (data) {
-          setParentPost(data as { media_url: string });
-        }
-      });
-  }, [reactingTo]);
 
   const win = useMemo(() => getDropWindowState(now), [now]);
 
@@ -353,37 +324,6 @@ export default function CameraScreen() {
     }
   }, [stopRecording, lockDrag]);
 
-  // ─── PIP: toggle parent clip playback ──────────────────────────
-  const toggleParentPlayback = useCallback(() => {
-    if (parentPlayingRef.current) {
-      parentVideoRef.current?.pauseAsync().catch(() => {});
-    } else {
-      parentVideoRef.current?.playAsync().catch(() => {});
-    }
-    parentPlayingRef.current = !parentPlayingRef.current;
-    setParentPlaying(parentPlayingRef.current);
-  }, []);
-
-  // ─── PIP: custom volume slider PanResponder ────────────────────
-  const handleVolumeChange = useCallback((x: number) => {
-    const w = volumeTrackWidthRef.current;
-    if (w <= 0) return;
-    const pct = Math.max(0, Math.min(1, x / w));
-    setParentVolume(pct);
-    parentVideoRef.current?.setVolumeAsync(pct).catch(() => {});
-  }, []);
-
-  const volumePan = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (e) => handleVolumeChange(e.nativeEvent.locationX),
-        onPanResponderMove: (e) => handleVolumeChange(e.nativeEvent.locationX),
-      }),
-    [handleVolumeChange],
-  );
-
   const capturePan = useMemo(
     () =>
       PanResponder.create({
@@ -554,7 +494,7 @@ export default function CameraScreen() {
 
   // ─── Helpers ──────────────────────────────────────────────────
 
-  const isReaction = !!reactingTo;
+
 
   const shortCountdown = (ms: number): string => {
     if (ms < 0) ms = 0;
@@ -664,29 +604,22 @@ export default function CameraScreen() {
           </Pressable>
         </View>
 
-        {/* ── Center pill: countdown for regular drops, reaction label for reactions ── */}
-        {isReaction ? (
-          <View style={styles.reactionPill}>
-            <Reply color={theme.accent} size={11} strokeWidth={2.5} />
-            <Text style={styles.countdownPillText}>Reaction</Text>
-          </View>
-        ) : (
-          <View style={styles.countdownPill}>
-            {win.isOpen ? (
-              <>
-                <View style={styles.liveDot} />
-                <Text style={styles.countdownPillTextLive}>LIVE</Text>
-              </>
-            ) : (
-              <>
-                <Clock color={theme.accent} size={11} />
-                <Text style={styles.countdownPillText}>
-                  Drop opens in {shortCountdown(win.msUntilOpen)}
-                </Text>
-              </>
-            )}
-          </View>
-        )}
+        {/* ── Center pill: countdown for regular drops ── */}
+        <View style={styles.countdownPill}>
+          {win.isOpen ? (
+            <>
+              <View style={styles.liveDot} />
+              <Text style={styles.countdownPillTextLive}>LIVE</Text>
+            </>
+          ) : (
+            <>
+              <Clock color={theme.accent} size={11} />
+              <Text style={styles.countdownPillText}>
+                Drop opens in {shortCountdown(win.msUntilOpen)}
+              </Text>
+            </>
+          )}
+        </View>
 
         <View style={styles.topSideRight}>
           <Pressable
@@ -712,81 +645,6 @@ export default function CameraScreen() {
           </Pressable>
         </View>
       </View>
-
-      {/* ── Reaction PIP: parent clip preview ── */}
-      {isReaction && parentPost && !isMerging && (
-        <View
-          style={[
-            styles.pipContainer,
-            { top: insets.top + 64 },
-          ]}
-          pointerEvents="box-none"
-        >
-          {/* PIP video card */}
-          <Pressable
-            onPress={toggleParentPlayback}
-            style={styles.pipCard}
-            accessibilityLabel={
-              parentPlaying ? "Pause parent clip" : "Play parent clip"
-            }
-          >
-            <Video
-              ref={parentVideoRef}
-              source={{ uri: parentPost.media_url }}
-              style={styles.pipVideo}
-              resizeMode={ResizeMode.COVER}
-              shouldPlay
-              isLooping
-              isMuted={false}
-              volume={parentVolume}
-            />
-            {/* Pause icon overlay */}
-            {!parentPlaying && (
-              <View style={styles.pipPauseOverlay}>
-                <Pause color="#fff" size={18} fill="rgba(255,255,255,0.9)" />
-              </View>
-            )}
-          </Pressable>
-
-          {/* Volume slider + label */}
-          <View style={styles.pipVolumeRow}>
-            <Volume2
-              color={
-                parentVolume === 0
-                  ? "rgba(255,255,255,0.25)"
-                  : "rgba(255,255,255,0.8)"
-              }
-              size={11}
-            />
-            <View
-              onLayout={(e) => {
-                volumeTrackWidthRef.current = e.nativeEvent.layout.width;
-              }}
-              style={styles.pipVolumeTrack}
-              {...volumePan.panHandlers}
-            >
-              <View
-                style={[
-                  styles.pipVolumeFill,
-                  { width: `${parentVolume * 100}%` as any },
-                ]}
-              />
-              <View
-                style={[
-                  styles.pipVolumeThumb,
-                  {
-                    left: `${parentVolume * 100}%` as any,
-                    marginLeft: -6,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-          <Text style={styles.pipHonestLabel}>
-            Heard while recording — mixing into your post coming soon
-          </Text>
-        </View>
-      )}
 
       {/* Recording hint */}
       {!isRecording && clips.length === 0 && (
@@ -1047,18 +905,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.06)",
   },
-  reactionPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: "rgba(10,10,10,0.5)",
-    borderWidth: 1,
-    borderColor: theme.accent + "30",
-  },
-
   countdownPillText: {
     color: "#fff",
     fontSize: 11,
@@ -1276,70 +1122,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // ── Reaction PIP ────────────────────────────────────────────────
-  pipContainer: {
-    position: "absolute",
-    right: 14,
-    width: 120,
-    zIndex: 15,
-    gap: 6,
-  },
-  pipCard: {
-    width: 120,
-    height: 213,
-    borderRadius: 10,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    backgroundColor: "rgba(10,10,10,0.55)",
-  },
-  pipVideo: {
-    width: "100%",
-    height: "100%",
-  },
-  pipPauseOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pipVolumeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 4,
-  },
-  pipVolumeTrack: {
-    flex: 1,
-    height: 20,
-    justifyContent: "center",
-  },
-  pipVolumeFill: {
-    position: "absolute",
-    left: 0,
-    top: 9,
-    height: 2,
-    backgroundColor: "rgba(255,255,255,0.7)",
-    borderRadius: 1,
-  },
-  pipVolumeThumb: {
-    position: "absolute",
-    top: 5,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#fff",
-  },
-  pipHonestLabel: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 8,
-    fontWeight: "500" as const,
-    textAlign: "center",
-    lineHeight: 11,
-    paddingHorizontal: 2,
-  },
 });
