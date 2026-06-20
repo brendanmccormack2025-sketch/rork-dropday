@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dimensions,
@@ -438,21 +438,42 @@ function ReactionSplitItem({
     reactionPost.profile?.username ||
     "dropper";
 
+  const parentVideoRef = useRef<Video>(null);
+  const reactionVideoRef = useRef<Video>(null);
+
+  // ── Resource cleanup & sync restart ──────────────────────────────────
+  // When inactive: videos unmount → native decoders/buffers released.
+  // When active: both mount fresh, sync to position 0 for frame-lock start.
+  useEffect(() => {
+    if (active) {
+      const timer = setTimeout(() => {
+        parentVideoRef.current?.setPositionAsync(0);
+        reactionVideoRef.current?.setPositionAsync(0);
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [active]);
+
   return (
     <View style={styles.item}>
       {/* ── Top: Parent clip (autoplay only, no controls) ──────────────── */}
       <View style={[styles.splitTop, { height: topHeight }]}>
         {parentPost.media_type === "video" ? (
-          <Video
-            source={{ uri: parentPost.media_url }}
-            style={StyleSheet.absoluteFill}
-            resizeMode={ResizeMode.COVER}
-            isLooping
-            shouldPlay={active}
-            isMuted={!active}
-            useNativeControls={false}
-            progressUpdateIntervalMillis={50}
-          />
+          active ? (
+            <Video
+              ref={parentVideoRef}
+              source={{ uri: parentPost.media_url }}
+              style={StyleSheet.absoluteFill}
+              resizeMode={ResizeMode.COVER}
+              isLooping
+              shouldPlay
+              isMuted={false}
+              useNativeControls={false}
+              progressUpdateIntervalMillis={50}
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: "#111" }]} />
+          )
         ) : (
           <Image
             source={{ uri: parentPost.media_url }}
@@ -480,16 +501,21 @@ function ReactionSplitItem({
       {/* ── Bottom: Reaction clip (autoplay only, no controls) ──────────── */}
       <View style={[styles.splitBottom, { height: bottomHeight }]}>
         {reactionPost.media_type === "video" ? (
-          <Video
-            source={{ uri: reactionPost.media_url }}
-            style={StyleSheet.absoluteFill}
-            resizeMode={ResizeMode.COVER}
-            isLooping
-            shouldPlay={active}
-            isMuted={!active}
-            useNativeControls={false}
-            progressUpdateIntervalMillis={50}
-          />
+          active ? (
+            <Video
+              ref={reactionVideoRef}
+              source={{ uri: reactionPost.media_url }}
+              style={StyleSheet.absoluteFill}
+              resizeMode={ResizeMode.COVER}
+              isLooping
+              shouldPlay
+              isMuted={false}
+              useNativeControls={false}
+              progressUpdateIntervalMillis={50}
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: "#111" }]} />
+          )
         ) : (
           <Image
             source={{ uri: reactionPost.media_url }}
