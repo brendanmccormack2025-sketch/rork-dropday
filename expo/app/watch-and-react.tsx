@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
   PanResponder,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -11,14 +12,30 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
-import { ArrowLeft, Play, Pause, RotateCcw, ArrowRight } from "lucide-react-native";
+import {
+  Video,
+  ResizeMode,
+  type AVPlaybackStatus,
+  type AVPlaybackStatusSuccess,
+} from "expo-av";
+import {
+  CameraView,
+  useCameraPermissions,
+  useMicrophonePermissions,
+} from "expo-camera";
+import * as Haptics from "expo-haptics";
+import { ArrowLeft, Play, Pause, RotateCcw, Circle, Square } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
+import { cacheDirectory, documentDirectory, getInfoAsync } from "@/lib/fileSystemCompat";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const SCRUB_BAR_HEIGHT = 40;
+const MAX_VIDEO_SECONDS = 300;
+
+/** Recording states for the unified watch-and-react screen */
+type ScreenState = "loading" | "watching" | "recording" | "processing";
 
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -27,59 +44,108 @@ function formatTime(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function triggerHaptic(style: Haptics.ImpactFeedbackStyle): void {
+  if (Platform.OS !== "web") {
+    Haptics.impactAsync(style).catch(() => {});
+  }
+}
+
 export default function WatchAndReactScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { postId } = useLocalSearchParams<{ postId: string }>();
 
+  // ── Parent post data ──────────────────────────────────────────────────────
   const [post, setPost] = useState<{
+    id: string;
     media_url: string;
     media_type: string;
     caption: string | null;
   } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [screenState, setScreenState] = useState<ScreenState>("loading");
 
-  // Playback
-  const videoRef = useRef<Video>(null);
+  // ── Permissions ───────────────────────────────────────────────────────────
+  const [camPermission, requestCamPermission] = useCameraPermissions();
+  const [micPermission, requestMicPermission] = useMicrophonePermissions();
+
+  // ── Parent video playback ─────────────────────────────────────────────────
+  const parentVideoRef = useRef<Video>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
   const [hasFinished, setHasFinished] = useState(false);
   const isPlayingRef = useRef(true);
   const scrubTrackWidthRef = useRef(SCREEN_W);
+  // Track whether the parent clip has been started at least once from the beginning
+  const parentStartedFromBeginning = useRef(false);
 
-  // ── Fetch post ──────────────────────────────────────────────────────────
+  // ── Camera recording ──────────────────────────────────────────────────────
+  const cameraRef = useRef<CameraView>(null);
+  const [camReady, setCamReady] = useState(false);
+  const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
+  const recordingStartTimeRef = useRef<number>(0);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordedUriRef = useRef<string | null>(null);
+  const [recordError, setRecordError] = useState<string | null>(null);
+  // Ref mirror of screenState so playback callback can read it without stale closures
+  const screenStateRef = useRef<ScreenState>("loading");
+  screenStateRef.current = screenState;
+
+  // ── Fetch parent post ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!postId) {
-      setFetchError("No post specified.");
-      setLoading(false);
+      setLoadError("No post specified.");
+      setScreenState("watching"); // will show error
       return;
     }
     supabase
       .from("posts")
-      .select("media_url, media_type, caption")
+      .select("id, media_url, media_type, caption")
       .eq("id", postId)
       .single()
       .then(({ data, error }) => {
-        if (error) {
-          console.error("[watch-and-react] Failed to fetch post:", error.message);
-          setFetchError("Could not load this clip.");
-        } else if (data) {
-          setPost(data as { media_url: string; media_type: string; caption: string | null });
+        if (error || !data) {
+          console.error("[watch-and-react] Failed to fetch post:", error?.message);
+          setLoadError("Could not load this clip.");
+          setScreenState("watching");
+        } else {
+          setPost(data as {
+            id: string;
+            media_url: string;
+            media_type: string;
+            caption: string | null;
+          });
+          setScreenState("watching");
         }
-        setLoading(false);
       });
   }, [postId]);
 
-  // ── Cleanup on unmount ─────────────────────────────────────────────────
+  // ── Cleanup on unmount ────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
-      videoRef.current?.unloadAsync().catch(() => {});
+      parentVideoRef.current?.unloadAsync().catch(() => {});
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     };
   }, []);
 
-  // ── Playback status ────────────────────────────────────────────────────
+  // ── Restart parent clip from beginning when screen first shows ────────────
+  useEffect(() => {
+    if (screenState === "watching" && post && !parentStartedFromBeginning.current) {
+      parentStartedFromBeginning.current = true;
+      // Small delay to ensure Video is mounted
+      const t = setTimeout(() => {
+        parentVideoRef.current?.setPositionAsync(0).catch(() => {});
+        parentVideoRef.current?.playAsync().catch(() => {});
+        setIsPlaying(true);
+        isPlayingRef.current = true;
+        setHasFinished(false);
+      }, 100);
+      return () => clearTimeout(t);
+    }
+  }, [screenState, post]);
+
+  // ── Playback status updates ──────────────────────────────────────────────
   const onPlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
     if (!status.isLoaded) return;
     setPositionMs(status.positionMillis);
@@ -87,18 +153,24 @@ export default function WatchAndReactScreen() {
       setDurationMs(status.durationMillis);
     }
     if (status.didJustFinish) {
-      setIsPlaying(false);
-      isPlayingRef.current = false;
-      setHasFinished(true);
+      const state = screenStateRef.current;
+      if (state === "watching") {
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+        setHasFinished(true);
+      } else if (state === "recording") {
+        // Parent clip ended during recording — auto-stop via the ref callback
+        stopRecordingRef.current?.();
+      }
     }
   }, []);
 
-  // ── Toggle play/pause ──────────────────────────────────────────────────
+  // ── Toggle play/pause (watching state only) ───────────────────────────────
   const togglePlayback = useCallback(() => {
+    if (screenState !== "watching") return;
     if (hasFinished) {
-      // Restart from beginning
-      videoRef.current?.setPositionAsync(0).then(() => {
-        videoRef.current?.playAsync().catch(() => {});
+      parentVideoRef.current?.setPositionAsync(0).then(() => {
+        parentVideoRef.current?.playAsync().catch(() => {});
       }).catch(() => {});
       setHasFinished(false);
       setIsPlaying(true);
@@ -107,59 +179,194 @@ export default function WatchAndReactScreen() {
       return;
     }
     if (isPlayingRef.current) {
-      videoRef.current?.pauseAsync().catch(() => {});
+      parentVideoRef.current?.pauseAsync().catch(() => {});
       setIsPlaying(false);
       isPlayingRef.current = false;
     } else {
-      videoRef.current?.playAsync().catch(() => {});
+      parentVideoRef.current?.playAsync().catch(() => {});
       setIsPlaying(true);
       isPlayingRef.current = true;
     }
-  }, [hasFinished]);
+  }, [screenState, hasFinished]);
 
-  // ── Replay ─────────────────────────────────────────────────────────────
+  // ── Replay ────────────────────────────────────────────────────────────────
   const handleReplay = useCallback(() => {
-    videoRef.current?.setPositionAsync(0).then(() => {
-      videoRef.current?.playAsync().catch(() => {});
+    if (screenState !== "watching") return;
+    parentVideoRef.current?.setPositionAsync(0).then(() => {
+      parentVideoRef.current?.playAsync().catch(() => {});
     }).catch(() => {});
     setHasFinished(false);
     setIsPlaying(true);
     isPlayingRef.current = true;
     setPositionMs(0);
-  }, []);
+  }, [screenState]);
 
-  // ── Scrub ──────────────────────────────────────────────────────────────
+  // ── Scrub ─────────────────────────────────────────────────────────────────
   const handleScrub = useCallback((x: number) => {
+    if (screenState !== "watching") return;
     if (durationMs <= 0) return;
     const pct = Math.max(0, Math.min(1, x / (scrubTrackWidthRef.current || SCREEN_W)));
     const targetMs = Math.round(pct * durationMs);
     setPositionMs(targetMs);
-    videoRef.current?.setPositionAsync(targetMs).catch(() => {});
+    parentVideoRef.current?.setPositionAsync(targetMs).catch(() => {});
     setHasFinished(false);
-  }, [durationMs]);
+  }, [screenState, durationMs]);
 
-  const scrubPan = PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: (e) => {
-      handleScrub(e.nativeEvent.locationX);
-    },
-    onPanResponderMove: (e) => {
-      handleScrub(e.nativeEvent.locationX);
-    },
-  });
+  const scrubPan = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => screenState === "watching",
+        onMoveShouldSetPanResponder: () => screenState === "watching",
+        onPanResponderGrant: (e) => {
+          handleScrub(e.nativeEvent.locationX);
+        },
+        onPanResponderMove: (e) => {
+          handleScrub(e.nativeEvent.locationX);
+        },
+      }),
+    [handleScrub, screenState],
+  );
 
   const progressPct = durationMs > 0 ? positionMs / durationMs : 0;
 
-  // ── Start Reacting ─────────────────────────────────────────────────────
-  const handleStartReacting = useCallback(() => {
-    // Pause the video before navigating so audio doesn't bleed
-    videoRef.current?.pauseAsync().catch(() => {});
-    router.push(`/camera?reactingTo=${postId}` as never);
-  }, [postId, router]);
+  // ── Start recording ──────────────────────────────────────────────────────
+  const handleStartRecording = useCallback(async () => {
+    if (screenState !== "watching") return;
 
-  // ── Loading / error states ──────────────────────────────────────────────
-  if (loading) {
+    // Ensure permissions
+    if (!camPermission?.granted) {
+      const res = await requestCamPermission();
+      if (!res.granted) {
+        setRecordError("Camera permission is required to record.");
+        return;
+      }
+    }
+    if (!micPermission?.granted) {
+      const res = await requestMicPermission();
+      if (!res.granted) {
+        setRecordError("Microphone permission is required to record.");
+        return;
+      }
+    }
+
+    // Restart parent clip from beginning for sync
+    parentVideoRef.current?.setPositionAsync(0).catch(() => {});
+    parentVideoRef.current?.playAsync().catch(() => {});
+    setIsPlaying(true);
+    isPlayingRef.current = true;
+    setHasFinished(false);
+    setPositionMs(0);
+
+    setScreenState("recording");
+    setRecordError(null);
+    recordedUriRef.current = null;
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
+
+    // Wait a tick for CameraView to mount, then start recording
+    setTimeout(async () => {
+      try {
+        if (!cameraRef.current) {
+          setRecordError("Camera not ready. Please try again.");
+          setScreenState("watching");
+          return;
+        }
+        recordingStartTimeRef.current = Date.now();
+        setRecordingElapsedMs(0);
+
+        // Start elapsed timer
+        recordingTimerRef.current = setInterval(() => {
+          setRecordingElapsedMs(Date.now() - recordingStartTimeRef.current);
+        }, 100);
+
+        const result = await cameraRef.current.recordAsync({
+          maxDuration: MAX_VIDEO_SECONDS,
+        });
+
+        // Recording finished (user stopped or max duration)
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+
+        if (result?.uri) {
+          recordedUriRef.current = result.uri;
+          console.log(`[watch-and-react] Recording saved: ${result.uri.slice(0, 60)}`);
+        } else {
+          console.warn("[watch-and-react] recordAsync returned no URI");
+        }
+
+        // Verify the file
+        if (recordedUriRef.current) {
+          const info = await getInfoAsync(recordedUriRef.current);
+          if (!info.exists || (info.size ?? 0) === 0) {
+            console.error("[watch-and-react] Recorded file is missing or empty");
+            setRecordError("Recording could not be saved. Please try again.");
+            recordedUriRef.current = null;
+          }
+        }
+
+        // Move to processing (stitching will be wired here later)
+        setScreenState("processing");
+      } catch (e) {
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        const msg = e instanceof Error ? e.message : "Recording failed.";
+        console.error("[watch-and-react] recordAsync error:", msg);
+        setRecordError(msg);
+        setScreenState("watching");
+        // Stop parent clip
+        parentVideoRef.current?.pauseAsync().catch(() => {});
+      }
+    }, 300);
+  }, [screenState, camPermission, micPermission, requestCamPermission, requestMicPermission]);
+
+  // ── Stop recording ────────────────────────────────────────────────────────
+  const handleStopRecording = useCallback(() => {
+    if (screenStateRef.current !== "recording") return;
+    try {
+      cameraRef.current?.stopRecording();
+    } catch {
+      // May already be stopped
+    }
+    // Pause parent clip
+    parentVideoRef.current?.pauseAsync().catch(() => {});
+  }, []);
+
+  // Stable ref for the stop function so the playback callback can call it
+  const stopRecordingRef = useRef<(() => void) | null>(null);
+  stopRecordingRef.current = handleStopRecording;
+
+  // ── Processing → navigate to editor ──────────────────────────────────────
+  // Stitching integration will be added here after layout review.
+  useEffect(() => {
+    if (screenState !== "processing") return;
+    if (!recordedUriRef.current || !postId) {
+      setRecordError("Recording was not saved. Please try again.");
+      setScreenState("watching");
+      return;
+    }
+
+    // For now (pre-stitching review): navigate to editor with just the
+    // reaction clip + reactingTo param. Stitching will be wired next.
+    const clip = {
+      id: `r_${Date.now()}`,
+      uri: recordedUriRef.current,
+      type: "video" as const,
+    };
+
+    router.replace({
+      pathname: "/edit",
+      params: {
+        clips: JSON.stringify([clip]),
+        reactingTo: postId,
+      },
+    });
+  }, [screenState, postId, router]);
+
+  // ── Loading state ─────────────────────────────────────────────────────────
+  if (screenState === "loading") {
     return (
       <View style={[styles.screen, styles.centered]}>
         <StatusBar style="light" />
@@ -169,14 +376,26 @@ export default function WatchAndReactScreen() {
     );
   }
 
-  if (fetchError || !post) {
+  // ── Error / no post ───────────────────────────────────────────────────────
+  if (loadError || !post) {
     return (
       <View style={[styles.screen, styles.centered]}>
         <StatusBar style="light" />
-        <Text style={styles.errorText}>{fetchError ?? "Clip not found."}</Text>
+        <Text style={styles.errorText}>{loadError ?? "Clip not found."}</Text>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backBtnText}>Go back</Text>
         </Pressable>
+      </View>
+    );
+  }
+
+  // ── Processing overlay ────────────────────────────────────────────────────
+  if (screenState === "processing") {
+    return (
+      <View style={[styles.screen, styles.centered]}>
+        <StatusBar style="light" />
+        <ActivityIndicator color={theme.accent} size="large" />
+        <Text style={styles.processingText}>Preparing your reaction…</Text>
       </View>
     );
   }
@@ -185,32 +404,58 @@ export default function WatchAndReactScreen() {
     <View style={styles.screen}>
       <StatusBar style="light" hidden />
 
-      {/* ── Full-screen video ────────────────────────────────────────── */}
-      <Pressable style={StyleSheet.absoluteFill} onPress={togglePlayback}>
-        {post.media_type === "video" ? (
-          <Video
-            ref={videoRef}
-            source={{ uri: post.media_url }}
-            style={StyleSheet.absoluteFill}
-            resizeMode={ResizeMode.CONTAIN}
-            shouldPlay={isPlaying}
-            isLooping={false}
-            isMuted={false}
-            onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-            progressUpdateIntervalMillis={100}
-          />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, styles.imagePlaceholder]}>
-            <Text style={styles.imageText}>Photo</Text>
-          </View>
-        )}
-      </Pressable>
+      {/* ── Parent clip: always mounted, plays audio during recording too ── */}
+      {post.media_type === "video" ? (
+        <Video
+          ref={parentVideoRef}
+          source={{ uri: post.media_url }}
+          style={[
+            StyleSheet.absoluteFill,
+            // Hide visually during recording but keep mounted for audio
+            screenState === "recording" && styles.hiddenVideo,
+          ]}
+          resizeMode={ResizeMode.CONTAIN}
+          shouldPlay={isPlaying || screenState === "recording"}
+          isLooping={false}
+          isMuted={false}
+          onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+          progressUpdateIntervalMillis={100}
+        />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, styles.imagePlaceholder]}>
+          <Text style={styles.imageText}>Photo</Text>
+        </View>
+      )}
 
-      {/* ── Top bar: back button ─────────────────────────────────────── */}
+      {/* ── Camera overlay during recording ─────────────────────────────── */}
+      {screenState === "recording" && (
+        <View style={StyleSheet.absoluteFill}>
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing="front"
+            mode="video"
+            mute={false}
+            mirror
+            videoQuality="1080p"
+            onCameraReady={() => setCamReady(true)}
+            onMountError={(e) => {
+              console.error("[watch-and-react] Camera mount error:", e?.message);
+              setRecordError("Camera failed to start.");
+              setScreenState("watching");
+            }}
+          />
+        </View>
+      )}
+
+      {/* ── Top bar: back button ────────────────────────────────────────── */}
       <SafeAreaView edges={["top"]} style={styles.topSafe}>
         <Pressable
           onPress={() => {
-            videoRef.current?.unloadAsync().catch(() => {});
+            if (screenState === "recording") {
+              handleStopRecording();
+            }
+            parentVideoRef.current?.unloadAsync().catch(() => {});
             router.back();
           }}
           style={styles.iconBtn}
@@ -221,12 +466,9 @@ export default function WatchAndReactScreen() {
         </Pressable>
       </SafeAreaView>
 
-      {/* ── Center play/pause overlay ─────────────────────────────────── */}
-      {(!isPlaying || hasFinished) && (
-        <Pressable
-          onPress={togglePlayback}
-          style={styles.centerOverlay}
-        >
+      {/* ── Center play/pause overlay (watching only) ────────────────────── */}
+      {screenState === "watching" && (!isPlaying || hasFinished) && (
+        <Pressable onPress={togglePlayback} style={styles.centerOverlay}>
           <View style={styles.playCircleLarge}>
             {hasFinished ? (
               <RotateCcw size={32} color="#fff" strokeWidth={2} />
@@ -237,59 +479,88 @@ export default function WatchAndReactScreen() {
         </Pressable>
       )}
 
-      {/* ── Bottom controls ───────────────────────────────────────────── */}
+      {/* ── Recording indicator ──────────────────────────────────────────── */}
+      {screenState === "recording" && (
+        <View style={[styles.recIndicator, { top: insets.top + 20 }]} pointerEvents="none">
+          <View style={styles.recDot} />
+          <Text style={styles.recText}>
+            REC {formatTime(recordingElapsedMs)}
+          </Text>
+        </View>
+      )}
+
+      {/* ── Recording error ──────────────────────────────────────────────── */}
+      {recordError && (
+        <View style={[styles.recErrorBanner, { top: insets.top + 60 }]} pointerEvents="none">
+          <Text style={styles.recErrorText}>{recordError}</Text>
+        </View>
+      )}
+
+      {/* ── Bottom controls ──────────────────────────────────────────────── */}
       <View
         style={[styles.bottomSection, { paddingBottom: insets.bottom + 12 }]}
         pointerEvents="box-none"
       >
-        {/* Caption */}
-        {post.caption ? (
+        {/* Caption (watching only) */}
+        {screenState === "watching" && post.caption ? (
           <Text style={styles.caption} numberOfLines={2}>
             {post.caption}
           </Text>
         ) : null}
 
-        {/* Scrub bar */}
-        <View style={styles.scrubRow}>
-          <Text style={styles.timeLabel}>{formatTime(positionMs)}</Text>
-          <View
-            style={styles.scrubTrack}
-            onLayout={(e) => {
-              scrubTrackWidthRef.current = e.nativeEvent.layout.width;
-            }}
-            {...scrubPan.panHandlers}
-          >
-            {/* Track background */}
-            <View style={styles.scrubTrackBg} />
-            {/* Progress fill */}
+        {/* Scrub bar (watching only) */}
+        {screenState === "watching" && (
+          <View style={styles.scrubRow}>
+            <Text style={styles.timeLabel}>{formatTime(positionMs)}</Text>
             <View
-              style={[
-                styles.scrubTrackFill,
-                { width: `${progressPct * 100}%` as any },
-              ]}
-            />
-            {/* Thumb */}
-            <View
-              style={[
-                styles.scrubThumb,
-                { left: `${progressPct * 100}%` as any, marginLeft: -6 },
-              ]}
-            />
+              style={styles.scrubTrack}
+              onLayout={(e) => {
+                scrubTrackWidthRef.current = e.nativeEvent.layout.width;
+              }}
+              {...scrubPan.panHandlers}
+            >
+              <View style={styles.scrubTrackBg} />
+              <View
+                style={[
+                  styles.scrubTrackFill,
+                  { width: `${progressPct * 100}%` as any },
+                ]}
+              />
+              <View
+                style={[
+                  styles.scrubThumb,
+                  { left: `${progressPct * 100}%` as any, marginLeft: -6 },
+                ]}
+              />
+            </View>
+            <Text style={styles.timeLabel}>{formatTime(durationMs)}</Text>
           </View>
-          <Text style={styles.timeLabel}>{formatTime(durationMs)}</Text>
-        </View>
+        )}
 
-        {/* Start Reacting button */}
-        <Pressable
-          onPress={handleStartReacting}
-          style={({ pressed }) => [
-            styles.reactBtn,
-            pressed && styles.reactBtnPressed,
-          ]}
-        >
-          <Text style={styles.reactBtnText}>Start Reacting</Text>
-          <ArrowRight color="#fff" size={18} strokeWidth={2.5} />
-        </Pressable>
+        {/* Record / Stop button */}
+        {screenState === "watching" ? (
+          <Pressable
+            onPress={handleStartRecording}
+            style={({ pressed }) => [
+              styles.recordBtn,
+              pressed && styles.recordBtnPressed,
+            ]}
+          >
+            <Circle color="#fff" size={22} fill="#fff" />
+            <Text style={styles.recordBtnText}>Record Reaction</Text>
+          </Pressable>
+        ) : screenState === "recording" ? (
+          <Pressable
+            onPress={handleStopRecording}
+            style={({ pressed }) => [
+              styles.stopBtn,
+              pressed && styles.stopBtnPressed,
+            ]}
+          >
+            <Square color="#fff" size={18} fill="#fff" />
+            <Text style={styles.stopBtnText}>Stop Recording</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -313,6 +584,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600" as const,
   },
+  processingText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 15,
+    fontWeight: "600" as const,
+  },
   errorText: {
     color: theme.danger,
     fontSize: 15,
@@ -330,6 +606,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700" as const,
   },
+  hiddenVideo: {
+    opacity: 0,
+  },
   imagePlaceholder: {
     alignItems: "center",
     justifyContent: "center",
@@ -341,6 +620,7 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
   },
 
+  /* Top bar */
   topSafe: {
     position: "absolute",
     top: 0,
@@ -361,6 +641,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.06)",
   },
 
+  /* Center play overlay */
   centerOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
@@ -378,6 +659,48 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.15)",
   },
 
+  /* Recording indicator */
+  recIndicator: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 6,
+    zIndex: 10,
+  },
+  recDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.danger,
+  },
+  recText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800" as const,
+    letterSpacing: 1.2,
+  },
+
+  /* Recording error */
+  recErrorBanner: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    alignItems: "center",
+    zIndex: 10,
+  },
+  recErrorText: {
+    color: theme.danger,
+    fontSize: 12,
+    fontWeight: "600" as const,
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowRadius: 6,
+  },
+
+  /* Bottom section */
   bottomSection: {
     position: "absolute",
     left: 0,
@@ -397,6 +720,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
 
+  /* Scrub bar */
   scrubRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -442,25 +766,51 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
 
-  reactBtn: {
+  /* Record button */
+  recordBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     paddingVertical: 15,
     borderRadius: 14,
-    backgroundColor: theme.accent,
-    shadowColor: theme.accent,
+    backgroundColor: theme.danger,
+    shadowColor: theme.danger,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
     shadowRadius: 12,
     elevation: 4,
   },
-  reactBtnPressed: {
+  recordBtnPressed: {
     opacity: 0.75,
   },
-  reactBtnText: {
+  recordBtnText: {
     color: "#fff",
+    fontSize: 16,
+    fontWeight: "800" as const,
+    letterSpacing: 0.3,
+  },
+
+  /* Stop button */
+  stopBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 15,
+    borderRadius: 14,
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  stopBtnPressed: {
+    opacity: 0.75,
+  },
+  stopBtnText: {
+    color: "#000",
     fontSize: 16,
     fontWeight: "800" as const,
     letterSpacing: 0.3,
