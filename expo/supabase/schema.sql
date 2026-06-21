@@ -18,6 +18,10 @@ grant select on public.follows to anon, authenticated;
 grant insert on public.follows to authenticated;
 grant delete on public.follows to authenticated;
 
+grant select on public.likes to anon, authenticated;
+grant insert on public.likes to authenticated;
+grant delete on public.likes to authenticated;
+
 -- ============================================================================
 -- 1. Profiles — keyed to Rork user IDs (text, NOT uuid)
 -- ============================================================================
