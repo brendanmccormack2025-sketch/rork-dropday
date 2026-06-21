@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Dimensions,
   PanResponder,
   Platform,
@@ -24,7 +25,8 @@ import {
   useMicrophonePermissions,
 } from "expo-camera";
 import * as Haptics from "expo-haptics";
-import { ArrowLeft, Play, Pause, RotateCcw, Circle, Square } from "lucide-react-native";
+import Svg, { Circle as SvgCircle } from "react-native-svg";
+import { ArrowLeft, Play, Pause, RotateCcw, Square } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
@@ -34,6 +36,15 @@ import { cacheDirectory, documentDirectory, getInfoAsync, downloadAsync, makeDir
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const SCRUB_BAR_HEIGHT = 40;
 const MAX_VIDEO_SECONDS = 300;
+
+// ── Capture ring constants (matching camera.tsx) ────────────────────────
+const RING_SIZE = 96;
+const RING_STROKE = 5;
+const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
+const RING_CIRC = 2 * Math.PI * RING_RADIUS;
+const RING_WRAP = RING_SIZE + 28;
+
+const AnimatedCircle = Animated.createAnimatedComponent(SvgCircle);
 
 /** Recording states for the unified watch-and-react screen */
 type ScreenState = "loading" | "watching" | "recording" | "processing";
@@ -83,6 +94,13 @@ export default function WatchAndReactScreen() {
 
   // ── Camera recording ──────────────────────────────────────────────────────
   const cameraRef = useRef<CameraView>(null);
+  /** Synchronous ref — TRUE source of truth for camera ready state.
+   *  React state (camReady) is derived from this and used for UI gating.
+   *  The ref is read by async callbacks; the state drives button disabled states. */
+  const cameraReadyRef = useRef<boolean>(false);
+  /** Resolves when onCameraReady fires — used by the recording start flow
+   *  to await camera readiness without spin-polling React state (stale closure). */
+  const cameraReadyResolveRef = useRef<(() => void) | null>(null);
   const [camReady, setCamReady] = useState(false);
   const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
   const recordingStartTimeRef = useRef<number>(0);
@@ -94,6 +112,11 @@ export default function WatchAndReactScreen() {
   // Ref mirror of screenState so playback callback can read it without stale closures
   const screenStateRef = useRef<ScreenState>("loading");
   screenStateRef.current = screenState;
+
+  // ── Ring animation (matching camera.tsx capture button) ─────────────────
+  const ringProgress = useRef(new Animated.Value(0)).current;
+  const buttonScale = useRef(new Animated.Value(1)).current;
+  const ringProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Fetch parent post ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -127,8 +150,11 @@ export default function WatchAndReactScreen() {
   // ── Cleanup on unmount ────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
+      cameraReadyRef.current = false;
+      try { cameraRef.current?.stopRecording(); } catch {}
       parentVideoRef.current?.unloadAsync().catch(() => {});
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (ringProgressIntervalRef.current) clearInterval(ringProgressIntervalRef.current);
     };
   }, []);
 
@@ -147,6 +173,54 @@ export default function WatchAndReactScreen() {
       return () => clearTimeout(t);
     }
   }, [screenState, post]);
+
+  // ── Ring progress animation (matching camera.tsx) ──────────────────────
+  useEffect(() => {
+    if (screenState === "recording") {
+      ringProgress.setValue(0);
+      ringProgressIntervalRef.current = setInterval(() => {
+        const segStart = recordingStartTimeRef.current ?? Date.now();
+        const elapsed = Date.now() - segStart;
+        const pct = Math.min(elapsed / (MAX_VIDEO_SECONDS * 1000), 1);
+        ringProgress.setValue(pct);
+      }, 50);
+      return () => {
+        if (ringProgressIntervalRef.current) {
+          clearInterval(ringProgressIntervalRef.current);
+          ringProgressIntervalRef.current = null;
+        }
+        ringProgress.setValue(0);
+      };
+    } else {
+      ringProgress.setValue(0);
+      if (ringProgressIntervalRef.current) {
+        clearInterval(ringProgressIntervalRef.current);
+        ringProgressIntervalRef.current = null;
+      }
+    }
+  }, [screenState, ringProgress]);
+
+  // ── Button scale animation (matching camera.tsx) ──────────────────────
+  useEffect(() => {
+    if (screenState === "recording") {
+      Animated.spring(buttonScale, {
+        toValue: 1.15,
+        useNativeDriver: true,
+        friction: 6,
+      }).start();
+    } else {
+      Animated.spring(buttonScale, {
+        toValue: 1,
+        useNativeDriver: true,
+        friction: 6,
+      }).start();
+    }
+  }, [screenState, buttonScale]);
+
+  const ringOffset = ringProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [RING_CIRC, 0],
+  });
 
   // ── Playback status updates ──────────────────────────────────────────────
   const onPlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
@@ -267,76 +341,107 @@ export default function WatchAndReactScreen() {
     recordedUriRef.current = null;
     triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
 
-    // Camera is pre-mounted — wait for onCameraReady if needed
-    if (!camReady) {
-      // Poll for camReady up to 5 seconds
-      const startWait = Date.now();
-      while (!camReady && Date.now() - startWait < 5000) {
-        await new Promise((r) => setTimeout(r, 100));
+    // Wait for the native camera session to be ready BEFORE calling
+    // recordAsync. Uses a ref+promise pattern (not React state polling)
+    // so the wait is never stale — same approach as useCameraRecorder.
+    if (!cameraReadyRef.current) {
+      console.log("[watch-and-react] Camera not ready — waiting for onCameraReady");
+      let timedOut = false;
+      try {
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            cameraReadyResolveRef.current = resolve;
+          }),
+          new Promise<void>((_, reject) =>
+            setTimeout(() => {
+              timedOut = true;
+              reject(new Error("timeout"));
+            }, 3000),
+          ),
+        ]);
+      } catch {
+        // Timeout or rejection
       }
-      if (!camReady) {
+      cameraReadyResolveRef.current = null;
+
+      if (timedOut || !cameraReadyRef.current) {
+        console.warn("[watch-and-react] Camera not ready before recordAsync — aborting");
         setRecordError("Camera not ready. Please try again.");
         setScreenState("watching");
+        parentVideoRef.current?.pauseAsync().catch(() => {});
         return;
       }
+      console.log("[watch-and-react] Camera ready — proceeding to recordAsync");
     }
 
     try {
-      if (!cameraRef.current) {
+      const cam = cameraRef.current;
+      if (!cam) {
         setRecordError("Camera not ready. Please try again.");
         setScreenState("watching");
+        parentVideoRef.current?.pauseAsync().catch(() => {});
         return;
       }
-        recordingStartTimeRef.current = Date.now();
-        setRecordingElapsedMs(0);
 
-        // Start elapsed timer
-        recordingTimerRef.current = setInterval(() => {
-          setRecordingElapsedMs(Date.now() - recordingStartTimeRef.current);
-        }, 100);
+      recordingStartTimeRef.current = Date.now();
+      setRecordingElapsedMs(0);
 
-        const result = await cameraRef.current.recordAsync({
-          maxDuration: MAX_VIDEO_SECONDS,
-        });
+      // Start elapsed timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingElapsedMs(Date.now() - recordingStartTimeRef.current);
+      }, 100);
 
-        // Recording finished (user stopped or max duration)
-        if (recordingTimerRef.current) {
-          clearInterval(recordingTimerRef.current);
-          recordingTimerRef.current = null;
-        }
+      console.log("[watch-and-react] Calling recordAsync...");
+      const result = await cam.recordAsync({
+        maxDuration: MAX_VIDEO_SECONDS,
+      });
 
-        if (result?.uri) {
-          recordedUriRef.current = result.uri;
-          console.log(`[watch-and-react] Recording saved: ${result.uri.slice(0, 60)}`);
-        } else {
-          console.warn("[watch-and-react] recordAsync returned no URI");
-        }
-
-        // Verify the file
-        if (recordedUriRef.current) {
-          const info = await getInfoAsync(recordedUriRef.current);
-          if (!info.exists || (info.size ?? 0) === 0) {
-            console.error("[watch-and-react] Recorded file is missing or empty");
-            setRecordError("Recording could not be saved. Please try again.");
-            recordedUriRef.current = null;
-          }
-        }
-
-        // Move to processing (stitching will be wired here later)
-        setScreenState("processing");
-      } catch (e) {
-        if (recordingTimerRef.current) {
-          clearInterval(recordingTimerRef.current);
-          recordingTimerRef.current = null;
-        }
-        const msg = e instanceof Error ? e.message : "Recording failed.";
-        console.error("[watch-and-react] recordAsync error:", msg);
-        setRecordError(msg);
-        setScreenState("watching");
-        // Stop parent clip
-        parentVideoRef.current?.pauseAsync().catch(() => {});
+      // Recording finished (user stopped or max duration)
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
       }
-  }, [screenState, camPermission, micPermission, requestCamPermission, requestMicPermission, camReady]);
+
+      if (result?.uri) {
+        recordedUriRef.current = result.uri;
+        console.log(`[watch-and-react] Recording saved: ${result.uri.slice(0, 60)}`);
+      } else {
+        console.warn("[watch-and-react] recordAsync returned no URI");
+      }
+
+      // Verify the file
+      if (recordedUriRef.current) {
+        const info = await getInfoAsync(recordedUriRef.current);
+        if (!info.exists || (info.size ?? 0) === 0) {
+          console.error("[watch-and-react] Recorded file is missing or empty");
+          setRecordError("Recording could not be saved. Please try again.");
+          recordedUriRef.current = null;
+        }
+      }
+
+      // Move to processing (stitching)
+      setScreenState("processing");
+    } catch (e) {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      // Log the FULL error object — not just message — to surface the real cause
+      const errAny = e as Record<string, unknown> | undefined;
+      console.error("[watch-and-react] recordAsync FAILED — FULL ERROR:", {
+        message: (e as Error)?.message,
+        name: (e as Error)?.name,
+        code: errAny?.code,
+        nativeError: errAny?.nativeError,
+        stack: (e as Error)?.stack?.slice(0, 300),
+      });
+      const msg = (e as Error)?.message ?? "Recording failed.";
+      setRecordError(msg);
+      setScreenState("watching");
+      // Stop parent clip
+      parentVideoRef.current?.pauseAsync().catch(() => {});
+    }
+  }, [screenState, camPermission, micPermission, requestCamPermission, requestMicPermission]);
 
   // ── Stop recording ────────────────────────────────────────────────────────
   const handleStopRecording = useCallback(() => {
@@ -517,8 +622,17 @@ export default function WatchAndReactScreen() {
             mute={false}
             mirror
             videoQuality="1080p"
-            onCameraReady={() => setCamReady(true)}
+            onCameraReady={() => {
+              cameraReadyRef.current = true;
+              setCamReady(true);
+              if (cameraReadyResolveRef.current) {
+                cameraReadyResolveRef.current();
+                cameraReadyResolveRef.current = null;
+              }
+              console.log("[watch-and-react] onCameraReady — camera session is live");
+            }}
             onMountError={(e) => {
+              cameraReadyRef.current = false;
               console.error("[watch-and-react] Camera mount error:", e?.message);
               setRecordError("Camera failed to start.");
               setScreenState("watching");
@@ -616,40 +730,91 @@ export default function WatchAndReactScreen() {
           </View>
         )}
 
-        {/* Record / Stop button */}
+        {/* Record / Stop button — circular SVG ring (matching camera.tsx) */}
         {screenState === "watching" ? (
-          <Pressable
-            onPress={handleStartRecording}
-            disabled={!camReady}
-            style={({ pressed }) => [
-              styles.recordBtn,
-              !camReady && styles.recordBtnDisabled,
-              pressed && styles.recordBtnPressed,
-            ]}
-          >
+          <View style={styles.captureRow}>
+            <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
+              <Pressable
+                onPress={handleStartRecording}
+                disabled={!camReady}
+                style={({ pressed }) => [
+                  styles.captureWrap,
+                  !camReady && { opacity: 0.4 },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Svg
+                  width={RING_WRAP}
+                  height={RING_WRAP}
+                  style={StyleSheet.absoluteFill}
+                >
+                  <SvgCircle
+                    cx={RING_WRAP / 2}
+                    cy={RING_WRAP / 2}
+                    r={RING_RADIUS}
+                    stroke="rgba(255,255,255,0.18)"
+                    strokeWidth={RING_STROKE}
+                    fill="transparent"
+                  />
+                </Svg>
+                <View style={styles.captureBtnInner}>
+                  {!camReady ? (
+                    <ActivityIndicator color="rgba(255,255,255,0.7)" size="small" />
+                  ) : (
+                    <View style={styles.captureBtnDot} />
+                  )}
+                </View>
+              </Pressable>
+            </Animated.View>
             {!camReady ? (
-              <>
-                <ActivityIndicator color="rgba(255,255,255,0.7)" size="small" />
-                <Text style={styles.recordBtnText}>Preparing camera…</Text>
-              </>
+              <Text style={styles.captureHint}>Preparing camera…</Text>
             ) : (
-              <>
-                <Circle color="#fff" size={22} fill="#fff" />
-                <Text style={styles.recordBtnText}>Record Reaction</Text>
-              </>
+              <Text style={styles.captureHint}>Tap to record reaction</Text>
             )}
-          </Pressable>
+          </View>
         ) : screenState === "recording" ? (
-          <Pressable
-            onPress={handleStopRecording}
-            style={({ pressed }) => [
-              styles.stopBtn,
-              pressed && styles.stopBtnPressed,
-            ]}
-          >
-            <Square color="#fff" size={18} fill="#fff" />
-            <Text style={styles.stopBtnText}>Stop Recording</Text>
-          </Pressable>
+          <View style={styles.captureRow}>
+            <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
+              <Pressable
+                onPress={handleStopRecording}
+                style={({ pressed }) => [
+                  styles.captureWrap,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Svg
+                  width={RING_WRAP}
+                  height={RING_WRAP}
+                  style={StyleSheet.absoluteFill}
+                >
+                  <SvgCircle
+                    cx={RING_WRAP / 2}
+                    cy={RING_WRAP / 2}
+                    r={RING_RADIUS}
+                    stroke="rgba(255,255,255,0.18)"
+                    strokeWidth={RING_STROKE}
+                    fill="transparent"
+                  />
+                  <AnimatedCircle
+                    cx={RING_WRAP / 2}
+                    cy={RING_WRAP / 2}
+                    r={RING_RADIUS}
+                    stroke={theme.accent}
+                    strokeWidth={RING_STROKE}
+                    strokeLinecap="round"
+                    fill="transparent"
+                    strokeDasharray={`${RING_CIRC}, ${RING_CIRC}`}
+                    strokeDashoffset={ringOffset}
+                    transform={`rotate(-90 ${RING_WRAP / 2} ${RING_WRAP / 2})`}
+                  />
+                </Svg>
+                <View style={[styles.captureBtnInner, styles.captureBtnInnerRecording]}>
+                  <Square color="#fff" size={22} fill="#fff" />
+                </View>
+              </Pressable>
+            </Animated.View>
+            <Text style={styles.captureHint}>Tap to stop</Text>
+          </View>
         ) : null}
       </View>
     </View>
@@ -860,56 +1025,47 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
 
-  /* Record button */
-  recordBtn: {
-    flexDirection: "row",
+  /* Capture button row (matching camera.tsx) */
+  captureRow: {
+    alignItems: "center",
+    gap: 10,
+  },
+  captureWrap: {
+    width: RING_WRAP,
+    height: RING_WRAP,
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingVertical: 15,
-    borderRadius: 14,
-    backgroundColor: theme.danger,
-    shadowColor: theme.danger,
+  },
+  captureBtnInner: {
+    width: RING_SIZE - 12,
+    height: RING_SIZE - 12,
+    borderRadius: (RING_SIZE - 12) / 2,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 3,
+    borderColor: "#fff",
+  },
+  captureBtnInnerRecording: {
+    borderColor: theme.accent,
+    backgroundColor: theme.accent,
+    shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowOpacity: 0.8,
+    shadowRadius: 16,
   },
-  recordBtnDisabled: {
-    opacity: 0.5,
-  },
-  recordBtnPressed: {
-    opacity: 0.75,
-  },
-  recordBtnText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "800" as const,
-    letterSpacing: 0.3,
-  },
-
-  /* Stop button */
-  stopBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 15,
-    borderRadius: 14,
+  captureBtnDot: {
+    width: RING_SIZE - 30,
+    height: RING_SIZE - 30,
+    borderRadius: (RING_SIZE - 30) / 2,
     backgroundColor: "#fff",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 4,
   },
-  stopBtnPressed: {
-    opacity: 0.75,
-  },
-  stopBtnText: {
-    color: "#000",
-    fontSize: 16,
-    fontWeight: "800" as const,
-    letterSpacing: 0.3,
+  captureHint: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 12,
+    fontWeight: "600" as const,
+    letterSpacing: 0.4,
+    textShadowColor: "rgba(0,0,0,0.6)",
+    textShadowRadius: 6,
   },
 });

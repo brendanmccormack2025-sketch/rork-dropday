@@ -1430,6 +1430,17 @@ export default function EditScreen() {
       setError(null);
       setSuccess(null);
 
+      // ── Pause the video IMMEDIATELY before any upload work begins ───
+      //    The editor loops the clip with audio, so playback must stop the
+      //    moment Post is tapped — otherwise audio keeps looping through the
+      //    entire copy+upload+post sequence (several seconds), causing echo.
+      setIsPlaying(false);
+      try {
+        videoRef.current?.pauseAsync();
+      } catch {
+        // Best-effort — continue with upload regardless
+      }
+
       const primary = clips[0]!;
 
       // ── 1. Copy all clip files to a stable permanent location ────────
@@ -1614,9 +1625,16 @@ export default function EditScreen() {
 
       setUploading(false);
 
-      setUploading(false);
+      // 4. Unload the editor video before navigating.
+      //    Playback was already paused at the start of executePost;
+      //    this just releases the player resource cleanly.
+      try {
+        videoRef.current?.unloadAsync();
+      } catch {
+        // Best-effort — navigation proceeds regardless
+      }
 
-      // 4. Navigate to the feed only on confirmed success.
+      // 5. Navigate to the feed only on confirmed success.
       console.log("[edit] executePost: Post confirmed valid (id:", newPost.id, ") — navigating to feed");
       try {
         if (router.canDismiss()) {
