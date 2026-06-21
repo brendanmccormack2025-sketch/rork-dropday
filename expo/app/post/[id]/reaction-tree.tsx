@@ -155,8 +155,18 @@ export default function ReactionTreeScreen() {
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const first = viewableItems[0];
-      if (first && typeof first.index === "number") {
-        setActiveIndex(first.index);
+      const firstIdx = first && typeof first.index === "number" ? first.index : null;
+      console.log("[reaction-tree] viewability changed", {
+        activeIndex: firstIdx,
+        viewableCount: viewableItems.length,
+        viewableIds: viewableItems.map((v) => ({
+          index: v.index,
+          id: (v.item as Post)?.id?.slice(0, 8),
+          isViewable: v.isViewable,
+        })),
+      });
+      if (firstIdx !== null) {
+        setActiveIndex(firstIdx);
       }
     },
   ).current;
@@ -360,6 +370,25 @@ function RootItem({
           isMuted={!active}
           useNativeControls={false}
           progressUpdateIntervalMillis={50}
+          onError={(error: string) => {
+            console.error("[reaction-tree] Video onError", {
+              postId: post.id,
+              media_url: post.media_url,
+              active,
+              isReaction: !!post.parent_post_id,
+              error,
+            });
+          }}
+          onLoad={(status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
+            console.log("[reaction-tree] Video onLoad", {
+              postId: post.id,
+              media_url: post.media_url,
+              active,
+              isReaction: !!post.parent_post_id,
+              durationMs: status.durationMillis,
+              uriUsed: status.uri,
+            });
+          }}
         />
       ) : (
         <Image
