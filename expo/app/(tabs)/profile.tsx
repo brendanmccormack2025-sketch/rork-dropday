@@ -36,7 +36,7 @@ const { width: SCREEN_W } = Dimensions.get("window");
 const GAP = 4;
 const COL_WIDTH = (SCREEN_W - 32 - GAP) / 2;
 
-type TabKey = "drops" | "reactions" | "drafts";
+type TabKey = "drops" | "reactions" | "likes" | "drafts";
 
 function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
   return (
@@ -72,6 +72,24 @@ function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
           ]}
         >
           Reactions
+        </Text>
+      </Pressable>
+      <Pressable
+        onPress={() => onTab("likes")}
+        style={[styles.tab, tab === "likes" && styles.tabActive]}
+      >
+        <Heart
+          color={tab === "likes" ? theme.accent : theme.textDim}
+          size={14}
+          strokeWidth={2}
+        />
+        <Text
+          style={[
+            styles.tabLabel,
+            tab === "likes" && styles.tabLabelActive,
+          ]}
+        >
+          Likes
         </Text>
       </Pressable>
       <Pressable
@@ -240,7 +258,7 @@ function ProfileHeader({
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
-  const { myPosts, myProfile, draftProjects, refetchMyPosts, refetchProfile } = usePosts();
+  const { myPosts, myProfile, likedPosts, likedPostsLoading, draftProjects, refetchMyPosts, refetchProfile, refetchLikedPosts } = usePosts();
   const qc = useQueryClient();
   const router = useRouter();
   const [tab, setTab] = useState<TabKey>("drops");
@@ -285,8 +303,8 @@ export default function ProfileScreen() {
   );
 
   const activePosts =
-    tab === "drops" ? drops : tab === "reactions" ? reactions : [];
-  const isDraftsTab = tab === "drafts";
+    tab === "drops" ? drops : tab === "reactions" ? reactions : tab === "likes" ? likedPosts : [];
+  const isGridTab = tab === "drafts" || tab === "likes";
 
   const headerNode = (
     <ProfileHeader
@@ -318,7 +336,7 @@ export default function ProfileScreen() {
   return (
     <View style={styles.root}>
       <SafeAreaView edges={["top"]} style={styles.safe}>
-        {isDraftsTab ? (
+        {isGridTab ? (
           <FlatList
             data={draftProjects}
             keyExtractor={(d) => d.id}
@@ -339,7 +357,16 @@ export default function ProfileScreen() {
             ListHeaderComponent={
               <>
                 {headerNode}
-                {draftProjects.length === 0 && (
+                {tab === "likes" && likedPosts.length === 0 && (
+                  <View style={styles.empty}>
+                    <Heart color={theme.textDim} size={40} strokeWidth={1.5} />
+                    <Text style={styles.emptyTitle}>No likes yet</Text>
+                    <Text style={styles.emptySub}>
+                      Posts you like will appear here.
+                    </Text>
+                  </View>
+                )}
+                {tab === "drafts" && draftProjects.length === 0 && (
                   <View style={styles.empty}>
                     <Save color={theme.textDim} size={40} strokeWidth={1.5} />
                     <Text style={styles.emptyTitle}>No drafts</Text>

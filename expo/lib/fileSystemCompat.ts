@@ -132,6 +132,21 @@ export async function writeAsStringAsync(
   return NativeFS.writeAsStringAsync(uri, contents, options);
 }
 
+// ── downloadAsync ────────────────────────────────────────────────────────────
+
+export async function downloadAsync(
+  url: string,
+  localUri: string,
+): Promise<NativeFS.FileSystemDownloadResult | undefined> {
+  if (Platform.OS === "web") {
+    throw new Error(
+      "File download is not available in the web preview. " +
+        "Use the iOS or Android app.",
+    );
+  }
+  return NativeFS.downloadAsync(url, localUri);
+}
+
 // ── deleteAsync ──────────────────────────────────────────────────────────────
 
 export async function deleteAsync(

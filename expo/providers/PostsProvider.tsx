@@ -19,6 +19,10 @@ export type Post = {
   media_type: "image" | "video";
   caption: string | null;
   parent_post_id: string | null;
+  /** Duration in ms of the original clip prepended before the reaction segment.
+   *  NULL for root drops. Set only on reaction posts that were stitched (original + reaction).
+   *  Players seek to this offset to start playback at the reaction segment. */
+  original_duration_ms: number | null;
   segments: string[] | null;
   audio_url: string | null;
   trim_data: { trimStartMs: number; trimEndMs: number }[] | null;
@@ -545,7 +549,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const res = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .order("created_at", { ascending: false })
@@ -566,6 +570,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         media_type: row.media_type as "image" | "video",
         caption: (row.caption as string | null) ?? null,
         parent_post_id: (row.parent_post_id as string | null) ?? null,
+        original_duration_ms: (row.original_duration_ms as number | null) ?? null,
         segments: (row.segments as string[] | null) ?? null,
         audio_url: (row.audio_url as string | null) ?? null,
         trim_data: (row.trim_data as Post["trim_data"]) ?? null,
@@ -589,7 +594,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       try {
         const { data, error } = await supabase
           .from("posts")
-          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)")
+          .select("id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)")
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(50);
@@ -604,6 +609,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           media_type: row.media_type as "image" | "video",
           caption: (row.caption as string | null) ?? null,
           parent_post_id: (row.parent_post_id as string | null) ?? null,
+          original_duration_ms: (row.original_duration_ms as number | null) ?? null,
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
@@ -645,7 +651,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
           )
           .gte("created_at", prevNightRange.start.toISOString())
           .lt("created_at", prevNightRange.end.toISOString())
@@ -662,6 +668,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           media_type: row.media_type as "image" | "video",
           caption: (row.caption as string | null) ?? null,
           parent_post_id: (row.parent_post_id as string | null) ?? null,
+          original_duration_ms: (row.original_duration_ms as number | null) ?? null,
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
@@ -680,7 +687,74 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
   });
 
-  // Reactions for a specific post — fetches all posts that have a parent_post_id
+  // Liked posts — fetches all posts the current user has liked
+  const likedPostsQuery = useQuery({
+    queryKey: ["posts", "liked", user?.id],
+    enabled: !!user?.id,
+    retry: 1,
+    queryFn: async (): Promise<Post[]> => {
+      if (!user?.id) return [];
+      try {
+        const { data: likeRows, error: likeErr } = await supabase
+          .from("likes")
+          .select("post_id")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(100);
+        if (likeErr || !likeRows?.length) return [];
+
+        const postIds = likeRows.map((r: { post_id: string }) => r.post_id);
+        const { data: postRows, error: postErr } = await supabase
+          .from("posts")
+          .select(
+            "id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+          )
+          .in("id", postIds);
+        if (postErr || !postRows) return [];
+
+        const idOrder = new Map(postIds.map((id, i) => [id, i]));
+        const posts: Post[] = (postRows as Record<string, unknown>[]).map((row) => ({
+          id: row.id as string,
+          user_id: row.user_id as string,
+          media_url: row.media_url as string,
+          media_type: row.media_type as "image" | "video",
+          caption: (row.caption as string | null) ?? null,
+          parent_post_id: (row.parent_post_id as string | null) ?? null,
+          original_duration_ms: (row.original_duration_ms as number | null) ?? null,
+          segments: (row.segments as string[] | null) ?? null,
+          audio_url: (row.audio_url as string | null) ?? null,
+          trim_data: (row.trim_data as Post["trim_data"]) ?? null,
+          thumbnail_url: (row.thumbnail_url as string | null) ?? null,
+          created_at: row.created_at as string,
+          like_count: (row.like_count as number | undefined) ?? 0,
+          comment_count: (row.comment_count as number | undefined) ?? 0,
+          reaction_count: (row.reaction_count as number | undefined) ?? 0,
+          profile: (row.profiles as Post["profile"]) ?? null,
+        }));
+        posts.sort((a, b) => (idOrder.get(a.id) ?? 999) - (idOrder.get(b.id) ?? 999));
+        return posts;
+      } catch (e) {
+        console.warn("[posts] liked network error", (e as Error)?.message ?? e);
+        return [];
+      }
+    },
+  });
+
+  // ── Like / Unlike mutations ───────────────────────────────────────────
+  const toggleLike = useMutation({
+    mutationFn: async ({ postId, liked }: { postId: string; liked: boolean }) => {
+      if (!user?.id) throw new Error("Not signed in.");
+      if (liked) {
+        await supabase.from("likes").insert({ user_id: user.id, post_id: postId });
+      } else {
+        await supabase.from("likes").delete().eq("user_id", user.id).eq("post_id", postId);
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["posts", "liked"] });
+    },
+  });
+
   // Suggested users — profiles NOT followed by current user (excluding self)
   const myProfileQuery = useQuery({
     queryKey: ["profile", user?.id],
@@ -830,7 +904,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
           )
           .not("parent_post_id", "is", null)
           .order("created_at", { ascending: false })
@@ -846,6 +920,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           media_type: row.media_type as "image" | "video",
           caption: (row.caption as string | null) ?? null,
           parent_post_id: (row.parent_post_id as string | null) ?? null,
+          original_duration_ms: (row.original_duration_ms as number | null) ?? null,
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
@@ -942,6 +1017,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         media_type: payload.mediaType,
         caption: payload.caption ?? null,
         parent_post_id: null,
+        original_duration_ms: null,
         segments: payload.segmentUris ?? null,
         audio_url: null,
         trim_data: payload.trimData ?? null,
@@ -1026,6 +1102,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       caption?: string;
       draftId?: string;
       parentPostId?: string;
+      originalDurationMs?: number;
       segmentUris?: string[];
       trimData?: Array<{ trimStartMs: number; trimEndMs: number }>;
       textOverlays?: TextOverlay[];
@@ -1165,6 +1242,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         parent_post_id: input.parentPostId || null,
         segments: segmentUrls,
       };
+      if (input.originalDurationMs != null) {
+        row.original_duration_ms = input.originalDurationMs;
+      }
       if (input.trimData && input.trimData.length > 0) {
         row.trim_data = input.trimData;
       }
@@ -1229,6 +1309,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         media_type: input.mediaType,
         caption: (input.caption?.trim() || null),
         parent_post_id: input.parentPostId || null,
+        original_duration_ms: input.originalDurationMs ?? null,
         segments: segmentUrls,
         audio_url: null,
         trim_data: input.trimData ?? null,
@@ -1391,6 +1472,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       saveDraftProject,
       deleteDraftProject,
       createPost,
+      likedPosts: likedPostsQuery.data ?? [],
+      likedPostsLoading: likedPostsQuery.isLoading,
+      refetchLikedPosts: likedPostsQuery.refetch,
+      toggleLike,
       reactionsByParent: allReactionsQuery.data ?? {},
       reactionsLoading: allReactionsQuery.isLoading,
       refetchReactions: allReactionsQuery.refetch,
@@ -1415,6 +1500,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       saveDraftProject,
       deleteDraftProject,
       createPost,
+      likedPostsQuery,
+      toggleLike,
       optimisticPosts,
       addOptimisticPost,
       retryOptimisticPost,

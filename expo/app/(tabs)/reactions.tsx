@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import {
   Dimensions,
   FlatList,
@@ -12,8 +12,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Heart, Sparkles } from "lucide-react-native";
-import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
+import { useFocusEffect } from "expo-router";
+import { Heart, Sparkles, Flame, MessageCircle } from "lucide-react-native";
+import { Video, ResizeMode } from "expo-av";
 
 import DropletLogo from "@/components/DropletLogo";
 import { FeedAvatar } from "@/components/Avatar";
@@ -23,42 +24,87 @@ import { usePosts, type Post } from "@/providers/PostsProvider";
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
 
+type SectionKey = "top_drops" | "top_reactions" | "most_reacted";
+
 export default function ReactionsScreen() {
-  const { reactionsByParent, reactionsLoading, refetchReactions } = usePosts();
+  const {
+    lastNightPosts,
+    lastNightLoading,
+    refetchLastNight,
+    reactionsByParent,
+    reactionsLoading,
+    refetchReactions,
+  } = usePosts();
+
+  const [section, setSection] = useState<SectionKey>("top_drops");
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refetchReactions();
+    await Promise.all([refetchLastNight(), refetchReactions()]);
     setRefreshing(false);
-  }, [refetchReactions]);
+  }, [refetchLastNight, refetchReactions]);
 
-  // Flatten grouped reactions into a sorted array
-  const reactions = useMemo<Post[]>(() => {
-    const flat: Post[] = [];
-    for (const key of Object.keys(reactionsByParent)) {
-      const group = reactionsByParent[key];
+  // Refetch on focus
+  useFocusEffect(
+    useCallback(() => {
+      refetchLastNight();
+      refetchReactions();
+    }, [refetchLastNight, refetchReactions])
+  );
+
+  // ── Derived data per section ──────────────────────────────────────────
+  const { topDrops, topReactions, mostReacted } = useMemo(() => {
+    // Top Drops: original posts from last night, ranked by like_count
+    const drops = (lastNightPosts ?? [])
+      .filter((p) => !p.parent_post_id)
+      .sort((a, b) => (b.like_count ?? 0) - (a.like_count ?? 0))
+      .slice(0, 50);
+
+    // Top Reactions: reactions from last night, ranked by like_count
+    const allReactions: Post[] = [];
+    for (const key of Object.keys(reactionsByParent ?? {})) {
+      const group = reactionsByParent![key];
       if (group) {
         for (const p of group) {
-          flat.push(p);
+          allReactions.push(p);
         }
       }
     }
-    flat.sort(
+    allReactions.sort(
       (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
-    return flat;
-  }, [reactionsByParent]);
+    const topReactions = allReactions
+      .sort((a, b) => (b.like_count ?? 0) - (a.like_count ?? 0))
+      .slice(0, 50);
 
+    // Most Reacted-To: original posts with highest reaction_count
+    const mostReacted = [...drops]
+      .sort((a, b) => (b.reaction_count ?? 0) - (a.reaction_count ?? 0))
+      .slice(0, 50);
+
+    return { topDrops: drops, topReactions, mostReacted };
+  }, [lastNightPosts, reactionsByParent]);
+
+  const activeData =
+    section === "top_drops"
+      ? topDrops
+      : section === "top_reactions"
+        ? topReactions
+        : mostReacted;
+
+  const isLoading = lastNightLoading || reactionsLoading;
+
+  // ── FlatList config ────────────────────────────────────────────────────
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const first = viewableItems[0];
       if (first && typeof first.index === "number") {
         setActiveIndex(first.index);
       }
-    },
+    }
   ).current;
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
@@ -69,24 +115,24 @@ export default function ReactionsScreen() {
       offset: SCREEN_H * index,
       index,
     }),
-    [],
+    []
   );
 
   const renderItem = useCallback(
     ({ item, index }: { item: Post; index: number }) => (
       <ReactionItem post={item} active={index === activeIndex} />
     ),
-    [activeIndex],
+    [activeIndex]
   );
 
   return (
     <View style={styles.root}>
       <FlatList
-        data={reactions}
+        data={activeData}
         keyExtractor={(p) => p.id}
         renderItem={renderItem}
         ListEmptyComponent={
-          reactionsLoading ? (
+          isLoading ? (
             <View style={styles.emptyWrap}>
               <Text style={styles.emptySub}>Loading…</Text>
             </View>
@@ -95,21 +141,24 @@ export default function ReactionsScreen() {
               <Sparkles color={theme.textDim} size={48} strokeWidth={1.5} />
               <Text style={styles.emptyTitle}>Nothing from last night</Text>
               <Text style={styles.emptySub}>
-                Video replies to drops will appear here. When someone reacts to
-                a drop, you'll see it here.
+                {section === "top_drops"
+                  ? "No drops were posted last night."
+                  : section === "top_reactions"
+                    ? "No reactions were posted last night."
+                    : "No posts received reactions last night."}
               </Text>
             </View>
           )
         }
         contentContainerStyle={
-          reactions.length === 0 ? styles.emptyContainer : undefined
+          activeData.length === 0 ? styles.emptyContainer : undefined
         }
         snapToInterval={SCREEN_H}
         snapToAlignment="start"
         decelerationRate="fast"
         bounces
         showsVerticalScrollIndicator={false}
-        getItemLayout={reactions.length > 0 ? getItemLayout : undefined}
+        getItemLayout={activeData.length > 0 ? getItemLayout : undefined}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         windowSize={3}
@@ -137,18 +186,92 @@ export default function ReactionsScreen() {
             <DropletLogo size={20} />
             <Text style={styles.brand}>Last Night</Text>
           </View>
-          {reactions.length > 0 && (
+          {activeData.length > 0 && (
             <View style={styles.countPill}>
               <Sparkles color={theme.accent} size={11} />
               <Text style={styles.countText}>
-                {reactions.length} clip{reactions.length !== 1 ? "s" : ""}
+                {activeData.length} clip{activeData.length !== 1 ? "s" : ""}
               </Text>
             </View>
           )}
         </View>
+
+        {/* Section pills */}
+        <View style={styles.sectionRow}>
+          <Pressable
+            onPress={() => {
+              setSection("top_drops");
+              setActiveIndex(0);
+            }}
+            style={[
+              styles.sectionPill,
+              section === "top_drops" && styles.sectionPillActive,
+            ]}
+          >
+            <Flame
+              color={section === "top_drops" ? "#fff" : theme.textDim}
+              size={12}
+              strokeWidth={2}
+            />
+            <Text
+              style={[
+                styles.sectionPillText,
+                section === "top_drops" && styles.sectionPillTextActive,
+              ]}
+            >
+              Top Drops
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setSection("top_reactions");
+              setActiveIndex(0);
+            }}
+            style={[
+              styles.sectionPill,
+              section === "top_reactions" && styles.sectionPillActive,
+            ]}
+          >
+            <MessageCircle
+              color={section === "top_reactions" ? "#fff" : theme.textDim}
+              size={12}
+              strokeWidth={2}
+            />
+            <Text
+              style={[
+                styles.sectionPillText,
+                section === "top_reactions" && styles.sectionPillTextActive,
+              ]}
+            >
+              Top Reactions
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setSection("most_reacted");
+              setActiveIndex(0);
+            }}
+            style={[
+              styles.sectionPill,
+              section === "most_reacted" && styles.sectionPillActive,
+            ]}
+          >
+            <Sparkles
+              color={section === "most_reacted" ? "#fff" : theme.textDim}
+              size={12}
+              strokeWidth={2}
+            />
+            <Text
+              style={[
+                styles.sectionPillText,
+                section === "most_reacted" && styles.sectionPillTextActive,
+              ]}
+            >
+              Most Reacted
+            </Text>
+          </Pressable>
+        </View>
       </SafeAreaView>
-
-
     </View>
   );
 }
@@ -158,6 +281,7 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const videoRef = useRef<Video>(null);
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
+  const isReaction = !!post.parent_post_id;
 
   // Reset liked state when post changes
   const postIdRef = useRef<string>(post.id);
@@ -168,8 +292,27 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
     setLiked(false);
   }, [post.id]);
 
-  const onPlaybackStatus = useCallback((status: AVPlaybackStatus) => {
-    // No-op — just needed for the Video component to function
+  // ── Offset-based seeking for reaction playback ──────────────────────
+  const hasSoughtRef = useRef(false);
+  useEffect(() => {
+    if (active && isReaction && post.original_duration_ms && post.original_duration_ms > 0) {
+      if (!hasSoughtRef.current) {
+        hasSoughtRef.current = true;
+        const t = setTimeout(() => {
+          videoRef.current?.setPositionAsync(post.original_duration_ms!).catch(() => {});
+        }, 120);
+        return () => clearTimeout(t);
+      }
+    } else if (!active) {
+      hasSoughtRef.current = false;
+    }
+  }, [active, isReaction, post.original_duration_ms]);
+
+  // Release resources on unmount
+  useEffect(() => {
+    return () => {
+      videoRef.current?.unloadAsync().catch(() => {});
+    };
   }, []);
 
   return (
@@ -185,7 +328,6 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
           isMuted={!active}
           useNativeControls={false}
           progressUpdateIntervalMillis={50}
-          onPlaybackStatusUpdate={onPlaybackStatus}
         />
       ) : (
         <Image
@@ -230,10 +372,7 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
       <View style={styles.bottom} pointerEvents="box-none">
         <View style={styles.userRow}>
           <View style={styles.avatar}>
-            <FeedAvatar
-              profile={post.profile}
-              name={name}
-            />
+            <FeedAvatar profile={post.profile} name={name} />
           </View>
           <Text style={styles.username}>
             @{post.profile?.username ?? "dropper"}
@@ -244,11 +383,21 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
             {post.caption}
           </Text>
         ) : null}
-        {/* Show what they're reacting to */}
-        <View style={styles.reactingToRow}>
-          <Sparkles color={theme.accent} size={11} />
-          <Text style={styles.reactingToText}>Reacted to this drop</Text>
-        </View>
+        {isReaction ? (
+          <View style={styles.reactingToRow}>
+            <Sparkles color={theme.accent} size={11} />
+            <Text style={styles.reactingToText}>Reacted to this drop</Text>
+          </View>
+        ) : (
+          <View style={styles.reactingToRow}>
+            <Sparkles color={theme.accent} size={11} />
+            <Text style={styles.reactingToText}>
+              {(post.reaction_count ?? 0) > 0
+                ? `${post.reaction_count} reaction${post.reaction_count !== 1 ? "s" : ""}`
+                : "Original drop"}
+            </Text>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -270,7 +419,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingTop: 4,
-    paddingBottom: 8,
+    paddingBottom: 4,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   brand: {
@@ -294,6 +443,37 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
     fontSize: 11,
     fontWeight: "700" as const,
+  },
+
+  /* Section pills */
+  sectionRow: {
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  sectionPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  sectionPillActive: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  sectionPillText: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: "700" as const,
+  },
+  sectionPillTextActive: {
+    color: "#fff",
   },
 
   /* Item */
@@ -348,11 +528,6 @@ const styles = StyleSheet.create({
     borderColor: theme.violet,
     overflow: "hidden",
   },
-  avatarText: {
-    color: "#fff",
-    fontWeight: "800" as const,
-    fontSize: 13,
-  },
   username: {
     color: "#fff",
     fontWeight: "800" as const,
@@ -399,6 +574,4 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 19,
   },
-
-
 });

@@ -15,7 +15,7 @@ import { Video, ResizeMode } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Heart, Sparkles, Reply } from "lucide-react-native";
+import { ArrowLeft, Heart, Sparkles, Reply, Rewind } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
@@ -65,6 +65,7 @@ export default function ReactionTreeScreen() {
           media_type: row.media_type as "image" | "video",
           caption: (row.caption as string | null) ?? null,
           parent_post_id: (row.parent_post_id as string | null) ?? null,
+          original_duration_ms: (row.original_duration_ms as number | null) ?? null,
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
@@ -167,22 +168,15 @@ export default function ReactionTreeScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item, index }: { item: Post; index: number }) => {
-      const parentPost =
-        index > 0 && item.parent_post_id
-          ? (posts.find((p) => p.id === item.parent_post_id) ?? null)
-          : null;
-      return (
-        <TreeItem
-          post={item}
-          active={index === activeIndex && screenFocused}
-          isRoot={index === 0}
-          replyingTo={replyingToMap.get(item.id)}
-          parentPost={parentPost}
-        />
-      );
-    },
-    [activeIndex, screenFocused, replyingToMap, posts],
+    ({ item, index }: { item: Post; index: number }) => (
+      <TreeItem
+        post={item}
+        active={index === activeIndex && screenFocused}
+        isRoot={index === 0}
+        replyingTo={replyingToMap.get(item.id)}
+      />
+    ),
+    [activeIndex, screenFocused, replyingToMap],
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -283,37 +277,18 @@ function TreeItem({
   active,
   isRoot,
   replyingTo,
-  parentPost,
 }: {
   post: Post;
   active: boolean;
   isRoot: boolean;
   replyingTo?: string;
-  parentPost?: Post | null;
 }) {
-  // Root Drop — full-screen, unchanged
-  if (isRoot) {
-    return <RootItem post={post} active={active} />;
-  }
-
-  // Reaction — split view (fall back to full-screen if parent data missing)
-  if (!parentPost) {
-    return (
-      <RootItem
-        post={post}
-        active={active}
-        replyingTo={replyingTo}
-        isRoot={false}
-      />
-    );
-  }
-
   return (
-    <ReactionSplitItem
-      parentPost={parentPost}
-      reactionPost={post}
+    <RootItem
+      post={post}
       active={active}
       replyingTo={replyingTo}
+      isRoot={isRoot}
     />
   );
 }
@@ -335,12 +310,36 @@ function RootItem({
   const videoRef = useRef<Video>(null);
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
+  const isReaction = !!post.parent_post_id;
+
+  // ── Offset-based seeking: when a reaction becomes active, seek to ────
+  //     the reaction segment (skip the prepended original clip).
+  const hasSoughtToReaction = useRef(false);
+  useEffect(() => {
+    if (active && isReaction && post.original_duration_ms && post.original_duration_ms > 0) {
+      if (!hasSoughtToReaction.current) {
+        hasSoughtToReaction.current = true;
+        const t = setTimeout(() => {
+          videoRef.current?.setPositionAsync(post.original_duration_ms!).catch(() => {});
+        }, 120);
+        return () => clearTimeout(t);
+      }
+    } else if (!active) {
+      hasSoughtToReaction.current = false;
+    }
+  }, [active, isReaction, post.original_duration_ms]);
 
   // Release native player resources on unmount
   useEffect(() => {
     return () => {
       videoRef.current?.unloadAsync().catch(() => {});
     };
+  }, []);
+
+  // ── Jump to source (seek back to start of original clip) ────────────
+  const handleJumpToSource = useCallback(() => {
+    videoRef.current?.setPositionAsync(0).catch(() => {});
+    hasSoughtToReaction.current = false;
   }, []);
 
   return (
@@ -428,166 +427,18 @@ function RootItem({
             {post.caption}
           </Text>
         ) : null}
-      </View>
-    </View>
-  );
-}
 
-// ── Reaction Split Item ─────────────────────────────────────────────────────
-
-function ReactionSplitItem({
-  parentPost,
-  reactionPost,
-  active,
-  replyingTo,
-}: {
-  parentPost: Post;
-  reactionPost: Post;
-  active: boolean;
-  replyingTo?: string;
-}) {
-  const topHeight = SCREEN_H * 0.58;
-  const bottomHeight = SCREEN_H * 0.42;
-  const reactionName =
-    reactionPost.profile?.display_name ||
-    reactionPost.profile?.username ||
-    "dropper";
-
-  const parentVideoRef = useRef<Video>(null);
-  const reactionVideoRef = useRef<Video>(null);
-
-  // ── Resource cleanup & sync restart ──────────────────────────────────
-  // When inactive: videos unmount → native decoders/buffers released.
-  // When active: both mount fresh, sync to position 0 for frame-lock start.
-  // On unmount (screen blur / navigation away): unloadAsync to stop audio.
-  useEffect(() => {
-    if (active) {
-      const timer = setTimeout(() => {
-        parentVideoRef.current?.setPositionAsync(0);
-        reactionVideoRef.current?.setPositionAsync(0);
-      }, 50);
-      return () => {
-        clearTimeout(timer);
-        parentVideoRef.current?.unloadAsync().catch(() => {});
-        reactionVideoRef.current?.unloadAsync().catch(() => {});
-      };
-    }
-    return () => {
-      parentVideoRef.current?.unloadAsync().catch(() => {});
-      reactionVideoRef.current?.unloadAsync().catch(() => {});
-    };
-  }, [active]);
-
-  return (
-    <View style={styles.item}>
-      {/* ── Top: Parent clip (autoplay only, no controls) ──────────────── */}
-      <View style={[styles.splitTop, { height: topHeight }]}>
-        {parentPost.media_type === "video" ? (
-          active ? (
-            <Video
-              ref={parentVideoRef}
-              source={{ uri: parentPost.media_url }}
-              style={StyleSheet.absoluteFill}
-              resizeMode={ResizeMode.COVER}
-              isLooping
-              shouldPlay
-              isMuted={false}
-              volume={0.35}
-              useNativeControls={false}
-              progressUpdateIntervalMillis={50}
-            />
-          ) : (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: "#111" }]} />
-          )
-        ) : (
-          <Image
-            source={{ uri: parentPost.media_url }}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-            transition={150}
-          />
+        {/* Jump to Source button — shown only on reaction posts that have been stitched */}
+        {isReaction && post.original_duration_ms && post.original_duration_ms > 0 && (
+          <Pressable
+            onPress={handleJumpToSource}
+            style={styles.jumpSourceBtn}
+            hitSlop={8}
+          >
+            <Rewind color={theme.accent} size={13} strokeWidth={2.5} />
+            <Text style={styles.jumpSourceText}>View Original</Text>
+          </Pressable>
         )}
-
-        <LinearGradient
-          colors={["rgba(0,0,0,0.45)", "transparent"]}
-          style={styles.splitGradTop}
-          pointerEvents="none"
-        />
-        <LinearGradient
-          colors={["transparent", "rgba(0,0,0,0.7)"]}
-          style={styles.splitGradBottom}
-          pointerEvents="none"
-        />
-      </View>
-
-      {/* ── Divider ──────────────────────────────────────────────────────── */}
-      <View style={styles.splitDivider} />
-
-      {/* ── Bottom: Reaction clip (autoplay only, no controls) ──────────── */}
-      <View style={[styles.splitBottom, { height: bottomHeight }]}>
-        {reactionPost.media_type === "video" ? (
-          active ? (
-            <Video
-              ref={reactionVideoRef}
-              source={{ uri: reactionPost.media_url }}
-              style={StyleSheet.absoluteFill}
-              resizeMode={ResizeMode.COVER}
-              isLooping
-              shouldPlay
-              isMuted={false}
-              volume={1.0}
-              useNativeControls={false}
-              progressUpdateIntervalMillis={50}
-            />
-          ) : (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: "#111" }]} />
-          )
-        ) : (
-          <Image
-            source={{ uri: reactionPost.media_url }}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-            transition={150}
-          />
-        )}
-
-        <LinearGradient
-          colors={["rgba(0,0,0,0.45)", "transparent"]}
-          style={styles.splitGradTop}
-          pointerEvents="none"
-        />
-        <LinearGradient
-          colors={["transparent", "rgba(0,0,0,0.85)"]}
-          style={styles.splitGradBottom}
-          pointerEvents="none"
-        />
-
-        {/* Bottom info — reaction author */}
-        <View style={styles.splitInfo} pointerEvents="box-none">
-          {replyingTo && (
-            <View style={styles.replyingRow}>
-              <Reply color={theme.accent} size={11} strokeWidth={2.5} />
-              <Text style={styles.replyingText}>
-                replying to @{replyingTo}
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.userRow}>
-            <View style={styles.avatar}>
-              <FeedAvatar profile={reactionPost.profile} name={reactionName} />
-            </View>
-            <Text style={styles.username}>
-              @{reactionPost.profile?.username ?? "dropper"}
-            </Text>
-          </View>
-
-          {reactionPost.caption ? (
-            <Text style={styles.caption} numberOfLines={2}>
-              {reactionPost.caption}
-            </Text>
-          ) : null}
-        </View>
       </View>
     </View>
   );
@@ -734,6 +585,26 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
 
+  /* Jump to Source button */
+  jumpSourceBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: "rgba(10,132,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(10,132,255,0.2)",
+    alignSelf: "flex-start",
+  },
+  jumpSourceText: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: "700" as const,
+  },
+
   /* React button */
   reactSafe: {
     position: "absolute",
@@ -770,44 +641,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800" as const,
     letterSpacing: 0.2,
-  },
-
-  /* Split view */
-  splitTop: {
-    width: SCREEN_W,
-    overflow: "hidden",
-    backgroundColor: "#000",
-  },
-  splitBottom: {
-    width: SCREEN_W,
-    overflow: "hidden",
-    backgroundColor: "#000",
-  },
-  splitDivider: {
-    width: SCREEN_W,
-    height: 1,
-    backgroundColor: "rgba(255,255,255,0.12)",
-  },
-  splitGradTop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 80,
-  },
-  splitGradBottom: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 120,
-  },
-  splitInfo: {
-    position: "absolute",
-    left: 16,
-    right: 80,
-    bottom: 130,
-    gap: 6,
   },
 
 });

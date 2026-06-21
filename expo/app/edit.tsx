@@ -104,11 +104,13 @@ export default function EditScreen() {
     videoUrl: nativeVideoUrl,
     draftId,
     reactingTo,
+    originalDurationMs,
   } = useLocalSearchParams<{
     clips: string;
     videoUrl?: string;
     draftId?: string;
     reactingTo?: string;
+    originalDurationMs?: string;
   }>();
 
   // ── Debug: log what params the edit screen received ─────────────────────
@@ -1559,6 +1561,7 @@ export default function EditScreen() {
           mediaType: stablePrimary.type,
           draftId: draftId ?? undefined,
           parentPostId: reactingTo || undefined,
+          originalDurationMs: originalDurationMs ? parseInt(originalDurationMs, 10) || undefined : undefined,
           segmentUris,
           trimData,
           textOverlays: overlaysForPost,

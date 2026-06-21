@@ -73,11 +73,13 @@ alter table public.posts add column if not exists audio_url text;
 alter table public.posts add column if not exists trim_data jsonb;
 alter table public.posts add column if not exists text_overlays jsonb;
 alter table public.posts add column if not exists thumbnail_url text;
+alter table public.posts add column if not exists original_duration_ms integer;
 
 -- Indexes
 create index if not exists posts_created_at_idx on public.posts (created_at desc);
 create index if not exists posts_user_id_idx on public.posts (user_id);
 create index if not exists posts_parent_post_id_idx on public.posts (parent_post_id);
+create index if not exists posts_original_duration_ms_idx on public.posts (original_duration_ms);
 
 alter table public.posts enable row level security;
 
@@ -121,7 +123,34 @@ create policy "users can delete their own follows"
   on public.follows for delete using (user_id() = follower_id);
 
 -- ============================================================================
--- 4. Storage bucket for media
+-- 4. Likes — tracks which posts a user has liked
+-- ============================================================================
+create table if not exists public.likes (
+  user_id text not null references public.profiles(id) on delete cascade,
+  post_id uuid not null references public.posts(id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (user_id, post_id)
+);
+
+create index if not exists likes_user_id_idx on public.likes (user_id);
+create index if not exists likes_post_id_idx on public.likes (post_id);
+
+alter table public.likes enable row level security;
+
+drop policy if exists "likes are readable by everyone" on public.likes;
+create policy "likes are readable by everyone"
+  on public.likes for select using (true);
+
+drop policy if exists "users can insert their own likes" on public.likes;
+create policy "users can insert their own likes"
+  on public.likes for insert with check (user_id() = user_id);
+
+drop policy if exists "users can delete their own likes" on public.likes;
+create policy "users can delete their own likes"
+  on public.likes for delete using (user_id() = user_id);
+
+-- ============================================================================
+-- 5. Storage bucket for media
 -- ============================================================================
 insert into storage.buckets (id, name, public)
 values ('drops', 'drops', true)

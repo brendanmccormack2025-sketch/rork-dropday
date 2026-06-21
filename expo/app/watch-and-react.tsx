@@ -28,7 +28,8 @@ import { ArrowLeft, Play, Pause, RotateCcw, Circle, Square } from "lucide-react-
 
 import { theme } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
-import { cacheDirectory, documentDirectory, getInfoAsync } from "@/lib/fileSystemCompat";
+import { concatMP4Files } from "@/lib/concatMP4";
+import { cacheDirectory, documentDirectory, getInfoAsync, downloadAsync, makeDirectoryAsync } from "@/lib/fileSystemCompat";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 const SCRUB_BAR_HEIGHT = 40;
@@ -88,6 +89,8 @@ export default function WatchAndReactScreen() {
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordedUriRef = useRef<string | null>(null);
   const [recordError, setRecordError] = useState<string | null>(null);
+  // Track parent duration for offset-based playback in reaction feeds
+  const parentDurationMsRef = useRef<number>(0);
   // Ref mirror of screenState so playback callback can read it without stale closures
   const screenStateRef = useRef<ScreenState>("loading");
   screenStateRef.current = screenState;
@@ -151,6 +154,8 @@ export default function WatchAndReactScreen() {
     setPositionMs(status.positionMillis);
     if (status.durationMillis && status.durationMillis > 0) {
       setDurationMs(status.durationMillis);
+      // Track the parent clip's full duration for offset-based reaction playback
+      parentDurationMsRef.current = status.durationMillis;
     }
     if (status.didJustFinish) {
       const state = screenStateRef.current;
@@ -262,14 +267,26 @@ export default function WatchAndReactScreen() {
     recordedUriRef.current = null;
     triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
 
-    // Wait a tick for CameraView to mount, then start recording
-    setTimeout(async () => {
-      try {
-        if (!cameraRef.current) {
-          setRecordError("Camera not ready. Please try again.");
-          setScreenState("watching");
-          return;
-        }
+    // Camera is pre-mounted — wait for onCameraReady if needed
+    if (!camReady) {
+      // Poll for camReady up to 5 seconds
+      const startWait = Date.now();
+      while (!camReady && Date.now() - startWait < 5000) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (!camReady) {
+        setRecordError("Camera not ready. Please try again.");
+        setScreenState("watching");
+        return;
+      }
+    }
+
+    try {
+      if (!cameraRef.current) {
+        setRecordError("Camera not ready. Please try again.");
+        setScreenState("watching");
+        return;
+      }
         recordingStartTimeRef.current = Date.now();
         setRecordingElapsedMs(0);
 
@@ -319,8 +336,7 @@ export default function WatchAndReactScreen() {
         // Stop parent clip
         parentVideoRef.current?.pauseAsync().catch(() => {});
       }
-    }, 300);
-  }, [screenState, camPermission, micPermission, requestCamPermission, requestMicPermission]);
+  }, [screenState, camPermission, micPermission, requestCamPermission, requestMicPermission, camReady]);
 
   // ── Stop recording ────────────────────────────────────────────────────────
   const handleStopRecording = useCallback(() => {
@@ -338,8 +354,7 @@ export default function WatchAndReactScreen() {
   const stopRecordingRef = useRef<(() => void) | null>(null);
   stopRecordingRef.current = handleStopRecording;
 
-  // ── Processing → navigate to editor ──────────────────────────────────────
-  // Stitching integration will be added here after layout review.
+  // ── Processing → stitch parent + reaction, then navigate to editor ───
   useEffect(() => {
     if (screenState !== "processing") return;
     if (!recordedUriRef.current || !postId) {
@@ -348,22 +363,79 @@ export default function WatchAndReactScreen() {
       return;
     }
 
-    // For now (pre-stitching review): navigate to editor with just the
-    // reaction clip + reactingTo param. Stitching will be wired next.
-    const clip = {
-      id: `r_${Date.now()}`,
-      uri: recordedUriRef.current,
-      type: "video" as const,
-    };
+    let cancelled = false;
 
-    router.replace({
-      pathname: "/edit",
-      params: {
-        clips: JSON.stringify([clip]),
-        reactingTo: postId,
-      },
-    });
-  }, [screenState, postId, router]);
+    (async () => {
+      try {
+        const reactionUri = recordedUriRef.current!;
+        const parentDurationMs = parentDurationMsRef.current;
+
+        // Create output directory
+        const outDir = `${documentDirectory}stitched/`;
+        await makeDirectoryAsync(outDir, { intermediates: true }).catch(() => {});
+        const stitchedUri = `${outDir}reaction_${Date.now()}.mp4`;
+
+        // Download the parent clip to a local file
+        console.log("[watch-and-react] Downloading parent clip for stitching...");
+        const parentLocalUri = `${documentDirectory}parent_${Date.now()}.mp4`;
+        const downloadResult = await downloadAsync(post!.media_url, parentLocalUri);
+        if (!downloadResult || downloadResult.status !== 200) {
+          throw new Error("Failed to download parent clip for stitching.");
+        }
+
+        if (cancelled) return;
+
+        // Concatenate: parent first, then reaction
+        console.log("[watch-and-react] Stitching parent + reaction...");
+        await concatMP4Files([parentLocalUri, reactionUri], stitchedUri);
+
+        if (cancelled) return;
+
+        console.log(`[watch-and-react] Stitched video ready: ${stitchedUri.slice(0, 60)}`);
+        console.log(`[watch-and-react] Parent duration: ${parentDurationMs}ms — reaction starts at this offset`);
+
+        const clip = {
+          id: `r_${Date.now()}`,
+          uri: stitchedUri,
+          type: "video" as const,
+        };
+
+        router.replace({
+          pathname: "/edit",
+          params: {
+            clips: JSON.stringify([clip]),
+            reactingTo: postId,
+            originalDurationMs: String(parentDurationMs),
+          },
+        });
+      } catch (stitchErr) {
+        if (cancelled) return;
+        const msg = stitchErr instanceof Error ? stitchErr.message : "Stitching failed.";
+        console.error("[watch-and-react] Stitch error:", msg);
+
+        // Graceful fallback: post the solo reaction clip with parent_post_id set
+        console.log("[watch-and-react] Falling back to solo reaction clip...");
+        const clip = {
+          id: `r_${Date.now()}`,
+          uri: recordedUriRef.current!,
+          type: "video" as const,
+        };
+
+        router.replace({
+          pathname: "/edit",
+          params: {
+            clips: JSON.stringify([clip]),
+            reactingTo: postId,
+            originalDurationMs: "0",
+          },
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [screenState, postId, router, post]);
 
   // ── Loading state ─────────────────────────────────────────────────────────
   if (screenState === "loading") {
@@ -427,9 +499,16 @@ export default function WatchAndReactScreen() {
         </View>
       )}
 
-      {/* ── Camera overlay during recording ─────────────────────────────── */}
-      {screenState === "recording" && (
-        <View style={StyleSheet.absoluteFill}>
+      {/* ── Camera: pre-mounted hidden during watching so it's ready ──── */}
+      {/*     when the user taps Record. Gated on camReady for recordAsync. */}
+      {(screenState === "watching" || screenState === "recording") && (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            screenState === "watching" && styles.cameraHidden,
+          ]}
+          pointerEvents={screenState === "watching" ? "none" : "auto"}
+        >
           <CameraView
             ref={cameraRef}
             style={StyleSheet.absoluteFill}
@@ -541,13 +620,24 @@ export default function WatchAndReactScreen() {
         {screenState === "watching" ? (
           <Pressable
             onPress={handleStartRecording}
+            disabled={!camReady}
             style={({ pressed }) => [
               styles.recordBtn,
+              !camReady && styles.recordBtnDisabled,
               pressed && styles.recordBtnPressed,
             ]}
           >
-            <Circle color="#fff" size={22} fill="#fff" />
-            <Text style={styles.recordBtnText}>Record Reaction</Text>
+            {!camReady ? (
+              <>
+                <ActivityIndicator color="rgba(255,255,255,0.7)" size="small" />
+                <Text style={styles.recordBtnText}>Preparing camera…</Text>
+              </>
+            ) : (
+              <>
+                <Circle color="#fff" size={22} fill="#fff" />
+                <Text style={styles.recordBtnText}>Record Reaction</Text>
+              </>
+            )}
           </Pressable>
         ) : screenState === "recording" ? (
           <Pressable
@@ -608,6 +698,10 @@ const styles = StyleSheet.create({
   },
   hiddenVideo: {
     opacity: 0,
+  },
+  cameraHidden: {
+    opacity: 0,
+    zIndex: -1,
   },
   imagePlaceholder: {
     alignItems: "center",
@@ -780,6 +874,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 12,
     elevation: 4,
+  },
+  recordBtnDisabled: {
+    opacity: 0.5,
   },
   recordBtnPressed: {
     opacity: 0.75,
