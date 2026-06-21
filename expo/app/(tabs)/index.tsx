@@ -17,6 +17,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { useFocusEffect, useRouter } from "expo-router";
+import { useVideoFocus } from "@/hooks/useVideoFocus";
 import {
   Heart,
   Music2,
@@ -48,6 +49,7 @@ export default function FeedScreen() {
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sharePost, setSharePost] = useState<Post | null>(null);
+  const screenFocused = useVideoFocus();
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -115,7 +117,7 @@ export default function FeedScreen() {
     ({ item, index }: { item: Post; index: number }) => (
       <FeedItem
         post={item}
-        active={index === activeIndex}
+        active={index === activeIndex && screenFocused}
         live={win.isOpen}
         onShare={() => setSharePost(item)}
         onReactions={() => router.push(`/post/${item.id}/reaction-tree` as never)}

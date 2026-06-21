@@ -16,6 +16,8 @@ import { useFocusEffect } from "expo-router";
 import { Heart, Sparkles, Flame, MessageCircle } from "lucide-react-native";
 import { Video, ResizeMode } from "expo-av";
 
+import { useVideoFocus } from "@/hooks/useVideoFocus";
+
 import DropletLogo from "@/components/DropletLogo";
 import { FeedAvatar } from "@/components/Avatar";
 import { theme } from "@/constants/theme";
@@ -39,6 +41,7 @@ export default function ReactionsScreen() {
   const [section, setSection] = useState<SectionKey>("top_drops");
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const screenFocused = useVideoFocus();
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -120,7 +123,7 @@ export default function ReactionsScreen() {
 
   const renderItem = useCallback(
     ({ item, index }: { item: Post; index: number }) => (
-      <ReactionItem post={item} active={index === activeIndex} />
+      <ReactionItem post={item} active={index === activeIndex && screenFocused} />
     ),
     [activeIndex]
   );
