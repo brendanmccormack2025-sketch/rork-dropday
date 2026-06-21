@@ -22,7 +22,7 @@ import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
-import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync } from "@/lib/fileSystemCompat";
+import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync, downloadAsync } from "@/lib/fileSystemCompat";
 import * as Haptics from "expo-haptics";
 import {
   Play,
@@ -38,6 +38,7 @@ import {
 } from "lucide-react-native";
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
+import { concatMP4Files } from "@/lib/concatMP4";
 import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/constants/theme";
@@ -97,7 +98,7 @@ export default function EditScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, session } = useAuth();
-  const { createPost, saveDraftProject, deleteDraftProject, draftProjects, draftsLoaded, addOptimisticPost } =
+  const { createPost, saveDraftProject, deleteDraftProject, draftProjects, draftsLoaded, addOptimisticPost, updateOptimisticProgress } =
     usePosts();
   const {
     clips: clipsJson,
@@ -1429,11 +1430,9 @@ export default function EditScreen() {
       console.log("[edit] executePost: starting optimistic post with", clips.length, "clip(s)");
       setError(null);
       setSuccess(null);
+      setUploading(true);
 
       // ── Pause the video IMMEDIATELY before any upload work begins ───
-      //    The editor loops the clip with audio, so playback must stop the
-      //    moment Post is tapped — otherwise audio keeps looping through the
-      //    entire copy+upload+post sequence (several seconds), causing echo.
       setIsPlaying(false);
       try {
         videoRef.current?.pauseAsync();
@@ -1444,8 +1443,6 @@ export default function EditScreen() {
       const primary = clips[0]!;
 
       // ── 1. Copy all clip files to a stable permanent location ────────
-      //    The draft directory may be cleaned up during/after upload, so we
-      //    must copy files OUT of drafts/ before the upload reads them.
       const stableDir = `${documentDirectory}post_uploads/`;
       await makeDirectoryAsync(stableDir, { intermediates: true });
 
@@ -1453,7 +1450,6 @@ export default function EditScreen() {
 
       const copiedClips = await Promise.all(
         clips.map(async (c, i) => {
-          // ── data: URIs (web preview) are self-contained — no copy needed ──
           if (isWeb && c.uri.startsWith("data:")) {
             const estimatedKB = Math.round(c.uri.length * 0.75 / 1024);
             console.log(
@@ -1462,7 +1458,6 @@ export default function EditScreen() {
             return c;
           }
 
-          // Verify the source file exists and is non-zero BEFORE attempting copy.
           const srcInfo = await getInfoAsync(c.uri);
           if (!srcInfo.exists) {
             throw new Error(
@@ -1485,10 +1480,8 @@ export default function EditScreen() {
             `[edit] executePost: copying clip[${i}] — ${srcSize} bytes → ${stableUri.slice(-50)}`,
           );
 
-          // Use copyAsync (not move) to preserve the original file.
           await copyAsync({ from: c.uri, to: stableUri });
 
-          // Verify the destination file exists, is non-zero, AND matches source size.
           const destInfo = await getInfoAsync(stableUri);
           if (!destInfo.exists) {
             throw new Error(
@@ -1513,19 +1506,46 @@ export default function EditScreen() {
         }),
       );
 
-      const stablePrimary = copiedClips[0]!;
+      let stablePrimary = copiedClips[0]!;
       console.log("[edit] executePost: all clips copied to stable location — primary:", stablePrimary.uri.slice(-40));
 
-      // ── Auto-generate cover thumbnail from first video frame ──────────
+      // ── 2a. If reacting to a parent post, download parent + stitch ──
+      if (reactingTo) {
+        console.log("[edit] executePost: stitching parent + reaction — reactingTo:", reactingTo);
+        const { data: parentPost, error: parentErr } = await supabase
+          .from("posts")
+          .select("media_url")
+          .eq("id", reactingTo)
+          .single();
+        if (parentErr || !parentPost?.media_url) {
+          console.error("[edit] executePost: failed to fetch parent post for stitching:", parentErr?.message);
+          throw new Error("Could not load the original clip for stitching.");
+        }
+        const parentLocalUri = `${documentDirectory}parent_${Date.now()}.mp4`;
+        const dlResult = await downloadAsync(parentPost.media_url, parentLocalUri);
+        if (!dlResult || dlResult.status !== 200) {
+          throw new Error("Failed to download original clip for stitching.");
+        }
+        console.log("[edit] executePost: parent clip downloaded — stitching...");
+        const stitchedDir = `${documentDirectory}stitched/`;
+        await makeDirectoryAsync(stitchedDir, { intermediates: true });
+        const stitchedUri = `${stitchedDir}reaction_${Date.now()}.mp4`;
+        await concatMP4Files([parentLocalUri, stablePrimary.uri], stitchedUri);
+        console.log("[edit] executePost: stitch complete —", stitchedUri.slice(-50));
+        stablePrimary = { ...stablePrimary, uri: stitchedUri };
+      }
+
+      // ── 2b. Generate cover thumbnail from first video frame ──────────
       let thumbnailUri: string | null = null;
-      const firstVideo = copiedClips.find((c) => c.type === "video");
-      if (firstVideo) {
-        thumbnailUri = await generateThumbnail(firstVideo.uri);
+      if (stablePrimary.type === "video") {
+        thumbnailUri = await generateThumbnail(stablePrimary.uri);
         console.log("[edit] executePost: thumbnail generated", thumbnailUri ? thumbnailUri.slice(-40) : "FAILED — continuing without thumbnail");
       }
 
+      // For reactions, we upload a single stitched file (no segments).
+      // For regular multi-clip Drops, upload each segment individually.
       const segmentUris =
-        copiedClips.length > 1 ? copiedClips.map((c) => c.uri) : undefined;
+        reactingTo ? undefined : copiedClips.length > 1 ? copiedClips.map((c) => c.uri) : undefined;
       const hasAnyTrim = copiedClips.some(
         (c) =>
           (c.trimStartMs ?? 0) > 0 ||
@@ -1540,7 +1560,7 @@ export default function EditScreen() {
           : undefined;
       const overlaysForPost = textOverlays.length > 0 ? textOverlays : undefined;
 
-      // 2. Create optimistic post — appears immediately in the feed
+      // ── 3. Create optimistic post — appears immediately in the feed ──
       const tempId = addOptimisticPost({
         uri: stablePrimary.uri,
         mediaType: stablePrimary.type,
@@ -1552,90 +1572,10 @@ export default function EditScreen() {
         thumbnailUri: thumbnailUri ?? undefined,
       });
 
-      // 3. Fire the actual upload using the STABLE file paths.
-      //    Use mutateAsync so we can await the result — on failure we stay on the
-      //    edit screen and show the error. Only navigate on success.
-      console.log("[edit] executePost: BEFORE createPost.mutateAsync — stablePrimary.uri:", stablePrimary.uri.slice(-50), "size:", stablePrimary.type);
-
-      if (!createPost || typeof createPost.mutateAsync !== "function") {
-        throw new Error("createPost.mutateAsync is not available. The post service may not be ready.");
-      }
-
-      setUploading(true);
-      setUploadPercent(0);
-      console.log("[edit] executePost: setUploading=true, uploadPercent=0 — calling createPost.mutateAsync...");
-
-      let newPost: Post | undefined;
-      try {
-        newPost = await createPost.mutateAsync({
-          uri: stablePrimary.uri,
-          mediaType: stablePrimary.type,
-          draftId: draftId ?? undefined,
-          parentPostId: reactingTo || undefined,
-          originalDurationMs: originalDurationMs ? parseInt(originalDurationMs, 10) || undefined : undefined,
-          segmentUris,
-          trimData,
-          textOverlays: overlaysForPost,
-          thumbnailUri: thumbnailUri ?? undefined,
-          optimisticTempId: tempId,
-          onProgress: (percent: number) => {
-            console.log(`[edit] executePost: onProgress callback fired — ${percent}%`);
-            setUploadPercent(percent);
-          },
-        });
-      } catch (mutateErr) {
-        setUploading(false);
-        // Dump the FULL error object
-        const errAny = mutateErr as unknown as Record<string, unknown> | undefined;
-        console.error("[edit] executePost: mutateAsync REJECTED — FULL ERROR:", {
-          message: (mutateErr as Error)?.message,
-          name: (mutateErr as Error)?.name,
-          stack: (mutateErr as Error)?.stack?.slice(0, 500),
-          code: errAny?.code,
-          details: errAny?.details,
-          hint: errAny?.hint,
-          status: errAny?.status,
-          statusCode: errAny?.statusCode,
-        });
-        // DO NOT re-throw — the outer catch will show Alert
-        throw mutateErr;
-      }
-
-      console.log("[edit] executePost: AFTER createPost.mutateAsync — resolved. Post id:", newPost?.id, "media_url:", newPost?.media_url?.slice(0, 50));
-
-      // ── CRITICAL: Validate the returned post BEFORE navigating ─────
-      // If mutateAsync resolved but the data is garbage, we MUST throw
-      // and stay on the edit screen. Do NOT navigate on bad data.
-      if (!newPost || !newPost.id) {
-        setUploading(false);
-        console.error("[edit] executePost: mutateAsync resolved but returned invalid Post —", JSON.stringify(newPost));
-        const errMsg = "Post was created but server returned an invalid response. The post may not have been saved.";
-        showAlert("Post Failed", errMsg);
-        setError(errMsg);
-        return; // ← DO NOT navigate — stay on edit screen
-      }
-      if (!newPost.media_url || newPost.media_url === newPost.id) {
-        setUploading(false);
-        console.error("[edit] executePost: mutateAsync resolved but media_url looks invalid —", newPost.media_url?.slice(0, 60));
-        const errMsg = "Post media failed to upload. The video may not have been saved to storage.";
-        showAlert("Post Failed", errMsg);
-        setError(errMsg);
-        return; // ← DO NOT navigate — stay on edit screen
-      }
-
-      setUploading(false);
-
-      // 4. Unload the editor video before navigating.
-      //    Playback was already paused at the start of executePost;
-      //    this just releases the player resource cleanly.
-      try {
-        videoRef.current?.unloadAsync();
-      } catch {
-        // Best-effort — navigation proceeds regardless
-      }
-
-      // 5. Navigate to the feed only on confirmed success.
-      console.log("[edit] executePost: Post confirmed valid (id:", newPost.id, ") — navigating to feed");
+      // ── 4. Navigate to feed IMMEDIATELY — don't wait for the upload ──
+      //    The optimistic post is already in the feed cache, and the
+      //    upload runs in the background via mutate (fire-and-forget).
+      console.log("[edit] executePost: optimistic post created (tempId:", tempId, ") — navigating to feed");
       try {
         if (router.canDismiss()) {
           router.dismissAll();
@@ -1643,15 +1583,32 @@ export default function EditScreen() {
       } catch {
         // canDismiss / dismissAll may not be available on all Expo Router versions
       }
-      // IMPORTANT: use replace to avoid stacking the edit screen in history
       router.replace("/(tabs)");
+
+      // ── 5. Fire-and-forget upload in the background ──────────────────
+      //    onSuccess → finalizeOptimisticPost (swap for real post)
+      //    onError   → failOptimisticPost (show error + retry on card)
+      //    onProgress → updateOptimisticProgress (0–100% bar on the card)
+      createPost.mutate({
+        uri: stablePrimary.uri,
+        mediaType: stablePrimary.type,
+        draftId: draftId ?? undefined,
+        parentPostId: reactingTo || undefined,
+        originalDurationMs: originalDurationMs ? parseInt(originalDurationMs, 10) || undefined : undefined,
+        segmentUris,
+        trimData,
+        textOverlays: overlaysForPost,
+        thumbnailUri: thumbnailUri ?? undefined,
+        optimisticTempId: tempId,
+        onProgress: (percent: number) => {
+          updateOptimisticProgress(tempId, percent);
+        },
+      });
 
       setSuccess("Posted!");
     } catch (postErr) {
-      setUploading(false);
       const errMsg = postErr instanceof Error ? postErr.message : "Could not post your drop. Please try again.";
       const errAny = postErr as unknown as Record<string, unknown> | undefined;
-      // Dump FULL error for debugging
       console.error("[edit] executePost: FAILED —", errMsg);
       console.error("[edit] executePost: FULL ERROR DUMP:", {
         message: (postErr as Error)?.message,
@@ -1664,13 +1621,11 @@ export default function EditScreen() {
         statusCode: errAny?.statusCode,
         raw: JSON.stringify(errAny, null, 2).slice(0, 500),
       });
-      // Show a visible alert so the user DEFINITELY sees the error
       showAlert("Post Failed", errMsg);
-      // Also set the banner error for persistence
       setError(errMsg);
       // DO NOT re-throw and DO NOT navigate. Stay on the edit screen.
     }
-  }, [clips, draftId, textOverlays, createPost, addOptimisticPost, generateThumbnail, router]);
+  }, [clips, draftId, textOverlays, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, originalDurationMs]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
   useEffect(() => { executePostRef.current = executePost; }, [executePost]);
@@ -2040,21 +1995,6 @@ export default function EditScreen() {
               <Text style={styles.bannerSuccessText}>{success}</Text>
             </View>
           )}
-          {uploading && (
-            <View style={styles.uploadProgressWrap}>
-              <View style={styles.uploadProgressTrack}>
-                <View
-                  style={[
-                    styles.uploadProgressFill,
-                    { width: `${Math.min(uploadPercent, 100)}%` as unknown as number },
-                  ]}
-                />
-              </View>
-              <Text style={styles.uploadProgressText}>
-                Uploading... {uploadPercent}%
-              </Text>
-            </View>
-          )}
           <View style={styles.actionRow}>
             <Pressable
               onPress={handleSaveDraftPress}
@@ -2079,7 +2019,7 @@ export default function EditScreen() {
               {uploading ? (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <ActivityIndicator size="small" color="#fff" />
-                  <Text style={styles.postBtnText}>Posting...</Text>
+                  <Text style={styles.postBtnText}>Preparing...</Text>
                 </View>
               ) : (
                 <Text style={styles.postBtnText}>{reactingTo ? "Post Reaction" : "Post Drop"}</Text>

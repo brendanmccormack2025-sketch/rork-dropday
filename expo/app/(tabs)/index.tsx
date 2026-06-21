@@ -382,13 +382,24 @@ const FeedItem = memo(function FeedItem({
       {post._optimistic?.status === "uploading" && (
         <View style={styles.optOverlay} pointerEvents="auto">
           <LinearGradient
-            colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0.55)"]}
+            colors={["rgba(0,0,0,0.6)", "rgba(0,0,0,0.6)"]}
             style={StyleSheet.absoluteFill}
           />
           <View style={styles.optInner}>
-            <View style={styles.optSpinner} />
             <Text style={styles.optTitle}>Posting your drop</Text>
-            <Text style={styles.optSub}>It'll appear here once uploaded</Text>
+            <View style={styles.optProgressTrack}>
+              <View
+                style={[
+                  styles.optProgressFill,
+                  {
+                    width: `${Math.min(post._optimistic?.progress ?? 0, 100)}%` as unknown as number,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.optProgressLabel}>
+              Uploading... {post._optimistic?.progress ?? 0}%
+            </Text>
           </View>
         </View>
       )}
@@ -1155,13 +1166,23 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 32,
   },
-  optSpinner: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.15)",
-    borderTopColor: theme.accent,
+  optProgressTrack: {
+    width: 180,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    overflow: "hidden",
+  },
+  optProgressFill: {
+    height: "100%" as unknown as number,
+    borderRadius: 2,
+    backgroundColor: theme.accent,
+  },
+  optProgressLabel: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 12,
+    fontWeight: "700" as const,
+    textAlign: "center",
   },
   optTitle: {
     color: "#fff",

@@ -70,7 +70,7 @@ const triggerHaptic = (style: Haptics.ImpactFeedbackStyle) => {
 
 export default function CameraScreen() {
   const router = useRouter();
-  const { reactingTo } = useLocalSearchParams<{ reactingTo?: string }>();
+  const { reactingTo, originalDurationMs } = useLocalSearchParams<{ reactingTo?: string; originalDurationMs?: string }>();
   const insets = useSafeAreaInsets();
 
   const {
@@ -445,9 +445,10 @@ export default function CameraScreen() {
       params: {
         clips: JSON.stringify(clips),
         reactingTo: reactingTo ?? "",
+        originalDurationMs: originalDurationMs ?? "0",
       },
     });
-  }, [clips, reactingTo, router, setError]);
+  }, [clips, reactingTo, originalDurationMs, router, setError]);
 
 
   // ─── Permissions: loading ──────────────────────────────────────

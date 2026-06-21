@@ -40,6 +40,8 @@ export type Post = {
   _optimistic?: {
     tempId: string;
     status: OptimisticStatus;
+    /** Upload progress 0–100, only meaningful when status is "uploading" */
+    progress?: number;
     error?: string;
     retryPayload?: string;
   };
@@ -1057,6 +1059,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         _optimistic: {
           tempId,
           status: "uploading",
+          progress: 0,
           retryPayload: JSON.stringify(payload),
         },
       };
@@ -1090,6 +1093,38 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       });
     },
     [persistOptimisticPosts]
+  );
+
+  /** Update the upload progress of an optimistic post (0–100).
+   *  Fires from createPost's onProgress callback during background upload. */
+  const updateOptimisticProgress = useCallback(
+    (tempId: string, progress: number) => {
+      setOptimisticPosts((prev) => {
+        const next = prev.map((p) =>
+          p._optimistic?.tempId === tempId
+            ? {
+                ...p,
+                _optimistic: { ...p._optimistic, progress },
+              }
+            : p
+        );
+        // Don't persist on every progress tick — too much I/O
+        return next;
+      });
+
+      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+        if (!old) return old;
+        return old.map((p) =>
+          p._optimistic?.tempId === tempId
+            ? {
+                ...p,
+                _optimistic: { ...p._optimistic!, progress },
+              }
+            : p
+        );
+      });
+    },
+    [user?.id, qc]
   );
 
   const failOptimisticPost = useCallback(
@@ -1432,7 +1467,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           p._optimistic?.tempId === tempId
             ? {
                 ...p,
-                _optimistic: { ...p._optimistic!, status: "uploading" as const, error: undefined },
+                _optimistic: { ...p._optimistic!, status: "uploading" as const, progress: 0, error: undefined },
               }
             : p
         );
@@ -1447,7 +1482,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           p._optimistic?.tempId === tempId
             ? {
                 ...p,
-                _optimistic: { ...p._optimistic!, status: "uploading" as const, error: undefined },
+                _optimistic: { ...p._optimistic!, status: "uploading" as const, progress: 0, error: undefined },
               }
             : p
         );
@@ -1465,13 +1500,16 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           textOverlays: payload.textOverlays,
           thumbnailUri: payload.thumbnailUri,
           optimisticTempId: tempId,
+          onProgress: (percent: number) => {
+            updateOptimisticProgress(tempId, percent);
+          },
         });
       } catch (e) {
         console.error("[optimistic] retry parse error", e);
         failOptimisticPost(tempId, "Could not retry. Please try posting again.");
       }
     },
-    [optimisticPosts, createPost, failOptimisticPost, persistOptimisticPosts, user?.id, qc]
+    [optimisticPosts, createPost, failOptimisticPost, updateOptimisticProgress, persistOptimisticPosts, user?.id, qc]
   );
 
   return useMemo(
@@ -1509,6 +1547,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       lastQueryError,
       optimisticPosts,
       addOptimisticPost,
+      updateOptimisticProgress,
       retryOptimisticPost,
     }),
     [
@@ -1533,6 +1572,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       toggleLike,
       optimisticPosts,
       addOptimisticPost,
+      updateOptimisticProgress,
       retryOptimisticPost,
     ]
   );
