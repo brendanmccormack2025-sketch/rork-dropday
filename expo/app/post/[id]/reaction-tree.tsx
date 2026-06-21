@@ -53,7 +53,12 @@ export default function ReactionTreeScreen() {
       );
 
       if (rpcErr) {
-        console.warn("[reaction-tree] RPC error", rpcErr.message);
+        console.error("[reaction-tree] RPC error", {
+          message: rpcErr.message,
+          code: rpcErr.code,
+          details: rpcErr.details,
+          hint: rpcErr.hint,
+        });
         return { posts: [] as Post[], profileMap: new Map<string, ProfileCard>() };
       }
 

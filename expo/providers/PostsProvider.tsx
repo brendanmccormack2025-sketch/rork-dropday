@@ -549,18 +549,18 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const res = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .order("created_at", { ascending: false })
           .limit(300);
         if (res.error) {
-          console.warn("[posts] feed error", res.error.message);
+          logQueryError("feed", res.error);
           return [];
         }
         data = res.data as unknown[] | null;
       } catch (e) {
-        console.warn("[posts] feed network error", (e as Error)?.message ?? e);
+        logQueryError("feed", e);
         return [];
       }
       const raw: Post[] = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
@@ -570,7 +570,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         media_type: row.media_type as "image" | "video",
         caption: (row.caption as string | null) ?? null,
         parent_post_id: (row.parent_post_id as string | null) ?? null,
-        original_duration_ms: (row.original_duration_ms as number | null) ?? null,
         segments: (row.segments as string[] | null) ?? null,
         audio_url: (row.audio_url as string | null) ?? null,
         trim_data: (row.trim_data as Post["trim_data"]) ?? null,
@@ -580,6 +579,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         comment_count: (row.comment_count as number | undefined) ?? 0,
         reaction_count: (row.reaction_count as number | undefined) ?? 0,
         profile: (row.profiles as Post["profile"]) ?? null,
+        // original_duration_ms not selected here — feed cards don't use it
+        original_duration_ms: null,
       }));
       return rankFeed(raw, followingQuery.data ?? []);
     },
@@ -594,12 +595,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       try {
         const { data, error } = await supabase
           .from("posts")
-          .select("id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)")
+          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)")
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(50);
         if (error) {
-          console.warn("[posts] mine error", error.message);
+          logQueryError("mine", error);
           return [];
         }
         return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
@@ -609,7 +610,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           media_type: row.media_type as "image" | "video",
           caption: (row.caption as string | null) ?? null,
           parent_post_id: (row.parent_post_id as string | null) ?? null,
-          original_duration_ms: (row.original_duration_ms as number | null) ?? null,
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
@@ -619,9 +619,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           comment_count: (row.comment_count as number | undefined) ?? 0,
           reaction_count: (row.reaction_count as number | undefined) ?? 0,
           profile: (row.profiles as Post["profile"]) ?? null,
+          original_duration_ms: null,
         }));
       } catch (e) {
-        console.warn("[posts] mine network error", (e as Error)?.message ?? e);
+        logQueryError("mine", e);
         return [];
       }
     },
@@ -651,14 +652,14 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
           )
           .gte("created_at", prevNightRange.start.toISOString())
           .lt("created_at", prevNightRange.end.toISOString())
           .order("like_count", { ascending: false })
           .limit(100);
         if (error) {
-          console.warn("[posts] last-night error", error.message);
+          logQueryError("last-night", error);
           return [];
         }
         const raw = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
@@ -668,7 +669,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           media_type: row.media_type as "image" | "video",
           caption: (row.caption as string | null) ?? null,
           parent_post_id: (row.parent_post_id as string | null) ?? null,
-          original_duration_ms: (row.original_duration_ms as number | null) ?? null,
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
@@ -678,10 +678,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           comment_count: (row.comment_count as number | undefined) ?? 0,
           reaction_count: (row.reaction_count as number | undefined) ?? 0,
           profile: (row.profiles as Post["profile"]) ?? null,
+          original_duration_ms: null,
         }));
         return raw;
       } catch (e) {
-        console.warn("[posts] last-night network error", (e as Error)?.message ?? e);
+        logQueryError("last-night", e);
         return [];
       }
     },
@@ -707,7 +708,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data: postRows, error: postErr } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
           )
           .in("id", postIds);
         if (postErr || !postRows) return [];
@@ -720,7 +721,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           media_type: row.media_type as "image" | "video",
           caption: (row.caption as string | null) ?? null,
           parent_post_id: (row.parent_post_id as string | null) ?? null,
-          original_duration_ms: (row.original_duration_ms as number | null) ?? null,
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
@@ -730,11 +730,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           comment_count: (row.comment_count as number | undefined) ?? 0,
           reaction_count: (row.reaction_count as number | undefined) ?? 0,
           profile: (row.profiles as Post["profile"]) ?? null,
+          original_duration_ms: null,
         }));
         posts.sort((a, b) => (idOrder.get(a.id) ?? 999) - (idOrder.get(b.id) ?? 999));
         return posts;
       } catch (e) {
-        console.warn("[posts] liked network error", (e as Error)?.message ?? e);
+        logQueryError("liked", e);
         return [];
       }
     },
@@ -910,7 +911,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           .order("created_at", { ascending: false })
           .limit(300);
         if (error) {
-          console.warn("[posts] reactions error", error.message);
+          logQueryError("reactions", error);
           return {};
         }
         const raw: Post[] = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
@@ -942,11 +943,37 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         }
         return grouped;
       } catch (e) {
-        console.warn("[posts] reactions network error", (e as Error)?.message ?? e);
+        logQueryError("reactions", e);
         return {};
       }
     },
   });
+
+  // Track the most recent query error so developers can inspect it during testing.
+  // Errors are still caught gracefully (returning empty arrays to users), but the
+  // full error shape is preserved here for diagnostic visibility.
+  const [lastQueryError, setLastQueryError] = useState<{
+    query: string;
+    message: string;
+    code?: string;
+    details?: string;
+    hint?: string;
+    ts: number;
+  } | null>(null);
+
+  const logQueryError = (query: string, error: unknown) => {
+    const err = error as Record<string, unknown> | undefined;
+    const entry = {
+      query,
+      message: (err?.message as string) ?? String(error),
+      code: err?.code as string | undefined,
+      details: err?.details as string | undefined,
+      hint: err?.hint as string | undefined,
+      ts: Date.now(),
+    };
+    console.error(`[posts] ${query} FAILED`, entry);
+    setLastQueryError(entry);
+  };
 
   // Track current time so hasPostedInWindow re-evaluates when the window opens/closes.
   // Previously the memo only depended on myPostsQuery.data, so the Drop icon
@@ -1479,6 +1506,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       reactionsByParent: allReactionsQuery.data ?? {},
       reactionsLoading: allReactionsQuery.isLoading,
       refetchReactions: allReactionsQuery.refetch,
+      lastQueryError,
       optimisticPosts,
       addOptimisticPost,
       retryOptimisticPost,
@@ -1492,6 +1520,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       allReactionsQuery,
       followingQuery,
       suggestedQuery,
+      lastQueryError,
       followUser,
       unfollowUser,
       hasPostedInWindow,
