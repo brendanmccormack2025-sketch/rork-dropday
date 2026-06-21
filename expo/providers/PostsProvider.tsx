@@ -44,6 +44,10 @@ export type Post = {
     progress?: number;
     error?: string;
     retryPayload?: string;
+    /** The parent_post_id this post will have once uploaded.
+     *  null for root Drops; set for reactions. Used to decide which
+     *  caches the optimistic entry should be inserted into. */
+    parentPostId: string | null;
   };
 };
 
@@ -1037,7 +1041,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   }, [optimisticPosts]);
 
   const addOptimisticPost = useCallback(
-    (payload: OptimisticRetryPayload): string => {
+    (payload: OptimisticRetryPayload, parentPostId?: string | null): string => {
       const tempId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const optPost: Post = {
         id: tempId,
@@ -1045,7 +1049,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         media_url: payload.uri,
         media_type: payload.mediaType,
         caption: payload.caption ?? null,
-        parent_post_id: null,
+        parent_post_id: parentPostId ?? null,
         original_duration_ms: null,
         segments: payload.segmentUris ?? null,
         audio_url: null,
@@ -1061,6 +1065,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           status: "uploading",
           progress: 0,
           retryPayload: JSON.stringify(payload),
+          parentPostId: parentPostId ?? null,
         },
       };
 
@@ -1070,10 +1075,15 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return next;
       });
 
-      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
-        if (!old) return [optPost];
-        return [optPost, ...old];
-      });
+      // Only root Drops (parent_post_id is null) belong in the main feed cache.
+      // Reactions belong in the reaction-tree query, which fetches from the DB
+      // independently — optimistic entries would pollute the fyp cache.
+      if (!parentPostId) {
+        qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+          if (!old) return [optPost];
+          return [optPost, ...old];
+        });
+      }
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
         if (!old) return [optPost];
         return [optPost, ...old];
@@ -1096,7 +1106,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   );
 
   /** Update the upload progress of an optimistic post (0–100).
-   *  Fires from createPost's onProgress callback during background upload. */
+   *  Fires from createPost's onProgress callback during background upload.
+   *  Only touches the fyp cache if the post is a root Drop (no parent). */
   const updateOptimisticProgress = useCallback(
     (tempId: string, progress: number) => {
       setOptimisticPosts((prev) => {
@@ -1112,10 +1123,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return next;
       });
 
+      // Only update fyp cache for root Drops — reactions aren't in this cache.
       qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
         if (!old) return old;
         return old.map((p) =>
-          p._optimistic?.tempId === tempId
+          p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
             ? {
                 ...p,
                 _optimistic: { ...p._optimistic!, progress },
@@ -1142,10 +1154,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return next;
       });
 
+      // Only update fyp cache for root Drops — reactions aren't in this cache.
       qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
         if (!old) return old;
         return old.map((p) =>
-          p._optimistic?.tempId === tempId
+          p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
             ? {
                 ...p,
                 _optimistic: { ...p._optimistic!, status: "failed" as const, error },
@@ -1385,13 +1398,13 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       } as Post;
     },
     onSuccess: (newPost, variables) => {
-      // Remove optimistic post and insert the real post into both caches.
+      // Remove optimistic post and insert the real post into caches.
       // We do NOT invalidateQueries({ queryKey: ["posts"] }) here because that
       // triggers a background refetch that races with setQueryData — on Supabase
       // eventual consistency, the refetch may return before the new row is visible
       // and overwrite the cache, making the post disappear.
       //
-      // Instead, setQueryData surgically updates the feed + mine caches with the
+      // Instead, setQueryData surgically updates the caches with the
       // full post data we already have. The useFocusEffect refetchFeed() in the
       // feed screen will eventually refresh from the DB for correctness.
 
@@ -1399,14 +1412,18 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         finalizeOptimisticPost(variables.optimisticTempId, newPost);
       }
 
-      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
-        if (!old) return [newPost];
-        const filtered = old.filter(
-          (p) => p._optimistic?.tempId !== variables.optimisticTempId
-        );
-        if (filtered.some((p) => p.id === newPost.id)) return filtered;
-        return [newPost, ...filtered];
-      });
+      // Only insert into the main fyp feed cache for root Drops (no parent).
+      // Reactions are NOT part of the fyp feed — they live in the reaction-tree.
+      if (!newPost.parent_post_id) {
+        qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+          if (!old) return [newPost];
+          const filtered = old.filter(
+            (p) => p._optimistic?.tempId !== variables.optimisticTempId
+          );
+          if (filtered.some((p) => p.id === newPost.id)) return filtered;
+          return [newPost, ...filtered];
+        });
+      }
 
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
         if (!old) return [newPost];
@@ -1420,6 +1437,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // Only invalidate the last-night query — it depends on the full posts table
       // and we can't surgically update it without re-running the window filter.
       qc.invalidateQueries({ queryKey: ["posts", "last-night"] });
+      // Fuzzy-match invalidates any reaction-tree query (all ids)
       qc.invalidateQueries({ queryKey: ["reaction-tree"] });
 
       persistOptimisticPosts();
@@ -1475,11 +1493,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return next;
       });
 
-      // Also update the feed cache
+      // Only update the feed cache for root Drops — reactions aren't in it.
       qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
         if (!old) return old;
         return old.map((p) =>
-          p._optimistic?.tempId === tempId
+          p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
             ? {
                 ...p,
                 _optimistic: { ...p._optimistic!, status: "uploading" as const, progress: 0, error: undefined },

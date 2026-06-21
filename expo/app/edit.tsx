@@ -1561,16 +1561,21 @@ export default function EditScreen() {
       const overlaysForPost = textOverlays.length > 0 ? textOverlays : undefined;
 
       // ── 3. Create optimistic post — appears immediately in the feed ──
-      const tempId = addOptimisticPost({
-        uri: stablePrimary.uri,
-        mediaType: stablePrimary.type,
-        caption: undefined,
-        draftId: draftId ?? undefined,
-        segmentUris,
-        trimData,
-        textOverlays: overlaysForPost,
-        thumbnailUri: thumbnailUri ?? undefined,
-      });
+      //    Pass reactingTo as parentPostId so the optimistic post is only
+      //    inserted into the fyp cache for root Drops, not reactions.
+      const tempId = addOptimisticPost(
+        {
+          uri: stablePrimary.uri,
+          mediaType: stablePrimary.type,
+          caption: undefined,
+          draftId: draftId ?? undefined,
+          segmentUris,
+          trimData,
+          textOverlays: overlaysForPost,
+          thumbnailUri: thumbnailUri ?? undefined,
+        },
+        reactingTo || null,
+      );
 
       // ── 4. Navigate to feed IMMEDIATELY — don't wait for the upload ──
       //    The optimistic post is already in the feed cache, and the
