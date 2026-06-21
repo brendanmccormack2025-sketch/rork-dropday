@@ -549,7 +549,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const res = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .order("created_at", { ascending: false })
@@ -595,7 +595,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       try {
         const { data, error } = await supabase
           .from("posts")
-          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)")
+          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(50);
@@ -652,7 +652,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .gte("created_at", prevNightRange.start.toISOString())
           .lt("created_at", prevNightRange.end.toISOString())
@@ -708,7 +708,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data: postRows, error: postErr } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .in("id", postIds);
         if (postErr || !postRows) return [];
@@ -905,7 +905,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, original_duration_ms, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .not("parent_post_id", "is", null)
           .order("created_at", { ascending: false })
