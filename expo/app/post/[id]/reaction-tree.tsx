@@ -331,7 +331,11 @@ function RootItem({
   //     the reaction segment (skip the prepended original clip).
   const hasSoughtToReaction = useRef(false);
   useEffect(() => {
-    if (active && isReaction && post.original_duration_ms && post.original_duration_ms > 0) {
+    // Only seek past the prepended parent clip when the reaction was actually
+    // stitched (has segments). Solo fallback clips have segments=null and
+    // should play from the start — seeking past their own duration shows black.
+    const wasStitched = post.segments != null && post.segments.length > 0;
+    if (active && isReaction && wasStitched && post.original_duration_ms && post.original_duration_ms > 0) {
       if (!hasSoughtToReaction.current) {
         hasSoughtToReaction.current = true;
         const t = setTimeout(() => {
@@ -342,7 +346,7 @@ function RootItem({
     } else if (!active) {
       hasSoughtToReaction.current = false;
     }
-  }, [active, isReaction, post.original_duration_ms]);
+  }, [active, isReaction, post.original_duration_ms, post.segments]);
 
   // Release native player resources on unmount
   useEffect(() => {
