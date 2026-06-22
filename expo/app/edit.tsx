@@ -1516,37 +1516,45 @@ export default function EditScreen() {
       //    database so the thread stays intact.
       let stitched = false;
       if (reactingTo) {
-        try {
-          console.log("[edit] executePost: stitching parent + reaction — reactingTo:", reactingTo);
-          const { data: parentPost, error: parentErr } = await supabase
-            .from("posts")
-            .select("media_url")
-            .eq("id", reactingTo)
-            .single();
-          if (parentErr || !parentPost?.media_url) {
-            console.error("[edit] executePost: failed to fetch parent post for stitching:", parentErr?.message);
-            throw new Error("Could not load the original clip for stitching.");
-          }
-          const parentLocalUri = `${documentDirectory}parent_${Date.now()}.mov`;
-          const dlResult = await downloadAsync(parentPost.media_url, parentLocalUri);
-          if (!dlResult || dlResult.status !== 200) {
-            throw new Error("Failed to download original clip for stitching.");
-          }
-          console.log("[edit] executePost: parent clip downloaded — stitching...");
-          const stitchedDir = `${documentDirectory}stitched/`;
-          await makeDirectoryAsync(stitchedDir, { intermediates: true });
-          const stitchedUri = `${stitchedDir}reaction_${Date.now()}.mov`;
-          await concatMP4Files([parentLocalUri, stablePrimary.uri], stitchedUri);
-          console.log("[edit] executePost: stitch complete —", stitchedUri.slice(-50));
-          stablePrimary = { ...stablePrimary, uri: stitchedUri };
-          stitched = true;
-        } catch (stitchErr) {
-          console.error(
-            "[edit] executePost: STITCH FAILED — posting solo reaction clip instead:",
-            (stitchErr as Error)?.message,
+        // On web, file downloads are not available — skip stitching
+        // and post the solo reaction clip directly.
+        if (Platform.OS === "web") {
+          console.log(
+            "[edit] executePost: skipping stitch on web — posting solo reaction clip",
           );
-          // stablePrimary remains the reactor's solo clip — fall through to upload it directly
-          // The reaction is still linked to the parent via parentPostId in createPost.mutate
+        } else {
+          try {
+            console.log("[edit] executePost: stitching parent + reaction — reactingTo:", reactingTo);
+            const { data: parentPost, error: parentErr } = await supabase
+              .from("posts")
+              .select("media_url")
+              .eq("id", reactingTo)
+              .single();
+            if (parentErr || !parentPost?.media_url) {
+              console.error("[edit] executePost: failed to fetch parent post for stitching:", parentErr?.message);
+              throw new Error("Could not load the original clip for stitching.");
+            }
+            const parentLocalUri = `${documentDirectory}parent_${Date.now()}.mov`;
+            const dlResult = await downloadAsync(parentPost.media_url, parentLocalUri);
+            if (!dlResult || dlResult.status !== 200) {
+              throw new Error("Failed to download original clip for stitching.");
+            }
+            console.log("[edit] executePost: parent clip downloaded — stitching...");
+            const stitchedDir = `${documentDirectory}stitched/`;
+            await makeDirectoryAsync(stitchedDir, { intermediates: true });
+            const stitchedUri = `${stitchedDir}reaction_${Date.now()}.mov`;
+            await concatMP4Files([parentLocalUri, stablePrimary.uri], stitchedUri);
+            console.log("[edit] executePost: stitch complete —", stitchedUri.slice(-50));
+            stablePrimary = { ...stablePrimary, uri: stitchedUri };
+            stitched = true;
+          } catch (stitchErr) {
+            console.error(
+              "[edit] executePost: STITCH FAILED — posting solo reaction clip instead:",
+              (stitchErr as Error)?.message,
+            );
+            // stablePrimary remains the reactor's solo clip — fall through to upload it directly
+            // The reaction is still linked to the parent via parentPostId in createPost.mutate
+          }
         }
       }
 
