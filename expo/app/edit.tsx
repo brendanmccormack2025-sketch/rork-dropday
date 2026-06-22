@@ -1510,29 +1510,44 @@ export default function EditScreen() {
       console.log("[edit] executePost: all clips copied to stable location — primary:", stablePrimary.uri.slice(-40));
 
       // ── 2a. If reacting to a parent post, download parent + stitch ──
+      //    If stitching fails for any reason (codec mismatch, corrupted
+      //    metadata, network error), fall back to posting the reactor's
+      //    solo clip — the reaction is still linked to the parent in the
+      //    database so the thread stays intact.
+      let stitched = false;
       if (reactingTo) {
-        console.log("[edit] executePost: stitching parent + reaction — reactingTo:", reactingTo);
-        const { data: parentPost, error: parentErr } = await supabase
-          .from("posts")
-          .select("media_url")
-          .eq("id", reactingTo)
-          .single();
-        if (parentErr || !parentPost?.media_url) {
-          console.error("[edit] executePost: failed to fetch parent post for stitching:", parentErr?.message);
-          throw new Error("Could not load the original clip for stitching.");
+        try {
+          console.log("[edit] executePost: stitching parent + reaction — reactingTo:", reactingTo);
+          const { data: parentPost, error: parentErr } = await supabase
+            .from("posts")
+            .select("media_url")
+            .eq("id", reactingTo)
+            .single();
+          if (parentErr || !parentPost?.media_url) {
+            console.error("[edit] executePost: failed to fetch parent post for stitching:", parentErr?.message);
+            throw new Error("Could not load the original clip for stitching.");
+          }
+          const parentLocalUri = `${documentDirectory}parent_${Date.now()}.mp4`;
+          const dlResult = await downloadAsync(parentPost.media_url, parentLocalUri);
+          if (!dlResult || dlResult.status !== 200) {
+            throw new Error("Failed to download original clip for stitching.");
+          }
+          console.log("[edit] executePost: parent clip downloaded — stitching...");
+          const stitchedDir = `${documentDirectory}stitched/`;
+          await makeDirectoryAsync(stitchedDir, { intermediates: true });
+          const stitchedUri = `${stitchedDir}reaction_${Date.now()}.mp4`;
+          await concatMP4Files([parentLocalUri, stablePrimary.uri], stitchedUri);
+          console.log("[edit] executePost: stitch complete —", stitchedUri.slice(-50));
+          stablePrimary = { ...stablePrimary, uri: stitchedUri };
+          stitched = true;
+        } catch (stitchErr) {
+          console.error(
+            "[edit] executePost: STITCH FAILED — posting solo reaction clip instead:",
+            (stitchErr as Error)?.message,
+          );
+          // stablePrimary remains the reactor's solo clip — fall through to upload it directly
+          // The reaction is still linked to the parent via parentPostId in createPost.mutate
         }
-        const parentLocalUri = `${documentDirectory}parent_${Date.now()}.mp4`;
-        const dlResult = await downloadAsync(parentPost.media_url, parentLocalUri);
-        if (!dlResult || dlResult.status !== 200) {
-          throw new Error("Failed to download original clip for stitching.");
-        }
-        console.log("[edit] executePost: parent clip downloaded — stitching...");
-        const stitchedDir = `${documentDirectory}stitched/`;
-        await makeDirectoryAsync(stitchedDir, { intermediates: true });
-        const stitchedUri = `${stitchedDir}reaction_${Date.now()}.mp4`;
-        await concatMP4Files([parentLocalUri, stablePrimary.uri], stitchedUri);
-        console.log("[edit] executePost: stitch complete —", stitchedUri.slice(-50));
-        stablePrimary = { ...stablePrimary, uri: stitchedUri };
       }
 
       // ── 2b. Generate cover thumbnail from first video frame ──────────

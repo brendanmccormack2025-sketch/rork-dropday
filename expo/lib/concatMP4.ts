@@ -558,9 +558,29 @@ export async function concatMP4Files(
     cumulativeOffsets,
   );
 
-  // ── 5. Write the merged file ──────────────────────────────────────
+  // ── 5. Patch stco/co64 offsets to be absolute file offsets ─────────
+  //    rebuildChunkOffsets computes offsets relative to the merged mdat
+  //    payload start, but the player reads stco/co64 as absolute file
+  //    offsets. We must add the absolute position of the mdat payload
+  //    in the final file: ftypSize + moovSize + mdatHeaderSize.
+  const MDAT_HEADER_SIZE = 8;
+  const mdatPayloadAbsoluteOffset =
+    ftypBytes.length + rebuiltMoov.length + MDAT_HEADER_SIZE;
 
-  const merged = concatUint8Arrays([ftypBytes, rebuiltMoov, mergedMdat]);
+  console.log(
+    `[concatMP4] Patching stco offsets by +${mdatPayloadAbsoluteOffset} ` +
+    `(ftyp=${ftypBytes.length} + moov=${rebuiltMoov.length} + mdatHdr=${MDAT_HEADER_SIZE})`,
+  );
+  patchStcoOffsets(rebuiltMoov, mdatPayloadAbsoluteOffset);
+
+  // ── 6. Build mdat box header ───────────────────────────────────────
+  const mdatHeader = new Uint8Array(MDAT_HEADER_SIZE);
+  writeU32(mdatHeader, 0, MDAT_HEADER_SIZE + mergedMdat.length);
+  writeType(mdatHeader, 4, "mdat");
+
+  // ── 7. Write the merged file ───────────────────────────────────────
+
+  const merged = concatUint8Arrays([ftypBytes, rebuiltMoov, mdatHeader, mergedMdat]);
 
   // Quick sanity: make sure the file starts with ftyp
   if (readType(merged, 4) !== "ftyp") {
@@ -628,6 +648,77 @@ function createMinimalFtyp(): Uint8Array {
   return buf;
 }
 
+// ── stco offset patching ────────────────────────────────────────────────────
+
+/**
+ * Scan the rebuilt moov buffer for all stco/co64 boxes and add the given
+ * absolute offset to every chunk offset entry.
+ *
+ * This is necessary because rebuildChunkOffsets computes offsets relative to
+ * the start of the merged mdat payload, but the player interprets stco/co64
+ * values as absolute file offsets. After the moov is placed in the final file,
+ * the mdat payload sits at ftypSize + moovSize + mdatHeaderSize bytes in.
+ */
+function patchStcoOffsets(moovBuffer: Uint8Array, absoluteOffset: number): void {
+  // Recursively scan boxes looking for stco and co64
+  scanAndPatchBoxes(moovBuffer, 0, moovBuffer.length, absoluteOffset);
+}
+
+function scanAndPatchBoxes(
+  buf: Uint8Array,
+  start: number,
+  end: number,
+  offset: number,
+): void {
+  let pos = start;
+  while (pos + 8 <= end) {
+    const header = parseBoxHeader(buf, pos);
+    if (!header) break;
+
+    const { type, size, headerSize } = header;
+    const dataOffset = pos + headerSize;
+    const dataSize = size - headerSize;
+
+    if (type === "stco" || type === "co64") {
+      // Patch the chunk offset entries
+      const is64 = type === "co64";
+      const entryCount = readU32(buf, dataOffset + 4);
+      const entrySize = is64 ? 8 : 4;
+      for (let i = 0; i < entryCount; i++) {
+        const entryBase = dataOffset + 8 + i * entrySize;
+        if (is64) {
+          const hi = readU32(buf, entryBase);
+          const lo = readU32(buf, entryBase + 4);
+          const oldVal = hi * 0x100000000 + lo;
+          const newVal = oldVal + offset;
+          writeU32(buf, entryBase, Math.floor(newVal / 0x100000000));
+          writeU32(buf, entryBase + 4, newVal % 0x100000000);
+        } else {
+          const oldVal = readU32(buf, entryBase);
+          writeU32(buf, entryBase, oldVal + offset);
+        }
+      }
+      // stco/co64 is a leaf — no children to recurse into
+    } else {
+      // Only recurse into container boxes
+      const isContainer =
+        type === "moov" ||
+        type === "trak" ||
+        type === "mdia" ||
+        type === "minf" ||
+        type === "stbl" ||
+        type === "dinf" ||
+        type === "edts" ||
+        type === "udta";
+      if (isContainer) {
+        scanAndPatchBoxes(buf, dataOffset, dataOffset + dataSize, offset);
+      }
+    }
+
+    pos += size;
+  }
+}
+
 // ── Moov rebuilding ───────────────────────────────────────────────────────────
 
 /**
@@ -645,6 +736,17 @@ function rebuildMoov(
   cumulativeOffsets: number[],
 ): Uint8Array {
   const trakBoxes = firstMoov.children.filter((c) => c.type === "trak");
+
+  // Extract movie timescale from mvhd — needed for tkhd/mvhd duration conversion
+  const mvhdBox = firstMoov.children.find((c) => c.type === "mvhd");
+  let movieTimescale = 600; // sensible default for iOS camera output
+  if (mvhdBox) {
+    const mvhdVersion = readU32(firstBuf, mvhdBox.dataOffset) >>> 24;
+    if (mvhdVersion === 0) {
+      movieTimescale = readU32(firstBuf, mvhdBox.dataOffset + 12);
+    }
+  }
+
   const rebuiltTraks: Uint8Array[] = [];
 
   for (let trakIdx = 0; trakIdx < trakBoxes.length; trakIdx++) {
@@ -655,6 +757,7 @@ function rebuildMoov(
       trakIdx,
       allSegments,
       cumulativeOffsets,
+      movieTimescale,
     );
     rebuiltTraks.push(rebuiltTrak);
   }
@@ -668,17 +771,35 @@ function rebuildMoov(
     );
   }
 
-  // Update mvhd duration using the VIDEO track's stts (trakIdx 0)
-  const mvhdBox = firstMoov.children.find((c) => c.type === "mvhd");
+  // Update mvhd duration using the VIDEO track's stts (trakIdx 0).
+  // computeTrackDuration returns values in the track's media timescale,
+  // but mvhd duration is in the MOVIE's timescale — convert if they differ.
   if (mvhdBox) {
     const mvhdBytes = new Uint8Array(
       firstBuf.slice(mvhdBox.offset, mvhdBox.offset + mvhdBox.size),
     );
     const version = readU32(mvhdBytes, 0) >>> 24;
     if (version === 0) {
-      const timescale = readU32(mvhdBytes, 20);
-      const totalDuration = computeTrackDuration(allSegments, 0);
-      writeU32(mvhdBytes, 24, totalDuration);
+      const videoTrackDuration = computeTrackDuration(allSegments, 0);
+      // Find video track's media timescale from its mdhd
+      let videoMediaTimescale = movieTimescale;
+      const videoTrak = trakBoxes[0];
+      if (videoTrak) {
+        const videoMdia = findChild(videoTrak, "mdia");
+        if (videoMdia) {
+          const videoMdhd = findChild(videoMdia, "mdhd");
+          if (videoMdhd) {
+            const mdhdVersion = readU32(firstBuf, videoMdhd.dataOffset) >>> 24;
+            if (mdhdVersion === 0) {
+              videoMediaTimescale = readU32(firstBuf, videoMdhd.dataOffset + 12);
+            }
+          }
+        }
+      }
+      const mvhdDuration = Math.round(
+        videoTrackDuration * movieTimescale / videoMediaTimescale,
+      );
+      writeU32(mvhdBytes, 24, mvhdDuration);
     }
     // Replace in nonTrakChildren array
     const idx = nonTrakChildren.findIndex(
@@ -705,6 +826,7 @@ function rebuildTrak(
   trakIdx: number,
   allSegments: SegmentInfo[],
   cumulativeOffsets: number[],
+  movieTimescale: number,
 ): Uint8Array {
   const mdiaBox = findChild(trak, "mdia");
   const trakParts: Uint8Array[] = [];
@@ -720,15 +842,32 @@ function rebuildTrak(
       );
       trakParts.push(rebuiltMdia);
     } else if (child.type === "tkhd") {
-      // Update tkhd duration using THIS track's stts data
+      // Update tkhd duration using THIS track's stts data.
+      // computeTrackDuration returns values in the TRACK's media timescale,
+      // but tkhd duration is in the MOVIE's timescale — convert.
       const tkhdBytes = new Uint8Array(
         firstBuf.slice(child.offset, child.offset + child.size),
       );
       const version = readU32(tkhdBytes, 0) >>> 24;
       if (version === 0) {
-        const totalDuration = computeTrackDuration(allSegments, trakIdx);
-        // tkhd duration at offset 28 (version 0)
-        writeU32(tkhdBytes, 28, totalDuration);
+        const trackDuration = computeTrackDuration(allSegments, trakIdx);
+        // Find this track's media timescale from its mdhd
+        const mdiaBox = findChild(trak, "mdia");
+        let mediaTimescale = movieTimescale;
+        if (mdiaBox) {
+          const mdhdBox = findChild(mdiaBox, "mdhd");
+          if (mdhdBox) {
+            const mdhdVersion = readU32(firstBuf, mdhdBox.dataOffset) >>> 24;
+            if (mdhdVersion === 0) {
+              mediaTimescale = readU32(firstBuf, mdhdBox.dataOffset + 12);
+            }
+          }
+        }
+        // Convert track duration from media timescale to movie timescale
+        const tkhdDuration = Math.round(
+          trackDuration * movieTimescale / mediaTimescale,
+        );
+        writeU32(tkhdBytes, 28, tkhdDuration);
       }
       trakParts.push(tkhdBytes);
     } else {
