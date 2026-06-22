@@ -1474,7 +1474,7 @@ export default function EditScreen() {
             `[edit] executePost: source verified — clip[${i}] ${c.uri.slice(0, 50)} — ${srcSize} bytes`,
           );
 
-          const ext = c.uri.match(/\.(\w+)(?:\?|$)/)?.[1] ?? (c.type === "video" ? "mp4" : "jpg");
+          const ext = c.uri.match(/\.(\w+)(?:\?|$)/)?.[1] ?? (c.type === "video" ? "mov" : "jpg");
           const stableUri = `${stableDir}clip_${i}_${Date.now()}.${ext}`;
           console.log(
             `[edit] executePost: copying clip[${i}] — ${srcSize} bytes → ${stableUri.slice(-50)}`,
@@ -1527,7 +1527,7 @@ export default function EditScreen() {
             console.error("[edit] executePost: failed to fetch parent post for stitching:", parentErr?.message);
             throw new Error("Could not load the original clip for stitching.");
           }
-          const parentLocalUri = `${documentDirectory}parent_${Date.now()}.mp4`;
+          const parentLocalUri = `${documentDirectory}parent_${Date.now()}.mov`;
           const dlResult = await downloadAsync(parentPost.media_url, parentLocalUri);
           if (!dlResult || dlResult.status !== 200) {
             throw new Error("Failed to download original clip for stitching.");
@@ -1535,7 +1535,7 @@ export default function EditScreen() {
           console.log("[edit] executePost: parent clip downloaded — stitching...");
           const stitchedDir = `${documentDirectory}stitched/`;
           await makeDirectoryAsync(stitchedDir, { intermediates: true });
-          const stitchedUri = `${stitchedDir}reaction_${Date.now()}.mp4`;
+          const stitchedUri = `${stitchedDir}reaction_${Date.now()}.mov`;
           await concatMP4Files([parentLocalUri, stablePrimary.uri], stitchedUri);
           console.log("[edit] executePost: stitch complete —", stitchedUri.slice(-50));
           stablePrimary = { ...stablePrimary, uri: stitchedUri };

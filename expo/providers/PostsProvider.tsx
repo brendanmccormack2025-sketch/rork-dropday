@@ -1235,7 +1235,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
           // Determine file extension and MIME type from the URI
           const uriExt = segUri.match(/\.(\w+)(?:\?|$)/)?.[1]?.toLowerCase();
-          const segExt = uriExt ?? (input.mediaType === "video" ? "mp4" : "jpg");
+          const segExt = uriExt ?? (input.mediaType === "video" ? "mov" : "jpg");
           const segPath = `${user.id}/${baseTs}_seg${i}.${segExt}`;
 
           const mimeByExt: Record<string, string> = {
@@ -1249,7 +1249,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             webp: "image/webp",
             heic: "image/heic",
           };
-          const contentType = mimeByExt[segExt] ?? (input.mediaType === "video" ? "video/mp4" : "image/jpeg");
+          const contentType = mimeByExt[segExt] ?? (input.mediaType === "video" ? "video/quicktime" : "image/jpeg");
 
           console.log(`[createPost] Uploading [${i}]: ${sizeMB} MB → ${BUCKET}/${segPath}, contentType: ${contentType}`);
 

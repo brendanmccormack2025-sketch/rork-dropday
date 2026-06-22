@@ -354,7 +354,7 @@ function computeChunkSizes(
  * empty files are skipped with a warning instead of poisoning the export.
  *
  * @param inputUris - Array of local file URIs to concatenate, in order
- * @param outputUri - Where to write the merged file (must end in .mp4)
+ * @param outputUri - Where to write the merged file (uses the extension you provide — prefer .mov to match native iOS camera output)
  * @returns The output URI on success
  * @throws If all files are invalid, or the merge produces an unplayable result
  */
@@ -562,14 +562,15 @@ export async function concatMP4Files(
   //    rebuildChunkOffsets computes offsets relative to the merged mdat
   //    payload start, but the player reads stco/co64 as absolute file
   //    offsets. We must add the absolute position of the mdat payload
-  //    in the final file: ftypSize + moovSize + mdatHeaderSize.
+  //    in the final file. With moov-at-end (native iOS layout):
+  //    [ftyp][mdat header][mdat payload][moov]
+  //    mdat payload starts at ftypSize + mdatHeaderSize.
   const MDAT_HEADER_SIZE = 8;
-  const mdatPayloadAbsoluteOffset =
-    ftypBytes.length + rebuiltMoov.length + MDAT_HEADER_SIZE;
+  const mdatPayloadAbsoluteOffset = ftypBytes.length + MDAT_HEADER_SIZE;
 
   console.log(
     `[concatMP4] Patching stco offsets by +${mdatPayloadAbsoluteOffset} ` +
-    `(ftyp=${ftypBytes.length} + moov=${rebuiltMoov.length} + mdatHdr=${MDAT_HEADER_SIZE})`,
+    `(ftyp=${ftypBytes.length} + mdatHdr=${MDAT_HEADER_SIZE})`,
   );
   patchStcoOffsets(rebuiltMoov, mdatPayloadAbsoluteOffset);
 
@@ -579,8 +580,11 @@ export async function concatMP4Files(
   writeType(mdatHeader, 4, "mdat");
 
   // ── 7. Write the merged file ───────────────────────────────────────
+  //    Native iOS camera output: ftyp → mdat → moov (moov at end).
+  //    We match this layout so the concatenated file behaves identically
+  //    to a solo camera recording.
 
-  const merged = concatUint8Arrays([ftypBytes, rebuiltMoov, mdatHeader, mergedMdat]);
+  const merged = concatUint8Arrays([ftypBytes, mdatHeader, mergedMdat, rebuiltMoov]);
 
   // Quick sanity: make sure the file starts with ftyp
   if (readType(merged, 4) !== "ftyp") {
