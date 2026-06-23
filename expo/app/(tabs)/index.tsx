@@ -1,5 +1,6 @@
 import React, { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Modal,
@@ -18,6 +19,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useVideoFocus } from "@/hooks/useVideoFocus";
+import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 import {
   Heart,
   Music2,
@@ -27,6 +29,7 @@ import {
   X,
   Users,
   Sparkles,
+  RotateCcw,
 } from "lucide-react-native";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
@@ -154,10 +157,12 @@ export default function FeedScreen() {
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         scrollEnabled={!gateActive}
-        windowSize={3}
+        // windowSize=5 instead of 3 gives more buffer before views are recycled.
+        // removeClippedSubviews is intentionally omitted — on native it detaches
+        // Video backing views during scroll, which can freeze expo-av players.
+        windowSize={5}
         maxToRenderPerBatch={3}
         initialNumToRender={2}
-        removeClippedSubviews
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -252,9 +257,36 @@ const FeedItem = memo(function FeedItem({
     [post.segments, post.media_url],
   );
   const [segIdx, setSegIdx] = useState<number>(0);
-  const videoRef = useRef<Video>(null);
+  const currentUri = allSegments[segIdx] ?? post.media_url;
   const segIdxRef = useRef<number>(0);
   useEffect(() => { segIdxRef.current = segIdx; }, [segIdx]);
+
+  // Video error state for retry UI
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const errorCountRef = useRef<number>(0);
+
+  // ── Pre-buffering: don't start playback until player has buffered enough data.
+  //    Prevents the 1-2 freeze/stutter pattern caused by buffer underrun when
+  //    shouldPlay=true starts playback immediately before network data arrives.
+  const [playbackReady, setPlaybackReady] = useState<boolean>(false);
+  const playbackReadyRef = useRef<boolean>(false);
+
+  // Reset pre-buffer gate whenever active toggles, post changes, or segment changes
+  useEffect(() => {
+    setPlaybackReady(false);
+    playbackReadyRef.current = false;
+  }, [active, post.id, segIdx]);
+
+  // ── Stall detection + recovery ─────────────────────────────────────
+  const videoLog = useCallback((e: VideoEvent) => {
+    console.log("[feed] video", e);
+  }, []);
+
+  const {
+    videoRef,
+    stallState,
+    handlePlaybackStatus: handleStallDetection,
+  } = useVideoStallDetection(post.id, active, currentUri, videoLog);
 
   // Trim tracking for the current segment
   const durationSetRef = useRef<boolean>(false);
@@ -270,6 +302,8 @@ const FeedItem = memo(function FeedItem({
     trimEndRef.current = trim?.trimEndMs ?? 0;
     trimEndHandledRef.current = false;
     durationSetRef.current = false;
+    setVideoError(null);
+    errorCountRef.current = 0;
   }, [segIdx, post.trim_data]);
 
   const name =
@@ -287,12 +321,27 @@ const FeedItem = memo(function FeedItem({
   // Reset segment index when post changes
   useEffect(() => {
     setSegIdx(0);
+    setVideoError(null);
+    errorCountRef.current = 0;
   }, [post.id]);
 
   // When video finishes, advance to next segment or loop
   const onSegmentStatus = useCallback(
     (status: AVPlaybackStatus) => {
+      // Forward to stall detection handler first
+      handleStallDetection(status);
+
       if (!status.isLoaded) return;
+
+      // ── Pre-buffer gate: start playback only after initial buffering completes ──
+      if (!playbackReadyRef.current && !status.isBuffering) {
+        playbackReadyRef.current = true;
+        setPlaybackReady(true);
+        console.log("[feed] pre-buffer complete, starting playback", {
+          postId: post.id.slice(0, 8),
+          playableDurationMs: status.playableDurationMillis,
+        });
+      }
 
       const sourceDur =
         typeof status.durationMillis === "number" ? status.durationMillis : 0;
@@ -348,10 +397,23 @@ const FeedItem = memo(function FeedItem({
         setSegIdx(next);
       }
     },
-    [allSegments.length],
+    [allSegments.length, handleStallDetection],
   );
 
-  const currentUri = allSegments[segIdx] ?? post.media_url;
+  // ── Error recovery: retry loading ──────────────────────────────────
+  const handleRetryVideo = useCallback(() => {
+    setVideoError(null);
+    videoRef.current
+      ?.unloadAsync()
+      .then(() =>
+        videoRef.current?.loadAsync(
+          { uri: currentUri },
+          { shouldPlay: active, isLooping: true },
+          false,
+        ),
+      )
+      .catch(() => {});
+  }, [currentUri, active, videoRef]);
 
   // ── Diagnostic: log audio-related state transitions ────────────────
   useEffect(() => {
@@ -361,25 +423,80 @@ const FeedItem = memo(function FeedItem({
       isMuted: !active,
       segIdx,
       uri: currentUri.slice(-30),
+      isBuffering: stallState.isBuffering,
+      stallCount: stallState.stallCount,
+      playbackReady,
     });
-  }, [active, post.id, segIdx, currentUri]);
+  }, [active, post.id, segIdx, currentUri, stallState.isBuffering, stallState.stallCount, playbackReady]);
 
   return (
     <View style={styles.item}>
       {post.media_type === "video" ? (
-        <Video
-          key={`${post.id}_seg${segIdx}`}
-          ref={videoRef}
-          source={{ uri: currentUri }}
-          style={StyleSheet.absoluteFill}
-          resizeMode={ResizeMode.COVER}
-          isLooping
-          shouldPlay={active}
-          isMuted={!active}
-          useNativeControls={false}
-          progressUpdateIntervalMillis={50}
-          onPlaybackStatusUpdate={onSegmentStatus}
-        />
+        <View style={StyleSheet.absoluteFill}>
+          <Video
+            key={`${post.id}_seg${segIdx}`}
+            ref={videoRef}
+            source={{ uri: currentUri }}
+            style={StyleSheet.absoluteFill}
+            resizeMode={ResizeMode.COVER}
+            isLooping
+            shouldPlay={active && playbackReady}
+            isMuted={!active}
+            useNativeControls={false}
+            progressUpdateIntervalMillis={250}
+            onPlaybackStatusUpdate={onSegmentStatus}
+            onError={(error: string) => {
+              errorCountRef.current += 1;
+              setVideoError(error);
+              videoLog({ type: "load_error", postId: post.id, error });
+              console.error("[feed] Video onError", {
+                postId: post.id.slice(0, 8),
+                uri: currentUri.slice(-30),
+                error,
+                errorCount: errorCountRef.current,
+              });
+            }}
+            onLoad={(status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
+              videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
+              console.log("[feed] Video onLoad", {
+                postId: post.id.slice(0, 8),
+                durationMs: status.durationMillis,
+                active,
+              });
+            }}
+            onLoadStart={() => {
+              videoLog({ type: "load_start", postId: post.id, uri: currentUri });
+            }}
+            onReadyForDisplay={() => {
+              videoLog({ type: "ready_for_display", postId: post.id });
+              setVideoError(null);
+            }}
+          />
+
+          {/* Buffering indicator */}
+          {stallState.isBuffering && active && (
+            <View style={styles.bufferingOverlay} pointerEvents="none">
+              <ActivityIndicator color={theme.accent} size="small" />
+            </View>
+          )}
+
+          {/* Stall recovery / error overlay */}
+          {(stallState.recovering || videoError) && active && (
+            <View style={styles.stallOverlay} pointerEvents="box-none">
+              {stallState.recovering ? (
+                <>
+                  <ActivityIndicator color="#fff" size="large" />
+                  <Text style={styles.stallText}>Recovering playback…</Text>
+                </>
+              ) : videoError ? (
+                <Pressable onPress={handleRetryVideo} style={styles.retryBtn}>
+                  <RotateCcw color="#fff" size={20} strokeWidth={2.5} />
+                  <Text style={styles.retryText}>Tap to retry</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+        </View>
       ) : (
         <Image
           source={{ uri: post.media_url }}
@@ -1163,6 +1280,51 @@ const styles = StyleSheet.create({
     top: 12,
     right: 12,
     padding: 6,
+  },
+
+  /* Buffering indicator */
+  bufferingOverlay: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    marginLeft: -16,
+    marginTop: -16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  /* Stall / error recovery overlay */
+  stallOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  stallText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 14,
+    fontWeight: "600" as const,
+  },
+  retryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  retryText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700" as const,
   },
 
   /* Optimistic posting overlay */

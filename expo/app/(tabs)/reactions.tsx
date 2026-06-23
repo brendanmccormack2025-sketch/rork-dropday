@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Pressable,
@@ -13,10 +14,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "expo-router";
-import { Heart, Sparkles, Flame, MessageCircle } from "lucide-react-native";
-import { Video, ResizeMode } from "expo-av";
+import { Heart, Sparkles, Flame, MessageCircle, RotateCcw } from "lucide-react-native";
+import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
 import { useVideoFocus } from "@/hooks/useVideoFocus";
+import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 
 import DropletLogo from "@/components/DropletLogo";
 import { FeedAvatar } from "@/components/Avatar";
@@ -164,10 +166,9 @@ export default function ReactionsScreen() {
         getItemLayout={activeData.length > 0 ? getItemLayout : undefined}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
-        windowSize={3}
+        windowSize={5}
         maxToRenderPerBatch={3}
         initialNumToRender={2}
-        removeClippedSubviews
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -281,10 +282,51 @@ export default function ReactionsScreen() {
 
 function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const [liked, setLiked] = useState<boolean>(false);
-  const videoRef = useRef<Video>(null);
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
   const isReaction = !!post.parent_post_id;
+
+  // Video error state for retry UI
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const errorCountRef = useRef<number>(0);
+
+  // ── Pre-buffering: don't start playback until player has buffered enough data ──
+  const [playbackReady, setPlaybackReady] = useState<boolean>(false);
+  const playbackReadyRef = useRef<boolean>(false);
+
+  // Reset pre-buffer gate when active toggles or post changes
+  useEffect(() => {
+    setPlaybackReady(false);
+    playbackReadyRef.current = false;
+  }, [active, post.id]);
+
+  // ── Stall detection + recovery ─────────────────────────────────────
+  const videoLog = useCallback((e: VideoEvent) => {
+    console.log("[reactions] video", e);
+  }, []);
+
+  const {
+    videoRef,
+    stallState,
+    handlePlaybackStatus: handleStallStatus,
+  } = useVideoStallDetection(post.id, active, post.media_url, videoLog);
+
+  // ── Wrap stall handler with pre-buffer gate ────────────────────────
+  const handlePlaybackStatus = useCallback(
+    (status: AVPlaybackStatus) => {
+      handleStallStatus(status);
+      if (!status.isLoaded) return;
+      // Start playback once initial buffering completes
+      if (!playbackReadyRef.current && !status.isBuffering) {
+        playbackReadyRef.current = true;
+        setPlaybackReady(true);
+        console.log("[reactions] pre-buffer complete, starting playback", {
+          postId: post.id.slice(0, 8),
+        });
+      }
+    },
+    [handleStallStatus, post.id],
+  );
 
   // Reset liked state when post changes
   const postIdRef = useRef<string>(post.id);
@@ -293,6 +335,8 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   }
   useEffect(() => {
     setLiked(false);
+    setVideoError(null);
+    errorCountRef.current = 0;
   }, [post.id]);
 
   // ── Offset-based seeking for reaction playback ──────────────────────
@@ -309,29 +353,91 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
     } else if (!active) {
       hasSoughtRef.current = false;
     }
-  }, [active, isReaction, post.original_duration_ms]);
+  }, [active, isReaction, post.original_duration_ms, videoRef]);
 
   // Release resources on unmount
   useEffect(() => {
     return () => {
       videoRef.current?.unloadAsync().catch(() => {});
     };
-  }, []);
+  }, [videoRef]);
+
+  // ── Error recovery: retry loading ──────────────────────────────────
+  const handleRetryVideo = useCallback(() => {
+    setVideoError(null);
+    videoRef.current
+      ?.unloadAsync()
+      .then(() =>
+        videoRef.current?.loadAsync(
+          { uri: post.media_url },
+          { shouldPlay: active, isLooping: true },
+          false,
+        ),
+      )
+      .catch(() => {});
+  }, [post.media_url, active, videoRef]);
 
   return (
     <View style={styles.item}>
       {post.media_type === "video" ? (
-        <Video
-          ref={videoRef}
-          source={{ uri: post.media_url }}
-          style={StyleSheet.absoluteFill}
-          resizeMode={ResizeMode.COVER}
-          isLooping
-          shouldPlay={active}
-          isMuted={!active}
-          useNativeControls={false}
-          progressUpdateIntervalMillis={50}
-        />
+        <View style={StyleSheet.absoluteFill}>
+          <Video
+            ref={videoRef}
+            source={{ uri: post.media_url }}
+            style={StyleSheet.absoluteFill}
+            resizeMode={ResizeMode.COVER}
+            isLooping
+            shouldPlay={active && playbackReady}
+            isMuted={!active}
+            useNativeControls={false}
+            progressUpdateIntervalMillis={250}
+            onPlaybackStatusUpdate={handlePlaybackStatus}
+            onError={(error: string) => {
+              errorCountRef.current += 1;
+              setVideoError(error);
+              videoLog({ type: "load_error", postId: post.id, error });
+              console.error("[reactions] Video onError", {
+                postId: post.id.slice(0, 8),
+                error,
+                errorCount: errorCountRef.current,
+              });
+            }}
+            onLoad={(status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
+              videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
+            }}
+            onLoadStart={() => {
+              videoLog({ type: "load_start", postId: post.id, uri: post.media_url });
+            }}
+            onReadyForDisplay={() => {
+              videoLog({ type: "ready_for_display", postId: post.id });
+              setVideoError(null);
+            }}
+          />
+
+          {/* Buffering indicator */}
+          {stallState.isBuffering && active && (
+            <View style={styles.bufferingOverlay} pointerEvents="none">
+              <ActivityIndicator color={theme.accent} size="small" />
+            </View>
+          )}
+
+          {/* Stall recovery / error overlay */}
+          {(stallState.recovering || videoError) && active && (
+            <View style={styles.stallOverlay} pointerEvents="box-none">
+              {stallState.recovering ? (
+                <>
+                  <ActivityIndicator color="#fff" size="large" />
+                  <Text style={styles.stallText}>Recovering playback…</Text>
+                </>
+              ) : videoError ? (
+                <Pressable onPress={handleRetryVideo} style={styles.retryBtn}>
+                  <RotateCcw color="#fff" size={20} strokeWidth={2.5} />
+                  <Text style={styles.retryText}>Tap to retry</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+        </View>
       ) : (
         <Image
           source={{ uri: post.media_url }}
@@ -551,6 +657,51 @@ const styles = StyleSheet.create({
     color: theme.accent,
     fontSize: 12,
     fontWeight: "600" as const,
+  },
+
+  /* Buffering indicator */
+  bufferingOverlay: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    marginLeft: -16,
+    marginTop: -16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  /* Stall / error recovery overlay */
+  stallOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  stallText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 14,
+    fontWeight: "600" as const,
+  },
+  retryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  retryText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700" as const,
   },
 
   /* Empty */

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Pressable,
@@ -11,15 +12,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
-import { Video, ResizeMode } from "expo-av";
+import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Heart, Sparkles, Reply, Rewind } from "lucide-react-native";
+import { ArrowLeft, Heart, Sparkles, Reply, Rewind, RotateCcw } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
 import { supabase } from "@/lib/supabase";
+import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 import type { Post } from "@/providers/PostsProvider";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
@@ -321,13 +323,54 @@ function RootItem({
   isRoot?: boolean;
 }) {
   const [liked, setLiked] = useState<boolean>(false);
-  const videoRef = useRef<Video>(null);
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
   const isReaction = !!post.parent_post_id;
 
-  // ── Imperative play/pause — more reliable than shouldPlay alone ──
-  //    when the FlatList recycles native views (removeClippedSubviews).
+  // Video error state for retry UI
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const errorCountRef = useRef<number>(0);
+
+  // ── Pre-buffering: don't start playback until player has buffered enough data ──
+  const [playbackReady, setPlaybackReady] = useState<boolean>(false);
+  const playbackReadyRef = useRef<boolean>(false);
+
+  // Reset pre-buffer gate when active toggles or post changes
+  useEffect(() => {
+    setPlaybackReady(false);
+    playbackReadyRef.current = false;
+  }, [active, post.id]);
+
+  // ── Stall detection + recovery ─────────────────────────────────────
+  const videoLog = useCallback((e: VideoEvent) => {
+    console.log("[reaction-tree] video", e);
+  }, []);
+
+  const {
+    videoRef,
+    stallState,
+    handlePlaybackStatus: handleStallStatus,
+  } = useVideoStallDetection(post.id, active, post.media_url, videoLog);
+
+  // ── Wrap stall handler with pre-buffer gate ────────────────────────
+  const handlePlaybackStatus = useCallback(
+    (status: AVPlaybackStatus) => {
+      handleStallStatus(status);
+      if (!status.isLoaded) return;
+      // Start playback once initial buffering completes
+      if (!playbackReadyRef.current && !status.isBuffering) {
+        playbackReadyRef.current = true;
+        setPlaybackReady(true);
+        console.log("[reaction-tree] pre-buffer complete, starting playback", {
+          postId: post.id.slice(0, 8),
+        });
+      }
+    },
+    [handleStallStatus, post.id],
+  );
+
+  // ── Imperative play/pause — safety net when FlatList recycles native views.
+  //    Gated on playbackReady so we don't start before pre-buffering completes.
   useEffect(() => {
     console.log("[reaction-tree] RootItem audio state", {
       postId: post.id.slice(0, 8),
@@ -335,9 +378,11 @@ function RootItem({
       isMuted: !active,
       isReaction,
       mediaUrl: post.media_url.slice(-30),
+      isBuffering: stallState.isBuffering,
+      stallCount: stallState.stallCount,
+      playbackReady,
     });
-    if (active) {
-      // Small delay so the native player has time to attach after a scroll
+    if (active && playbackReady) {
       const t = setTimeout(() => {
         videoRef.current?.playAsync().catch(() => {});
       }, 80);
@@ -345,15 +390,12 @@ function RootItem({
     } else {
       videoRef.current?.pauseAsync().catch(() => {});
     }
-  }, [active]);
+  }, [active, playbackReady, stallState.isBuffering, stallState.stallCount]);
 
   // ── Offset-based seeking: when a reaction becomes active, seek to ────
   //     the reaction segment (skip the prepended original clip).
   const hasSoughtToReaction = useRef(false);
   useEffect(() => {
-    // Only seek past the prepended parent clip when the reaction was actually
-    // stitched (has segments). Solo fallback clips have segments=null and
-    // should play from the start — seeking past their own duration shows black.
     const wasStitched = post.segments != null && post.segments.length > 0;
     if (active && isReaction && wasStitched && post.original_duration_ms && post.original_duration_ms > 0) {
       if (!hasSoughtToReaction.current) {
@@ -366,14 +408,29 @@ function RootItem({
     } else if (!active) {
       hasSoughtToReaction.current = false;
     }
-  }, [active, isReaction, post.original_duration_ms, post.segments]);
+  }, [active, isReaction, post.original_duration_ms, post.segments, videoRef]);
 
   // Release native player resources on unmount
   useEffect(() => {
     return () => {
       videoRef.current?.unloadAsync().catch(() => {});
     };
-  }, []);
+  }, [videoRef]);
+
+  // ── Error recovery: retry loading ──────────────────────────────────
+  const handleRetryVideo = useCallback(() => {
+    setVideoError(null);
+    videoRef.current
+      ?.unloadAsync()
+      .then(() =>
+        videoRef.current?.loadAsync(
+          { uri: post.media_url },
+          { shouldPlay: active, isLooping: true },
+          false,
+        ),
+      )
+      .catch(() => {});
+  }, [post.media_url, active, videoRef]);
 
   // ── Jump to source (seek back to start of original clip) ────────────
   const handleJumpToSource = useCallback(() => {
@@ -384,43 +441,80 @@ function RootItem({
   return (
     <View style={styles.item}>
       {post.media_type === "video" ? (
-        <Video
-          key={post.id}
-          ref={videoRef}
-          source={{ uri: post.media_url }}
-          style={StyleSheet.absoluteFill}
-          resizeMode={ResizeMode.COVER}
-          isLooping
-          shouldPlay={active}
-          isMuted={!active}
-          useNativeControls={false}
-          progressUpdateIntervalMillis={50}
-          onError={(error: string) => {
-            console.error("[reaction-tree] Video onError", {
-              postId: post.id,
-              media_url: post.media_url,
-              active,
-              isReaction: !!post.parent_post_id,
-              error,
-            });
-          }}
-          onLoad={(status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
-            console.log("[reaction-tree] Video onLoad", {
-              postId: post.id,
-              media_url: post.media_url,
-              active,
-              isReaction: !!post.parent_post_id,
-              durationMs: status.durationMillis,
-              uriUsed: status.uri,
-            });
-          }}
-          onReadyForDisplay={() => {
-            console.log("[reaction-tree] Video onReadyForDisplay", {
-              postId: post.id,
-              active,
-            });
-          }}
-        />
+        <View style={StyleSheet.absoluteFill}>
+          <Video
+            key={post.id}
+            ref={videoRef}
+            source={{ uri: post.media_url }}
+            style={StyleSheet.absoluteFill}
+            resizeMode={ResizeMode.COVER}
+            isLooping
+            shouldPlay={active && playbackReady}
+            isMuted={!active}
+            useNativeControls={false}
+            progressUpdateIntervalMillis={250}
+            onPlaybackStatusUpdate={handlePlaybackStatus}
+            onError={(error: string) => {
+              errorCountRef.current += 1;
+              setVideoError(error);
+              videoLog({ type: "load_error", postId: post.id, error });
+              console.error("[reaction-tree] Video onError", {
+                postId: post.id,
+                media_url: post.media_url,
+                active,
+                isReaction: !!post.parent_post_id,
+                error,
+                errorCount: errorCountRef.current,
+              });
+            }}
+            onLoad={(status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
+              videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
+              console.log("[reaction-tree] Video onLoad", {
+                postId: post.id,
+                media_url: post.media_url,
+                active,
+                isReaction: !!post.parent_post_id,
+                durationMs: status.durationMillis,
+                uriUsed: status.uri,
+              });
+            }}
+            onLoadStart={() => {
+              videoLog({ type: "load_start", postId: post.id, uri: post.media_url });
+            }}
+            onReadyForDisplay={() => {
+              videoLog({ type: "ready_for_display", postId: post.id });
+              setVideoError(null);
+              console.log("[reaction-tree] Video onReadyForDisplay", {
+                postId: post.id,
+                active,
+              });
+            }}
+          />
+
+          {/* Buffering indicator */}
+          {stallState.isBuffering && active && (
+            <View style={styles.bufferingOverlay} pointerEvents="none">
+              <ActivityIndicator color={theme.accent} size="small" />
+            </View>
+          )}
+
+          {/* Stall recovery / error overlay */}
+          {(stallState.recovering || videoError) && active && (
+            <View style={styles.stallOverlay} pointerEvents="box-none">
+              {stallState.recovering ? (
+                <>
+                  <ActivityIndicator color="#fff" size="large" />
+                  <Text style={styles.stallText}>Recovering playback…</Text>
+                </>
+              ) : videoError ? (
+                <Pressable onPress={handleRetryVideo} style={styles.retryBtn}>
+                  <RotateCcw color="#fff" size={20} strokeWidth={2.5} />
+                  <Text style={styles.retryText}>Tap to retry</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+        </View>
       ) : (
         <Image
           source={{ uri: post.media_url }}
@@ -648,6 +742,51 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     lineHeight: 19,
+  },
+
+  /* Buffering indicator */
+  bufferingOverlay: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    marginLeft: -16,
+    marginTop: -16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  /* Stall / error recovery overlay */
+  stallOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  stallText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 14,
+    fontWeight: "600" as const,
+  },
+  retryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  retryText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700" as const,
   },
 
   /* Jump to Source button */
