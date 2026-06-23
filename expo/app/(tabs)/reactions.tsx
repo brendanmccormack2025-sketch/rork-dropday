@@ -384,20 +384,31 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   }, [post.id]);
 
   // ── Offset-based seeking for reaction playback ──────────────────────
+  //     Gated on playbackReady to prevent seeking before the player's
+  //     first frame is loaded (which causes a permanent black screen).
   const hasSoughtRef = useRef(false);
   useEffect(() => {
-    if (active && isReaction && post.original_duration_ms && post.original_duration_ms > 0) {
-      if (!hasSoughtRef.current) {
-        hasSoughtRef.current = true;
-        const t = setTimeout(() => {
-          videoRef.current?.setPositionAsync(post.original_duration_ms!).catch(() => {});
-        }, 120);
-        return () => clearTimeout(t);
-      }
-    } else if (!active) {
+    if (
+      active &&
+      playbackReady &&
+      isReaction &&
+      post.original_duration_ms &&
+      post.original_duration_ms > 0 &&
+      !hasSoughtRef.current
+    ) {
+      hasSoughtRef.current = true;
+      console.log("[reactions] seeking to reaction segment", {
+        postId: post.id.slice(0, 8),
+        originalDurationMs: post.original_duration_ms,
+      });
+      const t = setTimeout(() => {
+        videoRef.current?.setPositionAsync(post.original_duration_ms!).catch(() => {});
+      }, 100);
+      return () => clearTimeout(t);
+    } else if (!active || !playbackReady) {
       hasSoughtRef.current = false;
     }
-  }, [active, isReaction, post.original_duration_ms, videoRef]);
+  }, [active, playbackReady, isReaction, post.original_duration_ms, post.id, videoRef]);
 
   // Release resources on unmount
   useEffect(() => {

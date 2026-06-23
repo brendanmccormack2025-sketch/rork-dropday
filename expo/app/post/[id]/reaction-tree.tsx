@@ -431,23 +431,36 @@ function RootItem({
     }
   }, [active, playbackReady, stallState.isBuffering, stallState.stallCount]);
 
-  // ── Offset-based seeking: when a reaction becomes active, seek to ────
-  //     the reaction segment (skip the prepended original clip).
+  // ── Offset-based seeking: when a reaction becomes active AND the player
+  //     is pre-buffered (playbackReady), seek to the reaction segment.
+  //     Gating on playbackReady prevents the seek from firing on a player
+  //     that hasn't loaded its first frame yet, which would cause a permanent
+  //     black screen.
   const hasSoughtToReaction = useRef(false);
   useEffect(() => {
     const wasStitched = post.segments != null && post.segments.length > 0;
-    if (active && isReaction && wasStitched && post.original_duration_ms && post.original_duration_ms > 0) {
-      if (!hasSoughtToReaction.current) {
-        hasSoughtToReaction.current = true;
-        const t = setTimeout(() => {
-          videoRef.current?.setPositionAsync(post.original_duration_ms!).catch(() => {});
-        }, 150);
-        return () => clearTimeout(t);
-      }
-    } else if (!active) {
+    if (
+      active &&
+      playbackReady &&
+      isReaction &&
+      wasStitched &&
+      post.original_duration_ms &&
+      post.original_duration_ms > 0 &&
+      !hasSoughtToReaction.current
+    ) {
+      hasSoughtToReaction.current = true;
+      console.log("[reaction-tree] seeking to reaction segment", {
+        postId: post.id.slice(0, 8),
+        originalDurationMs: post.original_duration_ms,
+      });
+      const t = setTimeout(() => {
+        videoRef.current?.setPositionAsync(post.original_duration_ms!).catch(() => {});
+      }, 100);
+      return () => clearTimeout(t);
+    } else if (!active || !playbackReady) {
       hasSoughtToReaction.current = false;
     }
-  }, [active, isReaction, post.original_duration_ms, post.segments, videoRef]);
+  }, [active, playbackReady, isReaction, post.original_duration_ms, post.segments, post.id, videoRef]);
 
   // Release native player resources on unmount
   useEffect(() => {
