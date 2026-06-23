@@ -638,13 +638,25 @@ export async function concatMP4Files(
   const firstSeg = segments[0]!;
   const firstBuf = firstSeg.mdat.buffer;
 
-  // Extract ftyp box
-  const ftypBox = firstSeg.boxes.find((b) => b.type === "ftyp");
-  let ftypBytes: Uint8Array;
-  if (ftypBox) {
-    ftypBytes = new Uint8Array(firstBuf.slice(ftypBox.offset, ftypBox.offset + ftypBox.size));
-  } else {
-    ftypBytes = createMinimalFtyp();
+  // ── ftyp: always output a fresh QuickTime brand ──────────────
+  //
+  // The first segment may carry an ISO brand (isom/mp42) from a previous
+  // concatMP4 run, or a native "qt  " brand from expo-camera.  The reaction
+  // clip (second segment) is always native QuickTime from expo-camera.
+  //
+  // Using the first segment's ftyp as-is risks mixing brands: an ISO ftyp
+  // on QuickTime-derived moov + mdat causes AVFoundation to reject the file
+  // ([AVAsset isPlayable:] = false).
+  //
+  // The safe solution: always emit a fresh QuickTime ftyp so the container
+  // identity is consistent regardless of input sources.
+  let ftypBytes = createMinimalFtyp();
+  const sourceFtypBox = firstSeg.boxes.find((b) => b.type === "ftyp");
+  if (sourceFtypBox) {
+    const sourceBrand = readType(firstBuf, sourceFtypBox.dataOffset);
+    console.log(
+      `[concatMP4] Output ftyp: overriding source brand "${sourceBrand}" → "qt  "`,
+    );
   }
 
   // ── 4. Rebuild moov with updated chunk offsets for ALL tracks ─────
@@ -737,16 +749,26 @@ function concatUint8Arrays(arrays: Uint8Array[]): Uint8Array {
   return result;
 }
 
+/**
+ * Create a QuickTime-compatible ftyp box.
+ *
+ * expo-camera uses AVAssetWriter with AVFileTypeQuickTimeMovie on iOS,
+ * which produces native QuickTime (.mov) files with ftyp major_brand "qt  ".
+ * The binary concatenation must output the same brand so AVFoundation
+ * recognises the file as a valid QuickTime movie — an ISO brand (isom/mp42)
+ * on QuickTime-derived data causes [AVAsset isPlayable:] to return false.
+ *
+ * Box layout (32 bytes):
+ *   [size:32][ftyp][qt  ][minor_version:0][qt  ]
+ */
 function createMinimalFtyp(): Uint8Array {
-  // Minimal ftyp box: size=24, type='ftyp', major_brand='isom', minor_version=0,
-  // compatible_brands=['isom', 'mp42']
-  const buf = new Uint8Array(24);
-  writeU32(buf, 0, 24);
+  // 4 (size) + 4 (type) + 4 (major) + 4 (minor) + 4 (compat) = 20 bytes
+  const buf = new Uint8Array(20);
+  writeU32(buf, 0, 20);
   writeType(buf, 4, "ftyp");
-  writeType(buf, 8, "isom");
-  writeU32(buf, 12, 0);
-  writeType(buf, 16, "isom");
-  writeType(buf, 20, "mp42");
+  writeType(buf, 8, "qt  ");    // major_brand = QuickTime
+  writeU32(buf, 12, 0);         // minor_version
+  writeType(buf, 16, "qt  ");   // compatible_brands[0]
   return buf;
 }
 

@@ -473,7 +473,7 @@ export function useCameraRecorder() {
           setIsMergingSync(true);
           console.log(`[camera] Merging ${uris.length} segments into one video...`);
 
-          const mergedUri = `${cacheDirectory || documentDirectory}merged_${Date.now()}.mp4`;
+          const mergedUri = `${cacheDirectory || documentDirectory}merged_${Date.now()}.mov`;
           finalUri = await concatMP4Files(uris, mergedUri);
           console.log(`[camera] Merge complete — output: ${finalUri.slice(0, 60)}`);
           setIsMergingSync(false);
