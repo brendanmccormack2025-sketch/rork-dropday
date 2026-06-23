@@ -51,9 +51,14 @@ export default function ReactionsScreen() {
     setRefreshing(false);
   }, [refetchLastNight, refetchReactions]);
 
-  // Refetch on focus
+  // Refetch on focus — skip initial mount to avoid disrupting cold-start video init.
+  const isFirstFocusRef = useRef<boolean>(true);
   useFocusEffect(
     useCallback(() => {
+      if (isFirstFocusRef.current) {
+        isFirstFocusRef.current = false;
+        return;
+      }
       refetchLastNight();
       refetchReactions();
     }, [refetchLastNight, refetchReactions])
@@ -290,15 +295,45 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const [videoError, setVideoError] = useState<string | null>(null);
   const errorCountRef = useRef<number>(0);
 
-  // ── Pre-buffering: don't start playback until player has buffered enough data ──
+  // ── Pre-buffering: don't start playback until the first frame is ready.
+  //    Uses onReadyForDisplay (deterministic) + !isBuffering fallback + 3s timeout.
   const [playbackReady, setPlaybackReady] = useState<boolean>(false);
   const playbackReadyRef = useRef<boolean>(false);
+  const readyForDisplayRef = useRef<boolean>(false);
+  const prebufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isInitialMountRef = useRef<boolean>(true);
 
-  // Reset pre-buffer gate when active toggles or post changes
+  // Reset pre-buffer gate when active toggles or post changes.
+  // Skip initial mount to avoid racing with native onPlaybackStatusUpdate.
   useEffect(() => {
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
     setPlaybackReady(false);
     playbackReadyRef.current = false;
+    readyForDisplayRef.current = false;
   }, [active, post.id]);
+
+  // Safety timeout: force playbackReady=true after 3s if onReadyForDisplay never fires
+  useEffect(() => {
+    if (!active || playbackReady) return;
+    prebufferTimerRef.current = setTimeout(() => {
+      if (!playbackReadyRef.current) {
+        console.log("[reactions] pre-buffer safety timeout — forcing playback", {
+          postId: post.id.slice(0, 8),
+        });
+        playbackReadyRef.current = true;
+        setPlaybackReady(true);
+      }
+    }, 3000);
+    return () => {
+      if (prebufferTimerRef.current) {
+        clearTimeout(prebufferTimerRef.current);
+        prebufferTimerRef.current = null;
+      }
+    };
+  }, [active, playbackReady, post.id]);
 
   // ── Stall detection + recovery ─────────────────────────────────────
   const videoLog = useCallback((e: VideoEvent) => {
@@ -316,13 +351,22 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
     (status: AVPlaybackStatus) => {
       handleStallStatus(status);
       if (!status.isLoaded) return;
-      // Start playback once initial buffering completes
-      if (!playbackReadyRef.current && !status.isBuffering) {
-        playbackReadyRef.current = true;
-        setPlaybackReady(true);
-        console.log("[reactions] pre-buffer complete, starting playback", {
-          postId: post.id.slice(0, 8),
-        });
+      // Start playback when the first frame is ready
+      if (!playbackReadyRef.current) {
+        const hasFrame = readyForDisplayRef.current;
+        const notBuffering = !status.isBuffering;
+        if (hasFrame || notBuffering) {
+          playbackReadyRef.current = true;
+          setPlaybackReady(true);
+          if (prebufferTimerRef.current) {
+            clearTimeout(prebufferTimerRef.current);
+            prebufferTimerRef.current = null;
+          }
+          console.log("[reactions] pre-buffer complete, starting playback", {
+            postId: post.id.slice(0, 8),
+            trigger: hasFrame ? "onReadyForDisplay" : "notBuffering",
+          });
+        }
       }
     },
     [handleStallStatus, post.id],
@@ -411,6 +455,18 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
             onReadyForDisplay={() => {
               videoLog({ type: "ready_for_display", postId: post.id });
               setVideoError(null);
+              readyForDisplayRef.current = true;
+              if (!playbackReadyRef.current) {
+                playbackReadyRef.current = true;
+                setPlaybackReady(true);
+                if (prebufferTimerRef.current) {
+                  clearTimeout(prebufferTimerRef.current);
+                  prebufferTimerRef.current = null;
+                }
+                console.log("[reactions] onReadyForDisplay — starting playback", {
+                  postId: post.id.slice(0, 8),
+                });
+              }
             }}
           />
 

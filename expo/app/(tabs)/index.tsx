@@ -53,6 +53,7 @@ export default function FeedScreen() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sharePost, setSharePost] = useState<Post | null>(null);
   const screenFocused = useVideoFocus();
+  const isFirstFocusRef = useRef<boolean>(true);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -81,8 +82,15 @@ export default function FeedScreen() {
 
   // Refetch on tab focus — ensures fresh data when returning from camera
   // or edit-profile without needing a manual pull-to-refresh.
+  // Skip the initial mount: useQuery already fetches on cold start,
+  // and an extra refetch here can race with the feed Video player's
+  // initialization, causing a 100% reproducible freeze on cold open.
   useFocusEffect(
     useCallback(() => {
+      if (isFirstFocusRef.current) {
+        isFirstFocusRef.current = false;
+        return;
+      }
       refetchFeed();
     }, [refetchFeed])
   );
@@ -265,17 +273,62 @@ const FeedItem = memo(function FeedItem({
   const [videoError, setVideoError] = useState<string | null>(null);
   const errorCountRef = useRef<number>(0);
 
-  // ── Pre-buffering: don't start playback until player has buffered enough data.
-  //    Prevents the 1-2 freeze/stutter pattern caused by buffer underrun when
-  //    shouldPlay=true starts playback immediately before network data arrives.
+  // ── Pre-buffering: don't start playback until the first frame is ready.
+  //    Uses onReadyForDisplay (deterministic, fires once) + a 3s safety timeout
+  //    to avoid the freeze-when-shouldPlay-fires-too-early pattern.
   const [playbackReady, setPlaybackReady] = useState<boolean>(false);
   const playbackReadyRef = useRef<boolean>(false);
+  const readyForDisplayRef = useRef<boolean>(false);
+  const prebufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isInitialMountRef = useRef<boolean>(true);
 
-  // Reset pre-buffer gate whenever active toggles, post changes, or segment changes
+  // Reset pre-buffer gate whenever active toggles, post changes, or segment changes.
+  // Skip the initial mount — on cold start, the useState(false) initializer is correct,
+  // and running setPlaybackReady(false) in the effect races with the native
+  // onPlaybackStatusUpdate callback, causing a freeze (video starts → effect resets → video stops).
   useEffect(() => {
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
     setPlaybackReady(false);
     playbackReadyRef.current = false;
+    readyForDisplayRef.current = false;
   }, [active, post.id, segIdx]);
+
+  // Clear prebuffer safety timer on unmount or when deps change
+  useEffect(() => {
+    return () => {
+      if (prebufferTimerRef.current) {
+        clearTimeout(prebufferTimerRef.current);
+        prebufferTimerRef.current = null;
+      }
+    };
+  }, [active, post.id, segIdx]);
+
+  // ── Safety timeout: if onReadyForDisplay never fires (rare Android edge case),
+  //    force playbackReady=true after 3s so the video doesn't stay frozen forever.
+  useEffect(() => {
+    // Only arm the timer when the player is supposed to be active and not yet ready.
+    if (!active || playbackReady) return;
+
+    prebufferTimerRef.current = setTimeout(() => {
+      if (!playbackReadyRef.current) {
+        console.log("[feed] pre-buffer safety timeout — forcing playback", {
+          postId: post.id.slice(0, 8),
+        });
+        playbackReadyRef.current = true;
+        setPlaybackReady(true);
+      }
+    }, 3000);
+
+    return () => {
+      if (prebufferTimerRef.current) {
+        clearTimeout(prebufferTimerRef.current);
+        prebufferTimerRef.current = null;
+      }
+    };
+  }, [active, playbackReady, post.id]);
 
   // ── Stall detection + recovery ─────────────────────────────────────
   const videoLog = useCallback((e: VideoEvent) => {
@@ -333,14 +386,26 @@ const FeedItem = memo(function FeedItem({
 
       if (!status.isLoaded) return;
 
-      // ── Pre-buffer gate: start playback only after initial buffering completes ──
-      if (!playbackReadyRef.current && !status.isBuffering) {
-        playbackReadyRef.current = true;
-        setPlaybackReady(true);
-        console.log("[feed] pre-buffer complete, starting playback", {
-          postId: post.id.slice(0, 8),
-          playableDurationMs: status.playableDurationMillis,
-        });
+      // ── Pre-buffer gate: start playback when the first frame is ready ──
+      //    onReadyForDisplay is the PRIMARY signal (deterministic, fires once).
+      //    onPlaybackStatusUpdate (!isBuffering) is a SECONDARY fallback for
+      //    edge cases where onReadyForDisplay doesn't fire on some Android devices.
+      if (!playbackReadyRef.current) {
+        const hasFrame = readyForDisplayRef.current;
+        const notBuffering = !status.isBuffering;
+        if (hasFrame || notBuffering) {
+          playbackReadyRef.current = true;
+          setPlaybackReady(true);
+          if (prebufferTimerRef.current) {
+            clearTimeout(prebufferTimerRef.current);
+            prebufferTimerRef.current = null;
+          }
+          console.log("[feed] pre-buffer complete, starting playback", {
+            postId: post.id.slice(0, 8),
+            trigger: hasFrame ? "onReadyForDisplay" : "notBuffering",
+            playableDurationMs: status.playableDurationMillis,
+          });
+        }
       }
 
       const sourceDur =
@@ -415,9 +480,9 @@ const FeedItem = memo(function FeedItem({
       .catch(() => {});
   }, [currentUri, active, videoRef]);
 
-  // ── Diagnostic: log audio-related state transitions ────────────────
+  // ── Diagnostic: log audio/playback state transitions ────────────────
   useEffect(() => {
-    console.log("[feed] FeedItem audio state", {
+    console.log("[feed] FeedItem state", {
       postId: post.id.slice(0, 8),
       active,
       isMuted: !active,
@@ -426,6 +491,7 @@ const FeedItem = memo(function FeedItem({
       isBuffering: stallState.isBuffering,
       stallCount: stallState.stallCount,
       playbackReady,
+      readyForDisplay: readyForDisplayRef.current,
     });
   }, [active, post.id, segIdx, currentUri, stallState.isBuffering, stallState.stallCount, playbackReady]);
 
@@ -470,6 +536,20 @@ const FeedItem = memo(function FeedItem({
             onReadyForDisplay={() => {
               videoLog({ type: "ready_for_display", postId: post.id });
               setVideoError(null);
+              readyForDisplayRef.current = true;
+              // If the pre-buffer gate hasn't passed yet, trigger it now.
+              // This is the most reliable signal that the first frame is visible.
+              if (!playbackReadyRef.current) {
+                playbackReadyRef.current = true;
+                setPlaybackReady(true);
+                if (prebufferTimerRef.current) {
+                  clearTimeout(prebufferTimerRef.current);
+                  prebufferTimerRef.current = null;
+                }
+                console.log("[feed] onReadyForDisplay — starting playback", {
+                  postId: post.id.slice(0, 8),
+                });
+              }
             }}
           />
 
