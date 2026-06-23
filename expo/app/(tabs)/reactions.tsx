@@ -125,7 +125,7 @@ export default function ReactionsScreen() {
     ({ item, index }: { item: Post; index: number }) => (
       <ReactionItem post={item} active={index === activeIndex && screenFocused} />
     ),
-    [activeIndex]
+    [activeIndex, screenFocused]
   );
 
   return (

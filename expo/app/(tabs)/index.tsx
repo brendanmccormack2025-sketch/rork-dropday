@@ -124,7 +124,7 @@ export default function FeedScreen() {
         onRetry={() => retryOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),
-    [activeIndex, win.isOpen, router, retryOptimisticPost]
+    [activeIndex, screenFocused, win.isOpen, router, retryOptimisticPost]
   );
 
   return (
@@ -352,6 +352,17 @@ const FeedItem = memo(function FeedItem({
   );
 
   const currentUri = allSegments[segIdx] ?? post.media_url;
+
+  // ── Diagnostic: log audio-related state transitions ────────────────
+  useEffect(() => {
+    console.log("[feed] FeedItem audio state", {
+      postId: post.id.slice(0, 8),
+      active,
+      isMuted: !active,
+      segIdx,
+      uri: currentUri.slice(-30),
+    });
+  }, [active, post.id, segIdx, currentUri]);
 
   return (
     <View style={styles.item}>

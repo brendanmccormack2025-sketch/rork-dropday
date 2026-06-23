@@ -17,6 +17,7 @@ import { CameraView } from "expo-camera";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Svg, { Circle } from "react-native-svg";
 import * as Haptics from "expo-haptics";
+import { Audio } from "expo-av";
 import {
   Camera as CameraIcon,
   Clock,
@@ -134,6 +135,22 @@ export default function CameraScreen() {
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
+  }, []);
+
+  // ─── Audio session: allow recording while camera is mounted ──────────
+  useEffect(() => {
+    console.log("[camera] Setting audio mode → allowsRecording");
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+    }).catch(() => {});
+    return () => {
+      console.log("[camera] Restoring audio mode → playback-only");
+      Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      }).catch(() => {});
+    };
   }, []);
 
   // Cleanup on unmount

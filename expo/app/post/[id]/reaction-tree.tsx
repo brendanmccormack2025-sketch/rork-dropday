@@ -329,6 +329,13 @@ function RootItem({
   // ── Imperative play/pause — more reliable than shouldPlay alone ──
   //    when the FlatList recycles native views (removeClippedSubviews).
   useEffect(() => {
+    console.log("[reaction-tree] RootItem audio state", {
+      postId: post.id.slice(0, 8),
+      active,
+      isMuted: !active,
+      isReaction,
+      mediaUrl: post.media_url.slice(-30),
+    });
     if (active) {
       // Small delay so the native player has time to attach after a scroll
       const t = setTimeout(() => {
