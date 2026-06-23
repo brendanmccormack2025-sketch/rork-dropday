@@ -286,6 +286,13 @@ export function useCameraRecorder() {
         if (result?.uri) {
           accumulatedSegmentUrisRef.current.push(result.uri);
           console.log(`[camera] recordAsync resolved — collected URI: ${result.uri.slice(0, 60)}`);
+
+          // ── RAW RECORDING DIAGNOSTICS ──────────────────────────────
+          // Verify the file is valid immediately after recordAsync returns,
+          // BEFORE any processing (merge, export, upload) touches it.
+          const rawInfo = await getInfoAsync(result.uri);
+          console.log(`[camera] RAW FILE — path: ${result.uri}`);
+          console.log(`[camera] RAW FILE — exists: ${rawInfo.exists}, size: ${rawInfo.exists ? (rawInfo.size ?? 0) : 'N/A'} bytes`);
         } else {
           // recordAsync resolved without a URI — the native session likely
           // wasn't fully ready.  Surface this as a visible error instead of
