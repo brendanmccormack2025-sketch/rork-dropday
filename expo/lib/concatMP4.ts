@@ -45,6 +45,62 @@ function readType(buf: Uint8Array, offset: number): string {
   return textDecoder.decode(buf.slice(offset, offset + 4));
 }
 
+/**
+ * Safely create a DataView backed by the same ArrayBuffer as `buf`,
+ * starting at `byteOffset` and spanning `byteLength` bytes.
+ *
+ * Throws a descriptive error if the requested view extends past the
+ * underlying buffer — this prevents the cryptic V8 "Cannot read that
+ * many bytes" RangeError and gives us the exact box/offset/size info.
+ */
+function safeDataView(
+  buf: Uint8Array,
+  byteOffset: number,
+  byteLength: number,
+  context: string,
+): DataView {
+  const absStart = buf.byteOffset + byteOffset;
+  const absEnd = absStart + byteLength;
+  const bufEnd = buf.byteOffset + buf.length;
+  const bufferLen = buf.buffer.byteLength;
+
+  if (byteLength < 0) {
+    throw new Error(
+      `[concatMP4] BAD BOX (${context}): negative byteLength ${byteLength}. ` +
+      `byteOffset=${byteOffset}, buf.byteOffset=${buf.byteOffset}, buf.length=${buf.length}`,
+    );
+  }
+  if (absEnd > bufferLen) {
+    throw new Error(
+      `[concatMP4] BAD BOX (${context}): view extends past buffer. ` +
+      `byteOffset=${byteOffset} + byteLength=${byteLength} = ${absEnd} ` +
+      `(abs, buf.byteOffset=${buf.byteOffset}) ` +
+      `but buffer.byteLength=${bufferLen}, buf.length=${buf.length}`,
+    );
+  }
+  // Also sanity-check against the Uint8Array view (catches sliced-buffer issues)
+  if (absEnd > bufEnd) {
+    throw new Error(
+      `[concatMP4] BAD BOX (${context}): view extends past Uint8Array view. ` +
+      `absEnd=${absEnd} > bufViewEnd=${bufEnd}`,
+    );
+  }
+  return new DataView(buf.buffer, absStart, byteLength);
+}
+
+/**
+ * Validate that a DataView read at `viewOffset` for `typeSize` bytes
+ * fits within the view. Throws the same descriptive error format.
+ */
+function checkViewBounds(view: DataView, viewOffset: number, typeSize: number, context: string): void {
+  if (viewOffset < 0 || viewOffset + typeSize > view.byteLength) {
+    throw new Error(
+      `[concatMP4] BAD BOX (${context}): read at offset ${viewOffset}+${typeSize} ` +
+      `exceeds view byteLength ${view.byteLength}`,
+    );
+  }
+}
+
 /** Write 4-character box type */
 function writeType(buf: Uint8Array, offset: number, type: string): void {
   const bytes = textEncoder.encode(type);
@@ -163,34 +219,44 @@ interface StscEntry {
 
 function parseStts(buf: Uint8Array, box: Mp4Box): SttsEntry[] {
   // stts fullbox: version(1) + flags(3) + entry_count(4) + entries
-  const view = new DataView(buf.buffer, buf.byteOffset + box.dataOffset + 4, box.dataSize - 4);
+  const ctx = `stts@${box.dataOffset}`;
+  const view = safeDataView(buf, box.dataOffset + 4, box.dataSize - 4, ctx);
+  checkViewBounds(view, 0, 4, ctx);
   const entryCount = view.getUint32(0);
   const entries: SttsEntry[] = [];
   for (let i = 0; i < entryCount; i++) {
+    const off = 4 + i * 8;
+    checkViewBounds(view, off, 8, `${ctx}[${i}]`);
     entries.push({
-      sampleCount: view.getUint32(4 + i * 8),
-      sampleDelta: view.getUint32(8 + i * 8),
+      sampleCount: view.getUint32(off),
+      sampleDelta: view.getUint32(off + 4),
     });
   }
   return entries;
 }
 
 function parseStsc(buf: Uint8Array, box: Mp4Box): StscEntry[] {
-  const view = new DataView(buf.buffer, buf.byteOffset + box.dataOffset + 4, box.dataSize - 4);
+  const ctx = `stsc@${box.dataOffset}`;
+  const view = safeDataView(buf, box.dataOffset + 4, box.dataSize - 4, ctx);
+  checkViewBounds(view, 0, 4, ctx);
   const entryCount = view.getUint32(0);
   const entries: StscEntry[] = [];
   for (let i = 0; i < entryCount; i++) {
+    const off = 4 + i * 12;
+    checkViewBounds(view, off, 12, `${ctx}[${i}]`);
     entries.push({
-      firstChunk: view.getUint32(4 + i * 12),
-      samplesPerChunk: view.getUint32(8 + i * 12),
-      sampleDescriptionIndex: view.getUint32(12 + i * 12),
+      firstChunk: view.getUint32(off),
+      samplesPerChunk: view.getUint32(off + 4),
+      sampleDescriptionIndex: view.getUint32(off + 8),
     });
   }
   return entries;
 }
 
 function parseStsz(buf: Uint8Array, box: Mp4Box): number[] {
-  const view = new DataView(buf.buffer, buf.byteOffset + box.dataOffset + 4, box.dataSize - 4);
+  const ctx = `stsz@${box.dataOffset}`;
+  const view = safeDataView(buf, box.dataOffset + 4, box.dataSize - 4, ctx);
+  checkViewBounds(view, 0, 8, ctx);
   const sampleSize = view.getUint32(0);
   const sampleCount = view.getUint32(4);
   if (sampleSize !== 0) {
@@ -199,7 +265,9 @@ function parseStsz(buf: Uint8Array, box: Mp4Box): number[] {
   }
   const sizes: number[] = [];
   for (let i = 0; i < sampleCount; i++) {
-    sizes.push(view.getUint32(8 + i * 4));
+    const off = 8 + i * 4;
+    checkViewBounds(view, off, 4, `${ctx}[${i}]`);
+    sizes.push(view.getUint32(off));
   }
   return sizes;
 }
@@ -211,16 +279,21 @@ interface ChunkOffsetTable {
 
 function parseChunkOffsets(buf: Uint8Array, box: Mp4Box): ChunkOffsetTable {
   const is64 = box.type === "co64";
-  const view = new DataView(buf.buffer, buf.byteOffset + box.dataOffset + 4, box.dataSize - 4);
+  const ctx = `${box.type}@${box.dataOffset}`;
+  const view = safeDataView(buf, box.dataOffset + 4, box.dataSize - 4, ctx);
+  checkViewBounds(view, 0, 4, ctx);
   const entryCount = view.getUint32(0);
   const offsets: number[] = [];
+  const entryStride = is64 ? 8 : 4;
   for (let i = 0; i < entryCount; i++) {
+    const off = 4 + i * entryStride;
+    checkViewBounds(view, off, entryStride, `${ctx}[${i}]`);
     if (is64) {
-      const hi = view.getUint32(4 + i * 8);
-      const lo = view.getUint32(8 + i * 8);
+      const hi = view.getUint32(off);
+      const lo = view.getUint32(off + 4);
       offsets.push(hi * 0x100000000 + lo);
     } else {
-      offsets.push(view.getUint32(4 + i * 4));
+      offsets.push(view.getUint32(off));
     }
   }
   return { is64, offsets };
@@ -431,6 +504,31 @@ export async function concatMP4Files(
     }
 
     const boxes = parseBoxes(buf, 0, buf.length);
+
+    // ── Diagnostic: log ftyp brand + top-level box outline ──────────
+    const ftypBox = boxes.find((b) => b.type === "ftyp");
+    if (ftypBox) {
+      const majorBrand = readType(buf, ftypBox.dataOffset);
+      const minorVersion = readU32(buf, ftypBox.dataOffset + 4);
+      const compatCount = Math.floor((ftypBox.dataSize - 8) / 4);
+      const compatBrands: string[] = [];
+      for (let c = 0; c < Math.min(compatCount, 6); c++) {
+        compatBrands.push(readType(buf, ftypBox.dataOffset + 8 + c * 4));
+      }
+      console.log(
+        `[concatMP4] ftyp: major=${majorBrand} minor=${minorVersion} ` +
+        `compat=[${compatBrands.join(", ")}]`,
+      );
+    } else {
+      console.warn(`[concatMP4] No ftyp box found in source: ${uri.slice(0, 60)}`);
+    }
+
+    // Log top-level box outline (type + size) for the first 12 boxes
+    const boxOutline = boxes.slice(0, 12).map((b) => `${b.type}:${b.size}`).join(" ");
+    console.log(
+      `[concatMP4] Box outline (${buf.length}B): ${boxOutline}` +
+      (boxes.length > 12 ? ` ... (${boxes.length} total)` : ""),
+    );
 
     const mdatBox = findMdatBox(boxes);
     if (!mdatBox) {
@@ -1061,11 +1159,14 @@ function rebuildChunkOffsets(
   writeType(buf, 4, stcoBox.type);
 
   // Copy version/flags from original
-  const origView = new DataView(
-    firstBuf.buffer,
-    firstBuf.byteOffset + stcoBox.dataOffset,
+  const origCtx = `orig-${stcoBox.type}@${stcoBox.dataOffset}`;
+  const origView = safeDataView(
+    firstBuf,
+    stcoBox.dataOffset,
     stcoBox.dataSize,
+    origCtx,
   );
+  checkViewBounds(origView, 0, 4, origCtx);
   const origVersion = origView.getUint8(0);
   const origFlags =
     (origView.getUint8(1) << 16) | (origView.getUint8(2) << 8) | origView.getUint8(3);
@@ -1113,11 +1214,14 @@ function rebuildStsz(
     const buf = new Uint8Array(20);
     writeU32(buf, 0, 20);
     writeType(buf, 4, "stsz");
-    const origView = new DataView(
-      firstBuf.buffer,
-      firstBuf.byteOffset + stszBox.dataOffset,
+    const stszCtxConst = `orig-stsz@${stszBox.dataOffset}`;
+    const origView = safeDataView(
+      firstBuf,
+      stszBox.dataOffset,
       stszBox.dataSize,
+      stszCtxConst,
     );
+    checkViewBounds(origView, 0, 4, stszCtxConst);
     buf[8] = origView.getUint8(0);
     buf[9] = origView.getUint8(1);
     buf[10] = origView.getUint8(2);
@@ -1133,11 +1237,14 @@ function rebuildStsz(
   const buf = new Uint8Array(boxSize);
   writeU32(buf, 0, boxSize);
   writeType(buf, 4, "stsz");
-  const origView = new DataView(
-    firstBuf.buffer,
-    firstBuf.byteOffset + stszBox.dataOffset,
+  const stszCtxVar = `orig-stsz@${stszBox.dataOffset}`;
+  const origView = safeDataView(
+    firstBuf,
+    stszBox.dataOffset,
     stszBox.dataSize,
+    stszCtxVar,
   );
+  checkViewBounds(origView, 0, 4, stszCtxVar);
   buf[8] = origView.getUint8(0);
   buf[9] = origView.getUint8(1);
   buf[10] = origView.getUint8(2);
@@ -1187,11 +1294,14 @@ function rebuildStsc(
   const buf = new Uint8Array(boxSize);
   writeU32(buf, 0, boxSize);
   writeType(buf, 4, "stsc");
-  const origView = new DataView(
-    firstBuf.buffer,
-    firstBuf.byteOffset + stscBox.dataOffset,
+  const stscCtx = `orig-stsc@${stscBox.dataOffset}`;
+  const origView = safeDataView(
+    firstBuf,
+    stscBox.dataOffset,
     stscBox.dataSize,
+    stscCtx,
   );
+  checkViewBounds(origView, 0, 4, stscCtx);
   buf[8] = origView.getUint8(0);
   buf[9] = origView.getUint8(1);
   buf[10] = origView.getUint8(2);
@@ -1238,11 +1348,14 @@ function rebuildStts(
   const buf = new Uint8Array(boxSize);
   writeU32(buf, 0, boxSize);
   writeType(buf, 4, "stts");
-  const origView = new DataView(
-    firstBuf.buffer,
-    firstBuf.byteOffset + sttsBox.dataOffset,
+  const sttsCtx = `orig-stts@${sttsBox.dataOffset}`;
+  const origView = safeDataView(
+    firstBuf,
+    sttsBox.dataOffset,
     sttsBox.dataSize,
+    sttsCtx,
   );
+  checkViewBounds(origView, 0, 4, sttsCtx);
   buf[8] = origView.getUint8(0);
   buf[9] = origView.getUint8(1);
   buf[10] = origView.getUint8(2);
