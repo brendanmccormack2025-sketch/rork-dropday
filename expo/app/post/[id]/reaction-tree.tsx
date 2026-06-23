@@ -251,7 +251,6 @@ export default function ReactionTreeScreen() {
           windowSize={3}
           maxToRenderPerBatch={3}
           initialNumToRender={2}
-          removeClippedSubviews
         />
       )}
 
@@ -327,6 +326,20 @@ function RootItem({
     post.profile?.display_name || post.profile?.username || "dropper";
   const isReaction = !!post.parent_post_id;
 
+  // ── Imperative play/pause — more reliable than shouldPlay alone ──
+  //    when the FlatList recycles native views (removeClippedSubviews).
+  useEffect(() => {
+    if (active) {
+      // Small delay so the native player has time to attach after a scroll
+      const t = setTimeout(() => {
+        videoRef.current?.playAsync().catch(() => {});
+      }, 80);
+      return () => clearTimeout(t);
+    } else {
+      videoRef.current?.pauseAsync().catch(() => {});
+    }
+  }, [active]);
+
   // ── Offset-based seeking: when a reaction becomes active, seek to ────
   //     the reaction segment (skip the prepended original clip).
   const hasSoughtToReaction = useRef(false);
@@ -340,7 +353,7 @@ function RootItem({
         hasSoughtToReaction.current = true;
         const t = setTimeout(() => {
           videoRef.current?.setPositionAsync(post.original_duration_ms!).catch(() => {});
-        }, 120);
+        }, 150);
         return () => clearTimeout(t);
       }
     } else if (!active) {
@@ -365,6 +378,7 @@ function RootItem({
     <View style={styles.item}>
       {post.media_type === "video" ? (
         <Video
+          key={post.id}
           ref={videoRef}
           source={{ uri: post.media_url }}
           style={StyleSheet.absoluteFill}
@@ -391,6 +405,12 @@ function RootItem({
               isReaction: !!post.parent_post_id,
               durationMs: status.durationMillis,
               uriUsed: status.uri,
+            });
+          }}
+          onReadyForDisplay={() => {
+            console.log("[reaction-tree] Video onReadyForDisplay", {
+              postId: post.id,
+              active,
             });
           }}
         />
