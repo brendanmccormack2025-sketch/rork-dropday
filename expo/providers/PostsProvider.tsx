@@ -533,6 +533,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     queryKey: ["follows", user?.id],
     enabled: !!user?.id,
     retry: 1,
+    staleTime: 120_000,
     queryFn: async (): Promise<string[]> => {
       if (!user?.id) return [];
       try {
@@ -552,7 +553,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const feedQuery = useQuery({
     queryKey: ["posts", "fyp", user?.id],
     retry: 1,
-    staleTime: 10_000,
+    staleTime: 120_000,
     queryFn: async (): Promise<Post[]> => {
       let data: unknown[] | null = null;
       try {
@@ -597,6 +598,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     queryKey: ["posts", "mine", user?.id],
     enabled: !!user?.id,
     retry: 1,
+    staleTime: 120_000,
     queryFn: async (): Promise<Post[]> => {
       if (!user?.id) return [];
       try {
@@ -638,6 +640,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     queryKey: ["posts", "liked", user?.id],
     enabled: !!user?.id,
     retry: 1,
+    staleTime: 120_000,
     queryFn: async (): Promise<Post[]> => {
       if (!user?.id) return [];
       try {
@@ -704,7 +707,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     queryKey: ["profile", user?.id],
     enabled: !!user?.id,
     retry: 1,
-    staleTime: 0,
+    staleTime: 120_000,
     queryFn: async (): Promise<MyProfile | null> => {
       if (!user?.id) return null;
       const { data, error } = await supabase
@@ -783,6 +786,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     queryKey: ["suggested", user?.id],
     enabled: !!user?.id,
     retry: 1,
+    staleTime: 120_000,
     queryFn: async (): Promise<SuggestedUser[]> => {
       if (!user?.id) return [];
       const following = followingQuery.data ?? [];
@@ -812,7 +816,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const exploreCreatorsQuery = useQuery({
     queryKey: ["explore", "creators"],
     retry: 1,
-    staleTime: 30_000,
+    staleTime: 120_000,
     queryFn: async (): Promise<ExploreCreator[]> => {
       try {
         const { data, error } = await supabase.rpc("get_explore_creators");
@@ -869,6 +873,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const allReactionsQuery = useQuery({
     queryKey: ["posts", "all-reactions"],
     retry: 1,
+    staleTime: 120_000,
     queryFn: async (): Promise<Record<string, Post[]>> => {
       try {
         const { data, error } = await supabase

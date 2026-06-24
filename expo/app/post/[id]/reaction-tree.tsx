@@ -70,13 +70,14 @@ export default function ReactionTreeScreen() {
   const tier1Query = useQuery({
     queryKey: ["reactions", id],
     enabled: !!id,
+    staleTime: 120_000,
     queryFn: async (): Promise<Post[]> => {
       if (!id) return [];
 
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("parent_post_id", id)
         .order("created_at", { ascending: false })
@@ -97,7 +98,7 @@ export default function ReactionTreeScreen() {
         segments: null,
         audio_url: null,
         trim_data: null,
-        thumbnail_url: null,
+        thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         created_at: row.created_at as string,
         like_count: (row.like_count as number | undefined) ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -123,7 +124,7 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .in("parent_post_id", tier1Ids)
         .order("created_at", { ascending: true })
@@ -144,7 +145,7 @@ export default function ReactionTreeScreen() {
         segments: null,
         audio_url: null,
         trim_data: null,
-        thumbnail_url: null,
+        thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         created_at: row.created_at as string,
         like_count: (row.like_count as number | undefined) ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -185,16 +186,15 @@ export default function ReactionTreeScreen() {
 
   const qc = useQueryClient();
 
-  // ── Refetch on focus so the feed stays current after posting a reaction ──
+  // Track screen focus for playback control (no aggressive refetch on focus —
+  // staleTime handles cache freshness).
   useFocusEffect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: ["reactions", id] });
-      qc.invalidateQueries({ queryKey: ["replies"] });
       setScreenFocused(true);
       return () => {
         setScreenFocused(false);
       };
-    }, [qc, id]),
+    }, []),
   );
 
   // ── FlatList config ───────────────────────────────────────────────────────
