@@ -16,40 +16,63 @@ import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw } from "lucide-react-native";
+import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw, ShieldCheck } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 import type { Post } from "@/providers/PostsProvider";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
-/** Profile subset needed for avatars and "replying to" derivation. */
-type ProfileCard = {
-  username: string;
-  display_name: string | null;
-  avatar_url: string | null;
-};
+// ── Feed item discriminated union ─────────────────────────────────────────
+
+type FeedItem =
+  | { kind: "reaction"; post: Post }
+  | { kind: "reply"; post: Post; parentReactionId: string };
 
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function ReactionTreeScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [screenFocused, setScreenFocused] = useState<boolean>(true);
 
-  // ── Data: query reactions for this parent post ────────────────────────────
-  const reactionsQuery = useQuery({
+  // ── Query 1: root Drop's creator ──────────────────────────────────────
+  const rootDropQuery = useQuery({
+    queryKey: ["post", id],
+    enabled: !!id,
+    staleTime: 60_000,
+    queryFn: async (): Promise<string | null> => {
+      if (!id) return null;
+      const { data, error } = await supabase
+        .from("posts")
+        .select("user_id")
+        .eq("id", id)
+        .single();
+      if (error) {
+        console.error("[reaction-tree] root drop query error", error.message);
+        return null;
+      }
+      return (data?.user_id as string) ?? null;
+    },
+  });
+
+  const rootDropCreatorId = rootDropQuery.data ?? null;
+  const isCreator = !!user?.id && !!rootDropCreatorId && user.id === rootDropCreatorId;
+
+  // ── Query 2: tier 1 reactions (parent_post_id = root drop) ────────────
+  const tier1Query = useQuery({
     queryKey: ["reactions", id],
     enabled: !!id,
-    queryFn: async () => {
-      if (!id) return [] as Post[];
+    queryFn: async (): Promise<Post[]> => {
+      if (!id) return [];
 
-      // Query standalone reaction posts linked to this parent
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
@@ -60,40 +83,113 @@ export default function ReactionTreeScreen() {
         .limit(200);
 
       if (error) {
-        console.error("[reaction-tree] query error", error.message);
-        return [] as Post[];
+        console.error("[reaction-tree] tier1 query error", error.message);
+        return [];
       }
 
-      const posts: Post[] = ((rows ?? []) as Record<string, unknown>[]).map(
-        (row) => ({
-          id: row.id as string,
-          user_id: row.user_id as string,
-          media_url: row.media_url as string,
-          media_type: row.media_type as "image" | "video",
-          caption: (row.caption as string | null) ?? null,
-          parent_post_id: (row.parent_post_id as string | null) ?? null,
-          segments: null,
-          audio_url: null,
-          trim_data: null,
-          thumbnail_url: null,
-          created_at: row.created_at as string,
-          like_count: (row.like_count as number | undefined) ?? 0,
-          comment_count: (row.comment_count as number | undefined) ?? 0,
-          profile: (row.profiles as Post["profile"]) ?? null,
-        }),
-      );
-
-      return posts;
+      return ((rows ?? []) as Record<string, unknown>[]).map((row) => ({
+        id: row.id as string,
+        user_id: row.user_id as string,
+        media_url: row.media_url as string,
+        media_type: row.media_type as "image" | "video",
+        caption: (row.caption as string | null) ?? null,
+        parent_post_id: (row.parent_post_id as string | null) ?? null,
+        segments: null,
+        audio_url: null,
+        trim_data: null,
+        thumbnail_url: null,
+        created_at: row.created_at as string,
+        like_count: (row.like_count as number | undefined) ?? 0,
+        comment_count: (row.comment_count as number | undefined) ?? 0,
+        profile: (row.profiles as Post["profile"]) ?? null,
+      }));
     },
   });
 
+  const tier1Posts = tier1Query.data ?? [];
+  const tier1Ids = useMemo(() => tier1Posts.map((p) => p.id), [tier1Posts]);
+
+  // ── Query 3: tier 2 replies (parent_post_id IN tier 1 IDs) ────────────
+  // Only the creator needs tier 2 data, but we fetch for everyone — the
+  // reply data is small and it avoids a query-mount flash for creators.
+  const tier2Query = useQuery({
+    queryKey: ["replies", tier1Ids],
+    enabled: tier1Ids.length > 0,
+    staleTime: 30_000,
+    queryFn: async (): Promise<Post[]> => {
+      // Tier 2: posts whose parent_post_id is one of the tier 1 reactions.
+      // Ordered ascending so replies appear in chronological order under
+      // their parent reaction.
+      const { data: rows, error } = await supabase
+        .from("posts")
+        .select(
+          "id, user_id, media_url, media_type, caption, parent_post_id, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+        )
+        .in("parent_post_id", tier1Ids)
+        .order("created_at", { ascending: true })
+        .limit(500);
+
+      if (error) {
+        console.error("[reaction-tree] tier2 query error", error.message);
+        return [];
+      }
+
+      return ((rows ?? []) as Record<string, unknown>[]).map((row) => ({
+        id: row.id as string,
+        user_id: row.user_id as string,
+        media_url: row.media_url as string,
+        media_type: row.media_type as "image" | "video",
+        caption: (row.caption as string | null) ?? null,
+        parent_post_id: (row.parent_post_id as string | null) ?? null,
+        segments: null,
+        audio_url: null,
+        trim_data: null,
+        thumbnail_url: null,
+        created_at: row.created_at as string,
+        like_count: (row.like_count as number | undefined) ?? 0,
+        comment_count: (row.comment_count as number | undefined) ?? 0,
+        profile: (row.profiles as Post["profile"]) ?? null,
+      }));
+    },
+  });
+
+  const tier2Posts = tier2Query.data ?? [];
+
+  // ── Build interleaved feed items ──────────────────────────────────────────
+  // Tier 1 reactions appear newest-first. For each tier 1 reaction, its tier 2
+  // replies are placed directly after it in the list (oldest reply first), so
+  // scrolling down goes from newest reactions → oldest, with replies grouped
+  // under their parent.
+  const feedItems: FeedItem[] = useMemo(() => {
+    // Index tier 2 replies by their parent_post_id
+    const repliesByParent = new Map<string, Post[]>();
+    for (const reply of tier2Posts) {
+      const pid = reply.parent_post_id;
+      if (!pid) continue;
+      if (!repliesByParent.has(pid)) repliesByParent.set(pid, []);
+      repliesByParent.get(pid)!.push(reply);
+    }
+
+    const items: FeedItem[] = [];
+    for (const reaction of tier1Posts) {
+      items.push({ kind: "reaction", post: reaction });
+      const replies = repliesByParent.get(reaction.id);
+      if (replies) {
+        for (const reply of replies) {
+          items.push({ kind: "reply", post: reply, parentReactionId: reaction.id });
+        }
+      }
+    }
+    return items;
+  }, [tier1Posts, tier2Posts]);
+
   const qc = useQueryClient();
-  const posts = reactionsQuery.data ?? [];
 
   // ── Refetch on focus so the feed stays current after posting a reaction ──
   useFocusEffect(
     useCallback(() => {
       qc.invalidateQueries({ queryKey: ["reactions", id] });
+      qc.invalidateQueries({ queryKey: ["replies"] });
       setScreenFocused(true);
       return () => {
         setScreenFocused(false);
@@ -115,7 +211,7 @@ export default function ReactionTreeScreen() {
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
 
   const getItemLayout = useCallback(
-    (_: ArrayLike<Post> | null | undefined, index: number) => ({
+    (_: ArrayLike<FeedItem> | null | undefined, index: number) => ({
       length: SCREEN_H,
       offset: SCREEN_H * index,
       index,
@@ -124,14 +220,25 @@ export default function ReactionTreeScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item, index }: { item: Post; index: number }) => (
+    ({ item, index }: { item: FeedItem; index: number }) => (
       <ReactionItem
-        post={item}
+        item={item}
         active={index === activeIndex && screenFocused}
+        isCreator={isCreator}
+        onReply={(reactionId: string) => {
+          // Creator replying to a tier 1 reaction — open camera with
+          // reactingTo set to that reaction's ID.
+          router.push(`/camera?reactingTo=${reactionId}` as never);
+        }}
       />
     ),
-    [activeIndex, screenFocused],
+    [activeIndex, screenFocused, isCreator, router],
   );
+
+  const keyExtractor = useCallback((item: FeedItem) => item.post.id, []);
+
+  const isLoading = tier1Query.isLoading || rootDropQuery.isLoading;
+  const postCount = feedItems.length;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -152,19 +259,19 @@ export default function ReactionTreeScreen() {
           </View>
           <View style={styles.headerBtn} />
         </View>
-        {posts.length > 0 && (
+        {postCount > 0 && (
           <Text style={styles.headerCount}>
-            {posts.length} reaction{posts.length !== 1 ? "s" : ""}
+            {postCount} reaction{postCount !== 1 ? "s" : ""}
           </Text>
         )}
       </SafeAreaView>
 
       {/* Body */}
-      {reactionsQuery.isLoading ? (
+      {isLoading ? (
         <View style={styles.center}>
           <Text style={styles.emptySub}>Loading…</Text>
         </View>
-      ) : posts.length === 0 ? (
+      ) : feedItems.length === 0 ? (
         <View style={styles.center}>
           <Sparkles color={theme.textDim} size={48} strokeWidth={1.5} />
           <Text style={styles.emptyTitle}>No reactions yet</Text>
@@ -174,8 +281,8 @@ export default function ReactionTreeScreen() {
         </View>
       ) : (
         <FlatList
-          data={posts}
-          keyExtractor={(p) => p.id}
+          data={feedItems}
+          keyExtractor={keyExtractor}
           renderItem={renderItem}
           pagingEnabled
           snapToInterval={SCREEN_H}
@@ -186,14 +293,19 @@ export default function ReactionTreeScreen() {
           getItemLayout={getItemLayout}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
-          windowSize={3}
+          windowSize={5}
           maxToRenderPerBatch={3}
           initialNumToRender={2}
         />
       )}
 
-      {/* React button — fixed at bottom */}
-      {!reactionsQuery.isLoading && (
+      {/* ── Permission gating: bottom Record Reaction button ──────────────
+          Only visible to NON-creators. The Drop's creator already sees
+          per-reaction Reply buttons on each tier 1 reaction card instead.
+
+          reactingTo is ALWAYS the root Drop's ID — hardcoded, intentional.
+          Do NOT change this to a dynamic value based on scroll position. */}
+      {!isLoading && !isCreator && (
         <SafeAreaView edges={["bottom"]} style={styles.reactSafe}>
           <Pressable
             onPress={() => {
@@ -215,7 +327,20 @@ export default function ReactionTreeScreen() {
 
 // ── Reaction Item (standalone video, no stitching) ──────────────────────────
 
-function ReactionItem({ post, active }: { post: Post; active: boolean }) {
+function ReactionItem({
+  item,
+  active,
+  isCreator,
+  onReply,
+}: {
+  item: FeedItem;
+  active: boolean;
+  isCreator: boolean;
+  onReply: (reactionId: string) => void;
+}) {
+  const { post, kind } = item;
+  const isReply = kind === "reply";
+
   const [liked, setLiked] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const name =
@@ -299,8 +424,6 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
     },
     [handleStallStatus, post.id],
   );
-
-
 
   // Release native player resources on unmount
   useEffect(() => {
@@ -421,6 +544,14 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
         pointerEvents="none"
       />
 
+      {/* ── Tier 2 reply indicator — shown at the top of reply cards ──── */}
+      {isReply && (
+        <View style={styles.replyBadge} pointerEvents="none">
+          <ShieldCheck color={theme.accent} size={14} strokeWidth={2.5} />
+          <Text style={styles.replyBadgeText}>Creator reply</Text>
+        </View>
+      )}
+
       {/* Side actions */}
       <View style={styles.actions} pointerEvents="box-none">
         <Pressable
@@ -438,6 +569,20 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
             {String((post.like_count ?? 0) + (liked ? 1 : 0))}
           </Text>
         </Pressable>
+
+        {/* ── Permission gating: Reply button on tier 1 reactions ────────
+            Only visible to the root Drop's creator. Tier 2 replies never
+            show a reply button (depth limit). */}
+        {isCreator && !isReply && (
+          <Pressable
+            onPress={() => onReply(post.id)}
+            style={styles.actionBtn}
+            hitSlop={8}
+          >
+            <Reply color="#fff" size={26} strokeWidth={2} />
+            <Text style={styles.actionLabel}>Reply</Text>
+          </Pressable>
+        )}
 
         <View style={styles.actionBtn}>
           <Sparkles color="#fff" size={28} strokeWidth={2} />
@@ -549,6 +694,29 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: 320,
+  },
+
+  /* Tier 2 reply badge */
+  replyBadge: {
+    position: "absolute",
+    top: 100,
+    left: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    zIndex: 5,
+  },
+  replyBadgeText: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: "700" as const,
+    letterSpacing: 0.3,
   },
 
   /* Actions */
