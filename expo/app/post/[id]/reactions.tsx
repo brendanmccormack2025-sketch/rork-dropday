@@ -98,7 +98,7 @@ export default function PostReactionsScreen() {
       ) : reactions.length === 0 ? (
         <View style={styles.center}>
           <Sparkles color={theme.textDim} size={48} strokeWidth={1.5} />
-          <Text style={styles.emptyTitle}>Nothing from last night</Text>
+          <Text style={styles.emptyTitle}>No reactions yet</Text>
           <Text style={styles.emptySub}>
             Be the first to react to this drop. Open the camera and record your
             response.

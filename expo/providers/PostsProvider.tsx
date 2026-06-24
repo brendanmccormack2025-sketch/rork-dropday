@@ -8,7 +8,7 @@ import { showAlert } from "@/lib/showAlert";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 
 import { useAuth, ensureProfileById } from "@/providers/AuthProvider";
-import { getDropWindowState, DROP_WINDOW } from "@/constants/theme";
+import { getDropWindowState } from "@/constants/theme";
 
 export type OptimisticStatus = "uploading" | "failed";
 
@@ -52,6 +52,14 @@ export type SuggestedUser = {
   username: string;
   display_name: string | null;
   avatar_url: string | null;
+};
+
+export type ExploreCreator = {
+  id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  total_engagement: number;
 };
 
 export type MyProfile = {
@@ -625,64 +633,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
   });
 
-  // Previous night's drop window (yesterday 8 PM – midnight local)
-  const prevNightRange = useMemo(() => {
-    const now = new Date();
-    const yesterdayStart = new Date(now);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-    yesterdayStart.setHours(DROP_WINDOW.startHour, 0, 0, 0);
-    const yesterdayEnd = new Date(yesterdayStart);
-    yesterdayEnd.setHours(0, 0, 0, 0);
-    yesterdayEnd.setDate(yesterdayEnd.getDate() + 1);
-    return { start: yesterdayStart, end: yesterdayEnd };
-  }, []);
-
-  const lastNightQuery = useQuery({
-    queryKey: [
-      "posts",
-      "last-night",
-      prevNightRange.start.toISOString().slice(0, 10),
-    ],
-    retry: 1,
-    queryFn: async (): Promise<Post[]> => {
-      try {
-        const { data, error } = await supabase
-          .from("posts")
-          .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
-          )
-          .gte("created_at", prevNightRange.start.toISOString())
-          .lt("created_at", prevNightRange.end.toISOString())
-          .order("like_count", { ascending: false })
-          .limit(100);
-        if (error) {
-          logQueryError("last-night", error);
-          return [];
-        }
-        const raw = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
-          id: row.id as string,
-          user_id: row.user_id as string,
-          media_url: row.media_url as string,
-          media_type: row.media_type as "image" | "video",
-          caption: (row.caption as string | null) ?? null,
-          parent_post_id: (row.parent_post_id as string | null) ?? null,
-          segments: (row.segments as string[] | null) ?? null,
-          audio_url: (row.audio_url as string | null) ?? null,
-          trim_data: (row.trim_data as Post["trim_data"]) ?? null,
-          thumbnail_url: (row.thumbnail_url as string | null) ?? null,
-          created_at: row.created_at as string,
-          like_count: (row.like_count as number | undefined) ?? 0,
-          comment_count: (row.comment_count as number | undefined) ?? 0,
-          profile: (row.profiles as Post["profile"]) ?? null,
-        }));
-        return raw;
-      } catch (e) {
-        logQueryError("last-night", e);
-        return [];
-      }
-    },
-  });
-
   // Liked posts — fetches all posts the current user has liked
   const likedPostsQuery = useQuery({
     queryKey: ["posts", "liked", user?.id],
@@ -853,6 +803,32 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         );
       } catch (e) {
         console.warn("[suggested] network error", (e as Error)?.message ?? e);
+        return [];
+      }
+    },
+  });
+
+  // ── Explore tab: suggested creators ranked by engagement ──────────
+  const exploreCreatorsQuery = useQuery({
+    queryKey: ["explore", "creators"],
+    retry: 1,
+    staleTime: 30_000,
+    queryFn: async (): Promise<ExploreCreator[]> => {
+      try {
+        const { data, error } = await supabase.rpc("get_explore_creators");
+        if (error) {
+          console.warn("[explore:creators] error", error.message);
+          return [];
+        }
+        return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+          id: row.id as string,
+          username: row.username as string,
+          display_name: (row.display_name as string | null) ?? null,
+          avatar_url: (row.avatar_url as string | null) ?? null,
+          total_engagement: (row.total_engagement as number) ?? 0,
+        }));
+      } catch (e) {
+        console.warn("[explore:creators] fetch error", (e as Error)?.message ?? e);
         return [];
       }
     },
@@ -1413,9 +1389,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return [newPost, ...filtered];
       });
 
-      // Only invalidate the last-night query — it depends on the full posts table
-      // and we can't surgically update it without re-running the window filter.
-      qc.invalidateQueries({ queryKey: ["posts", "last-night"] });
       // Fuzzy-match invalidates any reaction-tree query (all ids)
       qc.invalidateQueries({ queryKey: ["reaction-tree"] });
 
@@ -1511,6 +1484,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
   return useMemo(
     () => ({
+      exploreCreators: exploreCreatorsQuery.data ?? [],
+      exploreCreatorsLoading: exploreCreatorsQuery.isLoading,
+      refetchExploreCreators: exploreCreatorsQuery.refetch,
       feed: feedQuery.data ?? [],
       feedLoading: feedQuery.isLoading,
       refetchFeed: feedQuery.refetch,
@@ -1519,9 +1495,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       myProfile: myProfileQuery.data ?? null,
       refetchProfile: myProfileQuery.refetch,
       updateProfile,
-      lastNightPosts: lastNightQuery.data ?? [],
-      lastNightLoading: lastNightQuery.isLoading,
-      refetchLastNight: lastNightQuery.refetch,
       following: followingQuery.data ?? [],
       suggestedUsers: suggestedQuery.data ?? [],
       suggestedLoading: suggestedQuery.isLoading,
@@ -1548,11 +1521,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       retryOptimisticPost,
     }),
     [
+      exploreCreatorsQuery,
       feedQuery,
       myPostsQuery,
       myProfileQuery,
       updateProfile,
-      lastNightQuery,
       allReactionsQuery,
       followingQuery,
       suggestedQuery,

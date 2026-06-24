@@ -1,5 +1,5 @@
 import { Tabs, useRouter } from "expo-router";
-import { MessageCircleReply, User, Users, Zap } from "lucide-react-native";
+import { Compass, User, Users, Zap } from "lucide-react-native";
 import React, { useCallback } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
 import { BlurView } from "expo-blur";
@@ -44,10 +44,10 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="reactions"
+        name="explore"
         options={{
-          title: "Last Night",
-          tabBarIcon: ({ color, size }) => <MessageCircleReply color={color} size={size} />,
+          title: "Explore",
+          tabBarIcon: ({ color, size }) => <Compass color={color} size={size} />,
         }}
       />
       <Tabs.Screen

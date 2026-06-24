@@ -423,7 +423,7 @@ export default function ProfileScreen() {
                           strokeWidth={1.5}
                         />
                         <Text style={styles.emptyTitle}>
-                          Nothing from last night
+                          No reactions yet
                         </Text>
                         <Text style={styles.emptySub}>
                           When you react to someone's drop, it'll show here.
