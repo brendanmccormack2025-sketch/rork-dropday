@@ -110,8 +110,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           ready: true,
         });
       })
-      .catch((err) => {
+      .catch(async (err) => {
         console.warn("[auth] getSession failed", err?.message ?? err);
+        // Stale/expired refresh token — clear session storage to stop
+        // the Supabase client from retrying the failed token refresh.
+        try {
+          await supabase.auth.signOut({ scope: "local" });
+        } catch (_) {
+          // signOut may also fail if storage is corrupted; that's fine
+        }
         if (!mounted) return;
         setState((s) => ({ ...s, loading: false }));
       });

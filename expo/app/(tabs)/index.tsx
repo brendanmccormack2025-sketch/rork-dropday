@@ -259,6 +259,8 @@ const FeedItem = memo(function FeedItem({
   onRetry: () => void;
 }) {
   const [liked, setLiked] = useState<boolean>(false);
+  const { reactionsByParent } = usePosts();
+  const reactionCount = reactionsByParent[post.id]?.length ?? 0;
   // Multi-segment playback: if post.segments exists, cycle through them
   const allSegments = useMemo<string[]>(
     () => (post.segments && post.segments.length > 0 ? post.segments : [post.media_url]),
@@ -654,7 +656,7 @@ const FeedItem = memo(function FeedItem({
         />
         <ActionButton
           icon={<Sparkles color="#fff" size={28} strokeWidth={2} />}
-          label={String(post.reaction_count ?? 0)}
+          label={String(reactionCount)}
           onPress={onReactions}
         />
         <ActionButton

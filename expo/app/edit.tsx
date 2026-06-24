@@ -22,7 +22,7 @@ import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
-import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync, downloadAsync } from "@/lib/fileSystemCompat";
+import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync } from "@/lib/fileSystemCompat";
 import * as Haptics from "expo-haptics";
 import {
   Play,
@@ -38,9 +38,7 @@ import {
 } from "lucide-react-native";
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
-import { concatMP4Files } from "@/lib/concatMP4";
 import { showAlert } from "@/lib/showAlert";
-import { supabase } from "@/lib/supabase";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -105,13 +103,11 @@ export default function EditScreen() {
     videoUrl: nativeVideoUrl,
     draftId,
     reactingTo,
-    originalDurationMs,
   } = useLocalSearchParams<{
     clips: string;
     videoUrl?: string;
     draftId?: string;
     reactingTo?: string;
-    originalDurationMs?: string;
   }>();
 
   // ── Debug: log what params the edit screen received ─────────────────────
@@ -1509,55 +1505,6 @@ export default function EditScreen() {
       let stablePrimary = copiedClips[0]!;
       console.log("[edit] executePost: all clips copied to stable location — primary:", stablePrimary.uri.slice(-40));
 
-      // ── 2a. If reacting to a parent post, download parent + stitch ──
-      //    If stitching fails for any reason (codec mismatch, corrupted
-      //    metadata, network error), fall back to posting the reactor's
-      //    solo clip — the reaction is still linked to the parent in the
-      //    database so the thread stays intact.
-      let stitched = false;
-      if (reactingTo) {
-        // On web, file downloads are not available — skip stitching
-        // and post the solo reaction clip directly.
-        if (Platform.OS === "web") {
-          console.log(
-            "[edit] executePost: skipping stitch on web — posting solo reaction clip",
-          );
-        } else {
-          try {
-            console.log("[edit] executePost: stitching parent + reaction — reactingTo:", reactingTo);
-            const { data: parentPost, error: parentErr } = await supabase
-              .from("posts")
-              .select("media_url")
-              .eq("id", reactingTo)
-              .single();
-            if (parentErr || !parentPost?.media_url) {
-              console.error("[edit] executePost: failed to fetch parent post for stitching:", parentErr?.message);
-              throw new Error("Could not load the original clip for stitching.");
-            }
-            const parentLocalUri = `${documentDirectory}parent_${Date.now()}.mov`;
-            const dlResult = await downloadAsync(parentPost.media_url, parentLocalUri);
-            if (!dlResult || dlResult.status !== 200) {
-              throw new Error("Failed to download original clip for stitching.");
-            }
-            console.log("[edit] executePost: parent clip downloaded — stitching...");
-            const stitchedDir = `${documentDirectory}stitched/`;
-            await makeDirectoryAsync(stitchedDir, { intermediates: true });
-            const stitchedUri = `${stitchedDir}reaction_${Date.now()}.mov`;
-            await concatMP4Files([parentLocalUri, stablePrimary.uri], stitchedUri);
-            console.log("[edit] executePost: stitch complete —", stitchedUri.slice(-50));
-            stablePrimary = { ...stablePrimary, uri: stitchedUri };
-            stitched = true;
-          } catch (stitchErr) {
-            console.error(
-              "[edit] executePost: STITCH FAILED — posting solo reaction clip instead:",
-              (stitchErr as Error)?.message,
-            );
-            // stablePrimary remains the reactor's solo clip — fall through to upload it directly
-            // The reaction is still linked to the parent via parentPostId in createPost.mutate
-          }
-        }
-      }
-
       // ── 2b. Generate cover thumbnail from first video frame ──────────
       let thumbnailUri: string | null = null;
       if (stablePrimary.type === "video") {
@@ -1565,10 +1512,9 @@ export default function EditScreen() {
         console.log("[edit] executePost: thumbnail generated", thumbnailUri ? thumbnailUri.slice(-40) : "FAILED — continuing without thumbnail");
       }
 
-      // For reactions, we upload a single stitched file (no segments).
-      // For regular multi-clip Drops, upload each segment individually.
+      // For multi-clip Drops, upload each segment individually.
       const segmentUris =
-        reactingTo ? undefined : copiedClips.length > 1 ? copiedClips.map((c) => c.uri) : undefined;
+        copiedClips.length > 1 ? copiedClips.map((c) => c.uri) : undefined;
       const hasAnyTrim = copiedClips.some(
         (c) =>
           (c.trimStartMs ?? 0) > 0 ||
@@ -1622,7 +1568,6 @@ export default function EditScreen() {
         mediaType: stablePrimary.type,
         draftId: draftId ?? undefined,
         parentPostId: reactingTo || undefined,
-        originalDurationMs: originalDurationMs ? parseInt(originalDurationMs, 10) || undefined : undefined,
         segmentUris,
         trimData,
         textOverlays: overlaysForPost,
@@ -1653,7 +1598,7 @@ export default function EditScreen() {
       setError(errMsg);
       // DO NOT re-throw and DO NOT navigate. Stay on the edit screen.
     }
-  }, [clips, draftId, textOverlays, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, originalDurationMs]);
+  }, [clips, draftId, textOverlays, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
   useEffect(() => { executePostRef.current = executePost; }, [executePost]);
@@ -1705,7 +1650,7 @@ export default function EditScreen() {
             <ArrowLeft size={20} color="#fff" strokeWidth={2.5} />
           </TouchableOpacity>
           <Text style={styles.topTitle}>
-            {draftId ? "Edit Draft" : reactingTo ? "Edit Reaction" : "Edit Drop"}
+            {draftId ? "Edit Draft" : "Edit Drop"}
           </Text>
           <View style={styles.topBtnRow}>
             <TouchableOpacity
@@ -2050,7 +1995,7 @@ export default function EditScreen() {
                   <Text style={styles.postBtnText}>Preparing...</Text>
                 </View>
               ) : (
-                <Text style={styles.postBtnText}>{reactingTo ? "Post Reaction" : "Post Drop"}</Text>
+                <Text style={styles.postBtnText}>Post Drop</Text>
               )}
             </Pressable>
           </View>

@@ -94,7 +94,7 @@ export type Database = {
           like_count: number | null
           media_type: string
           media_url: string
-          original_duration_ms: number | null
+          reaction_count: number | null
           parent_post_id: string | null
           segments: Json | null
           text_overlays: Json | null
@@ -111,7 +111,7 @@ export type Database = {
           like_count?: number | null
           media_type: string
           media_url: string
-          original_duration_ms?: number | null
+          reaction_count?: number | null
           parent_post_id?: string | null
           segments?: Json | null
           text_overlays?: Json | null
@@ -128,7 +128,7 @@ export type Database = {
           like_count?: number | null
           media_type?: string
           media_url?: string
-          original_duration_ms?: number | null
+          reaction_count?: number | null
           parent_post_id?: string | null
           segments?: Json | null
           text_overlays?: Json | null
@@ -214,7 +214,7 @@ export type Database = {
           like_count: number | null
           media_type: string
           media_url: string
-          original_duration_ms: number | null
+          reaction_count: number | null
           parent_post_id: string | null
           segments: Json | null
           text_overlays: Json | null

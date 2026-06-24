@@ -90,9 +90,13 @@ export default function ReactionsScreen() {
       .sort((a, b) => (b.like_count ?? 0) - (a.like_count ?? 0))
       .slice(0, 50);
 
-    // Most Reacted-To: original posts with highest reaction_count
+    // Most Reacted-To: original posts with highest reaction count
+    const reactionCounts = new Map<string, number>();
+    for (const [parentId, group] of Object.entries(reactionsByParent ?? {})) {
+      reactionCounts.set(parentId, group?.length ?? 0);
+    }
     const mostReacted = [...drops]
-      .sort((a, b) => (b.reaction_count ?? 0) - (a.reaction_count ?? 0))
+      .sort((a, b) => (reactionCounts.get(b.id) ?? 0) - (reactionCounts.get(a.id) ?? 0))
       .slice(0, 50);
 
     return { topDrops: drops, topReactions, mostReacted };
@@ -286,10 +290,12 @@ export default function ReactionsScreen() {
 }
 
 function ReactionItem({ post, active }: { post: Post; active: boolean }) {
+  const { reactionsByParent } = usePosts();
   const [liked, setLiked] = useState<boolean>(false);
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
   const isReaction = !!post.parent_post_id;
+  const reactionCount = isReaction ? 0 : (reactionsByParent[post.id]?.length ?? 0);
 
   // Video error state for retry UI
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -382,33 +388,6 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
     setVideoError(null);
     errorCountRef.current = 0;
   }, [post.id]);
-
-  // ── Offset-based seeking for reaction playback ──────────────────────
-  //     Gated on playbackReady to prevent seeking before the player's
-  //     first frame is loaded (which causes a permanent black screen).
-  const hasSoughtRef = useRef(false);
-  useEffect(() => {
-    if (
-      active &&
-      playbackReady &&
-      isReaction &&
-      post.original_duration_ms &&
-      post.original_duration_ms > 0 &&
-      !hasSoughtRef.current
-    ) {
-      hasSoughtRef.current = true;
-      console.log("[reactions] seeking to reaction segment", {
-        postId: post.id.slice(0, 8),
-        originalDurationMs: post.original_duration_ms,
-      });
-      const t = setTimeout(() => {
-        videoRef.current?.setPositionAsync(post.original_duration_ms!).catch(() => {});
-      }, 100);
-      return () => clearTimeout(t);
-    } else if (!active || !playbackReady) {
-      hasSoughtRef.current = false;
-    }
-  }, [active, playbackReady, isReaction, post.original_duration_ms, post.id, videoRef]);
 
   // Release resources on unmount
   useEffect(() => {
@@ -568,8 +547,8 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
           <View style={styles.reactingToRow}>
             <Sparkles color={theme.accent} size={11} />
             <Text style={styles.reactingToText}>
-              {(post.reaction_count ?? 0) > 0
-                ? `${post.reaction_count} reaction${post.reaction_count !== 1 ? "s" : ""}`
+              {reactionCount > 0
+                ? `${reactionCount} reaction${reactionCount !== 1 ? "s" : ""}`
                 : "Original drop"}
             </Text>
           </View>

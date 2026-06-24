@@ -188,13 +188,11 @@ export default function WatchAndReactScreen() {
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     }
-    const dur = parentDurationMsRef.current;
     parentVideoRef.current?.pauseAsync().catch(() => {});
     router.push({
       pathname: "/camera",
       params: {
         reactingTo: postId,
-        originalDurationMs: dur > 0 ? String(Math.round(dur)) : "0",
       },
     });
   }, [postId, router]);

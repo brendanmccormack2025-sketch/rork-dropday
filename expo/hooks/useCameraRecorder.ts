@@ -8,7 +8,6 @@ import {
 import * as MediaLibrary from "expo-media-library";
 import { cacheDirectory, documentDirectory, getInfoAsync } from "@/lib/fileSystemCompat";
 import * as Haptics from "expo-haptics";
-import { concatMP4Files } from "@/lib/concatMP4";
 
 export type Clip = {
   id: string;
@@ -469,26 +468,10 @@ export function useCameraRecorder() {
             throw new Error("Recording file is empty (0 bytes). Please try recording again.");
           }
         } else {
-          // Multiple segments (camera flips) — merge into one file
-          setIsMergingSync(true);
-          console.log(`[camera] Merging ${uris.length} segments into one video...`);
-
-          const mergedUri = `${cacheDirectory || documentDirectory}merged_${Date.now()}.mov`;
-          finalUri = await concatMP4Files(uris, mergedUri);
-          console.log(`[camera] Merge complete — output: ${finalUri.slice(0, 60)}`);
-          setIsMergingSync(false);
-
-          // Verify the merged output file exists and has content
-          const mergedInfo = await getInfoAsync(finalUri);
-          console.log(
-            `[camera] Merged file check — exists: ${mergedInfo.exists}, size: ${mergedInfo.exists ? (mergedInfo.size ?? 0) : 'N/A'} bytes`,
-          );
-          if (!mergedInfo.exists) {
-            throw new Error("Merged video file was not created. Please try recording again.");
-          }
-          if ((mergedInfo.size ?? 0) === 0) {
-            throw new Error("Merged video file is empty (0 bytes). Please try recording again.");
-          }
+          // Multiple segments (camera flips) — use the first segment.
+          // Each segment is a standalone valid .mov from expo-camera.
+          console.log(`[camera] Multiple segments from flips (${uris.length}) — using first segment`);
+          finalUri = uris[0]!;
         }
 
         const clip: Clip = {

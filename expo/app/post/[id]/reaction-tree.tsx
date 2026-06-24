@@ -16,7 +16,7 @@ import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Heart, Sparkles, Reply, Rewind, RotateCcw } from "lucide-react-native";
+import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
@@ -41,30 +41,29 @@ export default function ReactionTreeScreen() {
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [screenFocused, setScreenFocused] = useState<boolean>(true);
 
-  // ── Data: RPC → enrich with profiles ──────────────────────────────────────
-  const treeQuery = useQuery({
-    queryKey: ["reaction-tree", id],
+  // ── Data: query reactions for this parent post ────────────────────────────
+  const reactionsQuery = useQuery({
+    queryKey: ["reactions", id],
     enabled: !!id,
     queryFn: async () => {
-      if (!id) return { posts: [] as Post[], profileMap: new Map<string, ProfileCard>() };
+      if (!id) return [] as Post[];
 
-      // 1. Call the recursive CTE RPC
-      const { data: rawRows, error: rpcErr } = await supabase.rpc(
-        "get_reaction_tree",
-        { root_id: id },
-      );
+      // Query standalone reaction posts linked to this parent
+      const { data: rows, error } = await supabase
+        .from("posts")
+        .select(
+          "id, user_id, media_url, media_type, caption, parent_post_id, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+        )
+        .eq("parent_post_id", id)
+        .order("created_at", { ascending: false })
+        .limit(200);
 
-      if (rpcErr) {
-        console.error("[reaction-tree] RPC error", {
-          message: rpcErr.message,
-          code: rpcErr.code,
-          details: rpcErr.details,
-          hint: rpcErr.hint,
-        });
-        return { posts: [] as Post[], profileMap: new Map<string, ProfileCard>() };
+      if (error) {
+        console.error("[reaction-tree] query error", error.message);
+        return [] as Post[];
       }
 
-      const posts: Post[] = ((rawRows ?? []) as Record<string, unknown>[]).map(
+      const posts: Post[] = ((rows ?? []) as Record<string, unknown>[]).map(
         (row) => ({
           id: row.id as string,
           user_id: row.user_id as string,
@@ -72,80 +71,28 @@ export default function ReactionTreeScreen() {
           media_type: row.media_type as "image" | "video",
           caption: (row.caption as string | null) ?? null,
           parent_post_id: (row.parent_post_id as string | null) ?? null,
-          original_duration_ms: (row.original_duration_ms as number | null) ?? null,
-          segments: (row.segments as string[] | null) ?? null,
-          audio_url: (row.audio_url as string | null) ?? null,
-          trim_data: (row.trim_data as Post["trim_data"]) ?? null,
-          thumbnail_url: (row.thumbnail_url as string | null) ?? null,
+          segments: null,
+          audio_url: null,
+          trim_data: null,
+          thumbnail_url: null,
           created_at: row.created_at as string,
           like_count: (row.like_count as number | undefined) ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
-          reaction_count: (row.reaction_count as number | undefined) ?? 0,
-          profile: null,
+          profile: (row.profiles as Post["profile"]) ?? null,
         }),
       );
 
-      // 2. Collect unique user IDs and fetch their profiles
-      const userIds = [...new Set(posts.map((p) => p.user_id))];
-      const profileMap = new Map<string, ProfileCard>();
-
-      if (userIds.length > 0) {
-        const { data: profileRows } = await supabase
-          .from("profiles")
-          .select("id, username, display_name, avatar_url")
-          .in("id", userIds);
-
-        if (profileRows) {
-          for (const p of profileRows) {
-            profileMap.set(p.id as string, {
-              username: p.username as string,
-              display_name: (p.display_name as string | null) ?? null,
-              avatar_url: (p.avatar_url as string | null) ?? null,
-            });
-          }
-        }
-      }
-
-      // 3. Attach profile data to each post
-      const enriched = posts.map((p) => ({
-        ...p,
-        profile: profileMap.get(p.user_id) ?? null,
-      }));
-
-      return { posts: enriched, profileMap };
+      return posts;
     },
   });
 
   const qc = useQueryClient();
-  const posts = treeQuery.data?.posts ?? [];
-  const profileMap = treeQuery.data?.profileMap ?? new Map<string, ProfileCard>();
+  const posts = reactionsQuery.data ?? [];
 
-  // ── Derive "replying to" usernames client-side ────────────────────────────
-  const replyingToMap = useMemo(() => {
-    // Build a post lookup for parent resolution
-    const postMap = new Map<string, Post>();
-    for (const p of posts) {
-      postMap.set(p.id, p);
-    }
-
-    const result = new Map<string, string>();
-    for (const p of posts) {
-      if (!p.parent_post_id) continue;
-      const parent = postMap.get(p.parent_post_id);
-      if (!parent) continue;
-      const parentProfile = profileMap.get(parent.user_id);
-      if (parentProfile?.username) {
-        result.set(p.id, parentProfile.username);
-      }
-    }
-    return result;
-  }, [posts, profileMap]);
-
-  // ── Refetch on focus so the tree stays current after posting a reaction ──
-  // Also pause all videos on blur so audio doesn't bleed into unrelated screens.
+  // ── Refetch on focus so the feed stays current after posting a reaction ──
   useFocusEffect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: ["reaction-tree", id] });
+      qc.invalidateQueries({ queryKey: ["reactions", id] });
       setScreenFocused(true);
       return () => {
         setScreenFocused(false);
@@ -158,15 +105,6 @@ export default function ReactionTreeScreen() {
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const first = viewableItems[0];
       const firstIdx = first && typeof first.index === "number" ? first.index : null;
-      console.log("[reaction-tree] viewability changed", {
-        activeIndex: firstIdx,
-        viewableCount: viewableItems.length,
-        viewableIds: viewableItems.map((v) => ({
-          index: v.index,
-          id: (v.item as Post)?.id?.slice(0, 8),
-          isViewable: v.isViewable,
-        })),
-      });
       if (firstIdx !== null) {
         setActiveIndex(firstIdx);
       }
@@ -186,14 +124,12 @@ export default function ReactionTreeScreen() {
 
   const renderItem = useCallback(
     ({ item, index }: { item: Post; index: number }) => (
-      <TreeItem
+      <ReactionItem
         post={item}
         active={index === activeIndex && screenFocused}
-        isRoot={index === 0}
-        replyingTo={replyingToMap.get(item.id)}
       />
     ),
-    [activeIndex, screenFocused, replyingToMap],
+    [activeIndex, screenFocused],
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -213,18 +149,17 @@ export default function ReactionTreeScreen() {
             <Sparkles color={theme.accent} size={16} />
             <Text style={styles.headerTitle}>Reactions</Text>
           </View>
-          {/* Spacer to keep title centered */}
           <View style={styles.headerBtn} />
         </View>
         {posts.length > 0 && (
           <Text style={styles.headerCount}>
-            {posts.length} clip{posts.length !== 1 ? "s" : ""}
+            {posts.length} reaction{posts.length !== 1 ? "s" : ""}
           </Text>
         )}
       </SafeAreaView>
 
       {/* Body */}
-      {treeQuery.isLoading ? (
+      {reactionsQuery.isLoading ? (
         <View style={styles.center}>
           <Text style={styles.emptySub}>Loading…</Text>
         </View>
@@ -256,29 +191,20 @@ export default function ReactionTreeScreen() {
         />
       )}
 
-      {/* React button — fixed at bottom, targets the currently-viewed post */}
-      {posts.length > 0 && !treeQuery.isLoading && (
+      {/* React button — fixed at bottom */}
+      {!reactionsQuery.isLoading && (
         <SafeAreaView edges={["bottom"]} style={styles.reactSafe}>
           <Pressable
             onPress={() => {
-              const targetId = posts[activeIndex]?.id;
-              if (!targetId) return;
-              router.push(`/watch-and-react?postId=${targetId}` as never);
+              router.push(`/watch-and-react?postId=${id}` as never);
             }}
-            disabled={activeIndex >= posts.length}
             style={({ pressed }) => [
               styles.reactBtn,
-              activeIndex >= posts.length && styles.reactBtnDisabled,
               pressed && styles.reactBtnPressed,
             ]}
           >
             <Reply color="#fff" size={18} strokeWidth={2.5} />
-            <Text style={styles.reactBtnText}>
-              React
-              {posts[activeIndex]?.profile?.username
-                ? ` to @${posts[activeIndex]!.profile!.username}`
-                : ""}
-            </Text>
+            <Text style={styles.reactBtnText}>Record Reaction</Text>
           </Pressable>
         </SafeAreaView>
       )}
@@ -286,53 +212,18 @@ export default function ReactionTreeScreen() {
   );
 }
 
-// ── Tree Item ───────────────────────────────────────────────────────────────
+// ── Reaction Item (standalone video, no stitching) ──────────────────────────
 
-function TreeItem({
-  post,
-  active,
-  isRoot,
-  replyingTo,
-}: {
-  post: Post;
-  active: boolean;
-  isRoot: boolean;
-  replyingTo?: string;
-}) {
-  return (
-    <RootItem
-      post={post}
-      active={active}
-      replyingTo={replyingTo}
-      isRoot={isRoot}
-    />
-  );
-}
-
-// ── Root Item (full-screen, unchanged from original) ────────────────────────
-
-function RootItem({
-  post,
-  active,
-  replyingTo,
-  isRoot = true,
-}: {
-  post: Post;
-  active: boolean;
-  replyingTo?: string;
-  isRoot?: boolean;
-}) {
+function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const [liked, setLiked] = useState<boolean>(false);
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
-  const isReaction = !!post.parent_post_id;
 
   // Video error state for retry UI
   const [videoError, setVideoError] = useState<string | null>(null);
   const errorCountRef = useRef<number>(0);
 
-  // ── Pre-buffering: don't start playback until the first frame is ready.
-  //    Uses onReadyForDisplay (deterministic) + !isBuffering fallback + 3s timeout.
+  // ── Pre-buffering gate ─────────────────────────────────────────────
   const [playbackReady, setPlaybackReady] = useState<boolean>(false);
   const playbackReadyRef = useRef<boolean>(false);
   const readyForDisplayRef = useRef<boolean>(false);
@@ -340,7 +231,6 @@ function RootItem({
   const isInitialMountRef = useRef<boolean>(true);
 
   // Reset pre-buffer gate when active toggles or post changes.
-  // Skip initial mount to avoid racing with native onPlaybackStatusUpdate.
   useEffect(() => {
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
@@ -351,14 +241,11 @@ function RootItem({
     readyForDisplayRef.current = false;
   }, [active, post.id]);
 
-  // Safety timeout: force playbackReady=true after 3s if onReadyForDisplay never fires
+  // Safety timeout: force playbackReady=true after 3s
   useEffect(() => {
     if (!active || playbackReady) return;
     prebufferTimerRef.current = setTimeout(() => {
       if (!playbackReadyRef.current) {
-        console.log("[reaction-tree] pre-buffer safety timeout — forcing playback", {
-          postId: post.id.slice(0, 8),
-        });
         playbackReadyRef.current = true;
         setPlaybackReady(true);
       }
@@ -387,7 +274,6 @@ function RootItem({
     (status: AVPlaybackStatus) => {
       handleStallStatus(status);
       if (!status.isLoaded) return;
-      // Start playback when the first frame is ready
       if (!playbackReadyRef.current) {
         const hasFrame = readyForDisplayRef.current;
         const notBuffering = !status.isBuffering;
@@ -398,29 +284,14 @@ function RootItem({
             clearTimeout(prebufferTimerRef.current);
             prebufferTimerRef.current = null;
           }
-          console.log("[reaction-tree] pre-buffer complete, starting playback", {
-            postId: post.id.slice(0, 8),
-            trigger: hasFrame ? "onReadyForDisplay" : "notBuffering",
-          });
         }
       }
     },
     [handleStallStatus, post.id],
   );
 
-  // ── Imperative play/pause — safety net when FlatList recycles native views.
-  //    Gated on playbackReady so we don't start before pre-buffering completes.
+  // ── Imperative play/pause ──────────────────────────────────────────
   useEffect(() => {
-    console.log("[reaction-tree] RootItem audio state", {
-      postId: post.id.slice(0, 8),
-      active,
-      isMuted: !active,
-      isReaction,
-      mediaUrl: post.media_url.slice(-30),
-      isBuffering: stallState.isBuffering,
-      stallCount: stallState.stallCount,
-      playbackReady,
-    });
     if (active && playbackReady) {
       const t = setTimeout(() => {
         videoRef.current?.playAsync().catch(() => {});
@@ -429,38 +300,7 @@ function RootItem({
     } else {
       videoRef.current?.pauseAsync().catch(() => {});
     }
-  }, [active, playbackReady, stallState.isBuffering, stallState.stallCount]);
-
-  // ── Offset-based seeking: when a reaction becomes active AND the player
-  //     is pre-buffered (playbackReady), seek to the reaction segment.
-  //     Gating on playbackReady prevents the seek from firing on a player
-  //     that hasn't loaded its first frame yet, which would cause a permanent
-  //     black screen.
-  const hasSoughtToReaction = useRef(false);
-  useEffect(() => {
-    const wasStitched = post.segments != null && post.segments.length > 0;
-    if (
-      active &&
-      playbackReady &&
-      isReaction &&
-      wasStitched &&
-      post.original_duration_ms &&
-      post.original_duration_ms > 0 &&
-      !hasSoughtToReaction.current
-    ) {
-      hasSoughtToReaction.current = true;
-      console.log("[reaction-tree] seeking to reaction segment", {
-        postId: post.id.slice(0, 8),
-        originalDurationMs: post.original_duration_ms,
-      });
-      const t = setTimeout(() => {
-        videoRef.current?.setPositionAsync(post.original_duration_ms!).catch(() => {});
-      }, 100);
-      return () => clearTimeout(t);
-    } else if (!active || !playbackReady) {
-      hasSoughtToReaction.current = false;
-    }
-  }, [active, playbackReady, isReaction, post.original_duration_ms, post.segments, post.id, videoRef]);
+  }, [active, playbackReady]);
 
   // Release native player resources on unmount
   useEffect(() => {
@@ -469,7 +309,7 @@ function RootItem({
     };
   }, [videoRef]);
 
-  // ── Error recovery: retry loading ──────────────────────────────────
+  // ── Error recovery ──────────────────────────────────────────────────
   const handleRetryVideo = useCallback(() => {
     setVideoError(null);
     videoRef.current
@@ -483,12 +323,6 @@ function RootItem({
       )
       .catch(() => {});
   }, [post.media_url, active, videoRef]);
-
-  // ── Jump to source (seek back to start of original clip) ────────────
-  const handleJumpToSource = useCallback(() => {
-    videoRef.current?.setPositionAsync(0).catch(() => {});
-    hasSoughtToReaction.current = false;
-  }, []);
 
   return (
     <View style={styles.item}>
@@ -511,24 +345,13 @@ function RootItem({
               setVideoError(error);
               videoLog({ type: "load_error", postId: post.id, error });
               console.error("[reaction-tree] Video onError", {
-                postId: post.id,
-                media_url: post.media_url,
-                active,
-                isReaction: !!post.parent_post_id,
+                postId: post.id.slice(0, 8),
                 error,
                 errorCount: errorCountRef.current,
               });
             }}
             onLoad={(status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
               videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
-              console.log("[reaction-tree] Video onLoad", {
-                postId: post.id,
-                media_url: post.media_url,
-                active,
-                isReaction: !!post.parent_post_id,
-                durationMs: status.durationMillis,
-                uriUsed: status.uri,
-              });
             }}
             onLoadStart={() => {
               videoLog({ type: "load_start", postId: post.id, uri: post.media_url });
@@ -544,9 +367,6 @@ function RootItem({
                   clearTimeout(prebufferTimerRef.current);
                   prebufferTimerRef.current = null;
                 }
-                console.log("[reaction-tree] onReadyForDisplay — starting playback", {
-                  postId: post.id.slice(0, 8),
-                });
               }
             }}
           />
@@ -616,22 +436,13 @@ function RootItem({
         <View style={styles.actionBtn}>
           <Sparkles color="#fff" size={28} strokeWidth={2} />
           <Text style={styles.actionLabel}>
-            {String(post.reaction_count ?? 0)}
+            {String(post.like_count ?? 0)}
           </Text>
         </View>
       </View>
 
       {/* Bottom info */}
       <View style={styles.bottom} pointerEvents="box-none">
-        {!isRoot && replyingTo && (
-          <View style={styles.replyingRow}>
-            <Reply color={theme.accent} size={11} strokeWidth={2.5} />
-            <Text style={styles.replyingText}>
-              replying to @{replyingTo}
-            </Text>
-          </View>
-        )}
-
         <View style={styles.userRow}>
           <View style={styles.avatar}>
             <FeedAvatar profile={post.profile} name={name} />
@@ -646,18 +457,6 @@ function RootItem({
             {post.caption}
           </Text>
         ) : null}
-
-        {/* Jump to Source button — shown only on reaction posts that have been stitched */}
-        {isReaction && post.original_duration_ms && post.original_duration_ms > 0 && (
-          <Pressable
-            onPress={handleJumpToSource}
-            style={styles.jumpSourceBtn}
-            hitSlop={8}
-          >
-            <Rewind color={theme.accent} size={13} strokeWidth={2.5} />
-            <Text style={styles.jumpSourceText}>View Original</Text>
-          </Pressable>
-        )}
       </View>
     </View>
   );
@@ -771,16 +570,6 @@ const styles = StyleSheet.create({
     bottom: 130,
     gap: 8,
   },
-  replyingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  replyingText: {
-    color: theme.accent,
-    fontSize: 12,
-    fontWeight: "600" as const,
-  },
   userRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   avatar: {
     width: 30,
@@ -849,26 +638,6 @@ const styles = StyleSheet.create({
     fontWeight: "700" as const,
   },
 
-  /* Jump to Source button */
-  jumpSourceBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    marginTop: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: "rgba(10,132,255,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(10,132,255,0.2)",
-    alignSelf: "flex-start",
-  },
-  jumpSourceText: {
-    color: theme.accent,
-    fontSize: 12,
-    fontWeight: "700" as const,
-  },
-
   /* React button */
   reactSafe: {
     position: "absolute",
@@ -894,9 +663,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 4,
   },
-  reactBtnDisabled: {
-    opacity: 0.3,
-  },
   reactBtnPressed: {
     opacity: 0.75,
   },
@@ -906,5 +672,4 @@ const styles = StyleSheet.create({
     fontWeight: "800" as const,
     letterSpacing: 0.2,
   },
-
 });
