@@ -196,7 +196,7 @@ export default function ReactionTreeScreen() {
         <SafeAreaView edges={["bottom"]} style={styles.reactSafe}>
           <Pressable
             onPress={() => {
-              router.push(`/watch-and-react?postId=${id}` as never);
+              router.push(`/camera?reactingTo=${id}` as never);
             }}
             style={({ pressed }) => [
               styles.reactBtn,
