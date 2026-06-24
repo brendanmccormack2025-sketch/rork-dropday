@@ -47,7 +47,7 @@ export default function ReactionTreeScreen() {
   const rootDropQuery = useQuery({
     queryKey: ["post", id],
     enabled: !!id,
-    staleTime: 60_000,
+    staleTime: 30_000,
     queryFn: async (): Promise<string | null> => {
       if (!id) return null;
       const { data, error } = await supabase
@@ -70,7 +70,7 @@ export default function ReactionTreeScreen() {
   const tier1Query = useQuery({
     queryKey: ["reactions", id],
     enabled: !!id,
-    staleTime: 120_000,
+    staleTime: 30_000,
     queryFn: async (): Promise<Post[]> => {
       if (!id) return [];
 

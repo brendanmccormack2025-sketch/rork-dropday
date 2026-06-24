@@ -533,7 +533,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     queryKey: ["follows", user?.id],
     enabled: !!user?.id,
     retry: 1,
-    staleTime: 120_000,
+    staleTime: 30_000,
     queryFn: async (): Promise<string[]> => {
       if (!user?.id) return [];
       try {
@@ -553,7 +553,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const feedQuery = useQuery({
     queryKey: ["posts", "fyp", user?.id],
     retry: 1,
-    staleTime: 120_000,
+    staleTime: 30_000,
     queryFn: async (): Promise<Post[]> => {
       let data: unknown[] | null = null;
       try {
@@ -873,7 +873,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const allReactionsQuery = useQuery({
     queryKey: ["posts", "all-reactions"],
     retry: 1,
-    staleTime: 120_000,
+    staleTime: 30_000,
     queryFn: async (): Promise<Record<string, Post[]>> => {
       try {
         const { data, error } = await supabase
