@@ -21,6 +21,7 @@ import { useVideoFocus } from "@/hooks/useVideoFocus";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 
 import DropletLogo from "@/components/DropletLogo";
+import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post } from "@/providers/PostsProvider";
@@ -292,6 +293,7 @@ export default function ReactionsScreen() {
 function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const { reactionsByParent } = usePosts();
   const [liked, setLiked] = useState<boolean>(false);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
   const isReaction = !!post.parent_post_id;
@@ -309,8 +311,9 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const prebufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialMountRef = useRef<boolean>(true);
 
-  // Reset pre-buffer gate when active toggles or post changes.
-  // Skip initial mount to avoid racing with native onPlaybackStatusUpdate.
+  // Reset pre-buffer gate when the data source changes (post).
+  // Do NOT reset on active toggle — that races with the pre-buffer gate
+  // and causes a permanent freeze when scrolling back to a loaded video.
   useEffect(() => {
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
@@ -319,7 +322,13 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
     setPlaybackReady(false);
     playbackReadyRef.current = false;
     readyForDisplayRef.current = false;
-  }, [active, post.id]);
+    setIsPaused(false);
+  }, [post.id]);
+
+  // Auto-unpause when scrolling back to this video
+  useEffect(() => {
+    if (active) setIsPaused(false);
+  }, [active]);
 
   // Safety timeout: force playbackReady=true after 3s if onReadyForDisplay never fires
   useEffect(() => {
@@ -416,12 +425,13 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
       {post.media_type === "video" ? (
         <View style={StyleSheet.absoluteFill}>
           <Video
+            key={post.id}
             ref={videoRef}
             source={{ uri: post.media_url }}
             style={StyleSheet.absoluteFill}
             resizeMode={ResizeMode.COVER}
             isLooping
-            shouldPlay={active && playbackReady}
+            shouldPlay={active && playbackReady && !isPaused}
             isMuted={!active}
             useNativeControls={false}
             progressUpdateIntervalMillis={250}
@@ -458,6 +468,12 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
                 });
               }
             }}
+          />
+
+          {/* Double-tap to like zone */}
+          <DoubleTapLikeZone
+            onLike={() => setLiked(true)}
+            onSingleTap={() => setIsPaused((v) => !v)}
           />
 
           {/* Buffering indicator */}

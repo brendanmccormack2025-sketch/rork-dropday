@@ -19,6 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
+import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
 import { supabase } from "@/lib/supabase";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
@@ -216,6 +217,7 @@ export default function ReactionTreeScreen() {
 
 function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const [liked, setLiked] = useState<boolean>(false);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
 
@@ -230,7 +232,9 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const prebufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialMountRef = useRef<boolean>(true);
 
-  // Reset pre-buffer gate when active toggles or post changes.
+  // Reset pre-buffer gate when the data source changes (post).
+  // Do NOT reset on active toggle — that races with the pre-buffer gate
+  // and causes a permanent freeze when scrolling back to a loaded video.
   useEffect(() => {
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
@@ -239,7 +243,13 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
     setPlaybackReady(false);
     playbackReadyRef.current = false;
     readyForDisplayRef.current = false;
-  }, [active, post.id]);
+    setIsPaused(false);
+  }, [post.id]);
+
+  // Auto-unpause when scrolling back to this video
+  useEffect(() => {
+    if (active) setIsPaused(false);
+  }, [active]);
 
   // Safety timeout: force playbackReady=true after 3s
   useEffect(() => {
@@ -290,17 +300,7 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
     [handleStallStatus, post.id],
   );
 
-  // ── Imperative play/pause ──────────────────────────────────────────
-  useEffect(() => {
-    if (active && playbackReady) {
-      const t = setTimeout(() => {
-        videoRef.current?.playAsync().catch(() => {});
-      }, 80);
-      return () => clearTimeout(t);
-    } else {
-      videoRef.current?.pauseAsync().catch(() => {});
-    }
-  }, [active, playbackReady]);
+
 
   // Release native player resources on unmount
   useEffect(() => {
@@ -335,7 +335,7 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
             style={StyleSheet.absoluteFill}
             resizeMode={ResizeMode.COVER}
             isLooping
-            shouldPlay={active && playbackReady}
+            shouldPlay={active && playbackReady && !isPaused}
             isMuted={!active}
             useNativeControls={false}
             progressUpdateIntervalMillis={250}
@@ -369,6 +369,12 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
                 }
               }
             }}
+          />
+
+          {/* Double-tap to like zone */}
+          <DoubleTapLikeZone
+            onLike={() => setLiked(true)}
+            onSingleTap={() => setIsPaused((v) => !v)}
           />
 
           {/* Buffering indicator */}

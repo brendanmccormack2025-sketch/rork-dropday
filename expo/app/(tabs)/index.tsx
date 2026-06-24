@@ -34,6 +34,7 @@ import {
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
 import DropletLogo from "@/components/DropletLogo";
+import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
 import { theme, getDropWindowState, formatCountdown } from "@/constants/theme";
 import { usePosts, type Post, type OptimisticStatus } from "@/providers/PostsProvider";
@@ -259,6 +260,7 @@ const FeedItem = memo(function FeedItem({
   onRetry: () => void;
 }) {
   const [liked, setLiked] = useState<boolean>(false);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
   const { reactionsByParent } = usePosts();
   const reactionCount = reactionsByParent[post.id]?.length ?? 0;
   // Multi-segment playback: if post.segments exists, cycle through them
@@ -284,10 +286,10 @@ const FeedItem = memo(function FeedItem({
   const prebufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialMountRef = useRef<boolean>(true);
 
-  // Reset pre-buffer gate whenever active toggles, post changes, or segment changes.
-  // Skip the initial mount — on cold start, the useState(false) initializer is correct,
-  // and running setPlaybackReady(false) in the effect races with the native
-  // onPlaybackStatusUpdate callback, causing a freeze (video starts → effect resets → video stops).
+  // Reset pre-buffer gate & pause state when the data source changes
+  // (post or segment). Do NOT reset on active toggle — that creates a race
+  // where the pre-buffer gate passes, then the reset undoes it, freezing
+  // the video on a single frame with no recovery path.
   useEffect(() => {
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
@@ -296,7 +298,15 @@ const FeedItem = memo(function FeedItem({
     setPlaybackReady(false);
     playbackReadyRef.current = false;
     readyForDisplayRef.current = false;
-  }, [active, post.id, segIdx]);
+    setIsPaused(false);
+  }, [post.id, segIdx]);
+
+  // Auto-unpause when scrolling back to this video.
+  // Only resets isPaused — playbackReady is left intact so the video
+  // resumes immediately without re-waiting for the pre-buffer gate.
+  useEffect(() => {
+    if (active) setIsPaused(false);
+  }, [active]);
 
   // Clear prebuffer safety timer on unmount or when deps change
   useEffect(() => {
@@ -306,7 +316,7 @@ const FeedItem = memo(function FeedItem({
         prebufferTimerRef.current = null;
       }
     };
-  }, [active, post.id, segIdx]);
+  }, [post.id, segIdx]);
 
   // ── Safety timeout: if onReadyForDisplay never fires (rare Android edge case),
   //    force playbackReady=true after 3s so the video doesn't stay frozen forever.
@@ -359,6 +369,7 @@ const FeedItem = memo(function FeedItem({
     durationSetRef.current = false;
     setVideoError(null);
     errorCountRef.current = 0;
+    setIsPaused(false);
   }, [segIdx, post.trim_data]);
 
   const name =
@@ -378,6 +389,7 @@ const FeedItem = memo(function FeedItem({
     setSegIdx(0);
     setVideoError(null);
     errorCountRef.current = 0;
+    setIsPaused(false);
   }, [post.id]);
 
   // When video finishes, advance to next segment or loop
@@ -508,7 +520,7 @@ const FeedItem = memo(function FeedItem({
             style={StyleSheet.absoluteFill}
             resizeMode={ResizeMode.COVER}
             isLooping
-            shouldPlay={active && playbackReady}
+            shouldPlay={active && playbackReady && !isPaused}
             isMuted={!active}
             useNativeControls={false}
             progressUpdateIntervalMillis={250}
@@ -553,6 +565,12 @@ const FeedItem = memo(function FeedItem({
                 });
               }
             }}
+          />
+
+          {/* Double-tap to like zone — between video and other overlays */}
+          <DoubleTapLikeZone
+            onLike={() => setLiked(true)}
+            onSingleTap={() => setIsPaused((v) => !v)}
           />
 
           {/* Buffering indicator */}
