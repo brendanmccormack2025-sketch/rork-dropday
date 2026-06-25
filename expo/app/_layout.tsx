@@ -103,6 +103,15 @@ function RootLayoutNav() {
           }}
         />
         <Stack.Screen
+          name="follow-list"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
+        <Stack.Screen
           name="dm/inbox"
           options={{
             presentation: "card",

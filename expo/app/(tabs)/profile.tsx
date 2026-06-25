@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Dimensions,
   FlatList,
@@ -25,12 +25,14 @@ import {
   Sparkles,
   Video,
   Save,
+  Users,
 } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
 import { usePosts, type MyProfile, type Post, type DraftProject } from "@/providers/PostsProvider";
+import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const GAP = 4;
@@ -38,7 +40,7 @@ const COL_WIDTH = (SCREEN_W - 32 - GAP) / 2;
 
 type TabKey = "drops" | "reactions" | "likes" | "drafts";
 
-function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
+function TabBar({ tab, onTab, isOwnProfile }: { tab: TabKey; onTab: (t: TabKey) => void; isOwnProfile: boolean }) {
   return (
     <View style={styles.tabRow}>
       <Pressable
@@ -92,24 +94,26 @@ function TabBar({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
           Likes
         </Text>
       </Pressable>
-      <Pressable
-        onPress={() => onTab("drafts")}
-        style={[styles.tab, tab === "drafts" && styles.tabActive]}
-      >
-        <Save
-          color={tab === "drafts" ? theme.accent : theme.textDim}
-          size={14}
-          strokeWidth={2}
-        />
-        <Text
-          style={[
-            styles.tabLabel,
-            tab === "drafts" && styles.tabLabelActive,
-          ]}
+      {isOwnProfile && (
+        <Pressable
+          onPress={() => onTab("drafts")}
+          style={[styles.tab, tab === "drafts" && styles.tabActive]}
         >
-          Drafts
-        </Text>
-      </Pressable>
+          <Save
+            color={tab === "drafts" ? theme.accent : theme.textDim}
+            size={14}
+            strokeWidth={2}
+          />
+          <Text
+            style={[
+              styles.tabLabel,
+              tab === "drafts" && styles.tabLabelActive,
+            ]}
+          >
+            Drafts
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -125,6 +129,11 @@ function ProfileHeader({
   onTab,
   onEditProfile,
   onSignOut,
+  isOwnProfile,
+  followersCount,
+  followingCount,
+  onFollowersTap,
+  onFollowingTap,
 }: {
   displayName: string;
   username: string;
@@ -136,6 +145,11 @@ function ProfileHeader({
   onTab: (t: TabKey) => void;
   onEditProfile: () => void;
   onSignOut: () => void;
+  isOwnProfile: boolean;
+  followersCount: number;
+  followingCount: number;
+  onFollowersTap: () => void;
+  onFollowingTap: () => void;
 }) {
   const hasLinks = !!(
     myProfile?.website ||
@@ -234,6 +248,16 @@ function ProfileHeader({
 
       {/* Stats row */}
       <View style={styles.statsRow}>
+        <Pressable style={styles.stat} onPress={onFollowersTap}>
+          <Text style={styles.statNum}>{followersCount}</Text>
+          <Text style={styles.statLabel}>Followers</Text>
+        </Pressable>
+        <View style={styles.statDivider} />
+        <Pressable style={styles.stat} onPress={onFollowingTap}>
+          <Text style={styles.statNum}>{followingCount}</Text>
+          <Text style={styles.statLabel}>Following</Text>
+        </Pressable>
+        <View style={styles.statDivider} />
         <View style={styles.stat}>
           <Text style={styles.statNum}>{drops.length}</Text>
           <Text style={styles.statLabel}>Drops</Text>
@@ -243,26 +267,50 @@ function ProfileHeader({
           <Text style={styles.statNum}>{reactions.length}</Text>
           <Text style={styles.statLabel}>Reactions</Text>
         </View>
-        <View style={styles.statDivider} />
-        <View style={styles.stat}>
-          <Text style={styles.statNum}>{draftProjects.length}</Text>
-          <Text style={styles.statLabel}>Drafts</Text>
-        </View>
+        {isOwnProfile && (
+          <>
+            <View style={styles.statDivider} />
+            <View style={styles.stat}>
+              <Text style={styles.statNum}>{draftProjects.length}</Text>
+              <Text style={styles.statLabel}>Drafts</Text>
+            </View>
+          </>
+        )}
       </View>
 
       {/* Tab switcher */}
-      <TabBar tab={tab} onTab={onTab} />
+      <TabBar tab={tab} onTab={onTab} isOwnProfile={isOwnProfile} />
     </View>
   );
 }
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
-  const { myPosts, myProfile, likedPosts, likedPostsLoading, draftProjects, refetchMyPosts, refetchProfile, refetchLikedPosts } = usePosts();
+  const { myPosts, myProfile, likedPosts, likedPostsLoading, draftProjects, refetchMyPosts, refetchProfile, refetchLikedPosts, following } = usePosts();
   const qc = useQueryClient();
   const router = useRouter();
   const [tab, setTab] = useState<TabKey>("drops");
   const [refreshing, setRefreshing] = useState<boolean>(false);
+
+  // Currently only self-profile; draft privacy is gated on this flag
+  const isOwnProfile = true;
+
+  // ── Followers count ──────────────────────────────────────────
+  const { data: followersCount = 0 } = useQuery({
+    queryKey: ["followers-count", user?.id],
+    enabled: !!user?.id,
+    queryFn: async (): Promise<number> => {
+      if (!user?.id) return 0;
+      const { count, error } = await supabase
+        .from("follows")
+        .select("*", { count: "exact", head: true })
+        .eq("followee_id", user.id);
+      if (error) return 0;
+      return count ?? 0;
+    },
+  });
+
+  const followingCount = following.length;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -306,6 +354,30 @@ export default function ProfileScreen() {
     tab === "drops" ? drops : tab === "reactions" ? reactions : tab === "likes" ? likedPosts : [];
   const isGridTab = tab === "drafts" || tab === "likes";
 
+  const handleFollowersTap = useCallback(() => {
+    if (!user?.id) return;
+    router.push({
+      pathname: "/follow-list",
+      params: {
+        userId: user.id,
+        type: "followers",
+        title: "Followers",
+      },
+    } as never);
+  }, [router, user?.id]);
+
+  const handleFollowingTap = useCallback(() => {
+    if (!user?.id) return;
+    router.push({
+      pathname: "/follow-list",
+      params: {
+        userId: user.id,
+        type: "following",
+        title: "Following",
+      },
+    } as never);
+  }, [router, user?.id]);
+
   const headerNode = (
     <ProfileHeader
       displayName={displayName}
@@ -318,6 +390,11 @@ export default function ProfileScreen() {
       onTab={setTab}
       onEditProfile={() => router.push("/edit-profile")}
       onSignOut={signOut}
+      isOwnProfile={isOwnProfile}
+      followersCount={followersCount}
+      followingCount={followingCount}
+      onFollowersTap={handleFollowersTap}
+      onFollowingTap={handleFollowingTap}
     />
   );
 

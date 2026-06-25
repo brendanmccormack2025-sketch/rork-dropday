@@ -230,7 +230,50 @@ create policy "messages insertable by sender"
   );
 
 -- ============================================================================
--- 7. Cascade-delete reactions when parent post is deleted
+-- 7. Drafts — saved draft projects per user
+-- ============================================================================
+create table if not exists public.drafts (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references public.profiles(id) on delete cascade,
+  clips jsonb not null default '[]'::jsonb,
+  caption text default '',
+  text_overlays jsonb default '[]'::jsonb,
+  cover_thumbnail_uri text,
+  cover_thumbnail_ms integer,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index if not exists drafts_user_id_idx on public.drafts (user_id);
+create index if not exists drafts_updated_at_idx on public.drafts (updated_at desc);
+
+alter table public.drafts enable row level security;
+
+drop policy if exists "users can read only their own drafts" on public.drafts;
+create policy "users can read only their own drafts"
+  on public.drafts for select
+  using (user_id() = user_id);
+
+drop policy if exists "users can insert their own drafts" on public.drafts;
+create policy "users can insert their own drafts"
+  on public.drafts for insert
+  with check (user_id() = user_id);
+
+drop policy if exists "users can update their own drafts" on public.drafts;
+create policy "users can update their own drafts"
+  on public.drafts for update
+  using (user_id() = user_id)
+  with check (user_id() = user_id);
+
+drop policy if exists "users can delete their own drafts" on public.drafts;
+create policy "users can delete their own drafts"
+  on public.drafts for delete
+  using (user_id() = user_id);
+
+grant select, insert, update, delete on public.drafts to authenticated;
+
+-- ============================================================================
+-- 8. Cascade-delete reactions when parent post is deleted
 --    (replaces the inline on-delete-set-null from the CREATE TABLE)
 -- ============================================================================
 do $$
@@ -257,7 +300,7 @@ alter table public.posts
   on delete cascade;
 
 -- ============================================================================
--- 8. Storage bucket for media
+-- 9. Storage bucket for media
 -- ============================================================================
 insert into storage.buckets (id, name, public)
 values ('drops', 'drops', true)
