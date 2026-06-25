@@ -178,7 +178,11 @@ export default function EditProfileScreen() {
         refetchProfile(),
       ]);
 
-      router.back();
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace("/(tabs)");
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to save profile.";
@@ -208,7 +212,7 @@ export default function EditProfileScreen() {
         {/* Top bar */}
         <View style={[styles.topBar, { marginTop: 8 }]}>
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
             style={styles.topBtn}
             hitSlop={8}
           >

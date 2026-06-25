@@ -214,7 +214,7 @@ export default function WatchAndReactScreen() {
       <View style={[styles.screen, styles.centered]}>
         <StatusBar style="light" />
         <Text style={styles.errorText}>{loadError ?? "Clip not found."}</Text>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.backBtn}>
           <Text style={styles.backBtnText}>Go back</Text>
         </Pressable>
       </View>
@@ -249,7 +249,11 @@ export default function WatchAndReactScreen() {
         <Pressable
           onPress={() => {
             parentVideoRef.current?.unloadAsync().catch(() => {});
-            router.back();
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace("/(tabs)");
+            }
           }}
           style={styles.iconBtn}
           hitSlop={8}

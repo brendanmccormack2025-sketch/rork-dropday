@@ -71,7 +71,7 @@ const triggerHaptic = (style: Haptics.ImpactFeedbackStyle) => {
 
 export default function CameraScreen() {
   const router = useRouter();
-  const { reactingTo } = useLocalSearchParams<{ reactingTo?: string }>();
+  const { reactingTo, rootDropId } = useLocalSearchParams<{ reactingTo?: string; rootDropId?: string }>();
   const insets = useSafeAreaInsets();
 
   const {
@@ -425,7 +425,11 @@ export default function CameraScreen() {
 
   const closeCamera = useCallback(() => {
     teardown();
-    router.back();
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)");
+    }
   }, [router, teardown]);
 
   const goToEdit = useCallback(async () => {
@@ -462,6 +466,7 @@ export default function CameraScreen() {
       params: {
         clips: JSON.stringify(clips),
         ...(reactingTo ? { reactingTo } : {}),
+        ...(rootDropId ? { rootDropId } : {}),
       },
     });
   }, [clips, reactingTo, router, setError]);
@@ -498,7 +503,7 @@ export default function CameraScreen() {
           }}
         />
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
           style={{ marginTop: 12, padding: 12 }}
         >
           <Text style={styles.permCancel}>Not now</Text>

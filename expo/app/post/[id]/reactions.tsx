@@ -72,14 +72,14 @@ export default function PostReactionsScreen() {
       {/* Header */}
       <SafeAreaView edges={["top"]} style={styles.headerSafe}>
         <View style={styles.headerRow}>
-          <Pressable onPress={() => router.back()} style={styles.headerBtn} hitSlop={8}>
+          <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.headerBtn} hitSlop={8}>
             <ArrowLeft color={theme.text} size={22} strokeWidth={2} />
           </Pressable>
           <View style={styles.headerCenter}>
             <Sparkles color={theme.accent} size={16} />
             <Text style={styles.headerTitle}>Last Night</Text>
           </View>
-          <Pressable onPress={() => router.back()} style={styles.headerBtn} hitSlop={8}>
+          <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.headerBtn} hitSlop={8}>
             <X color={theme.textMuted} size={20} strokeWidth={2} />
           </Pressable>
         </View>

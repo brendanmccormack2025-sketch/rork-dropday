@@ -69,7 +69,7 @@ export default function SignUpScreen() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={styles.kb}
         >
-          <Pressable onPress={() => router.back()} style={styles.back}>
+          <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.back}>
             <ArrowLeft color={theme.text} size={22} />
           </Pressable>
 

@@ -227,8 +227,9 @@ export default function ReactionTreeScreen() {
         isCreator={isCreator}
         onReply={(reactionId: string) => {
           // Creator replying to a tier 1 reaction — open camera with
-          // reactingTo set to that reaction's ID.
-          router.push(`/camera?reactingTo=${reactionId}` as never);
+          // reactingTo set to that reaction's ID and rootDropId so the
+          // editor can navigate back to the correct reaction-tree after posting.
+          router.push(`/camera?reactingTo=${reactionId}&rootDropId=${id}` as never);
         }}
       />
     ),
@@ -247,7 +248,7 @@ export default function ReactionTreeScreen() {
       <SafeAreaView edges={["top"]} style={styles.headerSafe}>
         <View style={styles.headerRow}>
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
             style={styles.headerBtn}
             hitSlop={8}
           >

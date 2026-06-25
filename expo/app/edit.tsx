@@ -103,11 +103,13 @@ export default function EditScreen() {
     videoUrl: nativeVideoUrl,
     draftId,
     reactingTo,
+    rootDropId,
   } = useLocalSearchParams<{
     clips: string;
     videoUrl?: string;
     draftId?: string;
     reactingTo?: string;
+    rootDropId?: string;
   }>();
 
   // ── Debug: log what params the edit screen received ─────────────────────
@@ -1005,7 +1007,11 @@ export default function EditScreen() {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     const next = clips.filter((c) => c.id !== selectedClipId);
     if (next.length === 0) {
-      router.back();
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace("/(tabs)");
+      }
       return;
     }
 
@@ -1406,9 +1412,13 @@ export default function EditScreen() {
       await saveDraftProject(project);
       setSuccess("Draft saved");
       setTimeout(() => {
-        router.back();
         if (!draftId) {
+          // New draft: dismiss all modals to return to the feed
+          router.dismissAll();
+        } else if (router.canGoBack()) {
           router.back();
+        } else {
+          router.replace("/(tabs)");
         }
       }, 1000);
     } catch (e) {
@@ -1546,18 +1556,25 @@ export default function EditScreen() {
         reactingTo || null,
       );
 
-      // ── 4. Navigate to feed IMMEDIATELY — don't wait for the upload ──
-      //    The optimistic post is already in the feed cache, and the
-      //    upload runs in the background via mutate (fire-and-forget).
-      console.log("[edit] executePost: optimistic post created (tempId:", tempId, ") — navigating to feed");
+      // ── 4. Navigate to the right screen IMMEDIATELY ─────────────────
+      //    Root Drops → feed tab. Reactions & replies → reaction-tree
+      //    so the user can see their newly posted content inline.
+      const reactionTreeId = rootDropId || reactingTo;
+      // Dismiss all modals (camera + edit) before navigating to the new screen.
+      // router.dismissAll() is safe — it's a no-op if no modals are presented.
       try {
-        if (router.canDismiss()) {
-          router.dismissAll();
-        }
+        router.dismissAll();
       } catch {
-        // canDismiss / dismissAll may not be available on all Expo Router versions
+        // Fallback: dismissAll may not be available on older Expo Router versions
+        if (router.canGoBack()) router.back();
       }
-      router.replace("/(tabs)");
+      if (reactionTreeId) {
+        console.log("[edit] executePost: navigating to reaction-tree for", reactionTreeId.slice(0, 8));
+        router.replace(`/post/${reactionTreeId}/reaction-tree` as never);
+      } else {
+        console.log("[edit] executePost: optimistic post created (tempId:", tempId, ") — navigating to feed");
+        router.replace("/(tabs)");
+      }
 
       // ── 5. Fire-and-forget upload in the background ──────────────────
       //    onSuccess → finalizeOptimisticPost (swap for real post)
@@ -1598,7 +1615,7 @@ export default function EditScreen() {
       setError(errMsg);
       // DO NOT re-throw and DO NOT navigate. Stay on the edit screen.
     }
-  }, [clips, draftId, textOverlays, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo]);
+  }, [clips, draftId, textOverlays, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
   useEffect(() => { executePostRef.current = executePost; }, [executePost]);
@@ -1622,7 +1639,7 @@ export default function EditScreen() {
       <View style={[styles.screen, styles.centered]}>
         <StatusBar style="light" />
         <Text style={styles.emptyText}>Nothing to preview</Text>
-        <Pressable onPress={() => router.back()} style={styles.emptyBtn}>
+        <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.emptyBtn}>
           <Text style={styles.emptyBtnText}>Go back</Text>
         </Pressable>
       </View>
@@ -1644,7 +1661,7 @@ export default function EditScreen() {
         {/* ── Top bar ────────────────────────────────────────────────── */}
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
             style={styles.topBtn}
           >
             <ArrowLeft size={20} color="#fff" strokeWidth={2.5} />
@@ -1725,7 +1742,7 @@ export default function EditScreen() {
                   <View style={styles.videoErrorOverlay}>
                     <Text style={styles.videoErrorText}>{videoLoadError}</Text>
                     <Pressable
-                      onPress={() => router.back()}
+                      onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
                       style={styles.videoErrorBackBtn}
                     >
                       <Text style={styles.videoErrorBackBtnText}>Go Back</Text>
