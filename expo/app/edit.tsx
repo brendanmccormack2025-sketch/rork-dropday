@@ -119,6 +119,8 @@ export default function EditScreen() {
     console.log("  clipsJson first 200 chars:", clipsJson?.slice(0, 200));
     console.log("  nativeVideoUrl:", nativeVideoUrl?.slice(0, 80));
     console.log("  draftId:", draftId);
+    console.log("  reactingTo:", reactingTo?.slice(0, 12) ?? "(none)");
+    console.log("  rootDropId:", rootDropId?.slice(0, 12) ?? "(none)");
   }, []);
 
   // ── Frame measurement ────────────────────────────────────────────────────
@@ -1556,6 +1558,13 @@ export default function EditScreen() {
         reactingTo || null,
       );
 
+      console.log("[edit] executePost: optimistic post added", {
+        tempId: tempId?.slice(0, 8),
+        reactingTo: reactingTo?.slice(0, 12) ?? "(none — will be root Drop)",
+        rootDropId: rootDropId?.slice(0, 12) ?? "(none)",
+        mediaType: stablePrimary.type,
+      });
+
       // ── 4. Fire-and-forget upload in the background ──────────────────
       //    MUST come BEFORE navigation — if navigation throws, the mutation
       //    is already registered with TanStack Query and will still upload.
@@ -1577,10 +1586,10 @@ export default function EditScreen() {
         },
       });
 
-      console.log("[edit] executePost: createPost.mutate() registered — upload now running in background", {
+      console.log("[edit] executePost: createPost.mutate() REGISTERED", {
         tempId: tempId?.slice(0, 8),
-        parentPostId: reactingTo?.slice(0, 8) ?? null,
-        rootDropId: rootDropId?.slice(0, 8) ?? null,
+        parentPostId: (reactingTo || undefined)?.slice(0, 12) ?? "(none)",
+        rootDropId: rootDropId?.slice(0, 12) ?? "(none)",
         mediaType: stablePrimary.type,
         uriStart: stablePrimary.uri.slice(0, 40),
       });
@@ -1626,7 +1635,9 @@ export default function EditScreen() {
       });
       showAlert("Post Failed", errMsg);
       setError(errMsg);
-      // DO NOT re-throw and DO NOT navigate. Stay on the edit screen.
+      setUploading(false);
+      // DO NOT re-throw and DO NOT navigate. Stay on the edit screen
+      // so the user can retry or save as draft.
     }
   }, [clips, draftId, textOverlays, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId]);
 

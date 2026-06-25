@@ -14,7 +14,7 @@ import { Image } from "expo-image";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, Heart, Sparkles, X } from "lucide-react-native";
+import { ArrowLeft, Heart, Reply, Sparkles, X } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
@@ -100,9 +100,20 @@ export default function PostReactionsScreen() {
           <Sparkles color={theme.textDim} size={48} strokeWidth={1.5} />
           <Text style={styles.emptyTitle}>No reactions yet</Text>
           <Text style={styles.emptySub}>
-            Be the first to react to this drop. Open the camera and record your
-            response.
+            Be the first to react to this drop.
           </Text>
+          <Pressable
+            onPress={() => {
+              router.push(`/camera?reactingTo=${id}` as never);
+            }}
+            style={({ pressed }) => [
+              styles.emptyReactBtn,
+              pressed && styles.emptyReactBtnPressed,
+            ]}
+          >
+            <Reply color="#fff" size={18} strokeWidth={2.5} />
+            <Text style={styles.emptyReactBtnText}>Create a reaction</Text>
+          </Pressable>
         </View>
       ) : (
         <FlatList
@@ -131,6 +142,24 @@ export default function PostReactionsScreen() {
             />
           }
         />
+      )}
+
+      {/* Record Reaction button — always visible for non-creators */}
+      {!reactionsLoading && (
+        <SafeAreaView edges={["bottom"]} style={styles.reactSafe}>
+          <Pressable
+            onPress={() => {
+              router.push(`/camera?reactingTo=${id}` as never);
+            }}
+            style={({ pressed }) => [
+              styles.reactBtn,
+              pressed && styles.reactBtnPressed,
+            ]}
+          >
+            <Reply color="#fff" size={18} strokeWidth={2.5} />
+            <Text style={styles.reactBtnText}>Record Reaction</Text>
+          </Pressable>
+        </SafeAreaView>
       )}
     </View>
   );
@@ -449,5 +478,67 @@ const styles = StyleSheet.create({
     color: theme.accent,
     fontSize: 12,
     fontWeight: "600" as const,
+  },
+
+  /* Empty state react button */
+  emptyReactBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    minHeight: 50,
+    borderRadius: 14,
+    backgroundColor: theme.accent,
+    shadowColor: theme.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  emptyReactBtnPressed: {
+    opacity: 0.75,
+  },
+  emptyReactBtnText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800" as const,
+    letterSpacing: 0.2,
+  },
+
+  /* Bottom react button */
+  reactSafe: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  reactBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 14,
+    minHeight: 50,
+    borderRadius: 14,
+    backgroundColor: theme.accent,
+    shadowColor: theme.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  reactBtnPressed: {
+    opacity: 0.75,
+  },
+  reactBtnText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800" as const,
+    letterSpacing: 0.2,
   },
 });

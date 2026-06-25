@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
-import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
+import { Video, ResizeMode } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -313,22 +313,26 @@ export default function ReactionTreeScreen() {
         />
       )}
 
-      {/* ── Permission gating: bottom Record Reaction button ──────────────
-          Only visible to NON-creators. The Drop's creator already sees
-          per-reaction Reply buttons on each tier 1 reaction card instead.
+      {/* ── Bottom Record Reaction button — always visible so every
+          user (including the creator) can record a general reaction.
+          Creators can also use per-reaction Reply buttons on tier 1 cards.
 
           reactingTo is ALWAYS the root Drop's ID — hardcoded, intentional.
           Do NOT change this to a dynamic value based on scroll position. */}
-      {!isLoading && !isCreator && (
+      {!isLoading && (
         <SafeAreaView edges={["bottom"]} style={styles.reactSafe}>
           <Pressable
             onPress={() => {
+              if (!id) return;
+              console.log("[reaction-tree] Record Reaction tapped — id:", id.slice(0, 8));
               router.push(`/camera?reactingTo=${id}` as never);
             }}
             style={({ pressed }) => [
               styles.reactBtn,
+              !id && styles.reactBtnDisabled,
               pressed && styles.reactBtnPressed,
             ]}
+            disabled={!id}
           >
             <Reply color="#fff" size={18} strokeWidth={2.5} />
             <Text style={styles.reactBtnText}>Record Reaction</Text>
@@ -364,48 +368,10 @@ function ReactionItem({
   const [videoError, setVideoError] = useState<string | null>(null);
   const errorCountRef = useRef<number>(0);
 
-  // ── Pre-buffering gate ─────────────────────────────────────────────
-  const [playbackReady, setPlaybackReady] = useState<boolean>(false);
-  const playbackReadyRef = useRef<boolean>(false);
-  const readyForDisplayRef = useRef<boolean>(false);
-  const prebufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isInitialMountRef = useRef<boolean>(true);
-
-  // Reset pre-buffer gate when the data source changes (post).
-  // Do NOT reset on active toggle — that races with the pre-buffer gate
-  // and causes a permanent freeze when scrolling back to a loaded video.
-  useEffect(() => {
-    if (isInitialMountRef.current) {
-      isInitialMountRef.current = false;
-      return;
-    }
-    setPlaybackReady(false);
-    playbackReadyRef.current = false;
-    readyForDisplayRef.current = false;
-    setIsPaused(false);
-  }, [post.id]);
-
   // Auto-unpause when scrolling back to this video
   useEffect(() => {
     if (active) setIsPaused(false);
   }, [active]);
-
-  // Safety timeout: force playbackReady=true after 3s
-  useEffect(() => {
-    if (!active || playbackReady) return;
-    prebufferTimerRef.current = setTimeout(() => {
-      if (!playbackReadyRef.current) {
-        playbackReadyRef.current = true;
-        setPlaybackReady(true);
-      }
-    }, 3000);
-    return () => {
-      if (prebufferTimerRef.current) {
-        clearTimeout(prebufferTimerRef.current);
-        prebufferTimerRef.current = null;
-      }
-    };
-  }, [active, playbackReady, post.id]);
 
   // ── Stall detection + recovery ─────────────────────────────────────
   const videoLog = useCallback((e: VideoEvent) => {
@@ -417,27 +383,6 @@ function ReactionItem({
     stallState,
     handlePlaybackStatus: handleStallStatus,
   } = useVideoStallDetection(post.id, active, post.media_url, videoLog);
-
-  // ── Wrap stall handler with pre-buffer gate ────────────────────────
-  const handlePlaybackStatus = useCallback(
-    (status: AVPlaybackStatus) => {
-      handleStallStatus(status);
-      if (!status.isLoaded) return;
-      if (!playbackReadyRef.current) {
-        const hasFrame = readyForDisplayRef.current;
-        const notBuffering = !status.isBuffering;
-        if (hasFrame || notBuffering) {
-          playbackReadyRef.current = true;
-          setPlaybackReady(true);
-          if (prebufferTimerRef.current) {
-            clearTimeout(prebufferTimerRef.current);
-            prebufferTimerRef.current = null;
-          }
-        }
-      }
-    },
-    [handleStallStatus, post.id],
-  );
 
   // Release native player resources on unmount
   useEffect(() => {
@@ -483,14 +428,14 @@ function ReactionItem({
             style={styles.videoFill}
             resizeMode={ResizeMode.COVER}
             isLooping
-            shouldPlay={active && playbackReady && !isPaused}
+            shouldPlay={active && !isPaused}
             isMuted={!active}
             useNativeControls={false}
             posterSource={
               post.thumbnail_url ? { uri: post.thumbnail_url } : undefined
             }
             progressUpdateIntervalMillis={250}
-            onPlaybackStatusUpdate={handlePlaybackStatus}
+            onPlaybackStatusUpdate={handleStallStatus}
             onError={(error: string) => {
               errorCountRef.current += 1;
               setVideoError(error);
@@ -510,15 +455,6 @@ function ReactionItem({
             onReadyForDisplay={() => {
               videoLog({ type: "ready_for_display", postId: post.id });
               setVideoError(null);
-              readyForDisplayRef.current = true;
-              if (!playbackReadyRef.current) {
-                playbackReadyRef.current = true;
-                setPlaybackReady(true);
-                if (prebufferTimerRef.current) {
-                  clearTimeout(prebufferTimerRef.current);
-                  prebufferTimerRef.current = null;
-                }
-              }
             }}
           />
 
@@ -930,6 +866,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 12,
     elevation: 4,
+  },
+  reactBtnDisabled: {
+    opacity: 0.35,
   },
   reactBtnPressed: {
     opacity: 0.75,

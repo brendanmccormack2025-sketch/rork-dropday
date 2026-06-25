@@ -72,6 +72,14 @@ const triggerHaptic = (style: Haptics.ImpactFeedbackStyle) => {
 export default function CameraScreen() {
   const router = useRouter();
   const { reactingTo, rootDropId } = useLocalSearchParams<{ reactingTo?: string; rootDropId?: string }>();
+
+  // Log received params on mount
+  useEffect(() => {
+    console.log("[camera] mounted with params:", {
+      reactingTo: reactingTo?.slice(0, 12) ?? "(none)",
+      rootDropId: rootDropId?.slice(0, 12) ?? "(none)",
+    });
+  }, []);
   const insets = useSafeAreaInsets();
 
   const {
@@ -461,15 +469,23 @@ export default function CameraScreen() {
       }
     }
 
+    const params: Record<string, string> = {
+      clips: JSON.stringify(clips),
+    };
+    if (reactingTo) params.reactingTo = reactingTo;
+    if (rootDropId) params.rootDropId = rootDropId;
+
+    console.log("[camera] goToEdit — navigating to edit with:", {
+      clipsCount: clips.length,
+      reactingTo: reactingTo?.slice(0, 12) ?? "(none)",
+      rootDropId: rootDropId?.slice(0, 12) ?? "(none)",
+    });
+
     router.push({
       pathname: "/edit",
-      params: {
-        clips: JSON.stringify(clips),
-        ...(reactingTo ? { reactingTo } : {}),
-        ...(rootDropId ? { rootDropId } : {}),
-      },
+      params,
     });
-  }, [clips, reactingTo, router, setError]);
+  }, [clips, reactingTo, rootDropId, router, setError]);
 
 
   // ─── Permissions: loading ──────────────────────────────────────
