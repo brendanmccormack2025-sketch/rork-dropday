@@ -45,7 +45,7 @@ const FREE_VIEWS_BEFORE_GATE = 5;
 
 export default function FeedScreen() {
   const router = useRouter();
-  const { feed, feedLoading, refetchFeed, refetchMyPosts, hasPostedInWindow, retryOptimisticPost } = usePosts();
+  const { feed, feedLoading, reactionsByParent, refetchFeed, refetchMyPosts, hasPostedInWindow, retryOptimisticPost } = usePosts();
   const [now, setNow] = useState<Date>(new Date());
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -133,12 +133,13 @@ export default function FeedScreen() {
         live={win.isOpen}
         onShare={() => setSharePost(item)}
         onReactions={() => {
-        if ((item.reaction_count ?? 0) > 0) {
-          router.push(`/post/${item.id}/reaction-tree` as never);
-        } else {
-          router.push(`/camera?reactingTo=${item.id}` as never);
-        }
-      }}
+          const hasReactions = (reactionsByParent[item.id]?.length ?? 0) > 0;
+          if (hasReactions) {
+            router.push(`/post/${item.id}/reaction-tree` as never);
+          } else {
+            router.push(`/camera?reactingTo=${item.id}` as never);
+          }
+        }}
         onRetry={() => retryOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),
