@@ -3,9 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { documentDirectory, getInfoAsync, deleteAsync } from "@/lib/fileSystemCompat";
+import { documentDirectory, cacheDirectory, getInfoAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
 import { showAlert } from "@/lib/showAlert";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
+import { concatMP4Files } from "@/src/integrations/concatMP4";
 
 import { useAuth, ensureProfileById } from "@/providers/AuthProvider";
 import { getDropWindowState } from "@/constants/theme";
@@ -1149,7 +1150,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       optimisticTempId?: string;
       onProgress?: (percent: number) => void;
     }) => {
-      console.log("[createPost] mutationFn START — user:", user?.id?.slice(0, 8), "mediaType:", input.mediaType, "hasSegmentUris:", !!input.segmentUris?.length, "hasThumbnail:", !!input.thumbnailUri, "draftId:", input.draftId?.slice(0, 8), "platform:", Platform.OS, "uriStart:", input.uri.slice(0, 60));
+      console.log("[createPost] mutationFn START — user:", user?.id?.slice(0, 8), "mediaType:", input.mediaType, "hasSegmentUris:", !!input.segmentUris?.length, "hasThumbnail:", !!input.thumbnailUri, "draftId:", input.draftId?.slice(0, 8), "platform:", Platform.OS, "uriStart:", input.uri.slice(0, 60), "parentPostId:", input.parentPostId?.slice(0, 8));
 
       if (!user?.id) {
         console.error("[createPost] mutationFn ABORT — no user.id");
@@ -1165,6 +1166,113 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       const baseTs = Date.now();
       const isRemoteUrl = input.uri.startsWith("http");
 
+      // ── Stitch reaction clip to parent clip BEFORE uploading ────────
+      // When this post is a reaction (has parentPostId) and the media is
+      // a video, download the parent clip and concatenate the reaction
+      // after it so both clips play sequentially in a single file.
+      let uploadUri = input.uri;
+      let parentDownloadUri: string | null = null;
+      let stitchedUri: string | null = null;
+
+      if (input.parentPostId && input.mediaType === "video" && !isRemoteUrl) {
+        try {
+          console.log("[createPost] STITCH: fetching parent post", input.parentPostId.slice(0, 8));
+          input.onProgress?.(5);
+
+          // Fetch parent post to get its media_url
+          const { data: parentPost, error: parentErr } = await supabase
+            .from("posts")
+            .select("media_url")
+            .eq("id", input.parentPostId)
+            .single();
+
+          if (parentErr || !parentPost?.media_url) {
+            console.warn(
+              "[createPost] STITCH: could not fetch parent post — uploading reaction alone",
+              parentErr?.message,
+            );
+          } else {
+            const parentUrl = parentPost.media_url as string;
+            console.log("[createPost] STITCH: parent URL:", parentUrl.slice(0, 60));
+
+            // Download parent clip to cache directory
+            parentDownloadUri = cacheDirectory + `stitch_parent_${baseTs}.mp4`;
+            input.onProgress?.(10);
+
+            console.log("[createPost] STITCH: downloading parent to", parentDownloadUri.slice(0, 60));
+            const downloadResult = await downloadAsync(parentUrl, parentDownloadUri);
+            console.log(
+              "[createPost] STITCH: download result — status:",
+              downloadResult?.status,
+            );
+
+            if (!downloadResult || downloadResult.status < 200 || downloadResult.status >= 300) {
+              console.warn(
+                "[createPost] STITCH: parent download failed (status " +
+                  (downloadResult?.status ?? "unknown") +
+                  ") — uploading reaction alone",
+              );
+              await deleteAsync(parentDownloadUri, { idempotent: true }).catch(() => {});
+              parentDownloadUri = null;
+            } else {
+              input.onProgress?.(20);
+
+              // Stitch: parent + reaction
+              stitchedUri = cacheDirectory + `stitch_output_${baseTs}.mp4`;
+              console.log(
+                "[createPost] STITCH: concatenating — parent:",
+                parentDownloadUri.slice(0, 50),
+                "+ reaction:",
+                input.uri.slice(0, 50),
+              );
+
+              const stitchResult = await concatMP4Files(
+                parentDownloadUri,
+                input.uri,
+                stitchedUri,
+              );
+
+              if (!stitchResult.success) {
+                console.error(
+                  "[createPost] STITCH FAILED:",
+                  stitchResult.error,
+                  "— uploading reaction alone",
+                );
+                await deleteAsync(stitchedUri, { idempotent: true }).catch(() => {});
+                stitchedUri = null;
+              } else {
+                console.log(
+                  "[createPost] STITCH SUCCESS — combined duration:",
+                  stitchResult.combinedDurationMs,
+                  "ms (parent:",
+                  stitchResult.parentDurationMs,
+                  "+ reaction:",
+                  stitchResult.reactionDurationMs,
+                  ")",
+                );
+                uploadUri = stitchedUri;
+              }
+            }
+          }
+        } catch (stitchErr) {
+          console.error(
+            "[createPost] STITCH: unhandled error — uploading reaction alone",
+            (stitchErr as Error)?.message,
+          );
+          // Clean up temp files on error
+          if (stitchedUri) {
+            await deleteAsync(stitchedUri, { idempotent: true }).catch(() => {});
+            stitchedUri = null;
+          }
+          if (parentDownloadUri) {
+            await deleteAsync(parentDownloadUri, { idempotent: true }).catch(() => {});
+            parentDownloadUri = null;
+          }
+          // Fall through — upload the original reaction clip
+          uploadUri = input.uri;
+        }
+      }
+
       let mediaUrl: string;
       let segmentUrls: string[] | null = null;
 
@@ -1172,9 +1280,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         mediaUrl = input.uri;
         segmentUrls = input.segmentUris ?? null;
       } else {
-        const urisToUpload = input.segmentUris && input.segmentUris.length > 0
-          ? input.segmentUris
-          : [input.uri];
+        // When stitched, upload the combined file instead of the original reaction
+        const urisToUpload = [uploadUri];
 
         const uploadedUrls: string[] = [];
         for (let i = 0; i < urisToUpload.length; i++) {
@@ -1227,8 +1334,13 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             (loaded, total) => {
               console.log(`[createPost] UPLOAD PROGRESS [${i}]: loaded=${loaded}, total=${total}, computable=${total > 0}`);
               if (total > 0 && input.onProgress) {
+                // When stitching, the first 20% was for download+stitch preparation.
+                // Map upload progress to the 20–100% range.
+                const wasStitched = !!stitchedUri;
+                const uploadStartPct = wasStitched ? 20 : 0;
+                const uploadRange = 100 - uploadStartPct;
                 const fileProgress = loaded / total;
-                const overall = ((i + fileProgress) / urisToUpload.length) * 100;
+                const overall = uploadStartPct + ((i + fileProgress) / urisToUpload.length) * uploadRange;
                 input.onProgress(Math.round(overall));
               }
             },
@@ -1236,7 +1348,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
           // Mark this file as fully done (100% contribution of this file)
           if (input.onProgress) {
-            input.onProgress(Math.round(((i + 1) / urisToUpload.length) * 100));
+            const wasStitched = !!stitchedUri;
+            const uploadStartPct = wasStitched ? 20 : 0;
+            const uploadRange = 100 - uploadStartPct;
+            input.onProgress(Math.round(uploadStartPct + ((i + 1) / urisToUpload.length) * uploadRange));
           }
 
           console.log(`[createPost] Upload SUCCESS [${i}] — ${BUCKET}/${segPath}`);
@@ -1335,6 +1450,14 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
       if (input.draftId) {
         await deleteDraftProject(input.draftId);
+      }
+
+      // ── Clean up stitch temp files ─────────────────────────────────
+      if (stitchedUri) {
+        await deleteAsync(stitchedUri, { idempotent: true }).catch(() => {});
+      }
+      if (parentDownloadUri) {
+        await deleteAsync(parentDownloadUri, { idempotent: true }).catch(() => {});
       }
 
       // Return the inserted row data for optimistic updates
