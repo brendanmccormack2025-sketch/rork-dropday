@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useRef } from "react";
 import {
   Dimensions,
   FlatList,
@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
-import { Video, ResizeMode } from "expo-av";
+import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, Heart, Sparkles, X } from "lucide-react-native";
@@ -138,28 +138,75 @@ export default function PostReactionsScreen() {
 
 function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const [liked, setLiked] = useState<boolean>(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const videoRef = useRef<Video>(null);
   const name = post.profile?.display_name || post.profile?.username || "dropper";
+
+  const hasValidMediaUrl = typeof post.media_url === "string" && post.media_url.length > 0;
+
+  // Release native player on unmount to avoid memory leaks
+  React.useEffect(() => {
+    return () => {
+      videoRef.current?.unloadAsync().catch(() => {});
+    };
+  }, []);
 
   return (
     <View style={styles.item}>
-      {post.media_type === "video" ? (
-        <Video
-          source={{ uri: post.media_url }}
-          style={StyleSheet.absoluteFill}
-          resizeMode={ResizeMode.COVER}
-          isLooping
-          shouldPlay={active}
-          isMuted={!active}
-          useNativeControls={false}
-          progressUpdateIntervalMillis={50}
-        />
-      ) : (
+      {post.media_type === "video" && hasValidMediaUrl ? (
+        <View style={styles.videoWrapper}>
+          {/* Poster thumbnail shown immediately before the video loads */}
+          {post.thumbnail_url ? (
+            <Image
+              source={{ uri: post.thumbnail_url }}
+              style={styles.videoPoster}
+              contentFit="cover"
+            />
+          ) : null}
+          <Video
+            key={post.id}
+            ref={videoRef}
+            source={{ uri: post.media_url }}
+            style={styles.videoFill}
+            resizeMode={ResizeMode.COVER}
+            isLooping
+            shouldPlay={active}
+            isMuted={!active}
+            useNativeControls={false}
+            posterSource={
+              post.thumbnail_url ? { uri: post.thumbnail_url } : undefined
+            }
+            progressUpdateIntervalMillis={250}
+            onError={(error: string) => {
+              setVideoError(error);
+              console.error("[reactions] Video onError", {
+                postId: post.id.slice(0, 8),
+                error,
+              });
+            }}
+            onReadyForDisplay={() => {
+              setVideoError(null);
+            }}
+          />
+          {/* Error overlay */}
+          {videoError && active && (
+            <View style={styles.errorOverlay} pointerEvents="box-none">
+              <Text style={styles.errorText}>Playback error</Text>
+            </View>
+          )}
+        </View>
+      ) : post.media_type === "image" && hasValidMediaUrl ? (
         <Image
           source={{ uri: post.media_url }}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
           transition={150}
         />
+      ) : (
+        <View style={styles.mediaFallback}>
+          <Sparkles color={theme.textDim} size={32} strokeWidth={1.5} />
+          <Text style={styles.mediaFallbackText}>Media unavailable</Text>
+        </View>
       )}
 
       <LinearGradient
@@ -290,6 +337,53 @@ const styles = StyleSheet.create({
     height: SCREEN_H,
     backgroundColor: "#000",
   },
+
+  /* Video — explicit wrapper + fill so the native player always gets
+     concrete dimensions even when the parent layout is still resolving */
+  videoWrapper: {
+    width: SCREEN_W,
+    height: SCREEN_H,
+  },
+  videoFill: {
+    width: SCREEN_W,
+    height: SCREEN_H,
+  },
+  videoPoster: {
+    width: SCREEN_W,
+    height: SCREEN_H,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    zIndex: 0,
+  },
+
+  /* Media fallback */
+  mediaFallback: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#111",
+  },
+  mediaFallbackText: {
+    color: theme.textDim,
+    fontSize: 13,
+    fontWeight: "600" as const,
+  },
+
+  /* Error overlay */
+  errorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  errorText: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 13,
+    fontWeight: "600" as const,
+  },
+
   gradTop: { position: "absolute", top: 0, left: 0, right: 0, height: 140 },
   gradBottom: { position: "absolute", left: 0, right: 0, bottom: 0, height: 320 },
 

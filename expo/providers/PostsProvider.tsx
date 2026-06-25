@@ -1520,10 +1520,34 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return [newPost, ...filtered];
       });
 
-      // Fuzzy-match invalidates any reaction-tree query (all ids)
-      qc.invalidateQueries({ queryKey: ["reaction-tree"] });
+      // Invalidate all reaction and reply queries so the reaction-tree
+      // screen refetches and shows the newly posted reaction immediately.
+      // The reaction-tree screen uses query keys ["reactions", id] and
+      // ["replies", ids] — fuzzy-invalidate both patterns.
+      qc.invalidateQueries({ queryKey: ["reactions"] });
+      qc.invalidateQueries({ queryKey: ["replies"] });
+
+      // Also optimistically insert the new reaction/reply into the
+      // matching "reactions" cache if we know the parent post ID.
+      if (newPost.parent_post_id) {
+        qc.setQueryData<Post[]>(
+          ["reactions", newPost.parent_post_id],
+          (old) => {
+            if (!old) return [newPost];
+            if (old.some((p) => p.id === newPost.id)) return old;
+            return [newPost, ...old];
+          },
+        );
+      }
 
       persistOptimisticPosts();
+
+      console.log("[createPost] onSuccess — reaction saved successfully", {
+        postId: newPost.id?.slice(0, 8),
+        parentPostId: newPost.parent_post_id?.slice(0, 8) ?? null,
+        mediaUrl: (newPost.media_url as string)?.slice(0, 50),
+        mediaType: newPost.media_type,
+      });
     },
     onError: (err, variables) => {
       const errAny = err as unknown as Record<string, unknown> | undefined;
@@ -1538,7 +1562,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         error: errAny?.error,
         cause: errAny?.cause,
       };
-      console.error("[createPost] onError — FULL ERROR OBJECT", errMeta);
+      console.error("[createPost] onError — POST FAILED", errMeta);
       // Persist the error so we can retrieve it after the fact
       AsyncStorage.setItem("dropday:lastMutationError", JSON.stringify({ ...errMeta, ts: Date.now() })).catch(() => {});
       // Show a visible alert so the user DEFINITELY sees the error

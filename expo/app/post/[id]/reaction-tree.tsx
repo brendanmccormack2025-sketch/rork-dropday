@@ -461,20 +461,34 @@ function ReactionItem({
       .catch(() => {});
   }, [post.media_url, active, videoRef]);
 
+  // ── Guard: missing or empty media_url → show thumbnail fallback ──
+  const hasValidMediaUrl = typeof post.media_url === "string" && post.media_url.length > 0;
+
   return (
     <View style={styles.item}>
-      {post.media_type === "video" ? (
-        <View style={StyleSheet.absoluteFill}>
+      {post.media_type === "video" && hasValidMediaUrl ? (
+        <View style={styles.videoWrapper}>
+          {/* Poster thumbnail shown immediately while the video pre-buffers */}
+          {post.thumbnail_url ? (
+            <Image
+              source={{ uri: post.thumbnail_url }}
+              style={styles.videoPoster}
+              contentFit="cover"
+            />
+          ) : null}
           <Video
             key={post.id}
             ref={videoRef}
             source={{ uri: post.media_url }}
-            style={StyleSheet.absoluteFill}
+            style={styles.videoFill}
             resizeMode={ResizeMode.COVER}
             isLooping
             shouldPlay={active && playbackReady && !isPaused}
             isMuted={!active}
             useNativeControls={false}
+            posterSource={
+              post.thumbnail_url ? { uri: post.thumbnail_url } : undefined
+            }
             progressUpdateIntervalMillis={250}
             onPlaybackStatusUpdate={handlePlaybackStatus}
             onError={(error: string) => {
@@ -540,11 +554,18 @@ function ReactionItem({
         </View>
       ) : (
         <Image
-          source={{ uri: post.media_url }}
+          source={hasValidMediaUrl ? { uri: post.media_url } : undefined}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
           transition={150}
         />
+      )}
+      {/* Fallback when media_url is missing entirely */}
+      {!hasValidMediaUrl && (
+        <View style={styles.mediaFallback}>
+          <Sparkles color={theme.textDim} size={32} strokeWidth={1.5} />
+          <Text style={styles.mediaFallbackText}>Media unavailable</Text>
+        </View>
       )}
 
       <LinearGradient
@@ -726,6 +747,39 @@ const styles = StyleSheet.create({
     width: SCREEN_W,
     height: SCREEN_H,
     backgroundColor: "#000",
+  },
+
+  /* Video — explicit wrapper + fill so the native player always gets
+     concrete dimensions even when the parent layout is still resolving */
+  videoWrapper: {
+    width: SCREEN_W,
+    height: SCREEN_H,
+  },
+  videoFill: {
+    width: SCREEN_W,
+    height: SCREEN_H,
+  },
+  videoPoster: {
+    width: SCREEN_W,
+    height: SCREEN_H,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    zIndex: 0,
+  },
+
+  /* Media fallback */
+  mediaFallback: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#111",
+  },
+  mediaFallbackText: {
+    color: theme.textDim,
+    fontSize: 13,
+    fontWeight: "600" as const,
   },
   gradTop: { position: "absolute", top: 0, left: 0, right: 0, height: 140 },
   gradBottom: {

@@ -1556,27 +1556,9 @@ export default function EditScreen() {
         reactingTo || null,
       );
 
-      // ── 4. Navigate to the right screen IMMEDIATELY ─────────────────
-      //    Root Drops → feed tab. Reactions & replies → reaction-tree
-      //    so the user can see their newly posted content inline.
-      const reactionTreeId = rootDropId || reactingTo;
-      // Dismiss all modals (camera + edit) before navigating to the new screen.
-      // router.dismissAll() is safe — it's a no-op if no modals are presented.
-      try {
-        router.dismissAll();
-      } catch {
-        // Fallback: dismissAll may not be available on older Expo Router versions
-        if (router.canGoBack()) router.back();
-      }
-      if (reactionTreeId) {
-        console.log("[edit] executePost: navigating to reaction-tree for", reactionTreeId.slice(0, 8));
-        router.replace(`/post/${reactionTreeId}/reaction-tree` as never);
-      } else {
-        console.log("[edit] executePost: optimistic post created (tempId:", tempId, ") — navigating to feed");
-        router.replace("/(tabs)");
-      }
-
-      // ── 5. Fire-and-forget upload in the background ──────────────────
+      // ── 4. Fire-and-forget upload in the background ──────────────────
+      //    MUST come BEFORE navigation — if navigation throws, the mutation
+      //    is already registered with TanStack Query and will still upload.
       //    onSuccess → finalizeOptimisticPost (swap for real post)
       //    onError   → failOptimisticPost (show error + retry on card)
       //    onProgress → updateOptimisticProgress (0–100% bar on the card)
@@ -1594,6 +1576,37 @@ export default function EditScreen() {
           updateOptimisticProgress(tempId, percent);
         },
       });
+
+      console.log("[edit] executePost: createPost.mutate() registered — upload now running in background", {
+        tempId: tempId?.slice(0, 8),
+        parentPostId: reactingTo?.slice(0, 8) ?? null,
+        rootDropId: rootDropId?.slice(0, 8) ?? null,
+        mediaType: stablePrimary.type,
+        uriStart: stablePrimary.uri.slice(0, 40),
+      });
+
+      // ── 5. Navigate to the right screen (best-effort) ───────────────
+      //    Root Drops → feed tab. Reactions & replies → reaction-tree
+      //    Wrapped in try/catch so navigation failures are logged but
+      //    NEVER prevent the post from being saved.
+      const reactionTreeId = rootDropId || reactingTo;
+      try {
+        try {
+          router.dismissAll();
+        } catch {
+          if (router.canGoBack()) router.back();
+        }
+        if (reactionTreeId) {
+          console.log("[edit] executePost: navigating to reaction-tree for", reactionTreeId.slice(0, 8));
+          router.replace(`/post/${reactionTreeId}/reaction-tree` as never);
+        } else {
+          console.log("[edit] executePost: navigating to feed");
+          router.replace("/(tabs)");
+        }
+      } catch (navErr) {
+        // Navigation failed but the post IS already saving — log it, don't throw.
+        console.warn("[edit] executePost: navigation after post failed (post is still uploading)", (navErr as Error)?.message);
+      }
 
       setSuccess("Posted!");
     } catch (postErr) {
