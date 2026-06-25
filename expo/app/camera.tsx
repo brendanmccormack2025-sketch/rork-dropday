@@ -15,6 +15,7 @@ import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { CameraView } from "expo-camera";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import { runOnJS } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import { Audio } from "expo-av";
@@ -169,9 +170,10 @@ export default function CameraScreen() {
       if (flipAnimRef.current) flipAnimRef.current.stop();
       if (frontFlashAnimRef.current) frontFlashAnimRef.current.stop();
 
+      setZoom(0);
       teardown();
     };
-  }, [teardown]);
+  }, [setZoom, teardown]);
 
   const win = useMemo(() => getDropWindowState(now), [now]);
 
@@ -380,9 +382,10 @@ export default function CameraScreen() {
   const handleFlip = useCallback(() => {
     console.log("[camera] DOUBLE TAP — executing flip");
     flipCamera();
+    setZoom(0);
     triggerFlipFlash();
     triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
-  }, [flipCamera, triggerFlipFlash]);
+  }, [flipCamera, setZoom, triggerFlipFlash]);
 
   // Double-tap anywhere on the preview to flip cameras.
   // react-native-gesture-handler TapGestureHandler configured for
@@ -405,27 +408,30 @@ export default function CameraScreen() {
   );
 
   // ─── Pinch-to-zoom ───────────────────────────────────────────
+  // Runs on the UI thread (worklet) for low-latency tracking.
   // Stable across re-renders — reads zoomRef.current (not `zoom` state)
   // so the gesture stays alive throughout the entire pinch lifecycle.
+  const updateZoomOnJS = useCallback((next: number) => {
+    setZoom(next);
+  }, [setZoom]);
+
   const pinchGesture = useMemo(
     () =>
       Gesture.Pinch()
-        .runOnJS(true)
         .onBegin(() => {
           zoomBaselineRef.current = zoomRef.current;
         })
         .onUpdate((e) => {
           const next = Math.min(1, Math.max(0, zoomBaselineRef.current * e.scale));
-          setZoom(next);
+          runOnJS(updateZoomOnJS)(next);
         }),
-    [setZoom],
+    [updateZoomOnJS],
   );
 
-  // Exclusive gesture composition: pinch takes priority over double-tap.
-  // A two-finger pinch activates zoom and cancels the double-tap recognizer.
-  // A single-finger double-tap flips the camera only when pinch fails to activate.
+  // Simultaneous gesture composition: pinch and double-tap coexist.
+  // Pinch-to-zoom does not interfere with the tap-to-record workflow.
   const previewGestures = useMemo(
-    () => Gesture.Exclusive(pinchGesture, flipGesture),
+    () => Gesture.Simultaneous(pinchGesture, flipGesture),
     [flipGesture, pinchGesture],
   );
 
