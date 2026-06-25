@@ -561,7 +561,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const res = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .order("created_at", { ascending: false })
@@ -589,6 +589,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         created_at: row.created_at as string,
         like_count: (row.like_count as number | undefined) ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
+        reaction_count: (row.reaction_count as number | undefined) ?? 0,
         profile: (row.profiles as Post["profile"]) ?? null,
       }));
       return rankFeed(raw, followingQuery.data ?? []);
@@ -605,7 +606,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       try {
         const { data, error } = await supabase
           .from("posts")
-          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
+          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(50);
@@ -627,6 +628,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           created_at: row.created_at as string,
           like_count: (row.like_count as number | undefined) ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
+          reaction_count: (row.reaction_count as number | undefined) ?? 0,
           profile: (row.profiles as Post["profile"]) ?? null,
         }));
       } catch (e) {
@@ -657,7 +659,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data: postRows, error: postErr } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .in("id", postIds);
         if (postErr || !postRows) return [];
@@ -677,6 +679,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           created_at: row.created_at as string,
           like_count: (row.like_count as number | undefined) ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
+          reaction_count: (row.reaction_count as number | undefined) ?? 0,
           profile: (row.profiles as Post["profile"]) ?? null,
         }));
         posts.sort((a, b) => (idOrder.get(a.id) ?? 999) - (idOrder.get(b.id) ?? 999));
