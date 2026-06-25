@@ -17,7 +17,7 @@ import { Video, ResizeMode, Audio, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw, ShieldCheck } from "lucide-react-native";
+import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw, ShieldCheck, Trash2 } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
@@ -695,6 +695,13 @@ function ReactionItem({
             {String(post.like_count ?? 0)}
           </Text>
         </View>
+
+        {isOwner && (
+          <Pressable onPress={handleDeleteReaction} style={styles.actionBtn} hitSlop={8}>
+            <Trash2 color="rgba(255,255,255,0.85)" size={24} strokeWidth={2} />
+            <Text style={styles.actionLabel}>Delete</Text>
+          </Pressable>
+        )}
       </View>
 
       {/* Bottom info */}
