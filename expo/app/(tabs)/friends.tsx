@@ -10,7 +10,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Send, Users, UserPlus, UserCheck } from "lucide-react-native";
+import { useRouter } from "expo-router";
+import { Send, Users, UserPlus, UserCheck, MessageCircle } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
@@ -30,6 +31,7 @@ const SHARE_MESSAGE =
 const SHARE_URL = "https://dropday.app";
 
 export default function FriendsScreen() {
+  const router = useRouter();
   const { user } = useAuth();
   const {
     suggestedUsers,
@@ -38,6 +40,7 @@ export default function FriendsScreen() {
     unfollowUser,
     following,
     refetchSuggested,
+    unreadCount,
   } = usePosts();
   const [followPending, setFollowPending] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -109,6 +112,37 @@ export default function FriendsScreen() {
               <Text style={styles.screenSub}>
                 Grow your circle. More friends = better feed.
               </Text>
+
+              {/* DM inbox quick access */}
+              <Pressable
+                onPress={() => router.push("/dm/inbox" as never)}
+                style={({ pressed }) => [
+                  styles.dmInbox,
+                  pressed && styles.dmInboxPressed,
+                ]}
+              >
+                <View style={styles.dmInboxLeft}>
+                  <View style={styles.dmIconWrap}>
+                    <MessageCircle color={theme.accent} size={20} strokeWidth={2} />
+                    {unreadCount > 0 && (
+                      <View style={styles.dmBadge}>
+                        <Text style={styles.dmBadgeText}>
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.dmTextWrap}>
+                    <Text style={styles.dmTitle}>Messages</Text>
+                    <Text style={styles.dmSub}>
+                      {unreadCount > 0
+                        ? `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`
+                        : "No new messages"}
+                    </Text>
+                  </View>
+                </View>
+                <MessageCircle color={theme.textMuted} size={16} strokeWidth={2} />
+              </Pressable>
 
               {/* Invite block */}
               <View style={styles.inviteBlock}>
@@ -233,6 +267,68 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
     marginTop: 4,
     marginBottom: 20,
+  },
+
+  /* DM inbox quick access */
+  dmInbox: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(10,132,255,0.06)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(10,132,255,0.12)",
+    padding: 16,
+    marginBottom: 16,
+  },
+  dmInboxPressed: {
+    backgroundColor: "rgba(10,132,255,0.1)",
+  },
+  dmInboxLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  dmIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(10,132,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(10,132,255,0.2)",
+  },
+  dmBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: theme.danger,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  dmBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "800" as const,
+  },
+  dmTextWrap: {
+    gap: 2,
+  },
+  dmTitle: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: "700" as const,
+    letterSpacing: -0.2,
+  },
+  dmSub: {
+    color: theme.textMuted,
+    fontSize: 13,
+    fontWeight: "500" as const,
   },
 
   /* Invite block */

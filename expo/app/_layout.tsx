@@ -102,6 +102,24 @@ function RootLayoutNav() {
             contentStyle: { backgroundColor: theme.bg },
           }}
         />
+        <Stack.Screen
+          name="dm/inbox"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
+        <Stack.Screen
+          name="dm/[conversationId]"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
       </Stack>
     </View>
   );

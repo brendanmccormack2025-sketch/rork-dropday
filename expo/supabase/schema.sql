@@ -22,6 +22,12 @@ grant select on public.likes to anon, authenticated;
 grant insert on public.likes to authenticated;
 grant delete on public.likes to authenticated;
 
+grant select on public.conversations to authenticated;
+grant insert on public.conversations to authenticated;
+
+grant select on public.messages to authenticated;
+grant insert on public.messages to authenticated;
+
 -- ============================================================================
 -- 1. Profiles — keyed to Rork user IDs (text, NOT uuid)
 -- ============================================================================
@@ -154,7 +160,77 @@ create policy "users can delete their own likes"
   on public.likes for delete using (user_id() = user_id);
 
 -- ============================================================================
--- 5. Storage bucket for media
+-- 5. Conversations — DM threads between two users
+-- ============================================================================
+create table if not exists public.conversations (
+  id uuid primary key default gen_random_uuid(),
+  participant_1_id text not null references public.profiles(id) on delete cascade,
+  participant_2_id text not null references public.profiles(id) on delete cascade,
+  created_at timestamptz default now(),
+  constraint conversations_unique_pair unique (participant_1_id, participant_2_id),
+  constraint conversations_no_self check (participant_1_id <> participant_2_id)
+);
+
+create index if not exists conversations_p1_idx on public.conversations (participant_1_id);
+create index if not exists conversations_p2_idx on public.conversations (participant_2_id);
+
+alter table public.conversations enable row level security;
+
+drop policy if exists "conversations readable by participants" on public.conversations;
+create policy "conversations readable by participants"
+  on public.conversations for select
+  using (user_id() = participant_1_id or user_id() = participant_2_id);
+
+drop policy if exists "conversations insertable by participants" on public.conversations;
+create policy "conversations insertable by participants"
+  on public.conversations for insert
+  with check (user_id() = participant_1_id or user_id() = participant_2_id);
+
+-- ============================================================================
+-- 6. Messages — individual messages within a DM conversation
+-- ============================================================================
+create table if not exists public.messages (
+  id uuid primary key default gen_random_uuid(),
+  conversation_id uuid not null references public.conversations(id) on delete cascade,
+  sender_id text not null references public.profiles(id) on delete cascade,
+  text text,
+  post_id uuid references public.posts(id) on delete set null,
+  created_at timestamptz default now(),
+  constraint messages_text_or_post check (
+    (text is not null and post_id is null) or (text is null and post_id is not null)
+  )
+);
+
+create index if not exists messages_conversation_idx on public.messages (conversation_id, created_at desc);
+create index if not exists messages_sender_idx on public.messages (sender_id);
+
+alter table public.messages enable row level security;
+
+drop policy if exists "messages readable by conversation participants" on public.messages;
+create policy "messages readable by conversation participants"
+  on public.messages for select
+  using (
+    exists (
+      select 1 from public.conversations c
+      where c.id = messages.conversation_id
+        and (user_id() = c.participant_1_id or user_id() = c.participant_2_id)
+    )
+  );
+
+drop policy if exists "messages insertable by sender" on public.messages;
+create policy "messages insertable by sender"
+  on public.messages for insert
+  with check (
+    user_id() = sender_id
+    and exists (
+      select 1 from public.conversations c
+      where c.id = messages.conversation_id
+        and (user_id() = c.participant_1_id or user_id() = c.participant_2_id)
+    )
+  );
+
+-- ============================================================================
+-- 7. Storage bucket for media
 -- ============================================================================
 insert into storage.buckets (id, name, public)
 values ('drops', 'drops', true)

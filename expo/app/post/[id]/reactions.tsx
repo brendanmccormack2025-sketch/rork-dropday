@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useCallback, useRef } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Pressable,
@@ -11,14 +12,15 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
-import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
+import { Video, ResizeMode } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, Heart, Reply, Sparkles, X } from "lucide-react-native";
+import { ArrowLeft, Heart, Reply, RotateCcw, Sparkles, X } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
 import { usePosts, type Post } from "@/providers/PostsProvider";
+import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
@@ -168,17 +170,43 @@ export default function PostReactionsScreen() {
 function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const [liked, setLiked] = useState<boolean>(false);
   const [videoError, setVideoError] = useState<string | null>(null);
-  const videoRef = useRef<Video>(null);
+  const errorCountRef = useRef<number>(0);
   const name = post.profile?.display_name || post.profile?.username || "dropper";
 
   const hasValidMediaUrl = typeof post.media_url === "string" && post.media_url.length > 0;
+
+  // ── Stall detection + auto-recovery ───────────────────────────────
+  const videoLog = useCallback((e: VideoEvent) => {
+    console.log("[reactions] video", e);
+  }, []);
+
+  const {
+    videoRef,
+    stallState,
+    handlePlaybackStatus,
+  } = useVideoStallDetection(post.id, active, post.media_url, videoLog);
 
   // Release native player on unmount to avoid memory leaks
   React.useEffect(() => {
     return () => {
       videoRef.current?.unloadAsync().catch(() => {});
     };
-  }, []);
+  }, [videoRef]);
+
+  // ── Error recovery ────────────────────────────────────────────────
+  const handleRetryVideo = useCallback(() => {
+    setVideoError(null);
+    videoRef.current
+      ?.unloadAsync()
+      .then(() =>
+        videoRef.current?.loadAsync(
+          { uri: post.media_url },
+          { shouldPlay: active, isLooping: true },
+          false,
+        ),
+      )
+      .catch(() => {});
+  }, [post.media_url, active, videoRef]);
 
   return (
     <View style={styles.item}>
@@ -206,21 +234,50 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
               post.thumbnail_url ? { uri: post.thumbnail_url } : undefined
             }
             progressUpdateIntervalMillis={250}
+            onPlaybackStatusUpdate={handlePlaybackStatus}
             onError={(error: string) => {
+              errorCountRef.current += 1;
               setVideoError(error);
+              videoLog({ type: "load_error", postId: post.id, error });
               console.error("[reactions] Video onError", {
                 postId: post.id.slice(0, 8),
                 error,
+                errorCount: errorCountRef.current,
               });
             }}
+            onLoad={(status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
+              videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
+            }}
+            onLoadStart={() => {
+              videoLog({ type: "load_start", postId: post.id, uri: post.media_url });
+            }}
             onReadyForDisplay={() => {
+              videoLog({ type: "ready_for_display", postId: post.id });
               setVideoError(null);
             }}
           />
-          {/* Error overlay */}
-          {videoError && active && (
-            <View style={styles.errorOverlay} pointerEvents="box-none">
-              <Text style={styles.errorText}>Playback error</Text>
+
+          {/* Buffering indicator */}
+          {stallState.isBuffering && active && (
+            <View style={styles.bufferingOverlay} pointerEvents="none">
+              <ActivityIndicator color={theme.accent} size="small" />
+            </View>
+          )}
+
+          {/* Stall recovery / error overlay */}
+          {(stallState.recovering || videoError) && active && (
+            <View style={styles.stallOverlay} pointerEvents="box-none">
+              {stallState.recovering ? (
+                <>
+                  <ActivityIndicator color="#fff" size="large" />
+                  <Text style={styles.stallText}>Recovering playback…</Text>
+                </>
+              ) : videoError ? (
+                <Pressable onPress={handleRetryVideo} style={styles.retryBtn}>
+                  <RotateCcw color="#fff" size={20} strokeWidth={2.5} />
+                  <Text style={styles.retryText}>Tap to retry</Text>
+                </Pressable>
+              ) : null}
             </View>
           )}
         </View>
@@ -400,17 +457,49 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
   },
 
-  /* Error overlay */
-  errorOverlay: {
-    ...StyleSheet.absoluteFillObject,
+  /* Buffering indicator */
+  bufferingOverlay: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    marginLeft: -16,
+    marginTop: -16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.4)",
   },
-  errorText: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 13,
+
+  /* Stall / error recovery overlay */
+  stallOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  stallText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 14,
     fontWeight: "600" as const,
+  },
+  retryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  retryText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700" as const,
   },
 
   gradTop: { position: "absolute", top: 0, left: 0, right: 0, height: 140 },

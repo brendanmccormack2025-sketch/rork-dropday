@@ -30,6 +30,7 @@ import {
   Users,
   Sparkles,
   RotateCcw,
+  MessageCircle,
 } from "lucide-react-native";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
@@ -37,7 +38,8 @@ import DropletLogo from "@/components/DropletLogo";
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
 import { theme, getDropWindowState, formatCountdown } from "@/constants/theme";
-import { usePosts, type Post, type OptimisticStatus } from "@/providers/PostsProvider";
+import { usePosts, type Post, type OptimisticStatus, resolveAvatarUrl } from "@/providers/PostsProvider";
+import { supabase } from "@/lib/supabase";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
@@ -45,7 +47,7 @@ const FREE_VIEWS_BEFORE_GATE = 5;
 
 export default function FeedScreen() {
   const router = useRouter();
-  const { feed, feedLoading, refetchFeed, refetchMyPosts, hasPostedInWindow, retryOptimisticPost, optimisticPosts } = usePosts();
+  const { feed, feedLoading, refetchFeed, refetchMyPosts, hasPostedInWindow, retryOptimisticPost, optimisticPosts, unreadCount } = usePosts();
   const [now, setNow] = useState<Date>(new Date());
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -200,18 +202,35 @@ export default function FeedScreen() {
             <DropletLogo size={22} />
             <Text style={styles.brand}>DropDay</Text>
           </View>
-          <View
-            style={[styles.pill, win.isOpen && styles.pillLive]}
-            pointerEvents="none"
-          >
-            {win.isOpen ? (
-              <Zap color="#050505" size={10} fill="#050505" />
-            ) : (
-              <View style={styles.dot} />
-            )}
-            <Text style={[styles.pillText, win.isOpen && styles.pillTextLive]}>
-              {win.isOpen ? "LIVE" : countdown}
-            </Text>
+          <View style={styles.headerActions} pointerEvents="box-none">
+            {/* DM Inbox icon with badge */}
+            <Pressable
+              onPress={() => router.push("/dm/inbox" as never)}
+              style={styles.dmBtn}
+              hitSlop={10}
+            >
+              <MessageCircle color="#fff" size={22} strokeWidth={2} />
+              {unreadCount > 0 && (
+                <View style={styles.dmBadge}>
+                  <Text style={styles.dmBadgeText}>
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+            <View
+              style={[styles.pill, win.isOpen && styles.pillLive]}
+              pointerEvents="none"
+            >
+              {win.isOpen ? (
+                <Zap color="#050505" size={10} fill="#050505" />
+              ) : (
+                <View style={styles.dot} />
+              )}
+              <Text style={[styles.pillText, win.isOpen && styles.pillTextLive]}>
+                {win.isOpen ? "LIVE" : countdown}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -856,8 +875,38 @@ function ShareSheet({
   post: Post | null;
   onClose: () => void;
 }) {
-  const { following } = usePosts();
+  const router = useRouter();
+  const { following, findOrCreateConversation, sendDropAsMessage } = usePosts();
   const [sentTo, setSentTo] = useState<Set<string>>(new Set());
+  const [sending, setSending] = useState<Set<string>>(new Set());
+  const [friendProfiles, setFriendProfiles] = useState<
+    Record<string, { username: string; display_name: string | null; avatar_url: string | null }>
+  >({});
+
+  // Fetch profile data for following users when the sheet opens
+  useEffect(() => {
+    if (!post || following.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("profiles")
+          .select("id, username, display_name, avatar_url")
+          .in("id", following.slice(0, 50));
+        if (cancelled || !data) return;
+        const map: Record<string, typeof friendProfiles[string]> = {};
+        for (const p of data as Record<string, unknown>[]) {
+          map[p.id as string] = {
+            username: p.username as string,
+            display_name: (p.display_name as string | null) ?? null,
+            avatar_url: (p.avatar_url as string | null) ?? null,
+          };
+        }
+        setFriendProfiles(map);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [post, following]);
 
   useEffect(() => {
     if (!post) setSentTo(new Set());
@@ -873,12 +922,19 @@ function ShareSheet({
     } catch {}
   };
 
-  const handleSendToFollower = (id: string) => {
-    setSentTo((prev) => {
-      const next = new Set(prev);
-      next.add(id);
-      return next;
-    });
+  const handleSendAsDM = async (friendId: string) => {
+    if (sending.has(friendId) || sentTo.has(friendId)) return;
+    setSending((prev) => { const n = new Set(prev); n.add(friendId); return n; });
+    try {
+      // Find or create conversation, then send the drop as a message
+      const convId = await findOrCreateConversation.mutateAsync(friendId);
+      await sendDropAsMessage.mutateAsync({ conversationId: convId, postId: post.id });
+      setSentTo((prev) => { const n = new Set(prev); n.add(friendId); return n; });
+    } catch (e) {
+      console.warn("[share] DM send error", (e as Error)?.message ?? e);
+    } finally {
+      setSending((prev) => { const n = new Set(prev); n.delete(friendId); return n; });
+    }
   };
 
   return (
@@ -888,7 +944,7 @@ function ShareSheet({
         <View style={styles.sheetHandle} />
         <Text style={styles.sheetTitle}>Send to a friend</Text>
         <Text style={styles.sheetSub}>
-          Share this drop privately with your followers.
+          Share this drop privately in a DM.
         </Text>
 
         {following.length === 0 ? (
@@ -904,32 +960,64 @@ function ShareSheet({
             keyExtractor={(id) => id}
             contentContainerStyle={{ paddingVertical: 8, gap: 8 }}
             renderItem={({ item }) => {
+              const profile = friendProfiles[item];
               const sent = sentTo.has(item);
+              const busy = sending.has(item);
+              const name = profile?.display_name ?? profile?.username ?? item.slice(0, 8);
+              const avatarUri = resolveAvatarUrl(profile?.avatar_url ?? null);
+
               return (
                 <View style={styles.friendRow}>
                   <View style={styles.friendAvatar}>
-                    <Users color="#fff" size={16} />
+                    {avatarUri ? (
+                      <Image
+                        source={{ uri: avatarUri }}
+                        style={StyleSheet.absoluteFill}
+                        contentFit="cover"
+                        transition={80}
+                      />
+                    ) : (
+                      <Text style={styles.friendAvatarText}>
+                        {name.charAt(0).toUpperCase()}
+                      </Text>
+                    )}
                   </View>
-                  <Text style={styles.friendName}>
-                    {item.slice(0, 8)}…
-                  </Text>
-                  <Pressable
-                    onPress={() => handleSendToFollower(item)}
-                    style={[styles.sendBtn, sent && styles.sendBtnDone]}
-                  >
-                    <Text
-                      style={[
-                        styles.sendBtnText,
-                        sent && styles.sendBtnTextDone,
-                      ]}
-                    >
-                      {sent ? "Sent" : "Send"}
+                  <View style={styles.friendInfo}>
+                    <Text style={styles.friendName} numberOfLines={1}>
+                      {name}
                     </Text>
+                    {profile?.username && profile.display_name ? (
+                      <Text style={styles.friendHandle} numberOfLines={1}>
+                        @{profile.username}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <Pressable
+                    onPress={() => handleSendAsDM(item)}
+                    disabled={sent || busy}
+                    style={({ pressed }) => [
+                      styles.sendBtn,
+                      sent && styles.sendBtnDone,
+                      pressed && !sent && !busy && styles.sendBtnPressed,
+                    ]}
+                  >
+                    {busy ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.sendBtnText,
+                          sent && styles.sendBtnTextDone,
+                        ]}
+                      >
+                        {sent ? "Sent" : "Send"}
+                      </Text>
+                    )}
                   </Pressable>
                 </View>
               );
             }}
-            style={{ maxHeight: 280 }}
+            style={{ maxHeight: 320 }}
           />
         )}
 
@@ -976,6 +1064,35 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  dmBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dmBadge: {
+    position: "absolute",
+    top: 0,
+    right: -2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: theme.danger,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  dmBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "800" as const,
+  },
   brand: {
     color: theme.text,
     fontSize: 18,
@@ -1345,21 +1462,40 @@ const styles = StyleSheet.create({
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  friendAvatarText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800" as const,
+  },
+  friendInfo: {
+    flex: 1,
+    gap: 1,
   },
   friendName: {
-    flex: 1,
     color: theme.text,
     fontSize: 14,
     fontWeight: "600" as const,
+  },
+  friendHandle: {
+    color: theme.textMuted,
+    fontSize: 12,
+    fontWeight: "500" as const,
   },
   sendBtn: {
     backgroundColor: theme.accent,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 999,
+    minWidth: 60,
+    alignItems: "center",
   },
   sendBtnDone: {
     backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  sendBtnPressed: {
+    backgroundColor: theme.primaryDeep,
   },
   sendBtnText: {
     color: "#fff",

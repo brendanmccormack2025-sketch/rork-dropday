@@ -230,7 +230,7 @@ export function useVideoStallDetection(
       const inGracePeriod = playbackStartTimeRef.current > 0 && (now - playbackStartTimeRef.current) < STALL_GRACE_PERIOD_MS;
 
       if (status.isPlaying && !status.isBuffering && active && !inGracePeriod) {
-        if (pos === lastPositionRef.current && pos > 0) {
+        if (pos === lastPositionRef.current) {
           // Position frozen — start/continue stall timer
           if (!stallTimerRef.current) {
             lastPositionTimeRef.current = now;

@@ -63,6 +63,56 @@ export type ExploreCreator = {
   total_engagement: number;
 };
 
+export type Conversation = {
+  id: string;
+  participant_1_id: string;
+  participant_2_id: string;
+  created_at: string;
+  /** The OTHER user in the conversation (not the current user) */
+  otherProfile?: {
+    id: string;
+    username: string;
+    display_name: string | null;
+    avatar_url: string | null;
+  } | null;
+  /** Preview of the most recent message */
+  lastMessage?: {
+    text: string | null;
+    post_id: string | null;
+    sender_id: string;
+    created_at: string;
+  } | null;
+};
+
+export type Message = {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  text: string | null;
+  post_id: string | null;
+  created_at: string;
+  /** Joined profile of the sender */
+  senderProfile?: {
+    username: string;
+    display_name: string | null;
+    avatar_url: string | null;
+  } | null;
+  /** Joined post data when this is a shared Drop */
+  sharedPost?: {
+    id: string;
+    media_url: string;
+    media_type: "image" | "video";
+    thumbnail_url: string | null;
+    caption: string | null;
+    user_id: string;
+    profile?: {
+      username: string;
+      display_name: string | null;
+      avatar_url: string | null;
+    } | null;
+  } | null;
+};
+
 export type MyProfile = {
   id: string;
   username: string;
@@ -1637,6 +1687,233 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     [optimisticPosts, createPost, failOptimisticPost, updateOptimisticProgress, persistOptimisticPosts, user?.id, qc]
   );
 
+  // ── DM: Conversations ─────────────────────────────────────────────────────
+  const conversationsQuery = useQuery({
+    queryKey: ["conversations", user?.id],
+    enabled: !!user?.id,
+    retry: 1,
+    staleTime: 15_000,
+    queryFn: async (): Promise<Conversation[]> => {
+      if (!user?.id) return [];
+      try {
+        // Fetch conversations where the user is a participant
+        const { data: convs, error: convErr } = await supabase
+          .from("conversations")
+          .select("id, participant_1_id, participant_2_id, created_at")
+          .or(`participant_1_id.eq.${user.id},participant_2_id.eq.${user.id}`)
+          .order("created_at", { ascending: false })
+          .limit(50);
+        if (convErr || !convs?.length) return [];
+
+        // Collect all other participant IDs
+        const otherIds = (convs as Record<string, unknown>[]).map((c) =>
+          c.participant_1_id === user.id ? c.participant_2_id : c.participant_1_id,
+        ) as string[];
+
+        // Fetch profiles for other participants
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, username, display_name, avatar_url")
+          .in("id", otherIds);
+        const profileMap = new Map(
+          (profiles ?? []).map((p: Record<string, unknown>) => [p.id as string, p]),
+        );
+
+        // Fetch last message for each conversation
+        const convIds = convs.map((c: Record<string, unknown>) => c.id as string);
+        const { data: lastMsgs } = await supabase
+          .from("messages")
+          .select("id, conversation_id, sender_id, text, post_id, created_at")
+          .in("conversation_id", convIds)
+          .order("created_at", { ascending: false });
+
+        const lastMsgMap = new Map<string, Record<string, unknown>>();
+        for (const m of lastMsgs ?? []) {
+          const msg = m as Record<string, unknown>;
+          const cid = msg.conversation_id as string;
+          if (!lastMsgMap.has(cid)) lastMsgMap.set(cid, msg);
+        }
+
+        return (convs as Record<string, unknown>[]).map((c) => {
+          const otherId =
+            c.participant_1_id === user.id
+              ? (c.participant_2_id as string)
+              : (c.participant_1_id as string);
+          const otherProfile = profileMap.get(otherId);
+          const lastMsg = lastMsgMap.get(c.id as string);
+          return {
+            id: c.id as string,
+            participant_1_id: c.participant_1_id as string,
+            participant_2_id: c.participant_2_id as string,
+            created_at: c.created_at as string,
+            otherProfile: otherProfile
+              ? {
+                  id: otherProfile.id as string,
+                  username: otherProfile.username as string,
+                  display_name: (otherProfile.display_name as string | null) ?? null,
+                  avatar_url: (otherProfile.avatar_url as string | null) ?? null,
+                }
+              : null,
+            lastMessage: lastMsg
+              ? {
+                  text: (lastMsg.text as string | null) ?? null,
+                  post_id: (lastMsg.post_id as string | null) ?? null,
+                  sender_id: lastMsg.sender_id as string,
+                  created_at: lastMsg.created_at as string,
+                }
+              : null,
+          };
+        });
+      } catch (e) {
+        console.warn("[conversations] fetch error", (e as Error)?.message ?? e);
+        return [];
+      }
+    },
+  });
+
+  // ── DM: Unread count ──────────────────────────────────────────────────────
+  const unreadCountQuery = useQuery({
+    queryKey: ["unread-count", user?.id],
+    enabled: !!user?.id,
+    retry: 1,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+    queryFn: async (): Promise<number> => {
+      if (!user?.id) return 0;
+      try {
+        // Get all conversation IDs the user participates in
+        const { data: convs } = await supabase
+          .from("conversations")
+          .select("id")
+          .or(`participant_1_id.eq.${user.id},participant_2_id.eq.${user.id}`);
+        if (!convs?.length) return 0;
+        const convIds = convs.map((c: Record<string, unknown>) => c.id as string);
+
+        // Count messages in those conversations NOT sent by the current user
+        // that were created after the user's last viewed timestamp (simple: count all non-self messages)
+        const { count, error } = await supabase
+          .from("messages")
+          .select("*", { count: "exact", head: true })
+          .in("conversation_id", convIds)
+          .neq("sender_id", user.id);
+        if (error) return 0;
+        return count ?? 0;
+      } catch (e) {
+        console.warn("[unread-count] error", (e as Error)?.message ?? e);
+        return 0;
+      }
+    },
+  });
+
+  // ── DM: Find or create conversation ──────────────────────────────────────
+  const findOrCreateConversation = useMutation({
+    mutationFn: async (otherUserId: string): Promise<string> => {
+      if (!user?.id) throw new Error("Not signed in.");
+      if (otherUserId === user.id) throw new Error("Cannot message yourself.");
+
+      // Ensure deterministic ordering: participant_1 is always the smaller ID
+      const [p1, p2] =
+        user.id < otherUserId
+          ? [user.id, otherUserId]
+          : [otherUserId, user.id];
+
+      // Try to find existing conversation
+      const { data: existing } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("participant_1_id", p1)
+        .eq("participant_2_id", p2)
+        .maybeSingle();
+
+      if (existing) return (existing as Record<string, unknown>).id as string;
+
+      // Create new conversation
+      const { data: created, error: createErr } = await supabase
+        .from("conversations")
+        .insert({ participant_1_id: p1, participant_2_id: p2 })
+        .select("id")
+        .single();
+
+      if (createErr) throw createErr;
+      return (created as Record<string, unknown>).id as string;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+
+  // ── DM: Send text message ────────────────────────────────────────────────
+  const sendTextMessage = useMutation({
+    mutationFn: async ({
+      conversationId,
+      text,
+    }: {
+      conversationId: string;
+      text: string;
+    }): Promise<Message> => {
+      if (!user?.id) throw new Error("Not signed in.");
+      const trimmed = text.trim();
+      if (!trimmed) throw new Error("Message cannot be empty.");
+
+      const { data, error } = await supabase
+        .from("messages")
+        .insert({
+          conversation_id: conversationId,
+          sender_id: user.id,
+          text: trimmed,
+          post_id: null,
+        })
+        .select("id, conversation_id, sender_id, text, post_id, created_at")
+        .single();
+
+      if (error) throw error;
+      return (data as unknown) as Message;
+    },
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ["messages", variables.conversationId] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["unread-count"] });
+    },
+    onError: (err) => {
+      console.error("[sendTextMessage] error", (err as Error)?.message ?? err);
+    },
+  });
+
+  // ── DM: Send Drop share as message ───────────────────────────────────────
+  const sendDropAsMessage = useMutation({
+    mutationFn: async ({
+      conversationId,
+      postId,
+    }: {
+      conversationId: string;
+      postId: string;
+    }): Promise<Message> => {
+      if (!user?.id) throw new Error("Not signed in.");
+
+      const { data, error } = await supabase
+        .from("messages")
+        .insert({
+          conversation_id: conversationId,
+          sender_id: user.id,
+          text: null,
+          post_id: postId,
+        })
+        .select("id, conversation_id, sender_id, text, post_id, created_at")
+        .single();
+
+      if (error) throw error;
+      return (data as unknown) as Message;
+    },
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ["messages", variables.conversationId] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["unread-count"] });
+    },
+    onError: (err) => {
+      console.error("[sendDropAsMessage] error", (err as Error)?.message ?? err);
+    },
+  });
+
   return useMemo(
     () => ({
       exploreCreators: exploreCreatorsQuery.data ?? [],
@@ -1651,6 +1928,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       refetchProfile: myProfileQuery.refetch,
       updateProfile,
       following: followingQuery.data ?? [],
+      followingProfiles: followingQuery.data ?? [],
       suggestedUsers: suggestedQuery.data ?? [],
       suggestedLoading: suggestedQuery.isLoading,
       refetchSuggested: suggestedQuery.refetch,
@@ -1674,6 +1952,14 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       addOptimisticPost,
       updateOptimisticProgress,
       retryOptimisticPost,
+      conversations: conversationsQuery.data ?? [],
+      conversationsLoading: conversationsQuery.isLoading,
+      refetchConversations: conversationsQuery.refetch,
+      unreadCount: unreadCountQuery.data ?? 0,
+      refetchUnreadCount: unreadCountQuery.refetch,
+      findOrCreateConversation,
+      sendTextMessage,
+      sendDropAsMessage,
     }),
     [
       exploreCreatorsQuery,
@@ -1699,6 +1985,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       addOptimisticPost,
       updateOptimisticProgress,
       retryOptimisticPost,
+      conversationsQuery,
+      unreadCountQuery,
+      findOrCreateConversation,
+      sendTextMessage,
+      sendDropAsMessage,
     ]
   );
 });
