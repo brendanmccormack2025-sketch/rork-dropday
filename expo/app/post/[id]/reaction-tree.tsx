@@ -17,7 +17,7 @@ import { Video, ResizeMode, Audio, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw, ShieldCheck, EllipsisVertical } from "lucide-react-native";
+import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw, ShieldCheck } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
@@ -648,16 +648,6 @@ function ReactionItem({
         pointerEvents="none"
       />
 
-      {/* Delete button — only visible to the owner */}
-      {isOwner && (
-        <Pressable
-          onPress={handleDeleteReaction}
-          style={styles.moreBtn}
-          hitSlop={8}
-        >
-          <EllipsisVertical color="rgba(255,255,255,0.8)" size={22} strokeWidth={2} />
-        </Pressable>
-      )}
 
       {/* ── Tier 2 reply indicator — shown at the top of reply cards ──── */}
       {isReply && (
