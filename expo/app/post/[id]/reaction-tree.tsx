@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
-import { Video, ResizeMode } from "expo-av";
+import { Video, ResizeMode, Audio, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -188,10 +188,17 @@ export default function ReactionTreeScreen() {
   const qc = useQueryClient();
 
   // Track screen focus for playback control (no aggressive refetch on focus —
-  // staleTime handles cache freshness).
+  // staleTime handles cache freshness). Also restore playback-only audio mode
+  // whenever this screen gains focus. expo-camera leaves the iOS AVAudioSession
+  // in PlayAndRecord mode, which can cause expo-av Video players to render video
+  // but silently fail to start playback.
   useFocusEffect(
     useCallback(() => {
       setScreenFocused(true);
+      Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      }).catch(() => {});
       return () => {
         setScreenFocused(false);
       };
@@ -368,6 +375,71 @@ function ReactionItem({
     post.profile?.display_name || post.profile?.username || "dropper";
   const isOwner = !!authUser?.id && post.user_id === authUser.id;
 
+  // ── Pre-buffer gate: don't start playback until the first frame is ready.
+  //    Uses onReadyForDisplay (deterministic, fires once) + a 3s safety timeout
+  //    to avoid the freeze-when-shouldPlay-fires-too-early pattern that occurs
+  //    when expo-av tries to play before the native decoder is initialized.
+  const [playbackReady, setPlaybackReady] = useState<boolean>(false);
+  const playbackReadyRef = useRef<boolean>(false);
+  const readyForDisplayRef = useRef<boolean>(false);
+  const prebufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isInitialMountRef = useRef<boolean>(true);
+
+  // Reset pre-buffer gate when the data source changes (post changes).
+  // Do NOT reset on active toggle — that creates a race where the pre-buffer
+  // gate passes, then the reset undoes it, freezing the video.
+  useEffect(() => {
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
+    setPlaybackReady(false);
+    playbackReadyRef.current = false;
+    readyForDisplayRef.current = false;
+    setIsPaused(false);
+  }, [post.id]);
+
+  // Auto-unpause when scrolling back to this video.
+  // Only resets isPaused — playbackReady is left intact so the video
+  // resumes immediately without re-waiting for the pre-buffer gate.
+  useEffect(() => {
+    if (active) setIsPaused(false);
+  }, [active]);
+
+  // Clear prebuffer safety timer on unmount or when deps change
+  useEffect(() => {
+    return () => {
+      if (prebufferTimerRef.current) {
+        clearTimeout(prebufferTimerRef.current);
+        prebufferTimerRef.current = null;
+      }
+    };
+  }, [post.id]);
+
+  // ── Safety timeout: if onReadyForDisplay never fires (rare Android edge
+  //    case), force playbackReady=true after 3s so the video doesn't stay
+  //    frozen forever.
+  useEffect(() => {
+    if (!active || playbackReady) return;
+
+    prebufferTimerRef.current = setTimeout(() => {
+      if (!playbackReadyRef.current) {
+        console.log("[reaction-tree] pre-buffer safety timeout — forcing playback", {
+          postId: post.id.slice(0, 8),
+        });
+        playbackReadyRef.current = true;
+        setPlaybackReady(true);
+      }
+    }, 3000);
+
+    return () => {
+      if (prebufferTimerRef.current) {
+        clearTimeout(prebufferTimerRef.current);
+        prebufferTimerRef.current = null;
+      }
+    };
+  }, [active, playbackReady, post.id]);
+
   const handleDeleteReaction = useCallback(() => {
     Alert.alert(
       "Delete this reaction?",
@@ -387,11 +459,6 @@ function ReactionItem({
   const [videoError, setVideoError] = useState<string | null>(null);
   const errorCountRef = useRef<number>(0);
 
-  // Auto-unpause when scrolling back to this video
-  useEffect(() => {
-    if (active) setIsPaused(false);
-  }, [active]);
-
   // ── Stall detection + recovery ─────────────────────────────────────
   const videoLog = useCallback((e: VideoEvent) => {
     console.log("[reaction-tree] video", e);
@@ -400,8 +467,41 @@ function ReactionItem({
   const {
     videoRef,
     stallState,
-    handlePlaybackStatus: handleStallStatus,
+    handlePlaybackStatus: handleStallDetection,
   } = useVideoStallDetection(post.id, active, post.media_url, videoLog);
+
+  // ── Combined onPlaybackStatusUpdate: stall detection first, then
+  //    pre-buffer gate fallback (mirrors the feed's onSegmentStatus pattern).
+  const onPlaybackStatus = useCallback(
+    (status: AVPlaybackStatus) => {
+      // Forward to stall detection handler first
+      handleStallDetection(status);
+
+      if (!status.isLoaded) return;
+
+      // ── Pre-buffer gate fallback: if onReadyForDisplay hasn't fired yet
+      //    but the player reports it's no longer buffering, assume the first
+      //    frame is ready and unlock playback.
+      if (!playbackReadyRef.current) {
+        const hasFrame = readyForDisplayRef.current;
+        const notBuffering = !status.isBuffering;
+        if (hasFrame || notBuffering) {
+          playbackReadyRef.current = true;
+          setPlaybackReady(true);
+          if (prebufferTimerRef.current) {
+            clearTimeout(prebufferTimerRef.current);
+            prebufferTimerRef.current = null;
+          }
+          console.log("[reaction-tree] pre-buffer complete, starting playback", {
+            postId: post.id.slice(0, 8),
+            trigger: hasFrame ? "onReadyForDisplay" : "notBuffering",
+            playableDurationMs: status.playableDurationMillis,
+          });
+        }
+      }
+    },
+    [handleStallDetection, post.id],
+  );
 
   // Release native player resources on unmount
   useEffect(() => {
@@ -447,14 +547,14 @@ function ReactionItem({
             style={styles.videoFill}
             resizeMode={ResizeMode.COVER}
             isLooping
-            shouldPlay={active && !isPaused}
+            shouldPlay={active && playbackReady && !isPaused}
             isMuted={!active}
             useNativeControls={false}
             posterSource={
               post.thumbnail_url ? { uri: post.thumbnail_url } : undefined
             }
             progressUpdateIntervalMillis={250}
-            onPlaybackStatusUpdate={handleStallStatus}
+            onPlaybackStatusUpdate={onPlaybackStatus}
             onError={(error: string) => {
               errorCountRef.current += 1;
               setVideoError(error);
@@ -474,6 +574,20 @@ function ReactionItem({
             onReadyForDisplay={() => {
               videoLog({ type: "ready_for_display", postId: post.id });
               setVideoError(null);
+              readyForDisplayRef.current = true;
+              // If the pre-buffer gate hasn't passed yet, trigger it now.
+              // This is the most reliable signal that the first frame is visible.
+              if (!playbackReadyRef.current) {
+                playbackReadyRef.current = true;
+                setPlaybackReady(true);
+                if (prebufferTimerRef.current) {
+                  clearTimeout(prebufferTimerRef.current);
+                  prebufferTimerRef.current = null;
+                }
+                console.log("[reaction-tree] onReadyForDisplay — starting playback", {
+                  postId: post.id.slice(0, 8),
+                });
+              }
             }}
           />
 
