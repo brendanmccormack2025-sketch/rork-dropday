@@ -15,6 +15,13 @@
  *   - Rebuilt moov with adjusted chunk offsets and combined duration
  */
 
+import { decode, encode } from "base64-arraybuffer";
+import {
+  readAsStringAsync,
+  writeAsStringAsync,
+  getInfoAsync,
+} from "@/lib/fileSystemCompat";
+
 // ── Box Types ─────────────────────────────────────────────────────────────────
 
 interface Mp4Box {
@@ -312,11 +319,6 @@ export async function concatMP4Files(
   reactionUri: string,
   outputUri: string,
 ): Promise<ConcatResult> {
-  const { readAsStringAsync, writeAsStringAsync } = await import(
-    "@/lib/fileSystemCompat"
-  );
-  const { decode, encode } = await import("base64-arraybuffer");
-
   // ── 1. Read both files into buffers ──────────────────────────────────────
   console.log("[concatMP4] Reading parent:", parentUri.slice(0, 60));
   console.log("[concatMP4] Reading reaction:", reactionUri.slice(0, 60));
@@ -345,23 +347,9 @@ export async function concatMP4Files(
     };
   }
 
-  // decode() returns Uint8Array | ArrayBuffer depending on version;
-  // cast through unknown for safe ArrayBuffer access
-  const parentBuffer = (decode(parentB64) as unknown as { buffer: ArrayBuffer }).buffer
-    ?? (decode(parentB64) as unknown as ArrayBuffer);
-  const reactionBuffer = (decode(reactionB64) as unknown as { buffer: ArrayBuffer }).buffer
-    ?? (decode(reactionB64) as unknown as ArrayBuffer);
-
-  // Normalize: if decode returned a typed array, parentBuffer is its .buffer;
-  // if it returned ArrayBuffer directly, it's already what we need.
-  const pBuf: ArrayBuffer =
-    (parentBuffer as { byteLength?: number }).byteLength !== undefined
-      ? (parentBuffer as ArrayBuffer)
-      : (decode(parentB64) as unknown as ArrayBuffer);
-  const rBuf: ArrayBuffer =
-    (reactionBuffer as { byteLength?: number }).byteLength !== undefined
-      ? (reactionBuffer as ArrayBuffer)
-      : (decode(reactionB64) as unknown as ArrayBuffer);
+  // decode() from base64-arraybuffer returns an ArrayBuffer
+  const pBuf: ArrayBuffer = decode(parentB64) as ArrayBuffer;
+  const rBuf: ArrayBuffer = decode(reactionB64) as ArrayBuffer;
 
   console.log(
     `[concatMP4] Parent: ${(pBuf.byteLength / 1024).toFixed(1)} KB, ` +
@@ -599,7 +587,6 @@ export async function concatMP4Files(
   }
 
   // ── 12. Verify output ────────────────────────────────────────────────────
-  const { getInfoAsync } = await import("@/lib/fileSystemCompat");
   const info = await getInfoAsync(outputUri);
   console.log(
     `[concatMP4] Output file check — exists: ${info.exists}, size: ${info.size} bytes`,

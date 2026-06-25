@@ -294,6 +294,7 @@ export default function ReactionTreeScreen() {
       ) : (
         <FlatList
           data={feedItems}
+          extraData={isCreator}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           pagingEnabled
