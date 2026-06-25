@@ -132,13 +132,31 @@ export default function CameraScreen() {
   const flipAnimRef = useRef<Animated.CompositeAnimation | null>(null);
   const frontFlashAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  // Pinch-to-zoom: track the baseline zoom at gesture start so zoom
-  // accumulates naturally across multiple pinches (like Instagram / TikTok).
+  // Vertical pan zoom: track the baseline zoom at gesture start so zoom
+  // accumulates naturally across multiple swipes (Snapchat-style).
   const zoomBaselineRef = useRef<number>(0);
   // Stable ref mirror of `zoom` state — read by gesture callbacks so the
-  // pinch gesture is never recreated mid-interaction.
+  // pan gesture is never recreated mid-interaction.
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+
+  // Vertical pan zoom indicator state — visible during swipe + 1s after
+  const [panZoomActive, setPanZoomActive] = useState(false);
+  const panZoomHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPanZoomTimeout = useCallback(() => {
+    if (panZoomHideRef.current) {
+      clearTimeout(panZoomHideRef.current);
+      panZoomHideRef.current = null;
+    }
+  }, []);
+
+  const scheduleHideZoomIndicator = useCallback(() => {
+    clearPanZoomTimeout();
+    panZoomHideRef.current = setTimeout(() => {
+      setPanZoomActive(false);
+    }, 1000);
+  }, [clearPanZoomTimeout]);
 
   // Clock
   useEffect(() => {
@@ -169,8 +187,10 @@ export default function CameraScreen() {
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
       if (flipAnimRef.current) flipAnimRef.current.stop();
       if (frontFlashAnimRef.current) frontFlashAnimRef.current.stop();
+      if (panZoomHideRef.current) clearTimeout(panZoomHideRef.current);
 
       setZoom(0);
+      setPanZoomActive(false);
       teardown();
     };
   }, [setZoom, teardown]);
@@ -407,32 +427,49 @@ export default function CameraScreen() {
     [handleFlip]
   );
 
-  // ─── Pinch-to-zoom ───────────────────────────────────────────
+  // ─── Vertical pan zoom (Snapchat-style) ──────────────────────
+  // One-finger vertical swipe on the camera viewfinder:
+  //   Swipe UP   → zoom in
+  //   Swipe DOWN → zoom out
   // Runs on the UI thread (worklet) for low-latency tracking.
-  // Stable across re-renders — reads zoomRef.current (not `zoom` state)
-  // so the gesture stays alive throughout the entire pinch lifecycle.
+  // Reads zoomRef.current (not `zoom` state) so the gesture stays
+  // alive throughout the entire swipe lifecycle.
   const updateZoomOnJS = useCallback((next: number) => {
     setZoom(next);
   }, [setZoom]);
 
-  const pinchGesture = useMemo(
+  const panZoomGesture = useMemo(
     () =>
-      Gesture.Pinch()
+      Gesture.Pan()
+        .minPointers(1)
+        .maxPointers(1)
+        .activeOffsetY([-12, 12])
         .onBegin(() => {
           zoomBaselineRef.current = zoomRef.current;
+          runOnJS(setPanZoomActive)(true);
+          runOnJS(clearPanZoomTimeout)();
         })
         .onUpdate((e) => {
-          const next = Math.min(1, Math.max(0, zoomBaselineRef.current * e.scale));
+          // Swipe UP (negative translationY) → zoom increase
+          const sensitivity = 0.004;
+          const delta = -e.translationY * sensitivity;
+          const next = Math.min(1, Math.max(0, zoomBaselineRef.current + delta));
           runOnJS(updateZoomOnJS)(next);
+        })
+        .onEnd(() => {
+          runOnJS(scheduleHideZoomIndicator)();
+        })
+        .onFinalize(() => {
+          runOnJS(scheduleHideZoomIndicator)();
         }),
-    [updateZoomOnJS],
+    [updateZoomOnJS, clearPanZoomTimeout, scheduleHideZoomIndicator],
   );
 
-  // Simultaneous gesture composition: pinch and double-tap coexist.
-  // Pinch-to-zoom does not interfere with the tap-to-record workflow.
+  // Simultaneous gesture composition: pan-zoom and double-tap coexist.
+  // Vertical swipe zoom does not interfere with the tap-to-record workflow.
   const previewGestures = useMemo(
-    () => Gesture.Simultaneous(pinchGesture, flipGesture),
-    [flipGesture, pinchGesture],
+    () => Gesture.Simultaneous(panZoomGesture, flipGesture),
+    [flipGesture, panZoomGesture],
   );
 
   // ─── Navigation ────────────────────────────────────────────────
@@ -593,14 +630,14 @@ export default function CameraScreen() {
         </View>
       )}
 
-      {/* Gesture zone — double-tap to flip, pinch to zoom.
+      {/* Gesture zone — double-tap to flip, vertical swipe to zoom.
           Simultaneous() allows both gestures to coexist on the same layer. */}
       <View style={[StyleSheet.absoluteFill, { zIndex: 5 }]} pointerEvents="box-none">
         <GestureDetector gesture={previewGestures}>
           <GestureView
             style={{ flex: 1 }}
             accessibilityRole="button"
-            accessibilityLabel="Double-tap to flip camera, pinch to zoom"
+            accessibilityLabel="Double-tap to flip camera, swipe up or down to zoom"
           />
         </GestureDetector>
       </View>
@@ -700,13 +737,20 @@ export default function CameraScreen() {
         </View>
       )}
 
-      {/* Zoom indicator — shows only when zoomed in */}
-      {zoom > 0.01 && (
-        <View
-          style={[styles.zoomPill, { top: insets.top + (isRecording ? 108 : 74) }]}
-          pointerEvents="none"
-        >
-          <Text style={styles.zoomPillText}>{zoomToLabel(zoom)}</Text>
+      {/* Zoom bar — vertical indicator on the right side, Snapchat-style.
+          Visible while actively swiping (panZoomActive) or when zoomed in.
+          Hides 1 second after the user stops swiping. */}
+      {(panZoomActive || zoom > 0.01) && (
+        <View style={styles.zoomBarWrap} pointerEvents="none">
+          <View style={styles.zoomBarTrack}>
+            <View
+              style={[
+                styles.zoomBarFill,
+                { height: `${Math.round(zoom * 100)}%` },
+              ]}
+            />
+          </View>
+          <Text style={styles.zoomBarLabel}>{zoomToLabel(zoom)}</Text>
         </View>
       )}
 
@@ -1114,23 +1158,38 @@ const styles = StyleSheet.create({
     textShadowRadius: 6,
   },
 
-  zoomPill: {
+  zoomBarWrap: {
     position: "absolute",
-    left: 0,
-    right: 0,
+    right: 16,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
     alignItems: "center",
+    gap: 8,
     zIndex: 10,
   },
-  zoomPillText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700" as const,
-    letterSpacing: 0.3,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: "rgba(10,10,10,0.45)",
+  zoomBarTrack: {
+    width: 4,
+    height: 132,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.18)",
     overflow: "hidden",
+  },
+  zoomBarFill: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: theme.accent,
+    borderRadius: 2,
+  },
+  zoomBarLabel: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700" as const,
+    fontVariant: ["tabular-nums"],
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowRadius: 4,
   },
 
   cameraErrorBanner: {
