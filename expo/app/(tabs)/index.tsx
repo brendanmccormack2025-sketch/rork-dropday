@@ -45,7 +45,7 @@ const FREE_VIEWS_BEFORE_GATE = 5;
 
 export default function FeedScreen() {
   const router = useRouter();
-  const { feed, feedLoading, refetchFeed, refetchMyPosts, hasPostedInWindow, retryOptimisticPost } = usePosts();
+  const { feed, feedLoading, refetchFeed, refetchMyPosts, hasPostedInWindow, retryOptimisticPost, optimisticPosts } = usePosts();
   const [now, setNow] = useState<Date>(new Date());
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -86,14 +86,23 @@ export default function FeedScreen() {
   // Skip the initial mount: useQuery already fetches on cold start,
   // and an extra refetch here can race with the feed Video player's
   // initialization, causing a 100% reproducible freeze on cold open.
+  //
+  // Also skip refetch while optimistic posts are uploading — the refetch
+  // can race with createPost's DB insert (Supabase eventual consistency)
+  // and overwrite the cache, making the optimistic post disappear.
   useFocusEffect(
     useCallback(() => {
       if (isFirstFocusRef.current) {
         isFirstFocusRef.current = false;
         return;
       }
-      refetchFeed();
-    }, [refetchFeed])
+      const hasPendingUpload = optimisticPosts.some(
+        (p) => p._optimistic?.status === "uploading",
+      );
+      if (!hasPendingUpload) {
+        refetchFeed();
+      }
+    }, [refetchFeed, optimisticPosts])
   );
 
   const onViewableItemsChanged = useRef(
