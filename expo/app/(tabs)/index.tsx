@@ -142,12 +142,8 @@ export default function FeedScreen() {
         live={win.isOpen}
         onShare={() => setSharePost(item)}
         onReactions={() => {
-        if ((item.reaction_count ?? 0) > 0) {
           router.push(`/post/${item.id}/reaction-tree` as never);
-        } else {
-          router.push(`/camera?reactingTo=${item.id}` as never);
-        }
-      }}
+        }}
         onRetry={() => retryOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),

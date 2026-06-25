@@ -278,6 +278,18 @@ export default function ReactionTreeScreen() {
           <Text style={styles.emptySub}>
             Be the first to react to this drop.
           </Text>
+          <Pressable
+            onPress={() => {
+              router.push(`/camera?reactingTo=${id}` as never);
+            }}
+            style={({ pressed }) => [
+              styles.emptyReactBtn,
+              pressed && styles.emptyReactBtnPressed,
+            ]}
+          >
+            <Reply color="#fff" size={18} strokeWidth={2.5} />
+            <Text style={styles.emptyReactBtnText}>Create a reaction</Text>
+          </Pressable>
         </View>
       ) : (
         <FlatList
@@ -679,6 +691,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: "center",
     lineHeight: 19,
+    marginBottom: 16,
+  },
+  emptyReactBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    minHeight: 50,
+    borderRadius: 14,
+    backgroundColor: theme.accent,
+    shadowColor: theme.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  emptyReactBtnPressed: {
+    opacity: 0.75,
+  },
+  emptyReactBtnText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800" as const,
+    letterSpacing: 0.2,
   },
 
   /* Item */
