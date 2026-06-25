@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useCallback, useRef } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Pressable,
@@ -15,11 +16,12 @@ import { Image } from "expo-image";
 import { Video, ResizeMode } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, Heart, Reply, RotateCcw, Sparkles, X } from "lucide-react-native";
+import { ArrowLeft, EllipsisVertical, Heart, Reply, RotateCcw, Sparkles, X } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
 import { usePosts, type Post } from "@/providers/PostsProvider";
+import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
@@ -171,7 +173,25 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const [liked, setLiked] = useState<boolean>(false);
   const [videoError, setVideoError] = useState<string | null>(null);
   const errorCountRef = useRef<number>(0);
+  const { deleteReaction } = usePosts();
+  const { user } = useAuth();
   const name = post.profile?.display_name || post.profile?.username || "dropper";
+  const isOwner = !!user?.id && post.user_id === user.id;
+
+  const handleDeleteReaction = useCallback(() => {
+    Alert.alert(
+      "Delete this reaction?",
+      "This can't be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => deleteReaction.mutate(post.id),
+        },
+      ],
+    );
+  }, [deleteReaction, post.id]);
 
   const hasValidMediaUrl = typeof post.media_url === "string" && post.media_url.length > 0;
 
@@ -305,6 +325,17 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
         style={styles.gradBottom}
         pointerEvents="none"
       />
+
+      {/* Delete button — only visible to the owner */}
+      {isOwner && (
+        <Pressable
+          onPress={handleDeleteReaction}
+          style={styles.moreBtn}
+          hitSlop={8}
+        >
+          <EllipsisVertical color="rgba(255,255,255,0.8)" size={22} strokeWidth={2} />
+        </Pressable>
+      )}
 
       {/* Side actions */}
       <View style={styles.actions} pointerEvents="box-none">
@@ -594,6 +625,20 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800" as const,
     letterSpacing: 0.2,
+  },
+
+  /* Delete button */
+  moreBtn: {
+    position: "absolute",
+    top: 60,
+    right: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    zIndex: 5,
   },
 
   /* Bottom react button */

@@ -230,7 +230,34 @@ create policy "messages insertable by sender"
   );
 
 -- ============================================================================
--- 7. Storage bucket for media
+-- 7. Cascade-delete reactions when parent post is deleted
+--    (replaces the inline on-delete-set-null from the CREATE TABLE)
+-- ============================================================================
+do $$
+declare
+  fk_name text;
+begin
+  select c.conname into fk_name
+  from pg_constraint c
+  join pg_attribute a on a.attnum = any(c.conkey) and a.attrelid = c.conrelid
+  where c.conrelid = 'public.posts'::regclass
+    and c.confrelid = 'public.posts'::regclass
+    and c.contype = 'f'
+    and a.attname = 'parent_post_id';
+
+  if fk_name is not null then
+    execute format('alter table public.posts drop constraint %I', fk_name);
+  end if;
+end;
+$$;
+
+alter table public.posts
+  add foreign key (parent_post_id)
+  references public.posts(id)
+  on delete cascade;
+
+-- ============================================================================
+-- 8. Storage bucket for media
 -- ============================================================================
 insert into storage.buckets (id, name, public)
 values ('drops', 'drops', true)

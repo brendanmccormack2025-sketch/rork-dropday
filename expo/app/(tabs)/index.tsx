@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Modal,
@@ -31,6 +32,8 @@ import {
   Sparkles,
   RotateCcw,
   MessageCircle,
+  EllipsisVertical,
+  Trash2,
 } from "lucide-react-native";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
@@ -39,6 +42,7 @@ import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
 import { theme, getDropWindowState, formatCountdown } from "@/constants/theme";
 import { usePosts, type Post, type OptimisticStatus, resolveAvatarUrl } from "@/providers/PostsProvider";
+import { useAuth } from "@/providers/AuthProvider";
 import { supabase } from "@/lib/supabase";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
@@ -291,7 +295,9 @@ const FeedItem = memo(function FeedItem({
 }) {
   const [liked, setLiked] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
-  const { reactionsByParent } = usePosts();
+  const { reactionsByParent, deletePost } = usePosts();
+  const { user } = useAuth();
+  const isOwner = !!user?.id && post.user_id === user.id;
   const reactionCount = reactionsByParent[post.id]?.length ?? 0;
   // Multi-segment playback: if post.segments exists, cycle through them
   const allSegments = useMemo<string[]>(
@@ -524,6 +530,22 @@ const FeedItem = memo(function FeedItem({
       .catch(() => {});
   }, [currentUri, active, videoRef]);
 
+  // ── Delete this Drop (owner only) ──────────────────────────────────
+  const handleDelete = useCallback(() => {
+    Alert.alert(
+      "Delete this Drop?",
+      "This can't be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => deletePost.mutate(post.id),
+        },
+      ],
+    );
+  }, [deletePost, post.id]);
+
   // ── Diagnostic: log audio/playback state transitions ────────────────
   useEffect(() => {
     console.log("[feed] FeedItem state", {
@@ -712,6 +734,13 @@ const FeedItem = memo(function FeedItem({
           label="Share"
           onPress={onShare}
         />
+        {isOwner && (
+          <ActionButton
+            icon={<Trash2 color="rgba(255,255,255,0.85)" size={24} strokeWidth={2} />}
+            label="Delete"
+            onPress={handleDelete}
+          />
+        )}
       </View>
 
       <View style={styles.bottom} pointerEvents="box-none">
@@ -1573,6 +1602,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700" as const,
   },
+
+
 
   /* Optimistic posting overlay */
   optOverlay: {

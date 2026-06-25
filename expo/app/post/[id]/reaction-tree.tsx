@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Pressable,
@@ -16,7 +17,7 @@ import { Video, ResizeMode } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw, ShieldCheck } from "lucide-react-native";
+import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw, ShieldCheck, EllipsisVertical } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
@@ -24,7 +25,7 @@ import { FeedAvatar } from "@/components/Avatar";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
-import type { Post } from "@/providers/PostsProvider";
+import { usePosts, type Post } from "@/providers/PostsProvider";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
@@ -361,8 +362,26 @@ function ReactionItem({
 
   const [liked, setLiked] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
+  const { deleteReaction } = usePosts();
+  const { user: authUser } = useAuth();
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
+  const isOwner = !!authUser?.id && post.user_id === authUser.id;
+
+  const handleDeleteReaction = useCallback(() => {
+    Alert.alert(
+      "Delete this reaction?",
+      "This can't be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => deleteReaction.mutate(post.id),
+        },
+      ],
+    );
+  }, [deleteReaction, post.id]);
 
   // Video error state for retry UI
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -514,6 +533,17 @@ function ReactionItem({
         style={styles.gradBottom}
         pointerEvents="none"
       />
+
+      {/* Delete button — only visible to the owner */}
+      {isOwner && (
+        <Pressable
+          onPress={handleDeleteReaction}
+          style={styles.moreBtn}
+          hitSlop={8}
+        >
+          <EllipsisVertical color="rgba(255,255,255,0.8)" size={22} strokeWidth={2} />
+        </Pressable>
+      )}
 
       {/* ── Tier 2 reply indicator — shown at the top of reply cards ──── */}
       {isReply && (
@@ -878,5 +908,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800" as const,
     letterSpacing: 0.2,
+  },
+
+  /* Delete button */
+  moreBtn: {
+    position: "absolute",
+    top: 60,
+    right: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    zIndex: 5,
   },
 });

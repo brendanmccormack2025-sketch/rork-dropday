@@ -1914,6 +1914,234 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
   });
 
+  // ── Helper: extract storage path from a Supabase public URL ───────────
+  const extractStoragePath = useCallback((publicUrl: string): string | null => {
+    const bucketPrefix = `${supabaseUrl}/storage/v1/object/public/${BUCKET}/`;
+    if (publicUrl.startsWith(bucketPrefix)) {
+      return publicUrl.slice(bucketPrefix.length);
+    }
+    // Also handle the /object/sign/ variant
+    const signPrefix = `${supabaseUrl}/storage/v1/object/sign/${BUCKET}/`;
+    const signIdx = publicUrl.indexOf(`/storage/v1/object/sign/${BUCKET}/`);
+    if (signIdx >= 0) {
+      const afterPrefix = publicUrl.slice(signIdx + signPrefix.length);
+      // Strip query params from signed URLs
+      const qIdx = afterPrefix.indexOf("?");
+      return qIdx >= 0 ? afterPrefix.slice(0, qIdx) : afterPrefix;
+    }
+    return null;
+  }, []);
+
+  // ── Delete Post (Drop or reply) ─────────────────────────────────────
+  const deletePost = useMutation({
+    mutationFn: async (postId: string): Promise<void> => {
+      if (!user?.id) throw new Error("Not signed in.");
+
+      console.log("[deletePost] START — postId:", postId.slice(0, 8));
+
+      // 1. Fetch the post to get media_urls before deleting the row
+      const { data: postRow, error: fetchErr } = await supabase
+        .from("posts")
+        .select("id, user_id, media_url, segments, thumbnail_url")
+        .eq("id", postId)
+        .single();
+
+      if (fetchErr) {
+        console.error("[deletePost] fetch error", fetchErr.message);
+        throw fetchErr;
+      }
+      if (!postRow) throw new Error("Post not found.");
+
+      const row = postRow as Record<string, unknown>;
+      if (row.user_id !== user.id) throw new Error("You can only delete your own posts.");
+
+      // 2. Collect all storage paths to delete
+      const pathsToDelete: string[] = [];
+
+      const mainPath = extractStoragePath(row.media_url as string);
+      if (mainPath) pathsToDelete.push(mainPath);
+
+      const segments = row.segments as string[] | null;
+      if (segments) {
+        for (const segUrl of segments) {
+          const segPath = extractStoragePath(segUrl);
+          if (segPath) pathsToDelete.push(segPath);
+        }
+      }
+
+      const thumbUrl = row.thumbnail_url as string | null;
+      if (thumbUrl) {
+        const thumbPath = extractStoragePath(thumbUrl);
+        if (thumbPath) pathsToDelete.push(thumbPath);
+      }
+
+      console.log("[deletePost] paths to delete:", pathsToDelete.length);
+
+      // 3. Delete from DB (cascade will handle child reactions via the FK)
+      const { error: delErr } = await supabase
+        .from("posts")
+        .delete()
+        .eq("id", postId);
+
+      if (delErr) {
+        console.error("[deletePost] DB delete error", delErr.message);
+        throw delErr;
+      }
+
+      console.log("[deletePost] DB row deleted");
+
+      // 4. Delete media files from storage (best-effort, non-fatal if fails)
+      if (pathsToDelete.length > 0) {
+        const { error: storageErr } = await supabase.storage
+          .from(BUCKET)
+          .remove(pathsToDelete);
+        if (storageErr) {
+          console.warn("[deletePost] storage cleanup error (non-fatal)", storageErr.message);
+        } else {
+          console.log("[deletePost] storage files deleted:", pathsToDelete.length);
+        }
+      }
+
+      console.log("[deletePost] COMPLETE");
+    },
+    onSuccess: (_data, postId) => {
+      console.log("[deletePost] onSuccess — removing post from caches", postId.slice(0, 8));
+
+      // Remove from main feed cache
+      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+        if (!old) return [];
+        return old.filter((p) => p.id !== postId);
+      });
+
+      // Remove from my posts cache
+      qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
+        if (!old) return [];
+        return old.filter((p) => p.id !== postId);
+      });
+
+      // Remove from liked posts cache
+      qc.setQueryData<Post[]>(["posts", "liked", user?.id], (old) => {
+        if (!old) return [];
+        return old.filter((p) => p.id !== postId);
+      });
+
+      // Invalidate reaction & reply queries (cascade may have removed children)
+      qc.invalidateQueries({ queryKey: ["reactions"] });
+      qc.invalidateQueries({ queryKey: ["replies"] });
+      qc.invalidateQueries({ queryKey: ["posts", "all-reactions"] });
+    },
+    onError: (err) => {
+      console.error("[deletePost] onError", (err as Error)?.message ?? err);
+      showAlert("Delete Failed", (err as Error)?.message ?? "Could not delete the post.");
+    },
+  });
+
+  // ── Delete Reaction ──────────────────────────────────────────────────
+  const deleteReaction = useMutation({
+    mutationFn: async (reactionId: string): Promise<string | null> => {
+      if (!user?.id) throw new Error("Not signed in.");
+
+      console.log("[deleteReaction] START — reactionId:", reactionId.slice(0, 8));
+
+      // 1. Fetch the reaction to get media_url and parent_post_id
+      const { data: reactionRow, error: fetchErr } = await supabase
+        .from("posts")
+        .select("id, user_id, media_url, segments, thumbnail_url, parent_post_id")
+        .eq("id", reactionId)
+        .single();
+
+      if (fetchErr) {
+        console.error("[deleteReaction] fetch error", fetchErr.message);
+        throw fetchErr;
+      }
+      if (!reactionRow) throw new Error("Reaction not found.");
+
+      const row = reactionRow as Record<string, unknown>;
+      if (row.user_id !== user.id) throw new Error("You can only delete your own reactions.");
+
+      const parentPostId = (row.parent_post_id as string) ?? null;
+
+      // 2. Collect storage paths
+      const pathsToDelete: string[] = [];
+      const mainPath = extractStoragePath(row.media_url as string);
+      if (mainPath) pathsToDelete.push(mainPath);
+
+      const segments = row.segments as string[] | null;
+      if (segments) {
+        for (const segUrl of segments) {
+          const segPath = extractStoragePath(segUrl);
+          if (segPath) pathsToDelete.push(segPath);
+        }
+      }
+
+      const thumbUrl = row.thumbnail_url as string | null;
+      if (thumbUrl) {
+        const thumbPath = extractStoragePath(thumbUrl);
+        if (thumbPath) pathsToDelete.push(thumbPath);
+      }
+
+      console.log("[deleteReaction] paths to delete:", pathsToDelete.length);
+
+      // 3. Delete from DB
+      const { error: delErr } = await supabase
+        .from("posts")
+        .delete()
+        .eq("id", reactionId);
+
+      if (delErr) {
+        console.error("[deleteReaction] DB delete error", delErr.message);
+        throw delErr;
+      }
+
+      console.log("[deleteReaction] DB row deleted");
+
+      // 4. Delete media files from storage (best-effort)
+      if (pathsToDelete.length > 0) {
+        const { error: storageErr } = await supabase.storage
+          .from(BUCKET)
+          .remove(pathsToDelete);
+        if (storageErr) {
+          console.warn("[deleteReaction] storage cleanup error (non-fatal)", storageErr.message);
+        } else {
+          console.log("[deleteReaction] storage files deleted:", pathsToDelete.length);
+        }
+      }
+
+      console.log("[deleteReaction] COMPLETE — parentPostId:", parentPostId?.slice(0, 8));
+
+      // Return parentPostId for cache updates
+      return parentPostId;
+    },
+    onSuccess: (parentPostId, reactionId) => {
+      console.log("[deleteReaction] onSuccess — removing reaction from caches", reactionId.slice(0, 8));
+
+      // Remove from my posts cache
+      qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
+        if (!old) return [];
+        return old.filter((p) => p.id !== reactionId);
+      });
+
+      // Remove from the parent's reaction cache
+      if (parentPostId) {
+        qc.setQueryData<Post[]>(["reactions", parentPostId], (old) => {
+          if (!old) return [];
+          return old.filter((p) => p.id !== reactionId);
+        });
+      }
+
+      // Invalidate reaction-related queries so counts update
+      qc.invalidateQueries({ queryKey: ["reactions"] });
+      qc.invalidateQueries({ queryKey: ["replies"] });
+      qc.invalidateQueries({ queryKey: ["posts", "all-reactions"] });
+      // Also invalidate the main feed so reaction_count decrements on the parent Drop
+      qc.invalidateQueries({ queryKey: ["posts", "fyp"] });
+    },
+    onError: (err) => {
+      console.error("[deleteReaction] onError", (err as Error)?.message ?? err);
+      showAlert("Delete Failed", (err as Error)?.message ?? "Could not delete the reaction.");
+    },
+  });
+
   return useMemo(
     () => ({
       exploreCreators: exploreCreatorsQuery.data ?? [],
@@ -1960,6 +2188,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       findOrCreateConversation,
       sendTextMessage,
       sendDropAsMessage,
+      deletePost,
+      deleteReaction,
     }),
     [
       exploreCreatorsQuery,
@@ -1990,6 +2220,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       findOrCreateConversation,
       sendTextMessage,
       sendDropAsMessage,
+      deletePost,
+      deleteReaction,
     ]
   );
 });
