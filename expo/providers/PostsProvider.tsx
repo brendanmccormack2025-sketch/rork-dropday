@@ -1220,13 +1220,15 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       const isRemoteUrl = input.uri.startsWith("http");
 
       // ── Stitch reaction clip to parent clip BEFORE uploading ────────
-      // When this post is a reaction (has parentPostId) and the media is
-      // a video, download the parent clip and concatenate the reaction
-      // after it so both clips play sequentially in a single file.
+      // DISABLED: Reactions are standalone single-clip videos attached to
+      // a parent via parent_post_id. The stitch path was failing silently
+      // and preventing the upload + insert from ever reaching Supabase.
+      // Commented out for later revisit — do NOT delete.
       let uploadUri = input.uri;
       let parentDownloadUri: string | null = null;
       let stitchedUri: string | null = null;
 
+      /*
       if (input.parentPostId && input.mediaType === "video" && !isRemoteUrl) {
         try {
           console.log("[createPost] STITCH: fetching parent post", input.parentPostId.slice(0, 8));
@@ -1325,6 +1327,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           uploadUri = input.uri;
         }
       }
+      */
 
       let mediaUrl: string;
       let segmentUrls: string[] | null = null;
