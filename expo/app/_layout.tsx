@@ -137,6 +137,15 @@ function RootLayoutNav() {
             contentStyle: { backgroundColor: theme.bg },
           }}
         />
+        <Stack.Screen
+          name="profile-drops"
+          options={{
+            presentation: "fullScreenModal",
+            animation: "slide_from_bottom",
+            headerShown: false,
+            contentStyle: { backgroundColor: "#0A0A14" },
+          }}
+        />
       </Stack>
     </View>
   );

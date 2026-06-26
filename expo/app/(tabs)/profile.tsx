@@ -421,7 +421,18 @@ export default function ProfileScreen() {
                 )}
               </>
             }
-            renderItem={({ item }) => <ProfileTile post={item} />}
+            renderItem={({ item, index }) => (
+              <ProfileTile
+                post={item}
+                onPress={() => {
+                  if (!user?.id) return;
+                  router.push({
+                    pathname: "/profile-drops",
+                    params: { userId: user.id, initialIndex: String(index) },
+                  } as never);
+                }}
+              />
+            )}
           />
         )}
       </SafeAreaView>
@@ -429,10 +440,10 @@ export default function ProfileScreen() {
   );
 }
 
-function ProfileTile({ post }: { post: Post }) {
+function ProfileTile({ post, onPress }: { post: Post; onPress: () => void }) {
   const coverUri = post.thumbnail_url ?? post.media_url;
   return (
-    <View style={styles.tile}>
+    <Pressable onPress={onPress} style={styles.tile}>
       <Image
         source={{ uri: coverUri }}
         style={StyleSheet.absoluteFill}
@@ -460,7 +471,7 @@ function ProfileTile({ post }: { post: Post }) {
           </View>
         )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
