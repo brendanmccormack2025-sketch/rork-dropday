@@ -35,6 +35,7 @@ import {
   Undo2,
   Redo2,
   Pencil,
+  Plus,
 } from "lucide-react-native";
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
@@ -1283,6 +1284,24 @@ export default function EditScreen() {
     });
   }, [clips]);
 
+  const handleAddClipPress = useCallback(async () => {
+    console.log("[edit] Add Clip — saving current draft state first, draftId:", draftId);
+    // Save the current draft state so any edits the user made are persisted
+    // before they leave for the camera.
+    if (clips.length > 0 && draftId) {
+      try {
+        await executeSaveDraftRef.current();
+      } catch (e) {
+        console.warn("[edit] Add Clip — draft save failed (continuing anyway)", (e as Error)?.message);
+      }
+    }
+    // Navigate to camera with draftId so new clips are appended on return
+    router.push({
+      pathname: "/camera",
+      params: { draftId: draftId ?? undefined },
+    });
+  }, [clips, draftId, router]);
+
   const handlePostPress = useCallback(() => {
     console.log("[edit] handlePostPress: Post Drop tapped — clips:", clips.length, "user:", !!user?.id);
 
@@ -1846,6 +1865,25 @@ export default function EditScreen() {
 
         {/* ── Toolbar ────────────────────────────────────────────────── */}
         <View style={styles.toolbar}>
+          {/* Add Clip — available when editing a draft */}
+          {draftId && (
+            <Pressable
+              onPress={handleAddClipPress}
+              style={({ pressed }) => [
+                styles.toolBtn,
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Plus
+                size={18}
+                color={theme.accent}
+              />
+              <Text style={[styles.toolLabel, { color: theme.accent }]}>
+                Add Clip
+              </Text>
+            </Pressable>
+          )}
+
           {/* Trim */}
           <Pressable
             onPress={handleTrim}

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { documentDirectory, cacheDirectory, getInfoAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
+import { documentDirectory, cacheDirectory, getInfoAsync, deleteAsync, downloadAsync, makeDirectoryAsync, copyAsync } from "@/lib/fileSystemCompat";
 import { showAlert } from "@/lib/showAlert";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { concatMP4Files } from "@/src/integrations/concatMP4";
@@ -549,6 +549,71 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       console.error("[drafts] persist error", e);
     }
   }, []);
+
+  /** Append one or more clips to an existing draft project.
+   *  Copies each new clip's file to the draft's permanent directory,
+   *  then saves the updated project. Returns the updated draft. */
+  const appendClipToDraft = useCallback(
+    async (draftId: string, newClips: DraftClip[]): Promise<DraftProject | null> => {
+      const existing = draftProjects.find((d) => d.id === draftId);
+      if (!existing) {
+        console.warn("[drafts] appendClipToDraft — draft not found:", draftId);
+        return null;
+      }
+
+      const draftDir = `${documentDirectory}drafts/${draftId}/`;
+      await makeDirectoryAsync(draftDir, { intermediates: true });
+
+      // Copy each new clip file to the draft's permanent directory
+      const permanentClips = await Promise.all(
+        newClips.map(async (c, i) => {
+          const srcInfo = await getInfoAsync(c.uri);
+          if (!srcInfo.exists || (srcInfo.size ?? 0) === 0) {
+            console.warn(
+              `[drafts] appendClipToDraft: new clip[${i}] missing or empty — skipping copy`,
+            );
+            return c;
+          }
+          const ext = c.uri.match(/\.(\w+)(?:\?|$)/)?.[1] ?? (c.type === "video" ? "mp4" : "jpg");
+          const destUri = `${draftDir}${c.id}.${ext}`;
+          if (c.uri !== destUri) {
+            try {
+              await copyAsync({ from: c.uri, to: destUri });
+              const destInfo = await getInfoAsync(destUri);
+              if (!destInfo.exists || (destInfo.size ?? 0) === 0) {
+                console.warn(
+                  `[drafts] appendClipToDraft: copy failed for clip[${i}] — keeping original URI`,
+                );
+                return c;
+              }
+            } catch {
+              console.warn(
+                `[drafts] appendClipToDraft: copy threw for clip[${i}] — keeping original URI`,
+              );
+              return c;
+            }
+          }
+          return { ...c, uri: destUri };
+        }),
+      );
+
+      const updated: DraftProject = {
+        ...existing,
+        clips: [...existing.clips, ...permanentClips],
+        updatedAt: Date.now(),
+      };
+
+      await persistDraftProjects(
+        [updated, ...draftProjects.filter((d) => d.id !== draftId)],
+      );
+
+      console.log(
+        `[drafts] appendClipToDraft: appended ${permanentClips.length} clip(s) to draft ${draftId} (total: ${updated.clips.length})`,
+      );
+      return updated;
+    },
+    [draftProjects, persistDraftProjects],
+  );
 
   /** Save a full draft project — creates new or overwrites existing by id. */
   const saveDraftProject = useCallback(
@@ -2169,6 +2234,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       draftProjects,
       draftsLoaded,
       saveDraftProject,
+      appendClipToDraft,
       deleteDraftProject,
       createPost,
       likedPosts: likedPostsQuery.data ?? [],
@@ -2210,6 +2276,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       draftProjects,
       draftsLoaded,
       saveDraftProject,
+      appendClipToDraft,
       deleteDraftProject,
       createPost,
       likedPostsQuery,

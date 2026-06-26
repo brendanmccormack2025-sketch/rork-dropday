@@ -248,6 +248,11 @@ function ProfileHeader({
 
       {/* Stats row */}
       <View style={styles.statsRow}>
+        <View style={styles.stat}>
+          <Text style={styles.statNum}>{drops.length}</Text>
+          <Text style={styles.statLabel}>Drops</Text>
+        </View>
+        <View style={styles.statDivider} />
         <Pressable style={styles.stat} onPress={onFollowersTap}>
           <Text style={styles.statNum}>{followersCount}</Text>
           <Text style={styles.statLabel}>Followers</Text>
@@ -257,25 +262,6 @@ function ProfileHeader({
           <Text style={styles.statNum}>{followingCount}</Text>
           <Text style={styles.statLabel}>Following</Text>
         </Pressable>
-        <View style={styles.statDivider} />
-        <View style={styles.stat}>
-          <Text style={styles.statNum}>{drops.length}</Text>
-          <Text style={styles.statLabel}>Drops</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.stat}>
-          <Text style={styles.statNum}>{reactions.length}</Text>
-          <Text style={styles.statLabel}>Reactions</Text>
-        </View>
-        {isOwnProfile && (
-          <>
-            <View style={styles.statDivider} />
-            <View style={styles.stat}>
-              <Text style={styles.statNum}>{draftProjects.length}</Text>
-              <Text style={styles.statLabel}>Drafts</Text>
-            </View>
-          </>
-        )}
       </View>
 
       {/* Tab switcher */}
