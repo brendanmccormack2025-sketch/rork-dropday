@@ -4,10 +4,10 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
@@ -61,8 +61,8 @@ export default function SignInScreen() {
 
           <View style={styles.header}>
             <DropletLogo size={48} />
-            <Text style={styles.title}>Welcome back</Text>
-            <Text style={styles.sub}>Sign in to join the drop.</Text>
+            <UiText style={styles.title}>Welcome back</UiText>
+            <UiText style={styles.sub}>Sign in to join the drop.</UiText>
           </View>
 
           <View style={styles.form}>
@@ -83,7 +83,7 @@ export default function SignInScreen() {
               secureTextEntry
               autoComplete="password"
             />
-            {error ? <Text style={styles.error}>{error}</Text> : null}
+            {error ? <UiText style={styles.error}>{error}</UiText> : null}
 
             <PrimaryButton
               label="Sign in"
@@ -94,10 +94,10 @@ export default function SignInScreen() {
               onPress={() => router.replace("/(auth)/sign-up")}
               style={styles.switch}
             >
-              <Text style={styles.switchText}>
+              <UiText style={styles.switchText}>
                 New here?{" "}
-                <Text style={styles.switchAccent}>Create an account</Text>
-              </Text>
+                <UiText style={styles.switchAccent}>Create an account</UiText>
+              </UiText>
             </Pressable>
           </View>
         </KeyboardAvoidingView>
@@ -112,7 +112,7 @@ function Field(
   const { label, style, ...rest } = props;
   return (
     <View style={styles.fieldWrap}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <UiText style={styles.fieldLabel}>{label}</UiText>
       <TextInput
         {...rest}
         placeholderTextColor={theme.textDim}

@@ -6,11 +6,11 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   TextInput,
   View,
   Dimensions,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Image } from "expo-image";
@@ -160,15 +160,15 @@ function DropCard({
         )}
       </View>
       <View style={styles.dropCardInfo}>
-        <Text style={styles.dropCardUser} numberOfLines={1}>
+        <UiText style={styles.dropCardUser} numberOfLines={1}>
           @{posterName}
-        </Text>
+        </UiText>
         {post.caption ? (
-          <Text style={styles.dropCardCaption} numberOfLines={2}>
+          <UiText style={styles.dropCardCaption} numberOfLines={2}>
             {post.caption}
-          </Text>
+          </UiText>
         ) : null}
-        <Text style={styles.dropCardLabel}>Shared Drop</Text>
+        <UiText style={styles.dropCardLabel}>Shared Drop</UiText>
       </View>
     </Pressable>
   );
@@ -250,9 +250,9 @@ export default function ChatThreadScreen() {
                     contentFit="cover"
                   />
                 ) : (
-                  <Text style={styles.msgAvatarSmText}>
+                  <UiText style={styles.msgAvatarSmText}>
                     {(item.senderProfile?.display_name ?? item.senderProfile?.username ?? "?").charAt(0).toUpperCase()}
-                  </Text>
+                  </UiText>
                 )}
               </View>
             )}
@@ -278,9 +278,9 @@ export default function ChatThreadScreen() {
                   contentFit="cover"
                 />
               ) : (
-                <Text style={styles.msgAvatarSmText}>
+                <UiText style={styles.msgAvatarSmText}>
                   {(item.senderProfile?.display_name ?? item.senderProfile?.username ?? "?").charAt(0).toUpperCase()}
-                </Text>
+                </UiText>
               )}
             </View>
           )}
@@ -290,14 +290,14 @@ export default function ChatThreadScreen() {
               isMine ? styles.bubbleMine : styles.bubbleTheirs,
             ]}
           >
-            <Text
+            <UiText
               style={[
                 styles.bubbleText,
                 isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs,
               ]}
             >
               {item.text ?? ""}
-            </Text>
+            </UiText>
           </View>
         </View>
       );
@@ -313,11 +313,11 @@ export default function ChatThreadScreen() {
             <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
               <ArrowLeft color={theme.text} size={22} strokeWidth={2.5} />
             </Pressable>
-            <Text style={styles.headerTitle}>Chat</Text>
+            <UiText style={styles.headerTitle}>Chat</UiText>
             <View style={styles.backBtn} />
           </View>
           <View style={styles.emptyWrap}>
-            <Text style={styles.emptySub}>Conversation not found.</Text>
+            <UiText style={styles.emptySub}>Conversation not found.</UiText>
           </View>
         </SafeAreaView>
       </View>
@@ -351,14 +351,14 @@ export default function ChatThreadScreen() {
                   transition={80}
                 />
               ) : (
-                <Text style={styles.headerAvatarText}>
+                <UiText style={styles.headerAvatarText}>
                   {otherName.charAt(0).toUpperCase()}
-                </Text>
+                </UiText>
               )}
             </View>
-            <Text style={styles.headerName} numberOfLines={1}>
+            <UiText style={styles.headerName} numberOfLines={1}>
               {otherName}
-            </Text>
+            </UiText>
           </Pressable>
           <View style={styles.backBtn} />
         </View>
@@ -388,9 +388,9 @@ export default function ChatThreadScreen() {
               }}
               ListEmptyComponent={
                 <View style={styles.emptyWrap}>
-                  <Text style={styles.emptySub}>
+                  <UiText style={styles.emptySub}>
                     No messages yet. Say hello!
-                  </Text>
+                  </UiText>
                 </View>
               }
             />
@@ -572,7 +572,7 @@ const styles = StyleSheet.create({
   dropCardMedia: {
     width: DM_CARD_W,
     height: DM_CARD_W * 0.7,
-    backgroundColor: "#000",
+    backgroundColor: "#0A0A14",
   },
   playOverlay: {
     ...StyleSheet.absoluteFillObject,

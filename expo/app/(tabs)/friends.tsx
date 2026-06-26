@@ -6,9 +6,9 @@ import {
   RefreshControl,
   Share,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Send, Users, UserPlus, UserCheck, MessageCircle } from "lucide-react-native";
@@ -108,10 +108,10 @@ export default function FriendsScreen() {
           ListHeaderComponent={
             <View style={styles.header}>
               {/* Title */}
-              <Text style={styles.screenTitle}>Friends</Text>
-              <Text style={styles.screenSub}>
+              <UiText style={styles.screenTitle}>Friends</UiText>
+              <UiText style={styles.screenSub}>
                 Grow your circle. More friends = better feed.
-              </Text>
+              </UiText>
 
               {/* DM inbox quick access */}
               <Pressable
@@ -126,19 +126,19 @@ export default function FriendsScreen() {
                     <MessageCircle color={theme.accent} size={20} strokeWidth={2} />
                     {unreadCount > 0 && (
                       <View style={styles.dmBadge}>
-                        <Text style={styles.dmBadgeText}>
+                        <UiText style={styles.dmBadgeText}>
                           {unreadCount > 99 ? "99+" : unreadCount}
-                        </Text>
+                        </UiText>
                       </View>
                     )}
                   </View>
                   <View style={styles.dmTextWrap}>
-                    <Text style={styles.dmTitle}>Messages</Text>
-                    <Text style={styles.dmSub}>
+                    <UiText style={styles.dmTitle}>Messages</UiText>
+                    <UiText style={styles.dmSub}>
                       {unreadCount > 0
                         ? `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`
                         : "No new messages"}
-                    </Text>
+                    </UiText>
                   </View>
                 </View>
                 <MessageCircle color={theme.textMuted} size={16} strokeWidth={2} />
@@ -150,10 +150,10 @@ export default function FriendsScreen() {
                   <Send color={theme.accent} size={22} strokeWidth={2} />
                 </View>
                 <View style={styles.inviteTextWrap}>
-                  <Text style={styles.inviteTitle}>Invite Friends</Text>
-                  <Text style={styles.inviteSub}>
+                  <UiText style={styles.inviteTitle}>Invite Friends</UiText>
+                  <UiText style={styles.inviteSub}>
                     Send your friends a link to join DropDay.
-                  </Text>
+                  </UiText>
                 </View>
                 <Pressable
                   onPress={handleInvite}
@@ -163,7 +163,7 @@ export default function FriendsScreen() {
                   ]}
                 >
                   <Send color="#fff" size={16} strokeWidth={2.5} />
-                  <Text style={styles.inviteBtnText}>Send Invite Link</Text>
+                  <UiText style={styles.inviteBtnText}>Send Invite Link</UiText>
                 </Pressable>
               </View>
 
@@ -172,7 +172,7 @@ export default function FriendsScreen() {
                 <View style={styles.sectionBadge}>
                   <Users color={theme.accent} size={13} strokeWidth={2} />
                 </View>
-                <Text style={styles.sectionLabel}>Suggested People</Text>
+                <UiText style={styles.sectionLabel}>Suggested People</UiText>
               </View>
 
               {/* Loading */}
@@ -186,9 +186,9 @@ export default function FriendsScreen() {
               {!suggestedLoading && suggestedUsers.length === 0 && (
                 <View style={styles.empty}>
                   <Users color={theme.textDim} size={28} strokeWidth={1.5} />
-                  <Text style={styles.emptyText}>
+                  <UiText style={styles.emptyText}>
                     No suggestions right now. Invite friends to grow your circle.
-                  </Text>
+                  </UiText>
                 </View>
               )}
             </View>
@@ -208,12 +208,12 @@ export default function FriendsScreen() {
                   />
                 </View>
                 <View style={styles.userInfo}>
-                  <Text style={styles.userName} numberOfLines={1}>
+                  <UiText style={styles.userName} numberOfLines={1}>
                     {displayName}
-                  </Text>
-                  <Text style={styles.userHandle} numberOfLines={1}>
+                  </UiText>
+                  <UiText style={styles.userHandle} numberOfLines={1}>
                     @{item.username}
-                  </Text>
+                  </UiText>
                 </View>
                 <Pressable
                   onPress={() => handleToggleFollow(item.id, isFollowing)}
@@ -230,12 +230,12 @@ export default function FriendsScreen() {
                   ) : isFollowing ? (
                     <>
                       <UserCheck color={theme.textMuted} size={14} strokeWidth={2.5} />
-                      <Text style={styles.followBtnTextActive}>Following</Text>
+                      <UiText style={styles.followBtnTextActive}>Following</UiText>
                     </>
                   ) : (
                     <>
                       <UserPlus color="#fff" size={14} strokeWidth={2.5} />
-                      <Text style={styles.followBtnText}>Follow</Text>
+                      <UiText style={styles.followBtnText}>Follow</UiText>
                     </>
                   )}
                 </Pressable>

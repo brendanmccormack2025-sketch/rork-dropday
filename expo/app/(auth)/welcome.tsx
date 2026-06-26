@@ -4,9 +4,9 @@ import {
   Easing,
   Platform,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as AppleAuthentication from "expo-apple-authentication";
@@ -106,8 +106,8 @@ export default function WelcomeScreen() {
           <Animated.View style={{ transform: [{ translateY }] }}>
             <DropletLogo size={120} />
           </Animated.View>
-          <Text style={styles.brand}>DropDay</Text>
-          <Text style={styles.tagline}>The night belongs to the moment.</Text>
+          <UiText style={styles.brand}>DropDay</UiText>
+          <UiText style={styles.tagline}>The night belongs to the moment.</UiText>
         </View>
 
         {/* Actions */}
@@ -115,7 +115,7 @@ export default function WelcomeScreen() {
           {/* Drop window badge */}
           <View style={styles.windowBadge}>
             <View style={styles.dot} />
-            <Text style={styles.windowText}>8 PM – 12 AM nightly</Text>
+            <UiText style={styles.windowText}>8 PM – 12 AM nightly</UiText>
           </View>
 
           <PrimaryButton
@@ -150,15 +150,15 @@ export default function WelcomeScreen() {
             variant="outline"
             icon={
               <View style={styles.gIcon}>
-                <Text style={styles.gIconText}>G</Text>
+                <UiText style={styles.gIconText}>G</UiText>
               </View>
             }
             onPress={handleGoogle}
           />
 
-          <Text style={styles.legal}>
+          <UiText style={styles.legal}>
             By continuing you agree to be part of the nightly drop.
-          </Text>
+          </UiText>
         </View>
       </SafeAreaView>
     </ScreenBackground>

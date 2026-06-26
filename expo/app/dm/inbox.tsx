@@ -5,9 +5,9 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
@@ -75,26 +75,26 @@ export default function InboxScreen() {
                 cachePolicy="memory"
               />
             ) : (
-              <Text style={styles.avatarText}>
+              <UiText style={styles.avatarText}>
                 {name.charAt(0).toUpperCase()}
-              </Text>
+              </UiText>
             )}
           </View>
           <View style={styles.convoInfo}>
             <View style={styles.convoTop}>
-              <Text style={styles.convoName} numberOfLines={1}>
+              <UiText style={styles.convoName} numberOfLines={1}>
                 {name}
-              </Text>
-              <Text style={styles.convoTime}>
+              </UiText>
+              <UiText style={styles.convoTime}>
                 {item.lastMessage?.created_at
                   ? timeAgoStr(item.lastMessage.created_at)
                   : ""}
-              </Text>
+              </UiText>
             </View>
-            <Text style={styles.convoPreview} numberOfLines={1}>
+            <UiText style={styles.convoPreview} numberOfLines={1}>
               {isMyMsg ? "You: " : ""}
               {preview || "No messages yet"}
-            </Text>
+            </UiText>
           </View>
         </Pressable>
       );
@@ -114,7 +114,7 @@ export default function InboxScreen() {
           >
             <ArrowLeft color={theme.text} size={22} strokeWidth={2.5} />
           </Pressable>
-          <Text style={styles.headerTitle}>Messages</Text>
+          <UiText style={styles.headerTitle}>Messages</UiText>
           <View style={styles.backBtn} />
         </View>
 
@@ -137,10 +137,10 @@ export default function InboxScreen() {
                   size={40}
                   strokeWidth={1.5}
                 />
-                <Text style={styles.emptyTitle}>No messages yet</Text>
-                <Text style={styles.emptySub}>
+                <UiText style={styles.emptyTitle}>No messages yet</UiText>
+                <UiText style={styles.emptySub}>
                   Share a Drop with a friend to start a conversation.
-                </Text>
+                </UiText>
               </View>
             )
           }

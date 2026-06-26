@@ -11,10 +11,10 @@ import {
   PanResponder,
   StyleSheet,
   Pressable,
-  Text,
   Image,
   Animated,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { getThumbnailAsync, type VideoThumbnailsResult } from "expo-video-thumbnails";
 import * as Haptics from "expo-haptics";
 import type { DraftClip } from "@/providers/PostsProvider";
@@ -906,9 +906,9 @@ export default function TimelineEditor({
             <View style={styles.clipPlaceholder} />
           )}
           <View pointerEvents="none" style={styles.clipLabelWrap}>
-            <Text style={styles.clipLabel} numberOfLines={1}>
+            <UiText style={styles.clipLabel} numberOfLines={1}>
               {msToLabel(draggedLayout.durationMs)}
-            </Text>
+            </UiText>
           </View>
         </View>
       )}
@@ -981,9 +981,9 @@ export default function TimelineEditor({
 
                   {/* Duration label */}
                   <View pointerEvents="none" style={styles.clipLabelWrap}>
-                    <Text style={styles.clipLabel} numberOfLines={1}>
+                    <UiText style={styles.clipLabel} numberOfLines={1}>
                       {msToLabel(layout.durationMs)}
-                    </Text>
+                    </UiText>
                   </View>
 
                   {/* Active indicator dot */}

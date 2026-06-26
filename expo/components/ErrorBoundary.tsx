@@ -1,5 +1,6 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import UiText from "@/components/UiText";
 import { StatusBar } from "expo-status-bar";
 import { AlertTriangle, RefreshCw } from "lucide-react-native";
 import { theme } from "@/constants/theme";
@@ -45,15 +46,15 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <View style={styles.iconWrap}>
               <AlertTriangle color={theme.danger} size={36} strokeWidth={1.5} />
             </View>
-            <Text style={styles.title}>Something went wrong</Text>
-            <Text style={styles.subtitle}>
+            <UiText style={styles.title}>Something went wrong</UiText>
+            <UiText style={styles.subtitle}>
               The app encountered an unexpected error. This is likely temporary — tap below to
               recover.
-            </Text>
+            </UiText>
             {this.state.error && (
-              <Text style={styles.errorDetail} numberOfLines={3}>
+              <UiText style={styles.errorDetail} numberOfLines={3}>
                 {this.state.error.message}
-              </Text>
+              </UiText>
             )}
             <Pressable
               onPress={this.handleReset}
@@ -61,7 +62,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
               accessibilityLabel="Restart app"
             >
               <RefreshCw color="#fff" size={16} strokeWidth={2.5} />
-              <Text style={styles.resetBtnText}>Try Again</Text>
+              <UiText style={styles.resetBtnText}>Try Again</UiText>
             </Pressable>
           </View>
         </View>

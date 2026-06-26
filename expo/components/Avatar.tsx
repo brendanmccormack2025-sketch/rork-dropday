@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import UiText from "@/components/UiText";
 import { Image } from "expo-image";
 
 import { resolveAvatarUrl } from "@/providers/PostsProvider";
@@ -32,7 +33,7 @@ export function FeedAvatar({
           cachePolicy="memory"
         />
       ) : (
-        <Text style={styles.avatarText}>{name.charAt(0).toUpperCase()}</Text>
+        <UiText style={styles.avatarText}>{name.charAt(0).toUpperCase()}</UiText>
       )}
     </View>
   );
@@ -65,9 +66,9 @@ export function ProfileAvatar({
           cachePolicy="memory"
         />
       ) : (
-        <Text style={styles.profileAvatarText}>
+        <UiText style={styles.profileAvatarText}>
           {name.charAt(0).toUpperCase()}
-        </Text>
+        </UiText>
       )}
     </View>
   );

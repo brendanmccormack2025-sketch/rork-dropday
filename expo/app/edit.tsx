@@ -11,11 +11,11 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
   Dimensions,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
@@ -1650,9 +1650,9 @@ export default function EditScreen() {
       <View style={[styles.screen, styles.centered]}>
         <StatusBar style="light" />
         <ActivityIndicator color={theme.accent} size="large" />
-        <Text style={[styles.emptyText, { marginTop: 16 }]}>
+        <UiText style={[styles.emptyText, { marginTop: 16 }]}>
           Loading draft…
-        </Text>
+        </UiText>
       </View>
     );
   }
@@ -1662,9 +1662,9 @@ export default function EditScreen() {
     return (
       <View style={[styles.screen, styles.centered]}>
         <StatusBar style="light" />
-        <Text style={styles.emptyText}>Nothing to preview</Text>
+        <UiText style={styles.emptyText}>Nothing to preview</UiText>
         <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.emptyBtn}>
-          <Text style={styles.emptyBtnText}>Go back</Text>
+          <UiText style={styles.emptyBtnText}>Go back</UiText>
         </Pressable>
       </View>
     );
@@ -1690,9 +1690,9 @@ export default function EditScreen() {
           >
             <ArrowLeft size={20} color="#fff" strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.topTitle}>
+          <UiText style={styles.topTitle}>
             {draftId ? "Edit Draft" : "Edit Drop"}
-          </Text>
+          </UiText>
           <View style={styles.topBtnRow}>
             <TouchableOpacity
               onPress={handleUndo}
@@ -1764,12 +1764,12 @@ export default function EditScreen() {
                 />
                 {videoLoadError && (
                   <View style={styles.videoErrorOverlay}>
-                    <Text style={styles.videoErrorText}>{videoLoadError}</Text>
+                    <UiText style={styles.videoErrorText}>{videoLoadError}</UiText>
                     <Pressable
                       onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
                       style={styles.videoErrorBackBtn}
                     >
-                      <Text style={styles.videoErrorBackBtnText}>Go Back</Text>
+                      <UiText style={styles.videoErrorBackBtnText}>Go Back</UiText>
                     </Pressable>
                   </View>
                 )}
@@ -1789,9 +1789,9 @@ export default function EditScreen() {
                   justifyContent: "center",
                 }}
               >
-                <Text style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>
+                <UiText style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>
                   No preview
-                </Text>
+                </UiText>
               </View>
             )}
 
@@ -1858,14 +1858,14 @@ export default function EditScreen() {
               size={18}
               color={selectedClipId ? theme.accent : "rgba(255,255,255,0.85)"}
             />
-            <Text
+            <UiText
               style={[
                 styles.toolLabel,
                 selectedClipId && { color: theme.accent },
               ]}
             >
               Trim
-            </Text>
+            </UiText>
           </Pressable>
 
           {/* Split */}
@@ -1880,14 +1880,14 @@ export default function EditScreen() {
                 !canSplit ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.85)"
               }
             />
-            <Text
+            <UiText
               style={[
                 styles.toolLabel,
                 !canSplit && styles.toolLabelOff,
               ]}
             >
               Split
-            </Text>
+            </UiText>
           </Pressable>
 
           {/* Text */}
@@ -1906,7 +1906,7 @@ export default function EditScreen() {
                   : "rgba(255,255,255,0.85)"
               }
             />
-            <Text
+            <UiText
               style={[
                 styles.toolLabel,
                 (selectedOverlayId || textEditorVisible) && {
@@ -1915,7 +1915,7 @@ export default function EditScreen() {
               ]}
             >
               Text
-            </Text>
+            </UiText>
           </Pressable>
 
           {/* Delete */}
@@ -1932,14 +1932,14 @@ export default function EditScreen() {
                   : "rgba(255,255,255,0.85)"
               }
             />
-            <Text
+            <UiText
               style={[
                 styles.toolLabel,
                 !selectedClipId && styles.toolLabelOff,
               ]}
             >
               Delete
-            </Text>
+            </UiText>
           </Pressable>
         </View>
 
@@ -1952,7 +1952,7 @@ export default function EditScreen() {
                 style={styles.textActionBtn}
               >
                 <RectangleEllipsis size={14} color="rgba(255,255,255,0.8)" />
-                <Text style={styles.textActionLabel}>Style</Text>
+                <UiText style={styles.textActionLabel}>Style</UiText>
               </Pressable>
               <Pressable
                 onPress={() => {
@@ -1965,28 +1965,28 @@ export default function EditScreen() {
                 style={styles.textActionBtn}
               >
                 <Pencil size={14} color="rgba(255,255,255,0.8)" />
-                <Text style={styles.textActionLabel}>Edit</Text>
+                <UiText style={styles.textActionLabel}>Edit</UiText>
               </Pressable>
               <Pressable
                 onPress={handleDuplicateOverlay}
                 style={styles.textActionBtn}
               >
                 <Type size={14} color="rgba(255,255,255,0.8)" />
-                <Text style={styles.textActionLabel}>Duplicate</Text>
+                <UiText style={styles.textActionLabel}>Duplicate</UiText>
               </Pressable>
               <Pressable
                 onPress={() => handleDeleteOverlay()}
                 style={[styles.textActionBtn, styles.textActionBtnDanger]}
               >
                 <Trash2 size={14} color="#FF453A" />
-                <Text
+                <UiText
                   style={[
                     styles.textActionLabel,
                     styles.textActionLabelDanger,
                   ]}
                 >
                   Delete
-                </Text>
+                </UiText>
               </Pressable>
             </View>
           </View>
@@ -2001,12 +2001,12 @@ export default function EditScreen() {
         >
           {error && (
             <View style={styles.bannerError}>
-              <Text style={styles.bannerErrorText}>{error}</Text>
+              <UiText style={styles.bannerErrorText}>{error}</UiText>
             </View>
           )}
           {success && (
             <View style={styles.bannerSuccess}>
-              <Text style={styles.bannerSuccessText}>{success}</Text>
+              <UiText style={styles.bannerSuccessText}>{success}</UiText>
             </View>
           )}
           <View style={styles.actionRow}>
@@ -2019,7 +2019,7 @@ export default function EditScreen() {
                 pressed && { opacity: 0.7 },
               ]}
             >
-              <Text style={styles.draftBtnText}>Save Draft</Text>
+              <UiText style={styles.draftBtnText}>Save Draft</UiText>
             </Pressable>
             <Pressable
               onPress={handlePostPress}
@@ -2033,10 +2033,10 @@ export default function EditScreen() {
               {uploading ? (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <ActivityIndicator size="small" color="#fff" />
-                  <Text style={styles.postBtnText}>Preparing...</Text>
+                  <UiText style={styles.postBtnText}>Preparing...</UiText>
                 </View>
               ) : (
-                <Text style={styles.postBtnText}>Post Drop</Text>
+                <UiText style={styles.postBtnText}>Post Drop</UiText>
               )}
             </Pressable>
           </View>
@@ -2059,14 +2059,14 @@ export default function EditScreen() {
                   : "rgba(255,255,255,0.4)"
               }
             />
-            <Text
+            <UiText
               style={[
                 styles.trashLabel,
                 dragOverlayInfo.centerY > 0.88 && styles.trashLabelActive,
               ]}
             >
               Drop to delete
-            </Text>
+            </UiText>
           </View>
         )}
       </View>

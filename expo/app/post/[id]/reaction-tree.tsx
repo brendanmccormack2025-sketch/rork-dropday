@@ -7,10 +7,10 @@ import {
   FlatList,
   Pressable,
   StyleSheet,
-  Text,
   View,
   ViewToken,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Video, ResizeMode, Audio, type AVPlaybackStatus } from "expo-av";
@@ -264,29 +264,29 @@ export default function ReactionTreeScreen() {
           </Pressable>
           <View style={styles.headerCenter}>
             <Sparkles color={theme.accent} size={16} />
-            <Text style={styles.headerTitle}>Reactions</Text>
+            <UiText style={styles.headerTitle}>Reactions</UiText>
           </View>
           <View style={styles.headerBtn} />
         </View>
         {postCount > 0 && (
-          <Text style={styles.headerCount}>
+          <UiText style={styles.headerCount}>
             {postCount} reaction{postCount !== 1 ? "s" : ""}
-          </Text>
+          </UiText>
         )}
       </SafeAreaView>
 
       {/* Body */}
       {isLoading ? (
         <View style={styles.center}>
-          <Text style={styles.emptySub}>Loading…</Text>
+          <UiText style={styles.emptySub}>Loading…</UiText>
         </View>
       ) : feedItems.length === 0 ? (
         <View style={styles.center}>
           <Sparkles color={theme.textDim} size={48} strokeWidth={1.5} />
-          <Text style={styles.emptyTitle}>No reactions yet</Text>
-          <Text style={styles.emptySub}>
+          <UiText style={styles.emptyTitle}>No reactions yet</UiText>
+          <UiText style={styles.emptySub}>
             Be the first to react to this drop.
-          </Text>
+          </UiText>
           <Pressable
             onPress={() => {
               router.push(`/camera?reactingTo=${id}` as never);
@@ -297,7 +297,7 @@ export default function ReactionTreeScreen() {
             ]}
           >
             <Reply color="#fff" size={18} strokeWidth={2.5} />
-            <Text style={styles.emptyReactBtnText}>Create a reaction</Text>
+            <UiText style={styles.emptyReactBtnText}>Create a reaction</UiText>
           </Pressable>
         </View>
       ) : (
@@ -343,7 +343,7 @@ export default function ReactionTreeScreen() {
             disabled={!id}
           >
             <Reply color="#fff" size={18} strokeWidth={2.5} />
-            <Text style={styles.reactBtnText}>Record Reaction</Text>
+            <UiText style={styles.reactBtnText}>Record Reaction</UiText>
           </Pressable>
         </SafeAreaView>
       )}
@@ -610,12 +610,12 @@ function ReactionItem({
               {stallState.recovering ? (
                 <>
                   <ActivityIndicator color="#fff" size="large" />
-                  <Text style={styles.stallText}>Recovering playback…</Text>
+                  <UiText style={styles.stallText}>Recovering playback…</UiText>
                 </>
               ) : videoError ? (
                 <Pressable onPress={handleRetryVideo} style={styles.retryBtn}>
                   <RotateCcw color="#fff" size={20} strokeWidth={2.5} />
-                  <Text style={styles.retryText}>Tap to retry</Text>
+                  <UiText style={styles.retryText}>Tap to retry</UiText>
                 </Pressable>
               ) : null}
             </View>
@@ -633,7 +633,7 @@ function ReactionItem({
       {!hasValidMediaUrl && (
         <View style={styles.mediaFallback}>
           <Sparkles color={theme.textDim} size={32} strokeWidth={1.5} />
-          <Text style={styles.mediaFallbackText}>Media unavailable</Text>
+          <UiText style={styles.mediaFallbackText}>Media unavailable</UiText>
         </View>
       )}
 
@@ -653,7 +653,7 @@ function ReactionItem({
       {isReply && (
         <View style={styles.replyBadge} pointerEvents="none">
           <ShieldCheck color={theme.accent} size={14} strokeWidth={2.5} />
-          <Text style={styles.replyBadgeText}>Creator reply</Text>
+          <UiText style={styles.replyBadgeText}>Creator reply</UiText>
         </View>
       )}
 
@@ -670,9 +670,9 @@ function ReactionItem({
             size={28}
             strokeWidth={2}
           />
-          <Text style={styles.actionLabel}>
+          <UiText style={styles.actionLabel}>
             {String((post.like_count ?? 0) + (liked ? 1 : 0))}
-          </Text>
+          </UiText>
         </Pressable>
 
         {/* ── Permission gating: Reply button on tier 1 reactions ────────
@@ -685,21 +685,21 @@ function ReactionItem({
             hitSlop={8}
           >
             <Reply color="#fff" size={26} strokeWidth={2} />
-            <Text style={styles.actionLabel}>Reply</Text>
+            <UiText style={styles.actionLabel}>Reply</UiText>
           </Pressable>
         )}
 
         <View style={styles.actionBtn}>
           <Sparkles color="#fff" size={28} strokeWidth={2} />
-          <Text style={styles.actionLabel}>
+          <UiText style={styles.actionLabel}>
             {String(post.like_count ?? 0)}
-          </Text>
+          </UiText>
         </View>
 
         {isOwner && (
           <Pressable onPress={handleDeleteReaction} style={styles.actionBtn} hitSlop={8}>
             <Trash2 color="rgba(255,255,255,0.85)" size={24} strokeWidth={2} />
-            <Text style={styles.actionLabel}>Delete</Text>
+            <UiText style={styles.actionLabel}>Delete</UiText>
           </Pressable>
         )}
       </View>
@@ -710,15 +710,15 @@ function ReactionItem({
           <View style={styles.avatar}>
             <FeedAvatar profile={post.profile} name={name} />
           </View>
-          <Text style={styles.username}>
+          <UiText style={styles.username}>
             @{post.profile?.username ?? "dropper"}
-          </Text>
+          </UiText>
         </View>
 
         {post.caption ? (
-          <Text style={styles.caption} numberOfLines={2}>
+          <UiText style={styles.caption} numberOfLines={2}>
             {post.caption}
-          </Text>
+          </UiText>
         ) : null}
       </View>
     </View>
@@ -823,7 +823,7 @@ const styles = StyleSheet.create({
   item: {
     width: SCREEN_W,
     height: SCREEN_H,
-    backgroundColor: "#000",
+    backgroundColor: "#0A0A14",
   },
 
   /* Video — explicit wrapper + fill so the native player always gets

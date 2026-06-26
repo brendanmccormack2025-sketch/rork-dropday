@@ -7,9 +7,9 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -549,11 +549,11 @@ export default function CameraScreen() {
       <View style={[styles.fullscreen, styles.centered]}>
         <StatusBar style="light" />
         <CameraIcon color={theme.accent} size={48} />
-        <Text style={styles.permTitle}>Camera Access</Text>
-        <Text style={styles.permSub}>
+        <UiText style={styles.permTitle}>Camera Access</UiText>
+        <UiText style={styles.permSub}>
           DropDay needs your camera to capture content. You can prep anytime and
           post during The Drop.
-        </Text>
+        </UiText>
         <PrimaryButton
           label="Grant Permission"
           onPress={async () => {
@@ -565,7 +565,7 @@ export default function CameraScreen() {
           onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
           style={{ marginTop: 12, padding: 12 }}
         >
-          <Text style={styles.permCancel}>Not now</Text>
+          <UiText style={styles.permCancel}>Not now</UiText>
         </Pressable>
       </View>
     );
@@ -626,7 +626,7 @@ export default function CameraScreen() {
       {/* Camera mount error */}
       {cameraMountError && (
         <View style={[StyleSheet.absoluteFill, styles.cameraErrorBanner]} pointerEvents="none">
-          <Text style={styles.cameraErrorBannerText}>{cameraMountError}</Text>
+          <UiText style={styles.cameraErrorBannerText}>{cameraMountError}</UiText>
         </View>
       )}
 
@@ -690,14 +690,14 @@ export default function CameraScreen() {
           {win.isOpen ? (
             <>
               <View style={styles.liveDot} />
-              <Text style={styles.countdownPillTextLive}>LIVE</Text>
+              <UiText style={styles.countdownPillTextLive}>LIVE</UiText>
             </>
           ) : (
             <>
               <Clock color={theme.accent} size={11} />
-              <Text style={styles.countdownPillText}>
+              <UiText style={styles.countdownPillText}>
                 Drop opens in {shortCountdown(win.msUntilOpen)}
-              </Text>
+              </UiText>
             </>
           )}
         </View>
@@ -733,7 +733,7 @@ export default function CameraScreen() {
           style={[styles.hintWrap, { bottom: insets.bottom + 210 }]}
           pointerEvents="none"
         >
-          <Text style={styles.hintText}>Tap to capture  ·  Hold to record  ·  Double-tap to flip</Text>
+          <UiText style={styles.hintText}>Tap to capture  ·  Hold to record  ·  Double-tap to flip</UiText>
         </View>
       )}
 
@@ -750,7 +750,7 @@ export default function CameraScreen() {
               ]}
             />
           </View>
-          <Text style={styles.zoomBarLabel}>{zoomToLabel(zoom)}</Text>
+          <UiText style={styles.zoomBarLabel}>{zoomToLabel(zoom)}</UiText>
         </View>
       )}
 
@@ -761,7 +761,7 @@ export default function CameraScreen() {
           pointerEvents="none"
         >
           <View style={styles.recDot} />
-          <Text style={styles.recTimerText}>REC</Text>
+          <UiText style={styles.recTimerText}>REC</UiText>
         </View>
       )}
 
@@ -772,7 +772,7 @@ export default function CameraScreen() {
           pointerEvents="none"
         >
           <ActivityIndicator color={theme.accent} size="large" />
-          <Text style={styles.mergeText}>Processing video...</Text>
+          <UiText style={styles.mergeText}>Processing video...</UiText>
         </View>
       )}
 
@@ -787,7 +787,7 @@ export default function CameraScreen() {
             style={styles.nextBtn}
             accessibilityLabel="Proceed to editor"
           >
-            <Text style={styles.nextBtnText}>Next</Text>
+            <UiText style={styles.nextBtnText}>Next</UiText>
             <ArrowRight color="#fff" size={15} strokeWidth={2.5} />
           </Pressable>
         </View>
@@ -832,7 +832,7 @@ export default function CameraScreen() {
             >
               <ChevronUp color={theme.accent} size={22} strokeWidth={2.5} />
             </Animated.View>
-            <Text style={styles.lockHintText}>Slide up to lock</Text>
+            <UiText style={styles.lockHintText}>Slide up to lock</UiText>
           </Animated.View>
         )}
 
@@ -840,7 +840,7 @@ export default function CameraScreen() {
         {isRecording && isLocked && (
           <View style={styles.lockedPill} pointerEvents="none">
             <Lock color={theme.accent} size={11} />
-            <Text style={styles.lockedPillText}>LOCKED · TAP TO STOP</Text>
+            <UiText style={styles.lockedPillText}>LOCKED · TAP TO STOP</UiText>
           </View>
         )}
 
@@ -897,7 +897,7 @@ export default function CameraScreen() {
           </View>
         </Animated.View>
 
-        {error && <Text style={styles.cameraErrorText}>{error}</Text>}
+        {error && <UiText style={styles.cameraErrorText}>{error}</UiText>}
       </View>
       )}
     </GestureHandlerRootView>
@@ -905,7 +905,7 @@ export default function CameraScreen() {
 }
 
 const styles = StyleSheet.create({
-  fullscreen: { flex: 1, backgroundColor: "#000" },
+  fullscreen: { flex: 1, backgroundColor: "#0A0A14" },
 
   centered: {
     flex: 1,

@@ -7,10 +7,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -218,7 +218,7 @@ export default function EditProfileScreen() {
           >
             <X color={theme.textMuted} size={22} strokeWidth={2} />
           </Pressable>
-          <Text style={styles.topTitle}>Edit Profile</Text>
+          <UiText style={styles.topTitle}>Edit Profile</UiText>
           <Pressable
             onPress={handleSave}
             style={[
@@ -230,7 +230,7 @@ export default function EditProfileScreen() {
             disabled={!dirty || saving}
           >
             {saving ? (
-              <Text style={styles.saveBtnText}>…</Text>
+              <UiText style={styles.saveBtnText}>…</UiText>
             ) : (
               <Check
                 color={dirty ? theme.accent : theme.textDim}
@@ -261,18 +261,18 @@ export default function EditProfileScreen() {
                     transition={100}
                   />
                 ) : (
-                  <Text style={styles.avatarText}>{avatarInitial}</Text>
+                  <UiText style={styles.avatarText}>{avatarInitial}</UiText>
                 )}
                 <View style={styles.avatarOverlay}>
                   <Camera color="#fff" size={16} strokeWidth={2} />
                 </View>
               </View>
-              <Text style={styles.avatarHint}>Change photo</Text>
+              <UiText style={styles.avatarHint}>Change photo</UiText>
             </Pressable>
 
             {/* Display Name */}
             <View style={styles.field}>
-              <Text style={styles.label}>Display Name</Text>
+              <UiText style={styles.label}>Display Name</UiText>
               <TextInput
                 style={styles.input}
                 value={displayName}
@@ -287,9 +287,9 @@ export default function EditProfileScreen() {
 
             {/* Username */}
             <View style={styles.field}>
-              <Text style={styles.label}>Username</Text>
+              <UiText style={styles.label}>Username</UiText>
               <View style={styles.inputRow}>
-                <Text style={styles.atPrefix}>@</Text>
+                <UiText style={styles.atPrefix}>@</UiText>
                 <TextInput
                   style={[styles.input, styles.inputInline]}
                   value={username}
@@ -312,7 +312,7 @@ export default function EditProfileScreen() {
 
             {/* Bio */}
             <View style={styles.field}>
-              <Text style={styles.label}>Bio</Text>
+              <UiText style={styles.label}>Bio</UiText>
               <TextInput
                 style={[styles.input, styles.inputMultiline]}
                 value={bio}
@@ -325,16 +325,16 @@ export default function EditProfileScreen() {
                 textAlignVertical="top"
                 returnKeyType="next"
               />
-              <Text style={styles.charCount}>
+              <UiText style={styles.charCount}>
                 {bio.length}/{BIO_MAX_LENGTH}
-              </Text>
+              </UiText>
             </View>
 
             {/* Website */}
             <View style={styles.field}>
               <View style={styles.labelRow}>
                 <Globe color={theme.textMuted} size={14} strokeWidth={2} />
-                <Text style={styles.label}>Website / Link</Text>
+                <UiText style={styles.label}>Website / Link</UiText>
               </View>
               <TextInput
                 style={styles.input}
@@ -357,7 +357,7 @@ export default function EditProfileScreen() {
                   size={14}
                   strokeWidth={2}
                 />
-                <Text style={styles.label}>Instagram (optional)</Text>
+                <UiText style={styles.label}>Instagram (optional)</UiText>
               </View>
               <TextInput
                 style={styles.input}
@@ -382,7 +382,7 @@ export default function EditProfileScreen() {
             <View style={styles.field}>
               <View style={styles.labelRow}>
                 <Music2 color={theme.textMuted} size={14} strokeWidth={2} />
-                <Text style={styles.label}>TikTok (optional)</Text>
+                <UiText style={styles.label}>TikTok (optional)</UiText>
               </View>
               <TextInput
                 style={styles.input}

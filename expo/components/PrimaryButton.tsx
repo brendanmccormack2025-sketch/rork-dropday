@@ -3,10 +3,10 @@ import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
-  Text,
   View,
   type ViewStyle,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { Platform } from "react-native";
@@ -60,7 +60,7 @@ export default function PrimaryButton({
           ) : (
             <View style={styles.row}>
               {icon}
-              <Text style={styles.label}>{label}</Text>
+              <UiText style={styles.label}>{label}</UiText>
             </View>
           )}
         </LinearGradient>
@@ -85,7 +85,7 @@ export default function PrimaryButton({
         ) : (
           <>
             {icon}
-            <Text style={[styles.label, { color: theme.text }]}>{label}</Text>
+            <UiText style={[styles.label, { color: theme.text }]}>{label}</UiText>
           </>
         )}
       </View>

@@ -7,9 +7,9 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -19,7 +19,6 @@ import {
   Heart,
   Instagram,
   LogOut,
-  MessageCircle,
   Music2,
   Pencil,
   Sparkles,
@@ -38,7 +37,7 @@ const { width: SCREEN_W } = Dimensions.get("window");
 const GAP = 4;
 const COL_WIDTH = (SCREEN_W - 32 - GAP) / 2;
 
-type TabKey = "drops" | "reactions" | "likes" | "drafts";
+type TabKey = "drops" | "drafts";
 
 function TabBar({ tab, onTab, isOwnProfile }: { tab: TabKey; onTab: (t: TabKey) => void; isOwnProfile: boolean }) {
   return (
@@ -52,47 +51,11 @@ function TabBar({ tab, onTab, isOwnProfile }: { tab: TabKey; onTab: (t: TabKey) 
           size={14}
           strokeWidth={2}
         />
-        <Text
+        <UiText
           style={[styles.tabLabel, tab === "drops" && styles.tabLabelActive]}
         >
           Drops
-        </Text>
-      </Pressable>
-      <Pressable
-        onPress={() => onTab("reactions")}
-        style={[styles.tab, tab === "reactions" && styles.tabActive]}
-      >
-        <MessageCircle
-          color={tab === "reactions" ? theme.accent : theme.textDim}
-          size={14}
-          strokeWidth={2}
-        />
-        <Text
-          style={[
-            styles.tabLabel,
-            tab === "reactions" && styles.tabLabelActive,
-          ]}
-        >
-          Reactions
-        </Text>
-      </Pressable>
-      <Pressable
-        onPress={() => onTab("likes")}
-        style={[styles.tab, tab === "likes" && styles.tabActive]}
-      >
-        <Heart
-          color={tab === "likes" ? theme.accent : theme.textDim}
-          size={14}
-          strokeWidth={2}
-        />
-        <Text
-          style={[
-            styles.tabLabel,
-            tab === "likes" && styles.tabLabelActive,
-          ]}
-        >
-          Likes
-        </Text>
+        </UiText>
       </Pressable>
       {isOwnProfile && (
         <Pressable
@@ -104,14 +67,14 @@ function TabBar({ tab, onTab, isOwnProfile }: { tab: TabKey; onTab: (t: TabKey) 
             size={14}
             strokeWidth={2}
           />
-          <Text
+          <UiText
             style={[
               styles.tabLabel,
               tab === "drafts" && styles.tabLabelActive,
             ]}
           >
             Drafts
-          </Text>
+          </UiText>
         </Pressable>
       )}
     </View>
@@ -123,8 +86,6 @@ function ProfileHeader({
   username,
   myProfile,
   drops,
-  reactions,
-  draftProjects,
   tab,
   onTab,
   onEditProfile,
@@ -139,8 +100,6 @@ function ProfileHeader({
   username: string;
   myProfile: MyProfile | null;
   drops: Post[];
-  reactions: Post[];
-  draftProjects: DraftProject[];
   tab: TabKey;
   onTab: (t: TabKey) => void;
   onEditProfile: () => void;
@@ -168,10 +127,10 @@ function ProfileHeader({
           />
         </View>
         <View style={styles.profileInfo}>
-          <Text style={styles.displayName} numberOfLines={1}>
+          <UiText style={styles.displayName} numberOfLines={1}>
             {displayName}
-          </Text>
-          <Text style={styles.username}>@{username}</Text>
+          </UiText>
+          <UiText style={styles.username}>@{username}</UiText>
         </View>
         <Pressable onPress={onSignOut} style={styles.signOutBtn} hitSlop={8}>
           <LogOut color={theme.textDim} size={16} strokeWidth={2} />
@@ -184,12 +143,12 @@ function ProfileHeader({
         style={styles.editProfileBtn}
       >
         <Pencil color={theme.accent} size={16} strokeWidth={2} />
-        <Text style={styles.editProfileBtnText}>Edit Profile</Text>
+        <UiText style={styles.editProfileBtnText}>Edit Profile</UiText>
       </Pressable>
 
       {/* Bio */}
       {myProfile?.bio ? (
-        <Text style={styles.bio}>{myProfile.bio}</Text>
+        <UiText style={styles.bio}>{myProfile.bio}</UiText>
       ) : null}
 
       {/* Links row */}
@@ -206,11 +165,11 @@ function ProfileHeader({
               }}
             >
               <Globe color={theme.accent} size={12} strokeWidth={2} />
-              <Text style={styles.linkText} numberOfLines={1}>
+              <UiText style={styles.linkText} numberOfLines={1}>
                 {myProfile.website!
                   .replace(/^https?:\/\//, "")
                   .replace(/\/$/, "")}
-              </Text>
+              </UiText>
             </Pressable>
           ) : null}
           {myProfile?.instagram_handle ? (
@@ -223,9 +182,9 @@ function ProfileHeader({
               }}
             >
               <Instagram color="#E1306C" size={12} strokeWidth={2} />
-              <Text style={styles.linkText} numberOfLines={1}>
+              <UiText style={styles.linkText} numberOfLines={1}>
                 {myProfile.instagram_handle}
-              </Text>
+              </UiText>
             </Pressable>
           ) : null}
           {myProfile?.tiktok_handle ? (
@@ -238,9 +197,9 @@ function ProfileHeader({
               }}
             >
               <Music2 color={theme.text} size={12} strokeWidth={2} />
-              <Text style={styles.linkText} numberOfLines={1}>
+              <UiText style={styles.linkText} numberOfLines={1}>
                 {myProfile.tiktok_handle}
-              </Text>
+              </UiText>
             </Pressable>
           ) : null}
         </View>
@@ -249,18 +208,18 @@ function ProfileHeader({
       {/* Stats row */}
       <View style={styles.statsRow}>
         <View style={styles.stat}>
-          <Text style={styles.statNum}>{drops.length}</Text>
-          <Text style={styles.statLabel}>Drops</Text>
+          <UiText style={styles.statNum}>{drops.length}</UiText>
+          <UiText style={styles.statLabel}>Drops</UiText>
         </View>
         <View style={styles.statDivider} />
         <Pressable style={styles.stat} onPress={onFollowersTap}>
-          <Text style={styles.statNum}>{followersCount}</Text>
-          <Text style={styles.statLabel}>Followers</Text>
+          <UiText style={styles.statNum}>{followersCount}</UiText>
+          <UiText style={styles.statLabel}>Followers</UiText>
         </Pressable>
         <View style={styles.statDivider} />
         <Pressable style={styles.stat} onPress={onFollowingTap}>
-          <Text style={styles.statNum}>{followingCount}</Text>
-          <Text style={styles.statLabel}>Following</Text>
+          <UiText style={styles.statNum}>{followingCount}</UiText>
+          <UiText style={styles.statLabel}>Following</UiText>
         </Pressable>
       </View>
 
@@ -272,7 +231,7 @@ function ProfileHeader({
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
-  const { myPosts, myProfile, likedPosts, likedPostsLoading, draftProjects, refetchMyPosts, refetchProfile, refetchLikedPosts, following } = usePosts();
+  const { myPosts, myProfile, draftProjects, refetchMyPosts, refetchProfile, following } = usePosts();
   const qc = useQueryClient();
   const router = useRouter();
   const [tab, setTab] = useState<TabKey>("drops");
@@ -331,14 +290,8 @@ export default function ProfileScreen() {
     () => myPosts.filter((p) => !p.parent_post_id),
     [myPosts],
   );
-  const reactions = useMemo(
-    () => myPosts.filter((p) => !!p.parent_post_id),
-    [myPosts],
-  );
-
-  const activePosts =
-    tab === "drops" ? drops : tab === "reactions" ? reactions : tab === "likes" ? likedPosts : [];
-  const isGridTab = tab === "drafts" || tab === "likes";
+  const activePosts = tab === "drops" ? drops : [];
+  const isGridTab = tab === "drafts";
 
   const handleFollowersTap = useCallback(() => {
     if (!user?.id) return;
@@ -370,8 +323,6 @@ export default function ProfileScreen() {
       username={username}
       myProfile={myProfile}
       drops={drops}
-      reactions={reactions}
-      draftProjects={draftProjects}
       tab={tab}
       onTab={setTab}
       onEditProfile={() => router.push("/edit-profile")}
@@ -420,23 +371,14 @@ export default function ProfileScreen() {
             ListHeaderComponent={
               <>
                 {headerNode}
-                {tab === "likes" && likedPosts.length === 0 && (
-                  <View style={styles.empty}>
-                    <Heart color={theme.textDim} size={40} strokeWidth={1.5} />
-                    <Text style={styles.emptyTitle}>No likes yet</Text>
-                    <Text style={styles.emptySub}>
-                      Posts you like will appear here.
-                    </Text>
-                  </View>
-                )}
                 {tab === "drafts" && draftProjects.length === 0 && (
                   <View style={styles.empty}>
                     <Save color={theme.textDim} size={40} strokeWidth={1.5} />
-                    <Text style={styles.emptyTitle}>No drafts</Text>
-                    <Text style={styles.emptySub}>
+                    <UiText style={styles.emptyTitle}>No drafts</UiText>
+                    <UiText style={styles.emptySub}>
                       Saved drafts will appear here. Record something and tap
                       "Save draft" to keep it.
-                    </Text>
+                    </UiText>
                   </View>
                 )}
               </>
@@ -466,33 +408,15 @@ export default function ProfileScreen() {
                 {headerNode}
                 {activePosts.length === 0 && (
                   <View style={styles.empty}>
-                    {tab === "drops" ? (
-                      <>
-                        <Video
-                          color={theme.textDim}
-                          size={40}
-                          strokeWidth={1.5}
-                        />
-                        <Text style={styles.emptyTitle}>No drops yet</Text>
-                        <Text style={styles.emptySub}>
-                          Your drops from tonight will appear here.
-                        </Text>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles
-                          color={theme.textDim}
-                          size={40}
-                          strokeWidth={1.5}
-                        />
-                        <Text style={styles.emptyTitle}>
-                          No reactions yet
-                        </Text>
-                        <Text style={styles.emptySub}>
-                          When you react to someone's drop, it'll show here.
-                        </Text>
-                      </>
-                    )}
+                    <Video
+                      color={theme.textDim}
+                      size={40}
+                      strokeWidth={1.5}
+                    />
+                    <UiText style={styles.emptyTitle}>No drops yet</UiText>
+                    <UiText style={styles.emptySub}>
+                      Your drops from tonight will appear here.
+                    </UiText>
                   </View>
                 )}
               </>
@@ -527,12 +451,12 @@ function ProfileTile({ post }: { post: Post }) {
       <View style={styles.tileBottom}>
         <View style={styles.tileStats}>
           <Heart color={theme.danger} size={10} fill={theme.danger} />
-          <Text style={styles.tileStatText}>{post.like_count ?? 0}</Text>
+          <UiText style={styles.tileStatText}>{post.like_count ?? 0}</UiText>
         </View>
         {post.parent_post_id && (
           <View style={styles.reactionTag}>
             <Sparkles color={theme.accent} size={9} />
-            <Text style={styles.reactionTagText}>Reaction</Text>
+            <UiText style={styles.reactionTagText}>Reaction</UiText>
           </View>
         )}
       </View>
@@ -585,12 +509,12 @@ function DraftTile({
       {/* Draft badge */}
       <View style={styles.draftBadge}>
         <Save color="#fff" size={10} />
-        <Text style={styles.draftBadgeText}>Draft</Text>
+        <UiText style={styles.draftBadgeText}>Draft</UiText>
       </View>
       {/* Clip count badge */}
       {draft.clips.length > 1 && (
         <View style={styles.videoBadge}>
-          <Text style={styles.videoBadgeText}>{draft.clips.length}</Text>
+          <UiText style={styles.videoBadgeText}>{draft.clips.length}</UiText>
         </View>
       )}
       <LinearGradient
@@ -599,11 +523,11 @@ function DraftTile({
       />
       <View style={styles.tileBottom}>
         <View style={styles.tileStats}>
-          <Text style={styles.tileStatText}>
+          <UiText style={styles.tileStatText}>
             {formatDuration(durationMs)}
-          </Text>
+          </UiText>
         </View>
-        <Text style={styles.tileStatText}>{timeSince(draft.updatedAt)}</Text>
+        <UiText style={styles.tileStatText}>{timeSince(draft.updatedAt)}</UiText>
       </View>
     </Pressable>
   );

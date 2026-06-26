@@ -1,5 +1,6 @@
 import { Link, Stack } from "expo-router";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import UiText from "@/components/UiText";
 
 import ScreenBackground from "@/components/ScreenBackground";
 import DropletLogo from "@/components/DropletLogo";
@@ -12,10 +13,10 @@ export default function NotFoundScreen() {
       <ScreenBackground>
         <View style={styles.container}>
           <DropletLogo size={80} />
-          <Text style={styles.title}>This drop slipped away</Text>
-          <Text style={styles.sub}>That screen doesn&apos;t exist.</Text>
+          <UiText style={styles.title}>This drop slipped away</UiText>
+          <UiText style={styles.sub}>That screen doesn&apos;t exist.</UiText>
           <Link href="/(tabs)" style={styles.link}>
-            <Text style={styles.linkText}>Back to tonight</Text>
+            <UiText style={styles.linkText}>Back to tonight</UiText>
           </Link>
         </View>
       </ScreenBackground>

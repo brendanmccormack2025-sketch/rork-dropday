@@ -4,9 +4,9 @@ import {
   FlatList,
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, UserPlus, UserCheck } from "lucide-react-native";
@@ -137,7 +137,7 @@ export default function FollowListScreen() {
           >
             <ArrowLeft color={theme.text} size={20} strokeWidth={2.5} />
           </Pressable>
-          <Text style={styles.title}>{title ?? "Users"}</Text>
+          <UiText style={styles.title}>{title ?? "Users"}</UiText>
           <View style={styles.backBtn} />
         </View>
 
@@ -153,11 +153,11 @@ export default function FollowListScreen() {
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={
               <View style={styles.empty}>
-                <Text style={styles.emptyText}>
+                <UiText style={styles.emptyText}>
                   {type === "followers"
                     ? "No followers yet."
                     : "Not following anyone yet."}
-                </Text>
+                </UiText>
               </View>
             }
             renderItem={({ item }) => {
@@ -172,12 +172,12 @@ export default function FollowListScreen() {
                     <FeedAvatar profile={item} name={displayName} />
                   </View>
                   <View style={styles.userInfo}>
-                    <Text style={styles.userName} numberOfLines={1}>
+                    <UiText style={styles.userName} numberOfLines={1}>
                       {displayName}
-                    </Text>
-                    <Text style={styles.userHandle} numberOfLines={1}>
+                    </UiText>
+                    <UiText style={styles.userHandle} numberOfLines={1}>
                       @{item.username}
-                    </Text>
+                    </UiText>
                   </View>
                   {!isSelf && (
                     <Pressable
@@ -202,12 +202,12 @@ export default function FollowListScreen() {
                             size={14}
                             strokeWidth={2.5}
                           />
-                          <Text style={styles.followBtnTextActive}>Following</Text>
+                          <UiText style={styles.followBtnTextActive}>Following</UiText>
                         </>
                       ) : (
                         <>
                           <UserPlus color="#fff" size={14} strokeWidth={2.5} />
-                          <Text style={styles.followBtnText}>Follow</Text>
+                          <UiText style={styles.followBtnText}>Follow</UiText>
                         </>
                       )}
                     </Pressable>

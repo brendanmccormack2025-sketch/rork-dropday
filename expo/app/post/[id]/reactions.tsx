@@ -7,10 +7,10 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
-  Text,
   View,
   ViewToken,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Video, ResizeMode } from "expo-av";
@@ -81,31 +81,31 @@ export default function PostReactionsScreen() {
           </Pressable>
           <View style={styles.headerCenter}>
             <Sparkles color={theme.accent} size={16} />
-            <Text style={styles.headerTitle}>Last Night</Text>
+            <UiText style={styles.headerTitle}>Last Night</UiText>
           </View>
           <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.headerBtn} hitSlop={8}>
             <X color={theme.textMuted} size={20} strokeWidth={2} />
           </Pressable>
         </View>
         {reactions.length > 0 && (
-          <Text style={styles.headerCount}>
+          <UiText style={styles.headerCount}>
             {reactions.length} clip{reactions.length !== 1 ? "s" : ""}
-          </Text>
+          </UiText>
         )}
       </SafeAreaView>
 
       {/* Body */}
       {reactionsLoading ? (
         <View style={styles.center}>
-          <Text style={styles.emptySub}>Loading…</Text>
+          <UiText style={styles.emptySub}>Loading…</UiText>
         </View>
       ) : reactions.length === 0 ? (
         <View style={styles.center}>
           <Sparkles color={theme.textDim} size={48} strokeWidth={1.5} />
-          <Text style={styles.emptyTitle}>No reactions yet</Text>
-          <Text style={styles.emptySub}>
+          <UiText style={styles.emptyTitle}>No reactions yet</UiText>
+          <UiText style={styles.emptySub}>
             Be the first to react to this drop.
-          </Text>
+          </UiText>
           <Pressable
             onPress={() => {
               router.push(`/camera?reactingTo=${id}` as never);
@@ -116,7 +116,7 @@ export default function PostReactionsScreen() {
             ]}
           >
             <Reply color="#fff" size={18} strokeWidth={2.5} />
-            <Text style={styles.emptyReactBtnText}>Create a reaction</Text>
+            <UiText style={styles.emptyReactBtnText}>Create a reaction</UiText>
           </Pressable>
         </View>
       ) : (
@@ -161,7 +161,7 @@ export default function PostReactionsScreen() {
             ]}
           >
             <Reply color="#fff" size={18} strokeWidth={2.5} />
-            <Text style={styles.reactBtnText}>Record Reaction</Text>
+            <UiText style={styles.reactBtnText}>Record Reaction</UiText>
           </Pressable>
         </SafeAreaView>
       )}
@@ -290,12 +290,12 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
               {stallState.recovering ? (
                 <>
                   <ActivityIndicator color="#fff" size="large" />
-                  <Text style={styles.stallText}>Recovering playback…</Text>
+                  <UiText style={styles.stallText}>Recovering playback…</UiText>
                 </>
               ) : videoError ? (
                 <Pressable onPress={handleRetryVideo} style={styles.retryBtn}>
                   <RotateCcw color="#fff" size={20} strokeWidth={2.5} />
-                  <Text style={styles.retryText}>Tap to retry</Text>
+                  <UiText style={styles.retryText}>Tap to retry</UiText>
                 </Pressable>
               ) : null}
             </View>
@@ -311,7 +311,7 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
       ) : (
         <View style={styles.mediaFallback}>
           <Sparkles color={theme.textDim} size={32} strokeWidth={1.5} />
-          <Text style={styles.mediaFallbackText}>Media unavailable</Text>
+          <UiText style={styles.mediaFallbackText}>Media unavailable</UiText>
         </View>
       )}
 
@@ -350,9 +350,9 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
             size={28}
             strokeWidth={2}
           />
-          <Text style={styles.actionLabel}>
+          <UiText style={styles.actionLabel}>
             {String((post.like_count ?? 0) + (liked ? 1 : 0))}
-          </Text>
+          </UiText>
         </Pressable>
       </View>
 
@@ -365,17 +365,17 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
               name={name}
             />
           </View>
-          <Text style={styles.username}>@{post.profile?.username ?? "dropper"}</Text>
+          <UiText style={styles.username}>@{post.profile?.username ?? "dropper"}</UiText>
         </View>
         {post.caption ? (
-          <Text style={styles.caption} numberOfLines={2}>
+          <UiText style={styles.caption} numberOfLines={2}>
             {post.caption}
-          </Text>
+          </UiText>
         ) : null}
         {/* Show what they're reacting to */}
         <View style={styles.reactingToRow}>
           <Sparkles color={theme.accent} size={11} />
-          <Text style={styles.reactingToText}>Reacted to this drop</Text>
+          <UiText style={styles.reactingToText}>Reacted to this drop</UiText>
         </View>
       </View>
     </View>
@@ -452,7 +452,7 @@ const styles = StyleSheet.create({
   item: {
     width: SCREEN_W,
     height: SCREEN_H,
-    backgroundColor: "#000",
+    backgroundColor: "#0A0A14",
   },
 
   /* Video — explicit wrapper + fill so the native player always gets

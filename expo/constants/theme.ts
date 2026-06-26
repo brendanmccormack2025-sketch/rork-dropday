@@ -1,8 +1,8 @@
-/** Premium black aesthetic — electric blue accent, near-black backdrop. */
+/** Deep indigo-night aesthetic — electric blue accent. */
 export const theme = {
-  bg: "#050505",
-  bgElevated: "#0A0A0A",
-  card: "#0F0F0F",
+  bg: "#0A0A14",
+  bgElevated: "#13131F",
+  card: "#1C1C2E",
   border: "#1C1C1E",
   text: "#F5F5F5",
   textMuted: "#999999",

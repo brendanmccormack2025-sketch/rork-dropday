@@ -4,10 +4,10 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
@@ -75,8 +75,8 @@ export default function SignUpScreen() {
 
           <View style={styles.header}>
             <DropletLogo size={48} />
-            <Text style={styles.title}>Join the drop</Text>
-            <Text style={styles.sub}>Create your account in seconds.</Text>
+            <UiText style={styles.title}>Join the drop</UiText>
+            <UiText style={styles.sub}>Create your account in seconds.</UiText>
           </View>
 
           <View style={styles.form}>
@@ -105,8 +105,8 @@ export default function SignUpScreen() {
               secureTextEntry
               autoComplete="password-new"
             />
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-            {info ? <Text style={styles.info}>{info}</Text> : null}
+            {error ? <UiText style={styles.error}>{error}</UiText> : null}
+            {info ? <UiText style={styles.info}>{info}</UiText> : null}
 
             <PrimaryButton
               label="Create account"
@@ -117,10 +117,10 @@ export default function SignUpScreen() {
               onPress={() => router.replace("/(auth)/sign-in")}
               style={styles.switch}
             >
-              <Text style={styles.switchText}>
+              <UiText style={styles.switchText}>
                 Already have an account?{" "}
-                <Text style={styles.switchAccent}>Sign in</Text>
-              </Text>
+                <UiText style={styles.switchAccent}>Sign in</UiText>
+              </UiText>
             </Pressable>
           </View>
         </KeyboardAvoidingView>
@@ -135,7 +135,7 @@ function Field(
   const { label, style, ...rest } = props;
   return (
     <View style={styles.fieldWrap}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <UiText style={styles.fieldLabel}>{label}</UiText>
       <TextInput
         {...rest}
         placeholderTextColor={theme.textDim}

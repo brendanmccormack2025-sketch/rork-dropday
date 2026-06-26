@@ -30,7 +30,7 @@ export default function TabLayout() {
             />
           ) : (
             <View
-              style={[StyleSheet.absoluteFill, { backgroundColor: "#0A0A0A" }]}
+              style={[StyleSheet.absoluteFill, { backgroundColor: "#0A0A14" }]}
             />
           ),
         tabBarLabelStyle: styles.label,

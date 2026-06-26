@@ -8,12 +8,12 @@ import {
   Pressable,
   Share,
   StyleSheet,
-  Text,
   TextInput,
   View,
   ViewToken,
   RefreshControl,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -165,7 +165,7 @@ export default function FeedScreen() {
         ListEmptyComponent={
           feedLoading ? (
             <View style={styles.emptyWrap}>
-              <Text style={styles.emptySub}>Loading drops…</Text>
+              <UiText style={styles.emptySub}>Loading drops…</UiText>
             </View>
           ) : (
             <EmptyState />
@@ -204,7 +204,7 @@ export default function FeedScreen() {
         <View style={styles.headerRow} pointerEvents="box-none">
           <View style={styles.brandRow}>
             <DropletLogo size={22} />
-            <Text style={styles.brand}>DropDay</Text>
+            <UiText style={styles.brand}>DropDay</UiText>
           </View>
           <View style={styles.headerActions} pointerEvents="box-none">
             {/* DM Inbox icon with badge */}
@@ -216,9 +216,9 @@ export default function FeedScreen() {
               <MessageCircle color="#fff" size={22} strokeWidth={2} />
               {unreadCount > 0 && (
                 <View style={styles.dmBadge}>
-                  <Text style={styles.dmBadgeText}>
+                  <UiText style={styles.dmBadgeText}>
                     {unreadCount > 99 ? "99+" : unreadCount}
-                  </Text>
+                  </UiText>
                 </View>
               )}
             </Pressable>
@@ -231,9 +231,9 @@ export default function FeedScreen() {
               ) : (
                 <View style={styles.dot} />
               )}
-              <Text style={[styles.pillText, win.isOpen && styles.pillTextLive]}>
+              <UiText style={[styles.pillText, win.isOpen && styles.pillTextLive]}>
                 {win.isOpen ? "LIVE" : countdown}
-              </Text>
+              </UiText>
             </View>
           </View>
         </View>
@@ -244,9 +244,9 @@ export default function FeedScreen() {
           style={styles.searchBar}
         >
           <Search color="rgba(255,255,255,0.55)" size={15} />
-          <Text style={styles.searchPlaceholder}>
+          <UiText style={styles.searchPlaceholder}>
             Search friends, creators, hashtags
-          </Text>
+          </UiText>
         </Pressable>
       </SafeAreaView>
 
@@ -638,12 +638,12 @@ const FeedItem = memo(function FeedItem({
               {stallState.recovering ? (
                 <>
                   <ActivityIndicator color="#fff" size="large" />
-                  <Text style={styles.stallText}>Recovering playback…</Text>
+                  <UiText style={styles.stallText}>Recovering playback…</UiText>
                 </>
               ) : videoError ? (
                 <Pressable onPress={handleRetryVideo} style={styles.retryBtn}>
                   <RotateCcw color="#fff" size={20} strokeWidth={2.5} />
-                  <Text style={styles.retryText}>Tap to retry</Text>
+                  <UiText style={styles.retryText}>Tap to retry</UiText>
                 </Pressable>
               ) : null}
             </View>
@@ -666,7 +666,7 @@ const FeedItem = memo(function FeedItem({
             style={StyleSheet.absoluteFill}
           />
           <View style={styles.optInner}>
-            <Text style={styles.optTitle}>Posting your drop</Text>
+            <UiText style={styles.optTitle}>Posting your drop</UiText>
             <View style={styles.optProgressTrack}>
               <View
                 style={[
@@ -677,9 +677,9 @@ const FeedItem = memo(function FeedItem({
                 ]}
               />
             </View>
-            <Text style={styles.optProgressLabel}>
+            <UiText style={styles.optProgressLabel}>
               Uploading... {post._optimistic?.progress ?? 0}%
-            </Text>
+            </UiText>
           </View>
         </View>
       )}
@@ -690,11 +690,11 @@ const FeedItem = memo(function FeedItem({
             style={StyleSheet.absoluteFill}
           />
           <View style={styles.optInner}>
-            <Text style={styles.optErrorIcon}>!</Text>
-            <Text style={styles.optTitle}>Upload failed</Text>
-            <Text style={styles.optSub} numberOfLines={2}>{post._optimistic?.error ?? "Something went wrong."}</Text>
+            <UiText style={styles.optErrorIcon}>!</UiText>
+            <UiText style={styles.optTitle}>Upload failed</UiText>
+            <UiText style={styles.optSub} numberOfLines={2}>{post._optimistic?.error ?? "Something went wrong."}</UiText>
             <Pressable onPress={onRetry} style={styles.optRetryBtn}>
-              <Text style={styles.optRetryText}>Retry</Text>
+              <UiText style={styles.optRetryText}>Retry</UiText>
             </Pressable>
           </View>
         </View>
@@ -747,7 +747,7 @@ const FeedItem = memo(function FeedItem({
         {isLiveDrop && (
           <View style={styles.liveTag}>
             <View style={styles.livePulse} />
-            <Text style={styles.liveTagText}>LIVE DROP</Text>
+            <UiText style={styles.liveTagText}>LIVE DROP</UiText>
           </View>
         )}
         <View style={styles.userRow}>
@@ -757,20 +757,20 @@ const FeedItem = memo(function FeedItem({
               name={name}
             />
           </View>
-          <Text style={styles.username}>@{post.profile?.username ?? "dropper"}</Text>
-          <Text style={styles.dotSep}>·</Text>
-          <Text style={styles.ago}>{ago}</Text>
+          <UiText style={styles.username}>@{post.profile?.username ?? "dropper"}</UiText>
+          <UiText style={styles.dotSep}>·</UiText>
+          <UiText style={styles.ago}>{ago}</UiText>
         </View>
         {post.caption ? (
-          <Text style={styles.caption} numberOfLines={3}>
+          <UiText style={styles.caption} numberOfLines={3}>
             {post.caption}
-          </Text>
+          </UiText>
         ) : null}
         <View style={styles.musicRow}>
           <Music2 color={theme.textMuted} size={12} />
-          <Text style={styles.musicText}>
+          <UiText style={styles.musicText}>
             {live ? "Original drop · tonight" : "Original sound"}
-          </Text>
+          </UiText>
         </View>
       </View>
     </View>
@@ -793,7 +793,7 @@ function ActionButton({
   return (
     <Pressable onPress={onPress} style={styles.actionBtn} hitSlop={8}>
       {icon}
-      <Text style={styles.actionLabel}>{label}</Text>
+      <UiText style={styles.actionLabel}>{label}</UiText>
     </Pressable>
   );
 }
@@ -802,8 +802,8 @@ function EmptyState() {
   return (
     <SafeAreaView style={styles.emptyWrap}>
       <DropletLogo size={56} />
-      <Text style={styles.emptyTitle}>No drops yet</Text>
-      <Text style={styles.emptySub}>Be the first to drop.</Text>
+      <UiText style={styles.emptyTitle}>No drops yet</UiText>
+      <UiText style={styles.emptySub}>Be the first to drop.</UiText>
     </SafeAreaView>
   );
 }
@@ -822,18 +822,18 @@ function GateOverlay({
         <View style={styles.gateIcon}>
           <DropletLogo size={42} />
         </View>
-        <Text style={styles.gateTitle}>Drop to unlock</Text>
-        <Text style={styles.gateSub}>
+        <UiText style={styles.gateTitle}>Drop to unlock</UiText>
+        <UiText style={styles.gateSub}>
           You've watched {viewed} drops. Post your DropDay to keep watching
           tonight's feed.
-        </Text>
+        </UiText>
         <Pressable onPress={onDrop} style={styles.gateBtn}>
           <Sparkles color="#fff" size={16} />
-          <Text style={styles.gateBtnText}>Drop now</Text>
+          <UiText style={styles.gateBtnText}>Drop now</UiText>
         </Pressable>
-        <Text style={styles.gateFootnote}>
+        <UiText style={styles.gateFootnote}>
           Unlimited access for the night once you post.
-        </Text>
+        </UiText>
       </View>
     </View>
   );
@@ -877,10 +877,10 @@ function SearchOverlay({
               />
             </View>
             <Pressable onPress={onClose} hitSlop={8} style={styles.searchClose}>
-              <Text style={styles.searchCloseText}>Cancel</Text>
+              <UiText style={styles.searchCloseText}>Cancel</UiText>
             </Pressable>
           </View>
-          <Text style={styles.sectionLabel}>Suggestions</Text>
+          <UiText style={styles.sectionLabel}>Suggestions</UiText>
           {suggestions
             .filter((s) => s.label.toLowerCase().includes(query.toLowerCase()))
             .map((s) => (
@@ -888,7 +888,7 @@ function SearchOverlay({
                 <View style={styles.suggestionIcon}>
                   <Search color={theme.accent} size={14} />
                 </View>
-                <Text style={styles.suggestionText}>{s.label}</Text>
+                <UiText style={styles.suggestionText}>{s.label}</UiText>
               </Pressable>
             ))}
         </SafeAreaView>
@@ -971,17 +971,17 @@ function ShareSheet({
       <Pressable style={styles.sheetBackdrop} onPress={onClose} />
       <View style={styles.sheet}>
         <View style={styles.sheetHandle} />
-        <Text style={styles.sheetTitle}>Send to a friend</Text>
-        <Text style={styles.sheetSub}>
+        <UiText style={styles.sheetTitle}>Send to a friend</UiText>
+        <UiText style={styles.sheetSub}>
           Share this drop privately in a DM.
-        </Text>
+        </UiText>
 
         {following.length === 0 ? (
           <View style={styles.sheetEmpty}>
             <Users color={theme.textMuted} size={20} />
-            <Text style={styles.sheetEmptyText}>
+            <UiText style={styles.sheetEmptyText}>
               Follow friends to send drops directly.
-            </Text>
+            </UiText>
           </View>
         ) : (
           <FlatList
@@ -1006,19 +1006,19 @@ function ShareSheet({
                         transition={80}
                       />
                     ) : (
-                      <Text style={styles.friendAvatarText}>
+                      <UiText style={styles.friendAvatarText}>
                         {name.charAt(0).toUpperCase()}
-                      </Text>
+                      </UiText>
                     )}
                   </View>
                   <View style={styles.friendInfo}>
-                    <Text style={styles.friendName} numberOfLines={1}>
+                    <UiText style={styles.friendName} numberOfLines={1}>
                       {name}
-                    </Text>
+                    </UiText>
                     {profile?.username && profile.display_name ? (
-                      <Text style={styles.friendHandle} numberOfLines={1}>
+                      <UiText style={styles.friendHandle} numberOfLines={1}>
                         @{profile.username}
-                      </Text>
+                      </UiText>
                     ) : null}
                   </View>
                   <Pressable
@@ -1033,14 +1033,14 @@ function ShareSheet({
                     {busy ? (
                       <ActivityIndicator color="#fff" size="small" />
                     ) : (
-                      <Text
+                      <UiText
                         style={[
                           styles.sendBtnText,
                           sent && styles.sendBtnTextDone,
                         ]}
                       >
                         {sent ? "Sent" : "Send"}
-                      </Text>
+                      </UiText>
                     )}
                   </Pressable>
                 </View>
@@ -1052,7 +1052,7 @@ function ShareSheet({
 
         <Pressable onPress={handleNativeShare} style={styles.shareMore}>
           <Send color={theme.accent} size={16} />
-          <Text style={styles.shareMoreText}>Share elsewhere</Text>
+          <UiText style={styles.shareMoreText}>Share elsewhere</UiText>
         </Pressable>
 
         <Pressable onPress={onClose} style={styles.sheetClose}>
@@ -1179,7 +1179,7 @@ const styles = StyleSheet.create({
   item: {
     width: SCREEN_W,
     height: SCREEN_H,
-    backgroundColor: "#000",
+    backgroundColor: "#0A0A14",
   },
   gradTop: { position: "absolute", top: 0, left: 0, right: 0, height: 140 },
   gradBottom: { position: "absolute", left: 0, right: 0, bottom: 0, height: 320 },

@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Modal,
   View,
-  Text,
   TextInput,
   Pressable,
   StyleSheet,
@@ -10,6 +9,7 @@ import {
   Platform,
   LayoutAnimation,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { Check, Ellipsis } from "lucide-react-native";
 import { theme } from "@/constants/theme";
 import type { TextBackgroundStyle } from "@/providers/PostsProvider";
@@ -232,12 +232,12 @@ function MiniBgPreview({ bgStyle }: { bgStyle: TextBackgroundStyle }) {
           ]}
         />
       )}
-      <Text
+      <UiText
         style={[miniStyles.letter, { color: meta.textColor }]}
         numberOfLines={1}
       >
         Aa
-      </Text>
+      </UiText>
     </View>
   );
 }
@@ -268,7 +268,7 @@ function BgChipPreview({
           ]}
         />
       )}
-      <Text
+      <UiText
         style={[
           chipStyles.letter,
           { color: meta.textColor },
@@ -277,7 +277,7 @@ function BgChipPreview({
         numberOfLines={1}
       >
         Aa
-      </Text>
+      </UiText>
     </View>
   );
 }

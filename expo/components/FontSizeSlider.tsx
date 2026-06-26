@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
+import UiText from "@/components/UiText";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
@@ -92,7 +93,7 @@ export default function FontSizeSlider({ value, onChange }: FontSizeSliderProps)
 
   return (
     <View style={styles.wrapper}>
-      <Text style={styles.label}>Font size</Text>
+      <UiText style={styles.label}>Font size</UiText>
       <View style={styles.trackArea}>
         <GestureDetector gesture={panGesture}>
           <GestureView
@@ -112,7 +113,7 @@ export default function FontSizeSlider({ value, onChange }: FontSizeSliderProps)
           </GestureView>
         </GestureDetector>
       </View>
-      <Text style={styles.valueLabel}>{displayValue}</Text>
+      <UiText style={styles.valueLabel}>{displayValue}</UiText>
     </View>
   );
 }

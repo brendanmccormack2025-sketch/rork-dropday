@@ -9,6 +9,14 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+  useFonts,
+  PlusJakartaSans_300Light,
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
+} from "@expo-google-fonts/plus-jakarta-sans";
 
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { PostsProvider } from "@/providers/PostsProvider";
@@ -63,7 +71,7 @@ function RootLayoutNav() {
             presentation: "fullScreenModal",
             animation: "slide_from_bottom",
             gestureEnabled: false,
-            contentStyle: { backgroundColor: "#000" },
+            contentStyle: { backgroundColor: "#0A0A14" },
           }}
         />
         <Stack.Screen
@@ -72,7 +80,7 @@ function RootLayoutNav() {
             presentation: "fullScreenModal",
             animation: "slide_from_right",
             gestureEnabled: false,
-            contentStyle: { backgroundColor: "#000" },
+            contentStyle: { backgroundColor: "#0A0A14" },
           }}
         />
         <Stack.Screen
@@ -135,9 +143,23 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    PlusJakartaSans_300Light,
+    PlusJakartaSans_400Regular,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_700Bold,
+    PlusJakartaSans_800ExtraBold,
+  });
+
   useEffect(() => {
-    SplashScreen.hideAsync().catch(() => {});
-  }, []);
+    if (fontsLoaded) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) {
+    return null;
+  }
 
   return (
     <ErrorBoundary>

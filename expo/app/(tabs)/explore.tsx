@@ -5,10 +5,10 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Search, Sparkles, UserPlus, UserCheck, X } from "lucide-react-native";
@@ -166,10 +166,10 @@ export default function ExploreScreen() {
           ) : searchResults.length === 0 ? (
             <View style={styles.empty}>
               <Search color={theme.textDim} size={28} strokeWidth={1.5} />
-              <Text style={styles.emptyTitle}>No users found</Text>
-              <Text style={styles.emptySub}>
+              <UiText style={styles.emptyTitle}>No users found</UiText>
+              <UiText style={styles.emptySub}>
                 Try searching for a different username.
-              </Text>
+              </UiText>
             </View>
           ) : (
             <FlatList
@@ -211,7 +211,7 @@ export default function ExploreScreen() {
                   <View style={styles.sectionBadge}>
                     <Sparkles color={theme.accent} size={14} strokeWidth={2} />
                   </View>
-                  <Text style={styles.sectionLabel}>Suggested Creators</Text>
+                  <UiText style={styles.sectionLabel}>Suggested Creators</UiText>
                 </View>
                 {exploreCreatorsLoading && (
                   <View style={styles.loadingWrap}>
@@ -221,10 +221,10 @@ export default function ExploreScreen() {
                 {!exploreCreatorsLoading && exploreCreators.length === 0 && (
                   <View style={styles.empty}>
                     <Sparkles color={theme.textDim} size={28} strokeWidth={1.5} />
-                    <Text style={styles.emptyTitle}>No creators yet</Text>
-                    <Text style={styles.emptySub}>
+                    <UiText style={styles.emptyTitle}>No creators yet</UiText>
+                    <UiText style={styles.emptySub}>
                       Be the first to drop and build your audience.
-                    </Text>
+                    </UiText>
                   </View>
                 )}
               </View>
@@ -270,20 +270,20 @@ function CreatorRow({
         <FeedAvatar profile={creator} name={displayName} />
       </View>
       <View style={styles.userInfo}>
-        <Text style={styles.userName} numberOfLines={1}>
+        <UiText style={styles.userName} numberOfLines={1}>
           {displayName}
-        </Text>
+        </UiText>
         <View style={styles.userMeta}>
-          <Text style={styles.userHandle} numberOfLines={1}>
+          <UiText style={styles.userHandle} numberOfLines={1}>
             @{creator.username}
-          </Text>
+          </UiText>
           {showEngagement && creator.total_engagement > 0 && (
             <>
-              <Text style={styles.metaDot}>·</Text>
+              <UiText style={styles.metaDot}>·</UiText>
               <Sparkles color={theme.accent} size={10} strokeWidth={2} />
-              <Text style={styles.engagementText}>
+              <UiText style={styles.engagementText}>
                 {formatEngagement(creator.total_engagement)}
-              </Text>
+              </UiText>
             </>
           )}
         </View>
@@ -306,12 +306,12 @@ function CreatorRow({
         ) : isFollowing ? (
           <>
             <UserCheck color={theme.textMuted} size={14} strokeWidth={2.5} />
-            <Text style={styles.followBtnTextActive}>Following</Text>
+            <UiText style={styles.followBtnTextActive}>Following</UiText>
           </>
         ) : (
           <>
             <UserPlus color="#fff" size={14} strokeWidth={2.5} />
-            <Text style={styles.followBtnText}>Follow</Text>
+            <UiText style={styles.followBtnText}>Follow</UiText>
           </>
         )}
       </Pressable>

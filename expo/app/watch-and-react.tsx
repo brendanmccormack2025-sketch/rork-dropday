@@ -6,9 +6,9 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
+import UiText from "@/components/UiText";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -203,7 +203,7 @@ export default function WatchAndReactScreen() {
       <View style={[styles.screen, styles.centered]}>
         <StatusBar style="light" />
         <ActivityIndicator color={theme.accent} size="large" />
-        <Text style={styles.loadingText}>Loading clip…</Text>
+        <UiText style={styles.loadingText}>Loading clip…</UiText>
       </View>
     );
   }
@@ -213,9 +213,9 @@ export default function WatchAndReactScreen() {
     return (
       <View style={[styles.screen, styles.centered]}>
         <StatusBar style="light" />
-        <Text style={styles.errorText}>{loadError ?? "Clip not found."}</Text>
+        <UiText style={styles.errorText}>{loadError ?? "Clip not found."}</UiText>
         <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>Go back</Text>
+          <UiText style={styles.backBtnText}>Go back</UiText>
         </Pressable>
       </View>
     );
@@ -240,7 +240,7 @@ export default function WatchAndReactScreen() {
         />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.imagePlaceholder]}>
-          <Text style={styles.imageText}>Photo</Text>
+          <UiText style={styles.imageText}>Photo</UiText>
         </View>
       )}
 
@@ -283,14 +283,14 @@ export default function WatchAndReactScreen() {
       >
         {/* Caption */}
         {post.caption ? (
-          <Text style={styles.caption} numberOfLines={2}>
+          <UiText style={styles.caption} numberOfLines={2}>
             {post.caption}
-          </Text>
+          </UiText>
         ) : null}
 
         {/* Scrub bar */}
         <View style={styles.scrubRow}>
-          <Text style={styles.timeLabel}>{formatTime(positionMs)}</Text>
+          <UiText style={styles.timeLabel}>{formatTime(positionMs)}</UiText>
           <View
             style={styles.scrubTrack}
             onLayout={(e) => {
@@ -312,7 +312,7 @@ export default function WatchAndReactScreen() {
               ]}
             />
           </View>
-          <Text style={styles.timeLabel}>{formatTime(durationMs)}</Text>
+          <UiText style={styles.timeLabel}>{formatTime(durationMs)}</UiText>
         </View>
 
         {/* Record Reaction button */}
@@ -325,7 +325,7 @@ export default function WatchAndReactScreen() {
           accessibilityLabel="Record a reaction"
         >
           <VideoIcon size={18} color="#fff" strokeWidth={2.5} />
-          <Text style={styles.recordBtnText}>Record Reaction</Text>
+          <UiText style={styles.recordBtnText}>Record Reaction</UiText>
         </Pressable>
       </View>
     </View>
@@ -336,7 +336,7 @@ export default function WatchAndReactScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#000",
+    backgroundColor: "#0A0A14",
   },
   centered: {
     alignItems: "center",
