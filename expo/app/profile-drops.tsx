@@ -85,7 +85,7 @@ export default function ProfileDropsScreen() {
       forceFocused
       onReactionsPost={handleReactions}
       headerComponent={
-        <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.headerWrap}>
+        <SafeAreaView edges={["top"]} style={styles.headerWrap}>
           <Pressable
             onPress={() => router.back()}
             style={styles.backBtn}
