@@ -1,42 +1,31 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import {
-  Dimensions,
-  FlatList,
-  Pressable,
-  Share,
-  StyleSheet,
-  View,
-  ViewToken,
-} from "react-native";
+import React, { useMemo, useCallback } from "react";
+import { Pressable, StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react-native";
 
-import { FeedItem } from "@/components/FeedItem";
+import { FeedListView } from "@/components/FeedListView";
 import { theme } from "@/constants/theme";
 import { type Post } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { supabase } from "@/lib/supabase";
 
-const { height: SCREEN_H } = Dimensions.get("window");
-
+/**
+ * Full-screen video feed showing a specific user's root drops.
+ *
+ * Uses the exact same FeedListView component as the main Drop feed tab,
+ * so all video playback, like/delete/react/share buttons, and swipe
+ * navigation work identically. The only difference is the data source
+ * (one user's drops instead of the global feed).
+ */
 export default function ProfileDropsScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const params = useLocalSearchParams<{ userId: string; initialIndex: string }>();
   const userId = params.userId ?? user?.id ?? "";
   const initialIndex = parseInt(params.initialIndex ?? "0", 10);
-
-  // This screen is a fullScreenModal — always focused while mounted.
-  // We don't use useVideoFocus() here because the tab screen underneath
-  // may still hold focus briefly during the push transition, causing
-  // a false-negative that freezes the video on first render.
-  const screenFocused = true;
-
-  const [activeIndex, setActiveIndex] = useState<number>(initialIndex);
-  const listRef = useRef<FlatList<Post>>(null);
 
   // Fetch this profile's root drops (no reactions)
   const { data: posts = [], isLoading } = useQuery({
@@ -73,164 +62,61 @@ export default function ProfileDropsScreen() {
     },
   });
 
-  const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const first = viewableItems[0];
-      if (first && typeof first.index === "number") {
-        setActiveIndex(first.index);
-      }
-    },
-  ).current;
-
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
-
-  const getItemLayout = useCallback(
-    (_: ArrayLike<Post> | null | undefined, index: number) => ({
-      length: SCREEN_H,
-      offset: SCREEN_H * index,
-      index,
-    }),
-    [],
-  );
-
-  const handleShare = useCallback(
-    async (post: Post) => {
-      try {
-        await Share.share({
-          message: `Check out this DropDay: ${post.media_url}`,
-        });
-      } catch {}
-    },
-    [],
-  );
-
   const handleReactions = useCallback(
-    (postId: string) => {
-      router.push(`/post/${postId}/reaction-tree` as never);
+    (post: Post) => {
+      router.push(`/post/${post.id}/reaction-tree` as never);
     },
     [router],
   );
 
-  const renderItem = useCallback(
-    ({ item, index }: { item: Post; index: number }) => (
-      <FeedItem
-        post={item}
-        active={index === activeIndex && screenFocused}
-        live
-        onShare={() => handleShare(item)}
-        onReactions={() => handleReactions(item.id)}
-        onRetry={() => {}}
-      />
-    ),
-    [activeIndex, screenFocused, handleShare, handleReactions],
-  );
-
-  const profileName = useMemo(
-    () =>
-      posts[0]?.profile?.display_name ??
-      posts[0]?.profile?.username ??
-      "Profile",
+  const profileDisplay = useMemo(
+    () => `@${posts[0]?.profile?.username ?? "profile"}`,
     [posts],
   );
 
-  if (isLoading && posts.length === 0) {
-    return (
-      <View style={styles.root}>
-        <SafeAreaView edges={["top"]} style={styles.safe}>
-          <UiText style={styles.loading}>Loading drops…</UiText>
-        </SafeAreaView>
-      </View>
-    );
-  }
-
-  if (posts.length === 0) {
-    return (
-      <View style={styles.root}>
-        <SafeAreaView edges={["top"]} style={styles.safe}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={12}>
+  return (
+    <FeedListView
+      posts={posts}
+      isLoading={isLoading}
+      initialIndex={initialIndex}
+      // This screen is a fullScreenModal — always focused while mounted.
+      // Override useVideoFocus (which tracks tab focus) so playback starts
+      // immediately without waiting for a tab-focus event.
+      forceFocused
+      onReactionsPost={handleReactions}
+      headerComponent={
+        <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.headerWrap}>
+          <Pressable
+            onPress={() => router.back()}
+            style={styles.backBtn}
+            hitSlop={12}
+          >
             <ArrowLeft color="#fff" size={24} strokeWidth={2.5} />
           </Pressable>
-          <View style={styles.emptyWrap}>
-            <UiText style={styles.emptyTitle}>No drops yet</UiText>
-            <UiText style={styles.emptySub}>
-              This user hasn't posted any drops.
-            </UiText>
-          </View>
+          <UiText style={styles.headerTitle} numberOfLines={1}>
+            {profileDisplay}
+          </UiText>
+          <View style={styles.headerSpacer} />
         </SafeAreaView>
-      </View>
-    );
-  }
-
-  // Clamp initialIndex to valid range
-  const safeInitialIndex = Math.max(0, Math.min(initialIndex, posts.length - 1));
-
-  return (
-    <View style={styles.root}>
-      <FlatList
-        ref={listRef}
-        data={posts}
-        keyExtractor={(p) => p.id}
-        renderItem={renderItem}
-        snapToInterval={SCREEN_H}
-        snapToAlignment="start"
-        decelerationRate="fast"
-        bounces
-        showsVerticalScrollIndicator={false}
-        getItemLayout={getItemLayout}
-        onViewableItemsChanged={onViewableItemsChanged}
-        viewabilityConfig={viewabilityConfig}
-        initialScrollIndex={safeInitialIndex}
-        onScrollToIndexFailed={(info) => {
-          // Retry after a short delay if the initial scroll misses
-          setTimeout(() => {
-            listRef.current?.scrollToIndex({
-              index: info.index,
-              animated: false,
-            });
-          }, 100);
-        }}
-        // removeClippedSubviews must be false — when true on native,
-        // expo-av Video backing views are detached during scroll,
-        // freezing the player permanently.
-        removeClippedSubviews={false}
-        windowSize={5}
-        maxToRenderPerBatch={3}
-        initialNumToRender={2}
-      />
-
-      {/* Back button overlay */}
-      <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.headerWrap}>
-        <Pressable
-          onPress={() => router.back()}
-          style={styles.backBtn}
-          hitSlop={12}
-        >
-          <ArrowLeft color="#fff" size={24} strokeWidth={2.5} />
-        </Pressable>
-        <UiText style={styles.headerTitle} numberOfLines={1}>
-          @{posts[0]?.profile?.username ?? "profile"}
-        </UiText>
-        <View style={styles.headerSpacer} />
-      </SafeAreaView>
-    </View>
+      }
+      emptyComponent={
+        <View style={styles.emptyWrap}>
+          <SafeAreaView edges={["top"]} style={StyleSheet.absoluteFill}>
+            <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={12}>
+              <ArrowLeft color="#fff" size={24} strokeWidth={2.5} />
+            </Pressable>
+          </SafeAreaView>
+          <UiText style={styles.emptyTitle}>No drops yet</UiText>
+          <UiText style={styles.emptySub}>
+            This user hasn't posted any drops.
+          </UiText>
+        </View>
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: "#0A0A14",
-  },
-  safe: {
-    flex: 1,
-  },
-  loading: {
-    color: theme.textMuted,
-    fontSize: 14,
-    textAlign: "center",
-    marginTop: 40,
-  },
-
   /* Header overlay */
   headerWrap: {
     position: "absolute",
@@ -241,7 +127,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingTop: 4,
+    paddingTop: 12,
     paddingBottom: 8,
   },
   backBtn: {

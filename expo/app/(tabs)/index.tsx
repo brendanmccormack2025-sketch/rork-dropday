@@ -9,8 +9,6 @@ import {
   StyleSheet,
   TextInput,
   View,
-  ViewToken,
-  RefreshControl,
 } from "react-native";
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -18,7 +16,6 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useVideoFocus } from "@/hooks/useVideoFocus";
 import {
   Music2,
   Send,
@@ -31,10 +28,9 @@ import {
 } from "lucide-react-native";
 
 import DropletLogo from "@/components/DropletLogo";
-import { FeedItem } from "@/components/FeedItem";
+import { FeedListView } from "@/components/FeedListView";
 import { theme, getDropWindowState, formatCountdown } from "@/constants/theme";
-import { usePosts, type Post, type OptimisticStatus, resolveAvatarUrl } from "@/providers/PostsProvider";
-import { useAuth } from "@/providers/AuthProvider";
+import { usePosts, type Post, resolveAvatarUrl } from "@/providers/PostsProvider";
 import { supabase } from "@/lib/supabase";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
@@ -42,15 +38,13 @@ const FREE_VIEWS_BEFORE_GATE = 5;
 
 export default function FeedScreen() {
   const router = useRouter();
-  const { feed, feedLoading, refetchFeed, refetchMyPosts, hasPostedInWindow, retryOptimisticPost, optimisticPosts, unreadCount } = usePosts();
+  const { feed, feedLoading, refetchFeed, refetchMyPosts, optimisticPosts, unreadCount } = usePosts();
   const [now, setNow] = useState<Date>(new Date());
-  const [activeIndex, setActiveIndex] = useState<number>(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sharePost, setSharePost] = useState<Post | null>(null);
-  const screenFocused = useVideoFocus();
   const isFirstFocusRef = useRef<boolean>(true);
 
   useEffect(() => {
@@ -102,152 +96,77 @@ export default function FeedScreen() {
     }, [refetchFeed, optimisticPosts])
   );
 
-  const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const first = viewableItems[0];
-      if (first && typeof first.index === "number") {
-        setActiveIndex(first.index);
-        const id = (first.item as Post | undefined)?.id;
-        if (id) {
-          setViewedIds((prev) => {
-            if (prev.has(id)) return prev;
-            const next = new Set(prev);
-            next.add(id);
-            return next;
-          });
-        }
-      }
-    }
-  ).current;
-
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
-
-  const getItemLayout = useCallback(
-    (_: ArrayLike<Post> | null | undefined, index: number) => ({
-      length: SCREEN_H,
-      offset: SCREEN_H * index,
-      index,
-    }),
-    []
-  );
-
-  const renderItem = useCallback(
-    ({ item, index }: { item: Post; index: number }) => (
-      <FeedItem
-        post={item}
-        active={index === activeIndex && screenFocused}
-        live={win.isOpen}
-        onShare={() => setSharePost(item)}
-        onReactions={() => {
-          router.push(`/post/${item.id}/reaction-tree` as never);
-        }}
-        onRetry={() => retryOptimisticPost(item._optimistic?.tempId ?? "")}
-      />
-    ),
-    [activeIndex, screenFocused, win.isOpen, router, retryOptimisticPost]
-  );
-
   return (
     <View style={styles.root}>
-      <FlatList
-        data={feed}
-        keyExtractor={(p) => p.id}
-        renderItem={renderItem}
-        ListEmptyComponent={
-          feedLoading ? (
-            <View style={styles.emptyWrap}>
-              <UiText style={styles.emptySub}>Loading drops…</UiText>
-            </View>
-          ) : (
-            <EmptyState />
-          )
-        }
-        contentContainerStyle={
-          feed.length === 0 ? styles.emptyContainer : undefined
-        }
-        snapToInterval={SCREEN_H}
-        snapToAlignment="start"
-        decelerationRate="fast"
-        bounces
-        showsVerticalScrollIndicator={false}
-        getItemLayout={feed.length > 0 ? getItemLayout : undefined}
-        onViewableItemsChanged={onViewableItemsChanged}
-        viewabilityConfig={viewabilityConfig}
-        scrollEnabled={!gateActive}
-        // windowSize=5 instead of 3 gives more buffer before views are recycled.
-        // removeClippedSubviews is intentionally omitted — on native it detaches
-        // Video backing views during scroll, which can freeze expo-av players.
-        windowSize={5}
-        maxToRenderPerBatch={3}
-        initialNumToRender={2}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={theme.accent}
-            progressBackgroundColor={theme.card}
-          />
-        }
-      />
-
-      {/* Floating top header + search */}
-      <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.headerWrap}>
-        <View style={styles.headerRow} pointerEvents="box-none">
-          <View style={styles.brandRow}>
-            <DropletLogo size={22} />
-            <UiText style={styles.brand}>DropDay</UiText>
-          </View>
-          <View style={styles.headerActions} pointerEvents="box-none">
-            {/* DM Inbox icon with badge */}
-            <Pressable
-              onPress={() => router.push("/dm/inbox" as never)}
-              style={styles.dmBtn}
-              hitSlop={10}
-            >
-              <MessageCircle color="#fff" size={22} strokeWidth={2} />
-              {unreadCount > 0 && (
-                <View style={styles.dmBadge}>
-                  <UiText style={styles.dmBadgeText}>
-                    {unreadCount > 99 ? "99+" : unreadCount}
+      <FeedListView
+        posts={feed}
+        isLoading={feedLoading}
+        onRefresh={onRefresh}
+        isRefreshing={refreshing}
+        initialIndex={0}
+        showGate={gateActive}
+        onSharePost={(post) => setSharePost(post)}
+        onReactionsPost={(post) => {
+          router.push(`/post/${post.id}/reaction-tree` as never);
+        }}
+        headerComponent={
+          <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.headerWrap}>
+            <View style={styles.headerRow} pointerEvents="box-none">
+              <View style={styles.brandRow}>
+                <DropletLogo size={22} />
+                <UiText style={styles.brand}>DropDay</UiText>
+              </View>
+              <View style={styles.headerActions} pointerEvents="box-none">
+                <Pressable
+                  onPress={() => router.push("/dm/inbox" as never)}
+                  style={styles.dmBtn}
+                  hitSlop={10}
+                >
+                  <MessageCircle color="#fff" size={22} strokeWidth={2} />
+                  {unreadCount > 0 && (
+                    <View style={styles.dmBadge}>
+                      <UiText style={styles.dmBadgeText}>
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </UiText>
+                    </View>
+                  )}
+                </Pressable>
+                <View
+                  style={[styles.pill, win.isOpen && styles.pillLive]}
+                  pointerEvents="none"
+                >
+                  {win.isOpen ? (
+                    <Zap color="#050505" size={10} fill="#050505" />
+                  ) : (
+                    <View style={styles.dot} />
+                  )}
+                  <UiText style={[styles.pillText, win.isOpen && styles.pillTextLive]}>
+                    {win.isOpen ? "LIVE" : countdown}
                   </UiText>
                 </View>
-              )}
-            </Pressable>
-            <View
-              style={[styles.pill, win.isOpen && styles.pillLive]}
-              pointerEvents="none"
-            >
-              {win.isOpen ? (
-                <Zap color="#050505" size={10} fill="#050505" />
-              ) : (
-                <View style={styles.dot} />
-              )}
-              <UiText style={[styles.pillText, win.isOpen && styles.pillTextLive]}>
-                {win.isOpen ? "LIVE" : countdown}
-              </UiText>
+              </View>
             </View>
-          </View>
-        </View>
-
-        {/* Faint TikTok-style search bar */}
-        <Pressable
-          onPress={() => setSearchOpen(true)}
-          style={styles.searchBar}
-        >
-          <Search color="rgba(255,255,255,0.55)" size={15} />
-          <UiText style={styles.searchPlaceholder}>
-            Search friends, creators, hashtags
-          </UiText>
-        </Pressable>
-      </SafeAreaView>
-
-      {/* 5-view participation gate */}
-      {gateActive && (
-        <GateOverlay
-          onDrop={() => router.push("/camera")}
-          viewed={viewedCount}
-        />
-      )}
+            <Pressable
+              onPress={() => setSearchOpen(true)}
+              style={styles.searchBar}
+            >
+              <Search color="rgba(255,255,255,0.55)" size={15} />
+              <UiText style={styles.searchPlaceholder}>
+                Search friends, creators, hashtags
+              </UiText>
+            </Pressable>
+          </SafeAreaView>
+        }
+        emptyComponent={<EmptyState />}
+        gateComponent={
+          gateActive ? (
+            <GateOverlay
+              onDrop={() => router.push("/camera")}
+              viewed={viewedCount}
+            />
+          ) : undefined
+        }
+      />
 
       {/* Search overlay */}
       <SearchOverlay

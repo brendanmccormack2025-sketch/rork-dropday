@@ -55,7 +55,7 @@ export default function ReactionTreeScreen() {
         .from("posts")
         .select("user_id")
         .eq("id", id)
-        .single();
+        .maybeSingle();
       if (error) {
         console.error("[reaction-tree] root drop query error", error.message);
         return null;
