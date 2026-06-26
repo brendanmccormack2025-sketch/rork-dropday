@@ -38,7 +38,6 @@ import { getInfoAsync } from "@/lib/fileSystemCompat";
 import { supabase } from "@/lib/supabase";
 import { theme, getDropWindowState } from "@/constants/theme";
 import { useCameraRecorder, type Clip, MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
-import { usePosts, type DraftClip } from "@/providers/PostsProvider";
 
 const LOCK_DRAG_DISTANCE = 70;
 
@@ -73,8 +72,7 @@ const triggerHaptic = (style: Haptics.ImpactFeedbackStyle) => {
 
 export default function CameraScreen() {
   const router = useRouter();
-  const { reactingTo, rootDropId, draftId } = useLocalSearchParams<{ reactingTo?: string; rootDropId?: string; draftId?: string }>();
-  const { draftProjects, appendClipToDraft } = usePosts();
+  const { reactingTo, rootDropId } = useLocalSearchParams<{ reactingTo?: string; rootDropId?: string }>();
 
   // Log received params on mount
   useEffect(() => {
@@ -488,30 +486,6 @@ export default function CameraScreen() {
   const goToEdit = useCallback(async () => {
     if (clips.length === 0) return;
 
-    // ── Draft append flow: if we came from editing a draft, append the new
-    //     clip(s) to the draft and navigate back to the editor. ──────────────
-    if (draftId) {
-      console.log("[camera] goToEdit — draft append flow, draftId:", draftId.slice(0, 8));
-      try {
-        const draftClips: DraftClip[] = clips.map((c) => ({
-          id: c.id,
-          uri: c.uri,
-          type: c.type,
-          durationMs: c.durationMs,
-          recordingSessionId: c.recordingSessionId,
-        }));
-        await appendClipToDraft(draftId, draftClips);
-        console.log("[camera] goToEdit — clip(s) appended to draft, going back");
-        router.back();
-        return;
-      } catch (e) {
-        console.error("[camera] goToEdit — draft append failed", (e as Error)?.message);
-        setError("Could not add clip to draft. Please try again.");
-        return;
-      }
-    }
-
-    // ── Normal flow: verify clips and navigate to the editor ───────────────
     // Verify every clip's file exists and is non-empty before navigating.
     // If the merge step produced a corrupt / empty / missing file, surface
     // a visible error instead of sending the editor a dead URI (black screen).
@@ -554,7 +528,7 @@ export default function CameraScreen() {
       pathname: "/edit",
       params,
     });
-  }, [clips, reactingTo, rootDropId, draftId, appendClipToDraft, router, setError]);
+  }, [clips, reactingTo, rootDropId, router, setError]);
 
 
   // ─── Permissions: loading ──────────────────────────────────────
