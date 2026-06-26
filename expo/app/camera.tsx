@@ -443,8 +443,8 @@ export default function CameraScreen() {
   const panZoomGesture = useMemo(
     () =>
       Gesture.Pan()
-        .minPointers(2)
-        .maxPointers(2)
+        .minPointers(1)
+        .maxPointers(1)
         .activeOffsetY([-12, 12])
         .onBegin(() => {
           zoomBaselineRef.current = zoomRef.current;
