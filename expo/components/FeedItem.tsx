@@ -2,7 +2,6 @@ import React, { memo, useEffect, useMemo, useRef, useState, useCallback } from "
 import {
   ActivityIndicator,
   Alert,
-  Button,
   Dimensions,
   Pressable,
   StyleSheet,
@@ -304,7 +303,6 @@ export const FeedItem = memo(function FeedItem({
 
   // ── Delete this Drop (owner only) ──────────────────────────────────
   const handleDelete = useCallback(() => {
-    console.log("[DEBUG] delete button onPress FIRED");
     Alert.alert(
       "Delete this Drop?",
       "This can't be undone.",
@@ -454,15 +452,12 @@ export const FeedItem = memo(function FeedItem({
         pointerEvents="none"
       />
 
-      {/* DEBUG: Action buttons rendered outside the video container.
-          pointerEvents changed from "box-none" to "auto" to test if
-          "box-none" is causing touch passthrough. */}
       <View
         style={[
           styles.actions,
           { bottom: bottomInset + 30 },
         ]}
-        pointerEvents="auto"
+        pointerEvents="box-none"
       >
         <ActionButton
           icon={
@@ -476,31 +471,22 @@ export const FeedItem = memo(function FeedItem({
           label={String((post.like_count ?? 0) + (liked ? 1 : 0))}
           onPress={() => setLiked((v) => !v)}
         />
-        {/* DEBUG: react button temporarily replaced with plain Button */}
-        <View style={{ backgroundColor: "red", padding: 4, borderRadius: 4, marginBottom: 4 }}>
-          <Button
-            title="REACT"
-            color="#fff"
-            onPress={() => { console.log("[DEBUG] react Button onPress FIRED"); onReactions(); }}
-          />
-        </View>
-        {/* DEBUG: share button temporarily replaced with plain Button */}
-        <View style={{ backgroundColor: "blue", padding: 4, borderRadius: 4, marginBottom: 4 }}>
-          <Button
-            title="SHARE"
-            color="#fff"
-            onPress={() => { console.log("[DEBUG] share Button onPress FIRED"); onShare(); }}
-          />
-        </View>
+        <ActionButton
+          icon={<Sparkles color="#fff" size={28} strokeWidth={1.8} />}
+          label={String(post.reaction_count ?? 0)}
+          onPress={onReactions}
+        />
+        <ActionButton
+          icon={<Send color="#fff" size={24} strokeWidth={2} />}
+          label="Share"
+          onPress={onShare}
+        />
         {isOwner && (
-          /* DEBUG: delete button temporarily replaced with plain Button */
-          <View style={{ backgroundColor: "rgba(255,0,0,0.6)", padding: 4, borderRadius: 4 }}>
-            <Button
-              title="DELETE"
-              color="#fff"
-              onPress={() => { console.log("[DEBUG] delete Button onPress FIRED"); handleDelete(); }}
-            />
-          </View>
+          <ActionButton
+            icon={<Trash2 color={theme.danger} size={24} strokeWidth={2} />}
+            label="Delete"
+            onPress={handleDelete}
+          />
         )}
       </View>
 

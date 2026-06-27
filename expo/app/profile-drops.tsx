@@ -1,74 +1,54 @@
 import React, { useMemo, useCallback } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, Share, StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react-native";
 
 import { FeedListView } from "@/components/FeedListView";
 import { theme } from "@/constants/theme";
-import { type Post } from "@/providers/PostsProvider";
-import { useAuth } from "@/providers/AuthProvider";
-import { supabase } from "@/lib/supabase";
+import { usePosts, type Post } from "@/providers/PostsProvider";
 
 /**
- * Full-screen video feed showing a specific user's root drops.
+ * Full-screen video feed showing the current user's root drops.
  *
- * Uses the exact same FeedListView component as the main Drop feed tab,
- * so all video playback, like/delete/react/share buttons, and swipe
- * navigation work identically. The only difference is the data source
- * (one user's drops instead of the global feed).
+ * Uses the exact same FeedListView component and the exact same data
+ * source (usePosts().myPosts) as the profile grid, so all video playback,
+ * like/delete/react/share buttons, swipe navigation, and reaction counts
+ * work identically. The only difference from the main feed is the data
+ * being passed (this user's drops instead of the global feed).
  */
 export default function ProfileDropsScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { myPosts } = usePosts();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ userId: string; initialIndex: string }>();
-  const userId = params.userId ?? user?.id ?? "";
+  const params = useLocalSearchParams<{ initialIndex: string }>();
   const initialIndex = parseInt(params.initialIndex ?? "0", 10);
 
-  // Fetch this profile's root drops (no reactions)
-  const { data: posts = [], isLoading } = useQuery({
-    queryKey: ["posts", "user-drops", userId],
-    enabled: !!userId,
-    queryFn: async (): Promise<Post[]> => {
-      const { data, error } = await supabase
-        .from("posts")
-        .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
-        )
-        .eq("user_id", userId)
-        .is("parent_post_id", null)
-        .order("created_at", { ascending: false })
-        .limit(100);
-      if (error) return [];
-      return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
-        id: row.id as string,
-        user_id: row.user_id as string,
-        media_url: row.media_url as string,
-        media_type: row.media_type as "image" | "video",
-        caption: (row.caption as string | null) ?? null,
-        parent_post_id: (row.parent_post_id as string | null) ?? null,
-        segments: (row.segments as string[] | null) ?? null,
-        audio_url: (row.audio_url as string | null) ?? null,
-        trim_data: (row.trim_data as Post["trim_data"]) ?? null,
-        thumbnail_url: (row.thumbnail_url as string | null) ?? null,
-        created_at: row.created_at as string,
-        like_count: (row.like_count as number | undefined) ?? 0,
-        comment_count: (row.comment_count as number | undefined) ?? 0,
-        reaction_count: (row.reaction_count as number | undefined) ?? 0,
-        profile: (row.profiles as Post["profile"]) ?? null,
-      }));
-    },
-  });
+  // Filter to root drops only (same logic as the profile grid's "drops" memo).
+  // This data comes from the SAME myPostsQuery in PostsProvider that the
+  // profile grid uses, so reaction_count values are always identical.
+  const posts = useMemo(
+    () => myPosts.filter((p) => !p.parent_post_id),
+    [myPosts],
+  );
 
   const handleReactions = useCallback(
     (post: Post) => {
-      console.log("[DEBUG] profile-drops handleReactions called, postId=", post.id);
       router.push(`/post/${post.id}/reaction-tree` as never);
     },
     [router],
+  );
+
+  const handleShare = useCallback(
+    async (post: Post) => {
+      try {
+        await Share.share({
+          message: `Check out this DropDay: ${post.media_url}`,
+        });
+      } catch {}
+    },
+    [],
   );
 
   const profileDisplay = useMemo(
@@ -83,13 +63,14 @@ export default function ProfileDropsScreen() {
   return (
     <FeedListView
       posts={posts}
-      isLoading={isLoading}
+      isLoading={false}
       initialIndex={initialIndex}
       // This screen is a fullScreenModal — always focused while mounted.
       // Override useVideoFocus (which tracks tab focus) so playback starts
       // immediately without waiting for a tab-focus event.
       forceFocused
       onReactionsPost={handleReactions}
+      onSharePost={handleShare}
       bottomInset={bottomInset}
       headerComponent={
         <View

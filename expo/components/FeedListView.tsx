@@ -106,12 +106,12 @@ export function FeedListView({
         active={index === activeIndex && screenFocused}
         live={win.isOpen}
         bottomInset={bottomInset}
-        onShare={() => { console.log("[DEBUG] FeedListView onShare called, onSharePost=", typeof onSharePost); onSharePost?.(item); }}
-        onReactions={() => { console.log("[DEBUG] FeedListView onReactions called, onReactionsPost=", typeof onReactionsPost); onReactionsPost?.(item); }}
+        onShare={() => onSharePost?.(item)}
+        onReactions={() => onReactionsPost?.(item)}
         onRetry={() => retryOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),
-    [activeIndex, screenFocused, win.isOpen, retryOptimisticPost, bottomInset],
+    [activeIndex, screenFocused, win.isOpen, retryOptimisticPost, bottomInset, onSharePost, onReactionsPost],
   );
 
   const safeInitialIndex = Math.max(0, Math.min(initialIndex, posts.length - 1));
@@ -141,9 +141,7 @@ export function FeedListView({
         getItemLayout={posts.length > 0 ? getItemLayout : undefined}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
-        // DEBUG: scrollEnabled forced to false to test if FlatList scroll
-        // gestures are intercepting button taps
-        scrollEnabled={false}
+        scrollEnabled
         // windowSize=5 instead of 3 gives more buffer before views are recycled.
         // removeClippedSubviews is intentionally omitted — on native it detaches
         // Video backing views during scroll, which can freeze expo-av players.
