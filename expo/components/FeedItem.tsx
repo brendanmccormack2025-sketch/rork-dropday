@@ -459,7 +459,6 @@ export const FeedItem = memo(function FeedItem({
           styles.actions,
           { bottom: bottomInset + 30 },
         ]}
-        pointerEvents="box-none"
       >
         <ActionButton
           icon={

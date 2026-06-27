@@ -186,6 +186,10 @@ export default function DoubleTapLikeZone({
 
 const styles = StyleSheet.create({
   zone: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 100,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 });
