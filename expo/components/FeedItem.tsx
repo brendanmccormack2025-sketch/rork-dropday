@@ -530,7 +530,7 @@ export const FeedItem = memo(function FeedItem({
   );
 },
 (prev, next) =>
-  prev.post.id === next.post.id &&
+  prev.post === next.post &&
   prev.active === next.active &&
   prev.live === next.live);
 

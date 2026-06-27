@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback } from "react";
+import React, { useEffect, useMemo, useCallback } from "react";
 import { Pressable, Share, StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,8 +20,12 @@ import { usePosts, type Post } from "@/providers/PostsProvider";
  */
 export default function ProfileDropsScreen() {
   const router = useRouter();
-  const { myPosts } = usePosts();
+  const { myPosts, refetchMyPosts } = usePosts();
   const insets = useSafeAreaInsets();
+
+  // Refetch on mount so reaction_count and other aggregate fields are
+  // current — avoids inheriting a stale cached payload from the profile tab.
+  useEffect(() => { refetchMyPosts(); }, [refetchMyPosts]);
   const params = useLocalSearchParams<{ initialIndex: string }>();
   const initialIndex = parseInt(params.initialIndex ?? "0", 10);
 
