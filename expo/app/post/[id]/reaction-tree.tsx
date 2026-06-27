@@ -5,6 +5,7 @@ import {
   Alert,
   Dimensions,
   FlatList,
+  InteractionManager,
   Pressable,
   StyleSheet,
   View,
@@ -194,12 +195,15 @@ export default function ReactionTreeScreen() {
   // but silently fail to start playback.
   useFocusEffect(
     useCallback(() => {
-      setScreenFocused(true);
-      Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-      }).catch(() => {});
+      const task = InteractionManager.runAfterInteractions(() => {
+        setScreenFocused(true);
+        Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+        }).catch(() => {});
+      });
       return () => {
+        task.cancel();
         setScreenFocused(false);
       };
     }, []),
