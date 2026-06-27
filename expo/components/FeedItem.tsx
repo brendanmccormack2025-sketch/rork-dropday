@@ -473,7 +473,7 @@ export const FeedItem = memo(function FeedItem({
         />
         <ActionButton
           icon={<Sparkles color="#fff" size={28} strokeWidth={1.8} />}
-          label={String(post.reaction_count ?? 0)}
+          label={String(reactionCount)}
           onPress={onReactions}
         />
         <ActionButton

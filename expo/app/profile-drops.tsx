@@ -3,6 +3,7 @@ import { Pressable, Share, StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react-native";
 
 import { FeedListView } from "@/components/FeedListView";
@@ -20,12 +21,18 @@ import { usePosts, type Post } from "@/providers/PostsProvider";
  */
 export default function ProfileDropsScreen() {
   const router = useRouter();
-  const { myPosts, refetchMyPosts } = usePosts();
+  const qc = useQueryClient();
+  const { myPosts } = usePosts();
   const insets = useSafeAreaInsets();
 
-  // Refetch on mount so reaction_count and other aggregate fields are
-  // current — avoids inheriting a stale cached payload from the profile tab.
-  useEffect(() => { refetchMyPosts(); }, [refetchMyPosts]);
+  // Invalidate caches on mount so reaction_count and reaction-tree data
+  // are current — avoids inheriting stale cached payloads.
+  // invalidateQueries is more reliable than refetch() because it forces
+  // a background refetch even if another fetch is already in-flight.
+  useEffect(() => {
+    qc.invalidateQueries({ queryKey: ["posts", "mine"] });
+    qc.invalidateQueries({ queryKey: ["posts", "all-reactions"] });
+  }, [qc]);
   const params = useLocalSearchParams<{ initialIndex: string }>();
   const initialIndex = parseInt(params.initialIndex ?? "0", 10);
 
