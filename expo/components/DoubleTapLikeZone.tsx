@@ -187,9 +187,9 @@ export default function DoubleTapLikeZone({
 const styles = StyleSheet.create({
   zone: {
     position: "absolute",
-    top: 100,
+    top: 120,
     left: 0,
-    right: 0,
+    right: 80,
     bottom: 0,
   },
 });
