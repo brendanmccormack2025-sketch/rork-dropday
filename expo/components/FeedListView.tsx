@@ -8,6 +8,7 @@ import {
   View,
   ViewToken,
 } from "react-native";
+import { useFocusEffect } from "expo-router";
 import { useVideoFocus } from "@/hooks/useVideoFocus";
 import { FeedItem } from "@/components/FeedItem";
 import { theme, getDropWindowState } from "@/constants/theme";
@@ -71,7 +72,16 @@ export function FeedListView({
   bottomInset,
 }: FeedListViewProps) {
   const tabFocused = useVideoFocus();
-  const screenFocused = forceFocused ?? tabFocused;
+
+  const [isFocused, setIsFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => setIsFocused(false);
+    }, []),
+  );
+
+  const screenFocused = (forceFocused ?? tabFocused) && isFocused;
 
   const [activeIndex, setActiveIndex] = useState<number>(initialIndex);
   const listRef = useRef<FlatList<Post>>(null);
