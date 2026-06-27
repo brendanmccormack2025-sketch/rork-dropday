@@ -42,7 +42,7 @@ export default function ReactionTreeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const [activeIndex, setActiveIndex] = useState<number>(0);
-  const [screenFocused, setScreenFocused] = useState<boolean>(true);
+  const [screenFocused, setScreenFocused] = useState<boolean>(false);
 
   // ── Query 1: root Drop's creator ──────────────────────────────────────
   const rootDropQuery = useQuery({
