@@ -46,7 +46,7 @@ export default function ProfileDropsScreen() {
 
   const handleReactions = useCallback(
     (post: Post) => {
-      router.push(`/post/${post.id}/reaction-tree` as never);
+      router.navigate(`/post/${post.id}/reaction-tree` as never);
     },
     [router],
   );
