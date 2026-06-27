@@ -174,7 +174,9 @@ export function FeedListView({
       />
 
       {/* Custom header overlay */}
-      {headerComponent}
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        {headerComponent}
+      </View>
 
       {/* Gate overlay */}
       {showGate && gateComponent}
