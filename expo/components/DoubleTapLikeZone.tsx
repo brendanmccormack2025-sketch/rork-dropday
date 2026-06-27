@@ -4,6 +4,7 @@ import {
   Pressable,
   StyleSheet,
   type GestureResponderEvent,
+  type ViewStyle,
 } from "react-native";
 import { Heart } from "lucide-react-native";
 import { theme } from "@/constants/theme";
@@ -95,6 +96,8 @@ interface DoubleTapLikeZoneProps {
   onSingleTap?: () => void;
   /** Optional children to render inside the zone (behind the hearts). */
   children?: React.ReactNode;
+  /** Optional style to constrain the tap zone (e.g. exclude button areas). */
+  style?: ViewStyle;
 }
 
 /**
@@ -110,6 +113,7 @@ export default function DoubleTapLikeZone({
   onLike,
   onSingleTap,
   children,
+  style,
 }: DoubleTapLikeZoneProps) {
   const lastTapRef = useRef<number>(0);
   const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -166,7 +170,7 @@ export default function DoubleTapLikeZone({
   );
 
   return (
-    <Pressable onPress={handlePress} style={styles.zone}>
+    <Pressable onPress={handlePress} style={[styles.zone, style]}>
       {children}
       {hearts.map((h) => (
         <FloatingHeart

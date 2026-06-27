@@ -40,6 +40,9 @@ export interface FeedListViewProps {
   onSharePost?: (post: Post) => void;
   /** Called when the reactions button is tapped on a post */
   onReactionsPost?: (post: Post) => void;
+  /** Bottom offset for action buttons and user info (default: 88 = tab bar height).
+   *  Pass a safe-area-based value on screens without a tab bar. */
+  bottomInset?: number;
 }
 
 /**
@@ -65,6 +68,7 @@ export function FeedListView({
   forceFocused,
   onSharePost,
   onReactionsPost,
+  bottomInset,
 }: FeedListViewProps) {
   const tabFocused = useVideoFocus();
   const screenFocused = forceFocused ?? tabFocused;
@@ -101,12 +105,13 @@ export function FeedListView({
         post={item}
         active={index === activeIndex && screenFocused}
         live={win.isOpen}
-        onShare={() => onSharePost?.(item)}
-        onReactions={() => onReactionsPost?.(item)}
+        bottomInset={bottomInset}
+        onShare={() => { console.log("[DEBUG] FeedListView onShare called, onSharePost=", typeof onSharePost); onSharePost?.(item); }}
+        onReactions={() => { console.log("[DEBUG] FeedListView onReactions called, onReactionsPost=", typeof onReactionsPost); onReactionsPost?.(item); }}
         onRetry={() => retryOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),
-    [activeIndex, screenFocused, win.isOpen, retryOptimisticPost],
+    [activeIndex, screenFocused, win.isOpen, retryOptimisticPost, bottomInset],
   );
 
   const safeInitialIndex = Math.max(0, Math.min(initialIndex, posts.length - 1));
@@ -136,7 +141,9 @@ export function FeedListView({
         getItemLayout={posts.length > 0 ? getItemLayout : undefined}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
-        scrollEnabled={!showGate}
+        // DEBUG: scrollEnabled forced to false to test if FlatList scroll
+        // gestures are intercepting button taps
+        scrollEnabled={false}
         // windowSize=5 instead of 3 gives more buffer before views are recycled.
         // removeClippedSubviews is intentionally omitted — on native it detaches
         // Video backing views during scroll, which can freeze expo-av players.

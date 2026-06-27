@@ -2,6 +2,7 @@ import React, { memo, useEffect, useMemo, useRef, useState, useCallback } from "
 import {
   ActivityIndicator,
   Alert,
+  Button,
   Dimensions,
   Pressable,
   StyleSheet,
@@ -30,6 +31,8 @@ import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDe
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
+/** Height reserved for the action buttons + username row at the bottom of each feed item. */
+const BOTTOM_OVERLAY_HEIGHT = 130;
 
 function ActionButton({
   icon,
@@ -66,6 +69,7 @@ export const FeedItem = memo(function FeedItem({
   onShare,
   onReactions,
   onRetry,
+  bottomInset = TAB_BAR_HEIGHT,
 }: {
   post: Post;
   active: boolean;
@@ -73,6 +77,8 @@ export const FeedItem = memo(function FeedItem({
   onShare: () => void;
   onReactions: () => void;
   onRetry: () => void;
+  /** Bottom offset for action buttons and user info — TAB_BAR_HEIGHT on main feed, safe-area-based on profile view. */
+  bottomInset?: number;
 }) {
   const [liked, setLiked] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
@@ -298,6 +304,7 @@ export const FeedItem = memo(function FeedItem({
 
   // ── Delete this Drop (owner only) ──────────────────────────────────
   const handleDelete = useCallback(() => {
+    console.log("[DEBUG] delete button onPress FIRED");
     Alert.alert(
       "Delete this Drop?",
       "This can't be undone.",
@@ -354,10 +361,11 @@ export const FeedItem = memo(function FeedItem({
             }}
           />
 
-          {/* Double-tap to like zone */}
+          {/* Double-tap to like zone — constrained so it does not overlap action buttons */}
           <DoubleTapLikeZone
             onLike={() => setLiked(true)}
             onSingleTap={() => setIsPaused((v) => !v)}
+            style={{ bottom: bottomInset + BOTTOM_OVERLAY_HEIGHT }}
           />
 
           {/* Buffering indicator */}
@@ -446,9 +454,16 @@ export const FeedItem = memo(function FeedItem({
         pointerEvents="none"
       />
 
-      {/* zIndex ensures action buttons sit above the DoubleTapLikeZone Pressable
-          in the touch responder chain, preventing tap hijacking on some view hierarchies. */}
-      <View style={styles.actions} pointerEvents="box-none">
+      {/* DEBUG: Action buttons rendered outside the video container.
+          pointerEvents changed from "box-none" to "auto" to test if
+          "box-none" is causing touch passthrough. */}
+      <View
+        style={[
+          styles.actions,
+          { bottom: bottomInset + 30 },
+        ]}
+        pointerEvents="auto"
+      >
         <ActionButton
           icon={
             <Heart
@@ -461,26 +476,41 @@ export const FeedItem = memo(function FeedItem({
           label={String((post.like_count ?? 0) + (liked ? 1 : 0))}
           onPress={() => setLiked((v) => !v)}
         />
-        <ActionButton
-          icon={<Sparkles color="#fff" size={28} strokeWidth={2} />}
-          label={String(reactionCount)}
-          onPress={onReactions}
-        />
-        <ActionButton
-          icon={<Send color="#fff" size={26} strokeWidth={2} />}
-          label="Share"
-          onPress={onShare}
-        />
-        {isOwner && (
-          <ActionButton
-            icon={<Trash2 color="rgba(255,255,255,0.85)" size={24} strokeWidth={2} />}
-            label="Delete"
-            onPress={handleDelete}
+        {/* DEBUG: react button temporarily replaced with plain Button */}
+        <View style={{ backgroundColor: "red", padding: 4, borderRadius: 4, marginBottom: 4 }}>
+          <Button
+            title="REACT"
+            color="#fff"
+            onPress={() => { console.log("[DEBUG] react Button onPress FIRED"); onReactions(); }}
           />
+        </View>
+        {/* DEBUG: share button temporarily replaced with plain Button */}
+        <View style={{ backgroundColor: "blue", padding: 4, borderRadius: 4, marginBottom: 4 }}>
+          <Button
+            title="SHARE"
+            color="#fff"
+            onPress={() => { console.log("[DEBUG] share Button onPress FIRED"); onShare(); }}
+          />
+        </View>
+        {isOwner && (
+          /* DEBUG: delete button temporarily replaced with plain Button */
+          <View style={{ backgroundColor: "rgba(255,0,0,0.6)", padding: 4, borderRadius: 4 }}>
+            <Button
+              title="DELETE"
+              color="#fff"
+              onPress={() => { console.log("[DEBUG] delete Button onPress FIRED"); handleDelete(); }}
+            />
+          </View>
         )}
       </View>
 
-      <View style={styles.bottom} pointerEvents="box-none">
+      <View
+        style={[
+          styles.bottom,
+          { bottom: bottomInset + 24 },
+        ]}
+        pointerEvents="box-none"
+      >
         {isLiveDrop && (
           <View style={styles.liveTag}>
             <View style={styles.livePulse} />
@@ -532,10 +562,9 @@ const styles = StyleSheet.create({
   actions: {
     position: "absolute",
     right: 12,
-    bottom: TAB_BAR_HEIGHT + 30,
     alignItems: "center",
     gap: 22,
-    zIndex: 10,
+    zIndex: 999,
   },
   actionBtn: { alignItems: "center", gap: 4 },
   actionLabel: {
@@ -551,8 +580,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 16,
     right: 80,
-    bottom: TAB_BAR_HEIGHT + 24,
     gap: 8,
+    zIndex: 999,
   },
   liveTag: {
     flexDirection: "row",

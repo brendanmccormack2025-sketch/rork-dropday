@@ -1,7 +1,7 @@
 import React, { useMemo, useCallback } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react-native";
@@ -23,6 +23,7 @@ import { supabase } from "@/lib/supabase";
 export default function ProfileDropsScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ userId: string; initialIndex: string }>();
   const userId = params.userId ?? user?.id ?? "";
   const initialIndex = parseInt(params.initialIndex ?? "0", 10);
@@ -64,6 +65,7 @@ export default function ProfileDropsScreen() {
 
   const handleReactions = useCallback(
     (post: Post) => {
+      console.log("[DEBUG] profile-drops handleReactions called, postId=", post.id);
       router.push(`/post/${post.id}/reaction-tree` as never);
     },
     [router],
@@ -73,6 +75,10 @@ export default function ProfileDropsScreen() {
     () => `@${posts[0]?.profile?.username ?? "profile"}`,
     [posts],
   );
+
+  // Use safe area bottom inset for action buttons / username positioning
+  // (no tab bar on this screen, so base offset is just the home indicator height)
+  const bottomInset = insets.bottom + 8;
 
   return (
     <FeedListView
@@ -84,8 +90,15 @@ export default function ProfileDropsScreen() {
       // immediately without waiting for a tab-focus event.
       forceFocused
       onReactionsPost={handleReactions}
+      bottomInset={bottomInset}
       headerComponent={
-        <SafeAreaView edges={["top"]} style={styles.headerWrap}>
+        <View
+          style={[
+            styles.headerWrap,
+            // Position below status bar / Dynamic Island using safe area top inset
+            { paddingTop: insets.top + 12, zIndex: 999 },
+          ]}
+        >
           <Pressable
             onPress={() => router.back()}
             style={styles.backBtn}
@@ -97,15 +110,22 @@ export default function ProfileDropsScreen() {
             {profileDisplay}
           </UiText>
           <View style={styles.headerSpacer} />
-        </SafeAreaView>
+        </View>
       }
       emptyComponent={
         <View style={styles.emptyWrap}>
-          <SafeAreaView edges={["top"]} style={StyleSheet.absoluteFill}>
+          <View
+            style={{
+              position: "absolute",
+              top: insets.top + 12,
+              left: 16,
+              zIndex: 999,
+            }}
+          >
             <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={12}>
               <ArrowLeft color="#fff" size={24} strokeWidth={2.5} />
             </Pressable>
-          </SafeAreaView>
+          </View>
           <UiText style={styles.emptyTitle}>No drops yet</UiText>
           <UiText style={styles.emptySub}>
             This user hasn't posted any drops.
@@ -127,7 +147,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingTop: 12,
     paddingBottom: 8,
   },
   backBtn: {
