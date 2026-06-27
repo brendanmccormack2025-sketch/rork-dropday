@@ -95,8 +95,8 @@ function RootLayoutNav() {
         <Stack.Screen
           name="post/[id]/reaction-tree"
           options={{
-            presentation: "card",
-            animation: "slide_from_right",
+            presentation: "fullScreenModal",
+            animation: "slide_from_bottom",
             headerShown: false,
             contentStyle: { backgroundColor: theme.bg },
           }}
