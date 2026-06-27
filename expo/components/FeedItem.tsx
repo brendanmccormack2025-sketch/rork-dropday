@@ -359,11 +359,13 @@ export const FeedItem = memo(function FeedItem({
             }}
           />
 
-          {/* Double-tap to like zone — constrained so it does not overlap action buttons */}
+          {/* Double-tap to like zone */}
           <DoubleTapLikeZone
             onLike={() => setLiked(true)}
             onSingleTap={() => setIsPaused((v) => !v)}
-            style={{ bottom: bottomInset + BOTTOM_OVERLAY_HEIGHT }}
+            style={{
+              bottom: bottomInset + BOTTOM_OVERLAY_HEIGHT,
+            }}
           />
 
           {/* Buffering indicator */}

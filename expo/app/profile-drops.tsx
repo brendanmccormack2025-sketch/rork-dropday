@@ -87,8 +87,7 @@ export default function ProfileDropsScreen() {
         <View
           style={[
             styles.headerWrap,
-            // Position below status bar / Dynamic Island using safe area top inset
-            { paddingTop: insets.top + 12, zIndex: 999 },
+            { paddingTop: insets.top + 12 },
           ]}
         >
           <Pressable
