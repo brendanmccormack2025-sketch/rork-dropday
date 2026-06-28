@@ -505,13 +505,24 @@ export const FeedItem = memo(function FeedItem({
           </View>
         )}
         <View style={styles.userRow}>
-          <View style={styles.avatar}>
-            <FeedAvatar
-              profile={post.profile}
-              name={name}
-            />
-          </View>
-          <UiText style={styles.username}>@{post.profile?.username ?? "dropper"}</UiText>
+          <Pressable
+            onPress={() => {
+              if (!user?.id || !post.user_id) return;
+              if (post.user_id === user.id) {
+                router.push("/(tabs)/profile" as never);
+              } else {
+                router.push(`/user/${post.user_id}` as never);
+              }
+            }}
+            style={styles.userRowPressable}
+          >
+            <View style={styles.avatar}>
+              <FeedAvatar profile={post.profile} name={name} />
+            </View>
+            <UiText style={styles.username}>
+              @{post.profile?.username ?? "dropper"}
+            </UiText>
+          </Pressable>
           <UiText style={styles.dotSep}>·</UiText>
           <UiText style={styles.ago}>{ago}</UiText>
         </View>
@@ -593,6 +604,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   userRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  userRowPressable: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   avatar: {
     width: 30,
     height: 30,

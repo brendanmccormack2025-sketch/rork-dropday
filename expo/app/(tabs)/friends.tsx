@@ -200,7 +200,19 @@ export default function FriendsScreen() {
             const initial = displayName.charAt(0).toUpperCase();
 
             return (
-              <View style={styles.userRow}>
+              <Pressable
+                onPress={() => {
+                  if (item.id === user?.id) {
+                    router.push("/(tabs)/profile" as never);
+                  } else {
+                    router.push(`/user/${item.id}` as never);
+                  }
+                }}
+                style={({ pressed }) => [
+                  styles.userRow,
+                  pressed && styles.userRowPressed,
+                ]}
+              >
                 <View style={styles.avatar}>
                   <FeedAvatar
                     profile={item}
@@ -239,7 +251,7 @@ export default function FriendsScreen() {
                     </>
                   )}
                 </Pressable>
-              </View>
+              </Pressable>
             );
           }}
         />
@@ -440,6 +452,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginBottom: 2,
+  },
+  userRowPressed: {
+    backgroundColor: "rgba(255,255,255,0.04)",
   },
   avatar: {
     width: 46,

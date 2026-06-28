@@ -371,6 +371,7 @@ function ReactionItem({
   const { post, kind } = item;
   const isReply = kind === "reply";
 
+  const router = useRouter();
   const [liked, setLiked] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const { deleteReaction } = usePosts();
@@ -710,14 +711,24 @@ function ReactionItem({
 
       {/* Bottom info */}
       <View style={styles.bottom} pointerEvents="box-none">
-        <View style={styles.userRow}>
+        <Pressable
+          onPress={() => {
+            if (!authUser?.id || !post.user_id) return;
+            if (post.user_id === authUser.id) {
+              router.push("/(tabs)/profile" as never);
+            } else {
+              router.push(`/user/${post.user_id}` as never);
+            }
+          }}
+          style={styles.userRowPressable}
+        >
           <View style={styles.avatar}>
             <FeedAvatar profile={post.profile} name={name} />
           </View>
           <UiText style={styles.username}>
             @{post.profile?.username ?? "dropper"}
           </UiText>
-        </View>
+        </Pressable>
 
         {post.caption ? (
           <UiText style={styles.caption} numberOfLines={2}>
@@ -920,6 +931,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   userRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  userRowPressable: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   avatar: {
     width: 30,
     height: 30,

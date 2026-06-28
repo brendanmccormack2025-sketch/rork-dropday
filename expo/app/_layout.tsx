@@ -155,6 +155,15 @@ function RootLayoutNav() {
             contentStyle: { backgroundColor: "#0A0A14" },
           }}
         />
+        <Stack.Screen
+          name="user/[id]"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
       </Stack>
     </View>
   );
