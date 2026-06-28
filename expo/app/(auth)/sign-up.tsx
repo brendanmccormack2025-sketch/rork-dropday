@@ -25,11 +25,9 @@ export default function SignUpScreen() {
   const [password, setPassword] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
 
   const onSubmit = async () => {
     setError(null);
-    setInfo(null);
     if (!username.trim() || !email || !password) {
       setError("Pick a username, email, and password.");
       return;
@@ -41,9 +39,6 @@ export default function SignUpScreen() {
     setLoading(true);
     try {
       await signUpWithEmail(email, password, username);
-      setInfo(
-        "Check your inbox to confirm your email, then sign in to start dropping."
-      );
     } catch (e: any) {
       const msg: string = e?.message ?? "Sign-up failed.";
       if (/user already registered/i.test(msg)) {
@@ -106,8 +101,6 @@ export default function SignUpScreen() {
               autoComplete="password-new"
             />
             {error ? <UiText style={styles.error}>{error}</UiText> : null}
-            {info ? <UiText style={styles.info}>{info}</UiText> : null}
-
             <PrimaryButton
               label="Create account"
               onPress={onSubmit}

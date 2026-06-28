@@ -180,18 +180,29 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       inFlight.current.signUp = true;
       try {
         console.log("[auth] signUp ->", email.trim().toLowerCase());
-        const { error } = await supabase.auth.signUp({
+        const { data, error: signUpErr } = await supabase.auth.signUp({
           email: email.trim().toLowerCase(),
           password,
           options: {
             data: { username: username.trim() },
           },
         });
-        if (error) throw error;
-        // Profile row is created by ensureProfile() on the auth state change
-        // event (SIGNED_IN, INITIAL_SESSION, or TOKEN_REFRESHED).
-        // If email confirmation is enabled, no session is returned here —
-        // ensureProfile() will run when the session becomes active.
+        if (signUpErr) throw signUpErr;
+        // If email confirmation is disabled (or the project allows it),
+        // signUp returns an active session immediately — nothing more to do.
+        if (data.session) {
+          console.log("[auth] signUp returned session — user is signed in");
+          return;
+        }
+        // No session — email confirmation is likely required on the server.
+        // Try signing in immediately (works if auto-confirm is on but session
+        // wasn't returned in the initial response).
+        console.log("[auth] signUp no session, trying signInWithPassword");
+        const { error: signInErr } = await supabase.auth.signInWithPassword({
+          email: email.trim().toLowerCase(),
+          password,
+        });
+        if (signInErr) throw signInErr;
       } finally {
         inFlight.current.signUp = false;
       }
