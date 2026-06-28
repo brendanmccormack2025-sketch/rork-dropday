@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native";
 import UiText from "@/components/UiText";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { useQuery } from "@tanstack/react-query";
@@ -28,7 +28,6 @@ type FollowedProfile = {
 
 export default function NewConversationScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { findOrCreateConversation } = usePosts();
   const [search, setSearch] = useState<string>("");
@@ -122,7 +121,7 @@ export default function NewConversationScreen() {
   );
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
+    <SafeAreaView style={styles.root} edges={["top"]}>
         {/* Header */}
         <View style={styles.header}>
           <Pressable
@@ -183,7 +182,7 @@ export default function NewConversationScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         />
-    </View>
+    </SafeAreaView>
   );
 }
 
