@@ -7,7 +7,6 @@ import {
   Pressable,
   Share,
   StyleSheet,
-  TextInput,
   View,
 } from "react-native";
 import UiText from "@/components/UiText";
@@ -20,7 +19,6 @@ import {
   Music2,
   Send,
   Zap,
-  Search,
   X,
   Users,
   Sparkles,
@@ -42,8 +40,6 @@ export default function FeedScreen() {
   const [now, setNow] = useState<Date>(new Date());
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
-  const [searchOpen, setSearchOpen] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>("");
   const [sharePost, setSharePost] = useState<Post | null>(null);
   const isFirstFocusRef = useRef<boolean>(true);
 
@@ -146,15 +142,7 @@ export default function FeedScreen() {
                 </View>
               </View>
             </View>
-            <Pressable
-              onPress={() => setSearchOpen(true)}
-              style={styles.searchBar}
-            >
-              <Search color="rgba(255,255,255,0.55)" size={15} />
-              <UiText style={styles.searchPlaceholder}>
-                Search friends, creators, hashtags
-              </UiText>
-            </Pressable>
+
           </SafeAreaView>
         }
         emptyComponent={<EmptyState />}
@@ -166,17 +154,6 @@ export default function FeedScreen() {
             />
           ) : undefined
         }
-      />
-
-      {/* Search overlay */}
-      <SearchOverlay
-        visible={searchOpen}
-        onClose={() => {
-          setSearchOpen(false);
-          setSearchQuery("");
-        }}
-        query={searchQuery}
-        onQueryChange={setSearchQuery}
       />
 
       {/* Share sheet */}
@@ -230,64 +207,6 @@ function GateOverlay({
         </UiText>
       </View>
     </View>
-  );
-}
-
-function SearchOverlay({
-  visible,
-  onClose,
-  query,
-  onQueryChange,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  query: string;
-  onQueryChange: (s: string) => void;
-}) {
-  const suggestions = useMemo(
-    () => [
-      { label: "Tonight's top drops", icon: "trending" as const },
-      { label: "Friends online", icon: "friends" as const },
-      { label: "#latenight", icon: "tag" as const },
-      { label: "#dropday", icon: "tag" as const },
-      { label: "New creators", icon: "creator" as const },
-    ],
-    []
-  );
-  return (
-    <Modal visible={visible} animationType="fade" transparent>
-      <View style={styles.searchRoot}>
-        <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
-          <View style={styles.searchHeader}>
-            <View style={styles.searchInputWrap}>
-              <Search color="rgba(255,255,255,0.55)" size={16} />
-              <TextInput
-                value={query}
-                onChangeText={onQueryChange}
-                placeholder="Search DropDay"
-                placeholderTextColor="rgba(255,255,255,0.45)"
-                style={styles.searchInput}
-                autoFocus
-              />
-            </View>
-            <Pressable onPress={onClose} hitSlop={8} style={styles.searchClose}>
-              <UiText style={styles.searchCloseText}>Cancel</UiText>
-            </Pressable>
-          </View>
-          <UiText style={styles.sectionLabel}>Suggestions</UiText>
-          {suggestions
-            .filter((s) => s.label.toLowerCase().includes(query.toLowerCase()))
-            .map((s) => (
-              <Pressable key={s.label} style={styles.suggestionRow}>
-                <View style={styles.suggestionIcon}>
-                  <Search color={theme.accent} size={14} />
-                </View>
-                <UiText style={styles.suggestionText}>{s.label}</UiText>
-              </Pressable>
-            ))}
-        </SafeAreaView>
-      </View>
-    </Modal>
   );
 }
 
@@ -540,26 +459,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.textMuted,
   },
 
-  /* Faint search bar */
-  searchBar: {
-    marginHorizontal: 16,
-    marginTop: 2,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-  },
-  searchPlaceholder: {
-    color: "rgba(255,255,255,0.55)",
-    fontSize: 13,
-    fontWeight: "500" as const,
-  },
-
   /* Empty */
   emptyContainer: {
     flexGrow: 1,
@@ -653,77 +552,6 @@ const styles = StyleSheet.create({
     color: theme.textDim,
     fontSize: 11,
     marginTop: 4,
-  },
-
-  /* Search modal */
-  searchRoot: {
-    flex: 1,
-    backgroundColor: theme.bg,
-  },
-  searchHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 14,
-  },
-  searchInputWrap: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  searchInput: {
-    flex: 1,
-    color: theme.text,
-    fontSize: 14,
-    paddingVertical: 0,
-  },
-  searchClose: {
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-  },
-  searchCloseText: {
-    color: theme.accent,
-    fontSize: 14,
-    fontWeight: "700" as const,
-  },
-  sectionLabel: {
-    color: theme.textMuted,
-    fontSize: 11,
-    fontWeight: "700" as const,
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-    paddingHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 6,
-  },
-  suggestionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  suggestionIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(10,132,255,0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  suggestionText: {
-    color: theme.text,
-    fontSize: 14,
-    fontWeight: "500" as const,
   },
 
   /* Share sheet */
