@@ -138,6 +138,15 @@ function RootLayoutNav() {
           }}
         />
         <Stack.Screen
+          name="dm/new"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
+        <Stack.Screen
           name="profile-drops"
           options={{
             presentation: "fullScreenModal",

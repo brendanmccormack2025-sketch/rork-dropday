@@ -19,6 +19,7 @@ import {
   Heart,
   Instagram,
   LogOut,
+  MessageCircle,
   Music2,
   Pencil,
   Sparkles,
@@ -95,6 +96,8 @@ function ProfileHeader({
   followingCount,
   onFollowersTap,
   onFollowingTap,
+  otherUserId,
+  onSendMessage,
 }: {
   displayName: string;
   username: string;
@@ -109,6 +112,8 @@ function ProfileHeader({
   followingCount: number;
   onFollowersTap: () => void;
   onFollowingTap: () => void;
+  otherUserId?: string | null;
+  onSendMessage?: () => void;
 }) {
   const hasLinks = !!(
     myProfile?.website ||
@@ -138,13 +143,23 @@ function ProfileHeader({
       </View>
 
       {/* Edit Profile button */}
-      <Pressable
-        onPress={onEditProfile}
-        style={styles.editProfileBtn}
-      >
-        <Pencil color={theme.accent} size={16} strokeWidth={2} />
-        <UiText style={styles.editProfileBtnText}>Edit Profile</UiText>
-      </Pressable>
+      {isOwnProfile ? (
+        <Pressable
+          onPress={onEditProfile}
+          style={styles.editProfileBtn}
+        >
+          <Pencil color={theme.accent} size={16} strokeWidth={2} />
+          <UiText style={styles.editProfileBtnText}>Edit Profile</UiText>
+        </Pressable>
+      ) : (
+        <Pressable
+          onPress={onSendMessage}
+          style={styles.editProfileBtn}
+        >
+          <MessageCircle color={theme.accent} size={16} strokeWidth={2} />
+          <UiText style={styles.editProfileBtnText}>Send Message</UiText>
+        </Pressable>
+      )}
 
       {/* Bio */}
       {myProfile?.bio ? (
@@ -231,7 +246,7 @@ function ProfileHeader({
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
-  const { myPosts, myProfile, draftProjects, refetchMyPosts, refetchProfile, following } = usePosts();
+  const { myPosts, myProfile, draftProjects, refetchMyPosts, refetchProfile, following, findOrCreateConversation } = usePosts();
   const qc = useQueryClient();
   const router = useRouter();
   const [tab, setTab] = useState<TabKey>("drops");
@@ -317,6 +332,19 @@ export default function ProfileScreen() {
     } as never);
   }, [router, user?.id]);
 
+  const handleSendMessage = useCallback(async () => {
+    // otherUserId will be provided when viewing another user's profile.
+    // For now, isOwnProfile is always true so this is unreachable.
+    const targetId: string | undefined = undefined;
+    if (!targetId) return;
+    try {
+      const convId = await findOrCreateConversation.mutateAsync(targetId);
+      router.push(`/dm/${convId}` as never);
+    } catch (e) {
+      console.warn("[profile] sendMessage error", (e as Error)?.message ?? e);
+    }
+  }, [findOrCreateConversation, router]);
+
   const headerNode = (
     <ProfileHeader
       displayName={displayName}
@@ -332,6 +360,8 @@ export default function ProfileScreen() {
       followingCount={followingCount}
       onFollowersTap={handleFollowersTap}
       onFollowingTap={handleFollowingTap}
+      otherUserId={null}
+      onSendMessage={handleSendMessage}
     />
   );
 

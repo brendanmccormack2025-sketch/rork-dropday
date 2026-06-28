@@ -11,7 +11,7 @@ import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
-import { ArrowLeft, MessageCircle } from "lucide-react-native";
+import { ArrowLeft, MessageCircle, PenLine } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -115,7 +115,16 @@ export default function InboxScreen() {
             <ArrowLeft color={theme.text} size={22} strokeWidth={2.5} />
           </Pressable>
           <UiText style={styles.headerTitle}>Messages</UiText>
-          <View style={styles.backBtn} />
+          <Pressable
+            onPress={() => router.push("/dm/new" as never)}
+            style={({ pressed }) => [
+              styles.composeBtn,
+              pressed && styles.composeBtnPressed,
+            ]}
+            hitSlop={8}
+          >
+            <PenLine color={theme.accent} size={20} strokeWidth={2.5} />
+          </Pressable>
         </View>
 
         <FlatList
@@ -177,6 +186,20 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
+  },
+  composeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(10,132,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(10,132,255,0.2)",
+  },
+  composeBtnPressed: {
+    backgroundColor: "rgba(10,132,255,0.2)",
+    transform: [{ scale: 0.93 }],
   },
   headerTitle: {
     color: theme.text,
