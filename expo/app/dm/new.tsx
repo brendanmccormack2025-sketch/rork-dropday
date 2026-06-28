@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native";
 import UiText from "@/components/UiText";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { useQuery } from "@tanstack/react-query";
@@ -28,40 +28,35 @@ type FollowedProfile = {
 
 export default function NewConversationScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { following, findOrCreateConversation } = usePosts();
+  const { findOrCreateConversation } = usePosts();
   const [search, setSearch] = useState<string>("");
   const [loadingConvId, setLoadingConvId] = useState<string | null>(null);
 
-  // Fetch profiles for users the current user follows
-  const { data: followedProfiles = [], isLoading } = useQuery({
-    queryKey: ["followed-profiles", ...following],
-    enabled: following.length > 0 && !!user?.id,
+  // Search all profiles matching the search input
+  const { data: searchResults = [], isLoading } = useQuery({
+    queryKey: ["dm-user-search", search],
+    enabled: search.trim().length > 0 && !!user?.id,
     queryFn: async (): Promise<FollowedProfile[]> => {
       const { data, error } = await supabase
         .from("profiles")
         .select("id, username, display_name, avatar_url")
-        .in("id", following);
+        .neq("id", user!.id)
+        .or(`username.ilike.%${search.trim()}%,display_name.ilike.%${search.trim()}%`)
+        .limit(20);
 
       if (error) {
-        console.warn("[dm/new] profile query error", error.message);
+        console.warn("[dm/new] profile search error", error.message);
         return [];
       }
-      return ((data ?? []) as FollowedProfile[]).filter(
-        (p) => p.id !== user?.id,
-      );
+      return (data ?? []) as FollowedProfile[];
     },
   });
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return followedProfiles;
-    const q = search.toLowerCase();
-    return followedProfiles.filter((p) => {
-      const dn = (p.display_name ?? "").toLowerCase();
-      const un = (p.username ?? "").toLowerCase();
-      return dn.includes(q) || un.includes(q);
-    });
-  }, [followedProfiles, search]);
+  const results = useMemo(() => {
+    return searchResults;
+  }, [searchResults]);
 
   const handleSelectUser = useCallback(
     async (userId: string) => {
@@ -127,8 +122,7 @@ export default function NewConversationScreen() {
   );
 
   return (
-    <View style={styles.root}>
-      <SafeAreaView edges={["top"]} style={styles.safe}>
+    <View style={[styles.root, { paddingTop: insets.top }]}>
         {/* Header */}
         <View style={styles.header}>
           <Pressable
@@ -148,7 +142,7 @@ export default function NewConversationScreen() {
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search following..."
+            placeholder="Search users..."
             placeholderTextColor={theme.textDim}
             style={styles.searchInput}
             autoFocus
@@ -157,33 +151,31 @@ export default function NewConversationScreen() {
         </View>
 
         <FlatList
-          data={filtered}
+          data={results}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={
-            filtered.length === 0 ? styles.emptyContainer : undefined
+            results.length === 0 ? styles.emptyContainer : undefined
           }
           ListEmptyComponent={
             isLoading ? (
               <View style={styles.emptyWrap}>
                 <ActivityIndicator color={theme.accent} size="small" />
               </View>
+            ) : !search.trim() ? (
+              <View style={styles.emptyWrap}>
+                <Search color={theme.textDim} size={40} strokeWidth={1.5} />
+                <UiText style={styles.emptyTitle}>Search for users</UiText>
+                <UiText style={styles.emptySub}>
+                  Start typing a name or username to find people.
+                </UiText>
+              </View>
             ) : (
               <View style={styles.emptyWrap}>
                 <Search color={theme.textDim} size={40} strokeWidth={1.5} />
-                <UiText style={styles.emptyTitle}>
-                  {search.trim()
-                    ? "No users found"
-                    : following.length === 0
-                      ? "You're not following anyone yet"
-                      : "No users to message"}
-                </UiText>
+                <UiText style={styles.emptyTitle}>No users found</UiText>
                 <UiText style={styles.emptySub}>
-                  {search.trim()
-                    ? "Try a different search."
-                    : following.length === 0
-                      ? "Follow people to start conversations."
-                      : ""}
+                  Try a different search.
                 </UiText>
               </View>
             )
@@ -191,14 +183,12 @@ export default function NewConversationScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         />
-      </SafeAreaView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.bg },
-  safe: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
