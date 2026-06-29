@@ -22,7 +22,6 @@ import {
   X,
   Users,
   Sparkles,
-  MessageCircle,
 } from "lucide-react-native";
 
 import DropletLogo from "@/components/DropletLogo";
@@ -36,7 +35,7 @@ const FREE_VIEWS_BEFORE_GATE = 5;
 
 export default function FeedScreen() {
   const router = useRouter();
-  const { feed, feedLoading, refetchFeed, refetchMyPosts, optimisticPosts, unreadCount } = usePosts();
+  const { feed, feedLoading, refetchFeed, refetchMyPosts, optimisticPosts } = usePosts();
   const [now, setNow] = useState<Date>(new Date());
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
@@ -113,20 +112,7 @@ export default function FeedScreen() {
                 <UiText style={styles.brand}>DropDay</UiText>
               </View>
               <View style={styles.headerActions} pointerEvents="box-none">
-                <Pressable
-                  onPress={() => router.push("/dm/inbox" as never)}
-                  style={styles.dmBtn}
-                  hitSlop={10}
-                >
-                  <MessageCircle color="#fff" size={22} strokeWidth={2} />
-                  {unreadCount > 0 && (
-                    <View style={styles.dmBadge}>
-                      <UiText style={styles.dmBadgeText}>
-                        {unreadCount > 99 ? "99+" : unreadCount}
-                      </UiText>
-                    </View>
-                  )}
-                </Pressable>
+
                 <View
                   style={[styles.pill, win.isOpen && styles.pillLive]}
                   pointerEvents="none"

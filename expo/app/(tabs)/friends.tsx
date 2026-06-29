@@ -11,7 +11,7 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Send, Users, UserPlus, UserCheck, MessageCircle } from "lucide-react-native";
+import { Send, Users, UserPlus, UserCheck } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
@@ -40,7 +40,6 @@ export default function FriendsScreen() {
     unfollowUser,
     following,
     refetchSuggested,
-    unreadCount,
   } = usePosts();
   const [followPending, setFollowPending] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -113,36 +112,7 @@ export default function FriendsScreen() {
                 Grow your circle. More friends = better feed.
               </UiText>
 
-              {/* DM inbox quick access */}
-              <Pressable
-                onPress={() => router.push("/dm/inbox" as never)}
-                style={({ pressed }) => [
-                  styles.dmInbox,
-                  pressed && styles.dmInboxPressed,
-                ]}
-              >
-                <View style={styles.dmInboxLeft}>
-                  <View style={styles.dmIconWrap}>
-                    <MessageCircle color={theme.accent} size={20} strokeWidth={2} />
-                    {unreadCount > 0 && (
-                      <View style={styles.dmBadge}>
-                        <UiText style={styles.dmBadgeText}>
-                          {unreadCount > 99 ? "99+" : unreadCount}
-                        </UiText>
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.dmTextWrap}>
-                    <UiText style={styles.dmTitle}>Messages</UiText>
-                    <UiText style={styles.dmSub}>
-                      {unreadCount > 0
-                        ? `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`
-                        : "No new messages"}
-                    </UiText>
-                  </View>
-                </View>
-                <MessageCircle color={theme.textMuted} size={16} strokeWidth={2} />
-              </Pressable>
+
 
               {/* Invite block */}
               <View style={styles.inviteBlock}>
