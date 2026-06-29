@@ -115,7 +115,7 @@ export default function WelcomeScreen() {
           {/* Drop window badge */}
           <View style={styles.windowBadge}>
             <View style={styles.dot} />
-            <UiText style={styles.windowText}>8 PM – 12 AM nightly</UiText>
+            <UiText style={styles.windowText}>8 PM – 10 PM nightly</UiText>
           </View>
 
           <PrimaryButton
