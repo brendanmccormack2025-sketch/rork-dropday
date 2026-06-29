@@ -3,6 +3,7 @@ import {
   Animated,
   Easing,
   Platform,
+  Pressable,
   StyleSheet,
   View,
 } from "react-native";
@@ -121,7 +122,7 @@ export default function WelcomeScreen() {
           <PrimaryButton
             label="Continue with Email"
             icon={<Mail color="#fff" size={18} />}
-            onPress={() => router.push("/(auth)/sign-in")}
+            onPress={() => router.push("/(auth)/sign-up")}
           />
 
           {Platform.OS === "ios" ? (
@@ -159,6 +160,15 @@ export default function WelcomeScreen() {
           <UiText style={styles.legal}>
             By continuing you agree to be part of the nightly drop.
           </UiText>
+          <Pressable
+            onPress={() => router.push("/(auth)/sign-in")}
+            style={styles.switch}
+          >
+            <UiText style={styles.switchText}>
+              Already have an account?{" "}
+              <UiText style={styles.switchAccent}>Sign in</UiText>
+            </UiText>
+          </Pressable>
         </View>
       </SafeAreaView>
     </ScreenBackground>
@@ -239,4 +249,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
   },
+  switch: { alignItems: "center", marginTop: 6 },
+  switchText: { color: theme.textMuted, fontSize: 14 },
+  switchAccent: { color: theme.accent, fontWeight: "700" as const },
 });

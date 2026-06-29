@@ -36,9 +36,7 @@ export default function SignInScreen() {
       await signInWithEmail(email, password);
     } catch (e: any) {
       const msg: string = e?.message ?? "Sign-in failed.";
-      if (/email not confirmed/i.test(msg)) {
-        setError("Confirm your email first — check your inbox.");
-      } else if (/invalid login credentials/i.test(msg)) {
+      if (/invalid login credentials/i.test(msg)) {
         setError("That email and password don't match.");
       } else {
         setError(msg);
@@ -90,15 +88,7 @@ export default function SignInScreen() {
               onPress={onSubmit}
               loading={loading}
             />
-            <Pressable
-              onPress={() => router.replace("/(auth)/sign-up")}
-              style={styles.switch}
-            >
-              <UiText style={styles.switchText}>
-                New here?{" "}
-                <UiText style={styles.switchAccent}>Create an account</UiText>
-              </UiText>
-            </Pressable>
+
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -165,7 +155,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "500" as const,
   },
-  switch: { alignItems: "center", marginTop: 6 },
-  switchText: { color: theme.textMuted, fontSize: 14 },
-  switchAccent: { color: theme.accent, fontWeight: "700" as const },
+
 });

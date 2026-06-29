@@ -194,15 +194,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           console.log("[auth] signUp returned session — user is signed in");
           return;
         }
-        // No session — email confirmation is likely required on the server.
-        // Try signing in immediately (works if auto-confirm is on but session
-        // wasn't returned in the initial response).
-        console.log("[auth] signUp no session, trying signInWithPassword");
-        const { error: signInErr } = await supabase.auth.signInWithPassword({
-          email: email.trim().toLowerCase(),
-          password,
-        });
-        if (signInErr) throw signInErr;
+        // No session — the onAuthStateChange listener will handle sign-in
+        // automatically when Supabase fires the appropriate event.
+        console.log("[auth] signUp no session — waiting for auth state change");
       } finally {
         inFlight.current.signUp = false;
       }
