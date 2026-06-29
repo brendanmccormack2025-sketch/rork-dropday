@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   StyleSheet,
@@ -15,6 +16,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Search } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
+import { showAlert } from "@/lib/showAlert";
 import { useAuth } from "@/providers/AuthProvider";
 import { usePosts, resolveAvatarUrl } from "@/providers/PostsProvider";
 import { supabase } from "@/lib/supabase";
@@ -65,7 +67,8 @@ export default function NewConversationScreen() {
         const convId = await findOrCreateConversation.mutateAsync(userId);
         router.replace(`/dm/${convId}` as never);
       } catch (e) {
-        console.warn("[dm/new] findOrCreateConversation error", (e as Error)?.message ?? e);
+        console.error("[dm/new] findOrCreateConversation full error:", JSON.stringify(e), (e as Error)?.message, (e as Error)?.stack);
+        Alert.alert("Couldn't start conversation", (e as Error)?.message ?? "Something went wrong. Please try again.");
       } finally {
         setLoadingConvId(null);
       }
