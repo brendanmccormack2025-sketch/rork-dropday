@@ -206,6 +206,16 @@ export type Database = {
           username: string
         }[]
       }
+      get_explore_creators: {
+        Args: never
+        Returns: {
+          avatar_url: string
+          display_name: string
+          id: string
+          total_engagement: number
+          username: string
+        }[]
+      }
       get_reaction_tree: {
         Args: { root_id: string }
         Returns: {
