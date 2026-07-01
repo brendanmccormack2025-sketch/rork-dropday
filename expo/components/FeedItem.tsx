@@ -83,7 +83,6 @@ export const FeedItem = memo(function FeedItem({
   const { reactionsByParent, deletePost, toggleLike, likedPosts } = usePosts();
   const { user } = useAuth();
   const liked = likedPosts.some((p) => p.id === post.id);
-  console.log("[FeedItem]", post.id.slice(0, 8), "user:", user?.id?.slice(0, 8), "likedPosts count:", likedPosts.length, "liked:", liked);
   const [likedOptimistic, setLikedOptimistic] = useState<boolean>(liked);
   // Sync optimistic state when the source-of-truth changes (e.g. query refetch)
   useEffect(() => { setLikedOptimistic(liked); }, [liked]);

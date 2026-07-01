@@ -282,7 +282,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     queryClient.clear();
-    console.log("[signOut] cache cleared");
   }, [queryClient]);
 
   return useMemo(
