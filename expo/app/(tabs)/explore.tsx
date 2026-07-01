@@ -126,8 +126,9 @@ export default function ExploreScreen() {
     (userId: string) => {
       if (userId === user?.id) {
         router.push("/(tabs)/profile" as never);
+      } else {
+        router.push({ pathname: "/user/[id]", params: { id: userId } } as never);
       }
-      // For navigating to other users' profiles — future profile view route
     },
     [router, user?.id],
   );
