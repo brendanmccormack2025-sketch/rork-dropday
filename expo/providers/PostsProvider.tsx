@@ -753,6 +753,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["posts", "liked"] });
+      qc.invalidateQueries({ queryKey: ["posts"] });
     },
   });
 
