@@ -10,7 +10,7 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import { ArrowLeft } from "lucide-react-native";
+import { ArrowLeft, Mail } from "lucide-react-native";
 
 import ScreenBackground from "@/components/ScreenBackground";
 import PrimaryButton from "@/components/PrimaryButton";
@@ -25,6 +25,7 @@ export default function SignUpScreen() {
   const [password, setPassword] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [showCheckInbox, setShowCheckInbox] = useState<boolean>(false);
 
   const onSubmit = async () => {
     setError(null);
@@ -41,6 +42,11 @@ export default function SignUpScreen() {
       await signUpWithEmail(email, password, username);
     } catch (e: any) {
       const msg: string = e?.message ?? "Sign-up failed.";
+      const code: string = (e as any)?.code ?? "";
+      if (/email not confirmed/i.test(msg) || code === "email_not_confirmed") {
+        setShowCheckInbox(true);
+        return;
+      }
       if (/user already registered/i.test(msg)) {
         setError("That email is already registered. Try signing in.");
       } else if (/rate limit/i.test(msg) || /too many/i.test(msg)) {
@@ -56,6 +62,37 @@ export default function SignUpScreen() {
       setLoading(false);
     }
   };
+
+  if (showCheckInbox) {
+    return (
+      <ScreenBackground>
+        <SafeAreaView style={styles.safe}>
+          <Pressable
+            onPress={() => setShowCheckInbox(false)}
+            style={styles.back}
+          >
+            <ArrowLeft color={theme.text} size={22} />
+          </Pressable>
+
+          <View style={styles.checkInboxWrap}>
+            <View style={styles.mailIconWrap}>
+              <Mail color={theme.accent} size={40} />
+            </View>
+            <UiText style={styles.checkInboxTitle}>Check your inbox!</UiText>
+            <UiText style={styles.checkInboxBody}>
+              We sent a confirmation link to{" "}
+              <UiText style={styles.checkInboxEmail}>{email}</UiText>.
+              Tap it, then come back here and sign in.
+            </UiText>
+            <PrimaryButton
+              label="Go to sign in"
+              onPress={() => router.replace("/(auth)/sign-in")}
+            />
+          </View>
+        </SafeAreaView>
+      </ScreenBackground>
+    );
+  }
 
   return (
     <ScreenBackground>
@@ -177,4 +214,36 @@ const styles = StyleSheet.create({
   switch: { alignItems: "center", marginTop: 6 },
   switchText: { color: theme.textMuted, fontSize: 14 },
   switchAccent: { color: theme.accent, fontWeight: "700" as const },
+  checkInboxWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    paddingBottom: 60,
+  },
+  mailIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: theme.card,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  checkInboxTitle: {
+    color: theme.text,
+    fontSize: 24,
+    fontWeight: "800" as const,
+  },
+  checkInboxBody: {
+    color: theme.textMuted,
+    fontSize: 15,
+    textAlign: "center",
+    lineHeight: 22,
+    paddingHorizontal: 24,
+  },
+  checkInboxEmail: {
+    color: theme.accent,
+    fontWeight: "600" as const,
+  },
 });

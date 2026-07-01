@@ -179,24 +179,31 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       inFlight.current.signUp = true;
       try {
-        console.log("[auth] signUp ->", email.trim().toLowerCase());
+        const normalizedEmail = email.trim().toLowerCase();
+        console.log("[auth] signUp ->", normalizedEmail);
         const { data, error: signUpErr } = await supabase.auth.signUp({
-          email: email.trim().toLowerCase(),
+          email: normalizedEmail,
           password,
           options: {
             data: { username: username.trim() },
           },
         });
         if (signUpErr) throw signUpErr;
-        // If email confirmation is disabled (or the project allows it),
-        // signUp returns an active session immediately — nothing more to do.
         if (data.session) {
           console.log("[auth] signUp returned session — user is signed in");
           return;
         }
-        // No session — the onAuthStateChange listener will handle sign-in
-        // automatically when Supabase fires the appropriate event.
-        console.log("[auth] signUp no session — waiting for auth state change");
+        // No session returned — sign in explicitly so the user lands in
+        // the app immediately. This handles the case where email
+        // confirmation is disabled but signUp still doesn't return a
+        // session (observed in some Supabase project configurations).
+        console.log("[auth] signUp no session — signing in explicitly");
+        const { error: signInErr } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
+        if (signInErr) throw signInErr;
+        console.log("[auth] explicit sign-in succeeded");
       } finally {
         inFlight.current.signUp = false;
       }
