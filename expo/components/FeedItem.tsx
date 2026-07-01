@@ -79,10 +79,13 @@ export const FeedItem = memo(function FeedItem({
   /** Bottom offset for action buttons and user info — TAB_BAR_HEIGHT on main feed, safe-area-based on profile view. */
   bottomInset?: number;
 }) {
-  const [liked, setLiked] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
-  const { reactionsByParent, deletePost } = usePosts();
+  const { reactionsByParent, deletePost, toggleLike, likedPosts } = usePosts();
   const { user } = useAuth();
+  const liked = likedPosts.some((p) => p.id === post.id);
+  const [likedOptimistic, setLikedOptimistic] = useState<boolean>(liked);
+  // Sync optimistic state when the source-of-truth changes (e.g. query refetch)
+  useEffect(() => { setLikedOptimistic(liked); }, [liked]);
   const router = useRouter();
   const isOwner = !!user?.id && post.user_id === user.id;
   const reactionCount = reactionsByParent[post.id]?.length ?? 0;
@@ -361,7 +364,12 @@ export const FeedItem = memo(function FeedItem({
 
           {/* Double-tap to like zone */}
           <DoubleTapLikeZone
-            onLike={() => setLiked(true)}
+            onLike={() => {
+              if (!likedOptimistic) {
+                setLikedOptimistic(true);
+                toggleLike.mutate({ postId: post.id, liked: true });
+              }
+            }}
             onSingleTap={() => setIsPaused((v) => !v)}
             style={{
               bottom: bottomInset + BOTTOM_OVERLAY_HEIGHT,
@@ -463,14 +471,18 @@ export const FeedItem = memo(function FeedItem({
         <ActionButton
           icon={
             <Heart
-              color={liked ? theme.danger : "#fff"}
-              fill={liked ? theme.danger : "transparent"}
+              color={likedOptimistic ? theme.danger : "#fff"}
+              fill={likedOptimistic ? theme.danger : "transparent"}
               size={28}
               strokeWidth={2}
             />
           }
-          label={String((post.like_count ?? 0) + (liked ? 1 : 0))}
-          onPress={() => setLiked((v) => !v)}
+          label={String((post.like_count ?? 0) + (likedOptimistic ? 1 : 0))}
+          onPress={() => {
+            const next = !likedOptimistic;
+            setLikedOptimistic(next);
+            toggleLike.mutate({ postId: post.id, liked: next });
+          }}
         />
         <ActionButton
           icon={<Sparkles color="#fff" size={28} strokeWidth={1.8} />}
