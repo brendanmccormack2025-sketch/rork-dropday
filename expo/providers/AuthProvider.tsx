@@ -2,6 +2,7 @@ import createContextHook from "@nkzw/create-context-hook";
 import type { Session, User } from "@supabase/supabase-js";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Platform } from "react-native";
+import { useQueryClient } from "@tanstack/react-query";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
@@ -86,6 +87,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     ready: SUPABASE_READY,
   });
   const inFlight = useRef<Record<string, boolean>>({});
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (!SUPABASE_READY) {
@@ -279,7 +281,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
-  }, []);
+    queryClient.clear();
+  }, [queryClient]);
 
   return useMemo(
     () => ({
