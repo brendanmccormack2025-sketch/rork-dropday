@@ -477,7 +477,7 @@ export const FeedItem = memo(function FeedItem({
               strokeWidth={2}
             />
           }
-          label={String((post.like_count ?? 0) + (likedOptimistic ? 1 : 0))}
+          label={String(post.like_count ?? 0)}
           onPress={() => {
             const next = !likedOptimistic;
             setLikedOptimistic(next);

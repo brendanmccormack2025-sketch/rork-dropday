@@ -751,9 +751,43 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         await supabase.from("likes").delete().eq("user_id", user.id).eq("post_id", postId);
       }
     },
+    onMutate: async ({ postId, liked }) => {
+      // Snapshot current feed caches for rollback on error
+      const prevFyp = qc.getQueryData<Post[]>(["posts", "fyp", user?.id]);
+      const prevMine = qc.getQueryData<Post[]>(["posts", "mine", user?.id]);
+
+      // Optimistically patch like_count in place — no refetch, no reorder
+      const delta = liked ? 1 : -1;
+      if (prevFyp) {
+        qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) =>
+          (old ?? []).map((p) =>
+            p.id === postId ? { ...p, like_count: (p.like_count ?? 0) + delta } : p
+          )
+        );
+      }
+      if (prevMine) {
+        qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) =>
+          (old ?? []).map((p) =>
+            p.id === postId ? { ...p, like_count: (p.like_count ?? 0) + delta } : p
+          )
+        );
+      }
+
+      return { prevFyp, prevMine };
+    },
+    onError: (_error, _vars, context) => {
+      // Rollback optimistic cache patches
+      if (context?.prevFyp) {
+        qc.setQueryData(["posts", "fyp", user?.id], context.prevFyp);
+      }
+      if (context?.prevMine) {
+        qc.setQueryData(["posts", "mine", user?.id], context.prevMine);
+      }
+      // Re-sync likedPosts so FeedItem's likedOptimistic useEffect reverts
+      qc.invalidateQueries({ queryKey: ["posts", "liked"] });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["posts", "liked"] });
-      qc.invalidateQueries({ queryKey: ["posts"] });
     },
   });
 
