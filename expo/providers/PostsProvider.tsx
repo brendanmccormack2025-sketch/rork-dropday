@@ -703,6 +703,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(100);
+        console.log("[likedPostsQuery]", "user:", user?.id?.slice(0, 8), "rows returned:", likeRows?.length ?? 0);
         if (likeErr || !likeRows?.length) return [];
 
         const postIds = likeRows.map((r: { post_id: string }) => r.post_id);
