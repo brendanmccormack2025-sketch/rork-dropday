@@ -1476,6 +1476,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
       console.log("[createPost] BEFORE insert — row keys:", Object.keys(row), "media_url:", (row.media_url as string)?.slice(0, 50));
       const { data: insData, error: insErr } = await supabase.from("posts").insert(row).select("id, created_at").single();
+      console.log("[DEBUG] Post insert result:", { data: insData, error: insErr });
       console.log("[createPost] AFTER insert — result:", JSON.stringify({ hasData: !!insData, hasError: !!insErr, id: insData?.id, created_at: insData?.created_at, errorMessage: insErr?.message, errorCode: insErr?.code }));
 
       if (insErr) {
