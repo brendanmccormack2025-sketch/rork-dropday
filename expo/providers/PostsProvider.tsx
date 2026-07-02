@@ -935,10 +935,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         .insert({ follower_id: user.id, followee_id: followeeId });
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_data, followeeId) => {
       qc.invalidateQueries({ queryKey: ["follows"] });
       qc.invalidateQueries({ queryKey: ["suggested"] });
       qc.invalidateQueries({ queryKey: ["posts"] });
+      qc.invalidateQueries({ queryKey: ["is-following", user?.id, followeeId] });
     },
   });
 
@@ -952,10 +953,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         .eq("followee_id", followeeId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_data, followeeId) => {
       qc.invalidateQueries({ queryKey: ["follows"] });
       qc.invalidateQueries({ queryKey: ["suggested"] });
       qc.invalidateQueries({ queryKey: ["posts"] });
+      qc.invalidateQueries({ queryKey: ["is-following", user?.id, followeeId] });
     },
   });
 
