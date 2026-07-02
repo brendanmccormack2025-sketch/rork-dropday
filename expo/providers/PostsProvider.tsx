@@ -939,7 +939,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       qc.invalidateQueries({ queryKey: ["follows"] });
       qc.invalidateQueries({ queryKey: ["suggested"] });
       qc.invalidateQueries({ queryKey: ["posts"] });
-      qc.invalidateQueries({ queryKey: ["is-following", user?.id, followeeId] });
+      qc.invalidateQueries({ queryKey: ["followers-count", followeeId] });
+      qc.invalidateQueries({
+        queryKey: ["is-following"],
+        predicate: (query) => query.queryKey[2] === followeeId,
+      });
     },
   });
 
@@ -957,7 +961,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       qc.invalidateQueries({ queryKey: ["follows"] });
       qc.invalidateQueries({ queryKey: ["suggested"] });
       qc.invalidateQueries({ queryKey: ["posts"] });
-      qc.invalidateQueries({ queryKey: ["is-following", user?.id, followeeId] });
+      qc.invalidateQueries({ queryKey: ["followers-count", followeeId] });
+      qc.invalidateQueries({
+        queryKey: ["is-following"],
+        predicate: (query) => query.queryKey[2] === followeeId,
+      });
     },
   });
 
