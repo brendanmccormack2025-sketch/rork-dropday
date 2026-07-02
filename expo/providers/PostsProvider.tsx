@@ -929,10 +929,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
   const followUser = useMutation({
     mutationFn: async (followeeId: string) => {
+      console.log("[follow-debug] followUser mutationFn called with:", followeeId);
       if (!user?.id) throw new Error("Not signed in.");
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("follows")
         .insert({ follower_id: user.id, followee_id: followeeId });
+      console.log("[follow-debug] follow insert result:", { data, error });
       if (error) throw error;
     },
     onSuccess: (_data, followeeId) => {

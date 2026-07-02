@@ -165,6 +165,7 @@ export default function PublicProfileScreen() {
     if (!id || isOwnProfile || followPending) return;
     setFollowPending(true);
     try {
+      console.log("[follow-debug] isFollowing:", isFollowing, "calling:", isFollowing ? "unfollow" : "follow");
       if (isFollowing) {
         await unfollowUser.mutateAsync(id);
       } else {
