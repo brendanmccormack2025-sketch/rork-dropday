@@ -148,15 +148,41 @@ const FeedTextOverlay = memo(function FeedTextOverlay({
   const left = clampedX * containerW;
   const top = clampedY * containerH;
 
+  // Scale font size: editor's fontSize is relative to its small letterboxed
+  // preview frame (~250px wide). Scale up proportionally to the feed's
+  // full-screen container so text appears at the correct visual proportion.
+  const ASSUMED_EDITOR_FRAME_WIDTH = 250;
+  const fontScale = containerW / ASSUMED_EDITOR_FRAME_WIDTH;
+  const scaledFontSize = (overlay.fontSize ?? 26) * fontScale;
+
+  // Measure the text box via onLayout so we can center it on the stored
+  // x/y point — matching the editor's DraggableTextOverlay which offsets
+  // by -textWidth/2, -textHeight/2 (lines 377-378).
+  const [textSize, setTextSize] = useState<{ w: number; h: number }>(
+    { w: 0, h: 0 },
+  );
+
   return (
     <View
       pointerEvents="none"
+      onLayout={(e) => {
+        const { width, height } = e.nativeEvent.layout;
+        if (width > 0 && height > 0) {
+          setTextSize((prev) =>
+            prev.w === width && prev.h === height ? prev : { w: width, h: height },
+          );
+        }
+      }}
       style={[
         styles.textOverlayWrap,
         {
           left,
           top,
-          transform: [{ translateX: -9999 }, { rotate: `${overlay.rotation}deg` }, { translateX: 9999 }],
+          transform: [
+            { translateX: -textSize.w / 2 },
+            { translateY: -textSize.h / 2 },
+            { rotate: `${overlay.rotation}deg` },
+          ],
         },
       ]}
     >
@@ -165,7 +191,7 @@ const FeedTextOverlay = memo(function FeedTextOverlay({
           styles.textOverlayText,
           {
             color,
-            fontSize: overlay.fontSize,
+            fontSize: scaledFontSize,
             backgroundColor,
           },
         ]}
