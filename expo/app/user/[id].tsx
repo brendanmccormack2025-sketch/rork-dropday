@@ -151,7 +151,7 @@ export default function PublicProfileScreen() {
       if (!user?.id || !id) return false;
       const { data, error } = await supabase
         .from("follows")
-        .select("id")
+        .select("follower_id")
         .eq("follower_id", user.id)
         .eq("followee_id", id)
         .maybeSingle();
@@ -169,7 +169,7 @@ export default function PublicProfileScreen() {
       // Raw check: does a follows row already exist?
       const { data: existingRow, error: rawErr } = await supabase
         .from("follows")
-        .select("id, follower_id, followee_id, created_at")
+        .select("follower_id, followee_id, created_at")
         .eq("follower_id", user!.id)
         .eq("followee_id", id)
         .maybeSingle();
