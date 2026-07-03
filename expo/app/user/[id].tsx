@@ -144,41 +144,32 @@ export default function PublicProfileScreen() {
     },
   });
 
-  // ── Follow status: 'none' | 'pending' | 'accepted' ──────────────────
-  const { data: followStatus = "none" } = useQuery({
+  // ── Follow status ─────────────────────────────────────────────────────
+  const { data: isFollowing = false } = useQuery({
     queryKey: ["is-following", user?.id, id],
     enabled: !!user?.id && !!id && !isOwnProfile,
-    queryFn: async (): Promise<"none" | "pending" | "accepted"> => {
-      if (!user?.id || !id) return "none";
+    queryFn: async (): Promise<boolean> => {
+      if (!user?.id || !id) return false;
       const { data, error } = await supabase
         .from("follows")
-        .select("status")
+        .select("follower_id")
         .eq("follower_id", user.id)
         .eq("followee_id", id)
         .maybeSingle();
-      if (error) return "none";
-      if (!data) return "none";
-      return (data.status as "pending" | "accepted") ?? "none";
+      if (error) return false;
+      return !!data;
     },
   });
 
-  const isFollowing = followStatus === "accepted";
-  const isRequested = followStatus === "pending";
-
-  // ── Follow / Unfollow / Cancel request ───────────────────────────────
+  // ── Follow / Unfollow ───────────────────────────────────────────────────
   const handleToggleFollow = useCallback(async () => {
-    console.log("[follow-debug] handler called. id:", id, "isOwnProfile:", isOwnProfile, "followPending:", followPending, "followStatus:", followStatus);
+    console.log("[follow-debug] handler called. id:", id, "isOwnProfile:", isOwnProfile, "followPending:", followPending, "isFollowing:", isFollowing);
     if (!id || isOwnProfile || followPending) return;
     setFollowPending(true);
     try {
-      if (followStatus === "accepted") {
-        // Following → Unfollow (delete row)
-        await unfollowUser.mutateAsync(id);
-      } else if (followStatus === "pending") {
-        // Requested → Cancel request (delete row)
+      if (isFollowing) {
         await unfollowUser.mutateAsync(id);
       } else {
-        // Not following → Follow (insert row; trigger sets status)
         await followUser.mutateAsync(id);
       }
     } catch (e) {
@@ -186,7 +177,7 @@ export default function PublicProfileScreen() {
     } finally {
       setFollowPending(false);
     }
-  }, [id, isOwnProfile, followStatus, followPending, followUser, unfollowUser]);
+  }, [id, isOwnProfile, isFollowing, followPending, followUser, unfollowUser]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -281,25 +272,20 @@ export default function PublicProfileScreen() {
                         disabled={followPending}
                         style={({ pressed }) => [
                           styles.followBtn,
-                          (isFollowing || isRequested) && styles.followBtnActive,
-                          pressed && !isFollowing && !isRequested && styles.followBtnPressed,
-                          pressed && (isFollowing || isRequested) && styles.followBtnActivePressed,
+                          isFollowing && styles.followBtnActive,
+                          pressed && !isFollowing && styles.followBtnPressed,
+                          pressed && isFollowing && styles.followBtnActivePressed,
                         ]}
                       >
                         {followPending ? (
                           <ActivityIndicator
-                            color={isFollowing || isRequested ? theme.textMuted : "#fff"}
+                            color={isFollowing ? theme.textMuted : "#fff"}
                             size="small"
                           />
                         ) : isFollowing ? (
                           <>
                             <UserCheck color={theme.textMuted} size={16} strokeWidth={2.5} />
                             <UiText style={styles.followBtnTextActive}>Following</UiText>
-                          </>
-                        ) : isRequested ? (
-                          <>
-                            <Clock color={theme.textMuted} size={16} strokeWidth={2.5} />
-                            <UiText style={styles.followBtnTextActive}>Requested</UiText>
                           </>
                         ) : (
                           <>

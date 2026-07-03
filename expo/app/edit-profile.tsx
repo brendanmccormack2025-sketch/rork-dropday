@@ -7,7 +7,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   TextInput,
   View,
 } from "react-native";
@@ -25,7 +24,6 @@ import {
   Check,
   Globe,
   Instagram,
-  Lock,
   Music2,
   X,
 } from "lucide-react-native";
@@ -72,9 +70,6 @@ export default function EditProfileScreen() {
     myProfile?.instagram_handle ?? "",
   );
   const [tiktok, setTiktok] = useState(myProfile?.tiktok_handle ?? "");
-  const [isPrivate, setIsPrivate] = useState<boolean>(
-    myProfile?.is_private ?? false,
-  );
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -86,9 +81,8 @@ export default function EditProfileScreen() {
     if (website !== (myProfile?.website ?? "")) return true;
     if (instagram !== (myProfile?.instagram_handle ?? "")) return true;
     if (tiktok !== (myProfile?.tiktok_handle ?? "")) return true;
-    if (isPrivate !== (myProfile?.is_private ?? false)) return true;
     return false;
-  }, [myProfile, displayName, username, bio, website, instagram, tiktok, avatarUri, isPrivate]);
+  }, [myProfile, displayName, username, bio, website, instagram, tiktok, avatarUri]);
 
   const pickAvatar = useCallback(async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -174,7 +168,6 @@ export default function EditProfileScreen() {
         website: website.trim() || null,
         instagram_handle: instagram.trim() || null,
         tiktok_handle: tiktok.trim() || null,
-        is_private: isPrivate,
       });
 
       // Force a fresh refetch so the profile screen has the latest data
@@ -211,7 +204,6 @@ export default function EditProfileScreen() {
     refetchProfile,
     qc,
     router,
-    isPrivate,
   ]);
 
   return (
@@ -411,34 +403,6 @@ export default function EditProfileScreen() {
               />
             </View>
 
-            {/* Privacy toggle */}
-            <View style={styles.field}>
-              <View style={styles.privacyRow}>
-                <View style={styles.privacyInfo}>
-                  <View style={styles.privacyHeader}>
-                    <Lock
-                      color={isPrivate ? theme.accent : theme.textMuted}
-                      size={16}
-                      strokeWidth={2}
-                    />
-                    <UiText style={styles.privacyTitle}>Private Account</UiText>
-                  </View>
-                  <UiText style={styles.privacyDesc}>
-                    When private, only approved followers can see your drops.
-                  </UiText>
-                </View>
-                <Switch
-                  value={isPrivate}
-                  onValueChange={setIsPrivate}
-                  trackColor={{
-                    false: "rgba(255,255,255,0.12)",
-                    true: theme.accent,
-                  }}
-                  thumbColor="#fff"
-                />
-              </View>
-            </View>
-
             {/* Bottom spacer */}
             <View style={styles.bottomSpacer} />
           </ScrollView>
@@ -578,33 +542,6 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
     textAlign: "right",
     marginTop: 4,
-  },
-
-  /* Privacy */
-  privacyRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-  },
-  privacyInfo: {
-    flex: 1,
-    gap: 4,
-  },
-  privacyHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  privacyTitle: {
-    color: theme.text,
-    fontSize: 15,
-    fontWeight: "700" as const,
-  },
-  privacyDesc: {
-    color: theme.textMuted,
-    fontSize: 13,
-    fontWeight: "500" as const,
-    lineHeight: 18,
   },
 
   /* Bottom spacer */

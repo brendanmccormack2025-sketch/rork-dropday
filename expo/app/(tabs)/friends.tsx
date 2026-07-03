@@ -11,7 +11,7 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Send, Users, UserPlus, UserCheck, Clock } from "lucide-react-native";
+import { Send, Users, UserPlus, UserCheck } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
@@ -39,7 +39,6 @@ export default function FriendsScreen() {
     followUser,
     unfollowUser,
     following,
-    pendingFollowing,
     refetchSuggested,
   } = usePosts();
   const [followPending, setFollowPending] = useState<Set<string>>(new Set());
@@ -62,14 +61,14 @@ export default function FriendsScreen() {
   }, []);
 
   const handleToggleFollow = useCallback(
-    async (targetId: string, currentState: "none" | "pending" | "accepted") => {
+    async (targetId: string, isFollowing: boolean) => {
       setFollowPending((prev) => {
         const next = new Set(prev);
         next.add(targetId);
         return next;
       });
       try {
-        if (currentState === "accepted" || currentState === "pending") {
+        if (isFollowing) {
           await unfollowUser.mutateAsync(targetId);
         } else {
           await followUser.mutateAsync(targetId);
@@ -88,7 +87,6 @@ export default function FriendsScreen() {
   );
 
   const followingSet = new Set(following);
-  const pendingSet = new Set(pendingFollowing);
 
   return (
     <View style={styles.root}>
@@ -166,13 +164,7 @@ export default function FriendsScreen() {
             </View>
           }
           renderItem={({ item }) => {
-            const followState: "none" | "pending" | "accepted" = followingSet.has(item.id)
-              ? "accepted"
-              : pendingSet.has(item.id)
-                ? "pending"
-                : "none";
-            const isFollowing = followState === "accepted";
-            const isRequested = followState === "pending";
+            const isFollowing = followingSet.has(item.id);
             const pending = followPending.has(item.id);
             const displayName = item.display_name ?? item.username;
             const initial = displayName.charAt(0).toUpperCase();
@@ -206,26 +198,21 @@ export default function FriendsScreen() {
                   </UiText>
                 </View>
                 <Pressable
-                  onPress={() => handleToggleFollow(item.id, followState)}
+                  onPress={() => handleToggleFollow(item.id, isFollowing)}
                   disabled={pending}
                   style={({ pressed }) => [
                     styles.followBtn,
-                    (isFollowing || isRequested) && styles.followBtnActive,
-                    pressed && !isFollowing && !isRequested && styles.followBtnPressed,
-                    pressed && (isFollowing || isRequested) && styles.followBtnActivePressed,
+                    isFollowing && styles.followBtnActive,
+                    pressed && !isFollowing && styles.followBtnPressed,
+                    pressed && isFollowing && styles.followBtnActivePressed,
                   ]}
                 >
                   {pending ? (
-                    <ActivityIndicator color={isFollowing || isRequested ? theme.textMuted : "#fff"} size="small" />
+                    <ActivityIndicator color={isFollowing ? theme.textMuted : "#fff"} size="small" />
                   ) : isFollowing ? (
                     <>
                       <UserCheck color={theme.textMuted} size={14} strokeWidth={2.5} />
                       <UiText style={styles.followBtnTextActive}>Following</UiText>
-                    </>
-                  ) : isRequested ? (
-                    <>
-                      <Clock color={theme.textMuted} size={14} strokeWidth={2.5} />
-                      <UiText style={styles.followBtnTextActive}>Requested</UiText>
                     </>
                   ) : (
                     <>

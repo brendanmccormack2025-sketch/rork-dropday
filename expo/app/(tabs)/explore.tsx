@@ -11,7 +11,7 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Search, Sparkles, UserPlus, UserCheck, Clock, X } from "lucide-react-native";
+import { Search, Sparkles, UserPlus, UserCheck, X } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
@@ -33,7 +33,6 @@ export default function ExploreScreen() {
     exploreCreatorsLoading,
     refetchExploreCreators,
     following,
-    pendingFollowing,
     followUser,
     unfollowUser,
   } = usePosts();
@@ -53,14 +52,14 @@ export default function ExploreScreen() {
   }, [refetchExploreCreators]);
 
   const handleToggleFollow = useCallback(
-    async (targetId: string, currentState: "none" | "pending" | "accepted") => {
+    async (targetId: string, isFollowing: boolean) => {
       setFollowPending((prev) => {
         const next = new Set(prev);
         next.add(targetId);
         return next;
       });
       try {
-        if (currentState === "accepted" || currentState === "pending") {
+        if (isFollowing) {
           await unfollowUser.mutateAsync(targetId);
         } else {
           await followUser.mutateAsync(targetId);
@@ -122,7 +121,6 @@ export default function ExploreScreen() {
   }, []);
 
   const followingSet = useMemo(() => new Set(following), [following]);
-  const pendingSet = useMemo(() => new Set(pendingFollowing), [pendingFollowing]);
 
   const navigateToProfile = useCallback(
     (userId: string) => {
@@ -184,13 +182,7 @@ export default function ExploreScreen() {
               renderItem={({ item }) => (
                 <CreatorRow
                   creator={item}
-                  followState={
-                    followingSet.has(item.id)
-                      ? "accepted"
-                      : pendingSet.has(item.id)
-                        ? "pending"
-                        : "none"
-                  }
+                  isFollowing={followingSet.has(item.id)}
                   followPending={followPending.has(item.id)}
                   onToggleFollow={handleToggleFollow}
                   onPress={() => navigateToProfile(item.id)}
@@ -241,13 +233,7 @@ export default function ExploreScreen() {
             renderItem={({ item }) => (
               <CreatorRow
                 creator={item}
-                followState={
-                  followingSet.has(item.id)
-                    ? "accepted"
-                    : pendingSet.has(item.id)
-                      ? "pending"
-                      : "none"
-                }
+                isFollowing={followingSet.has(item.id)}
                 followPending={followPending.has(item.id)}
                 onToggleFollow={handleToggleFollow}
                 onPress={() => navigateToProfile(item.id)}
@@ -263,23 +249,21 @@ export default function ExploreScreen() {
 
 function CreatorRow({
   creator,
-  followState,
+  isFollowing,
   followPending,
   onToggleFollow,
   onPress,
   showEngagement,
 }: {
   creator: ExploreCreator;
-  followState: "none" | "pending" | "accepted";
+  isFollowing: boolean;
   followPending: boolean;
-  onToggleFollow: (id: string, currentState: "none" | "pending" | "accepted") => void;
+  onToggleFollow: (id: string, isFollowing: boolean) => void;
   onPress: () => void;
   showEngagement: boolean;
 }) {
   const displayName = creator.display_name ?? creator.username;
   const pending = followPending;
-  const isFollowing = followState === "accepted";
-  const isRequested = followState === "pending";
 
   return (
     <Pressable onPress={onPress} style={styles.userRow}>
@@ -306,29 +290,24 @@ function CreatorRow({
         </View>
       </View>
       <Pressable
-        onPress={() => onToggleFollow(creator.id, followState)}
+        onPress={() => onToggleFollow(creator.id, isFollowing)}
         disabled={pending}
         style={({ pressed }) => [
           styles.followBtn,
-          (isFollowing || isRequested) && styles.followBtnActive,
-          pressed && !isFollowing && !isRequested && styles.followBtnPressed,
-          pressed && (isFollowing || isRequested) && styles.followBtnActivePressed,
+          isFollowing && styles.followBtnActive,
+          pressed && !isFollowing && styles.followBtnPressed,
+          pressed && isFollowing && styles.followBtnActivePressed,
         ]}
       >
         {pending ? (
           <ActivityIndicator
-            color={isFollowing || isRequested ? theme.textMuted : "#fff"}
+            color={isFollowing ? theme.textMuted : "#fff"}
             size="small"
           />
         ) : isFollowing ? (
           <>
             <UserCheck color={theme.textMuted} size={14} strokeWidth={2.5} />
             <UiText style={styles.followBtnTextActive}>Following</UiText>
-          </>
-        ) : isRequested ? (
-          <>
-            <Clock color={theme.textMuted} size={14} strokeWidth={2.5} />
-            <UiText style={styles.followBtnTextActive}>Requested</UiText>
           </>
         ) : (
           <>
