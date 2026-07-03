@@ -430,11 +430,9 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: theme.primaryDeep,
+    backgroundColor: theme.card,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "rgba(10,132,255,0.2)",
   },
   avatarText: {
     color: "#fff",
