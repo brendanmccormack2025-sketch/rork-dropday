@@ -26,6 +26,7 @@ import {
   Video,
   Save,
   Users,
+  UserPlus,
 } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
@@ -94,8 +95,10 @@ function ProfileHeader({
   isOwnProfile,
   followersCount,
   followingCount,
+  pendingRequestsCount,
   onFollowersTap,
   onFollowingTap,
+  onFollowRequests,
   otherUserId,
   onSendMessage,
 }: {
@@ -110,8 +113,10 @@ function ProfileHeader({
   isOwnProfile: boolean;
   followersCount: number;
   followingCount: number;
+  pendingRequestsCount: number;
   onFollowersTap: () => void;
   onFollowingTap: () => void;
+  onFollowRequests: () => void;
   otherUserId?: string | null;
   onSendMessage?: () => void;
 }) {
@@ -142,15 +147,30 @@ function ProfileHeader({
         </Pressable>
       </View>
 
-      {/* Edit Profile button */}
+      {/* Edit Profile + Follow Requests buttons */}
       {isOwnProfile ? (
-        <Pressable
-          onPress={onEditProfile}
-          style={styles.editProfileBtn}
-        >
-          <Pencil color={theme.accent} size={16} strokeWidth={2} />
-          <UiText style={styles.editProfileBtnText}>Edit Profile</UiText>
-        </Pressable>
+        <View style={styles.ownActionsRow}>
+          <Pressable
+            onPress={onEditProfile}
+            style={styles.editProfileBtn}
+          >
+            <Pencil color={theme.accent} size={16} strokeWidth={2} />
+            <UiText style={styles.editProfileBtnText}>Edit Profile</UiText>
+          </Pressable>
+          <Pressable
+            onPress={onFollowRequests}
+            style={styles.requestsBtn}
+          >
+            <UserPlus color={theme.textMuted} size={16} strokeWidth={2} />
+            {pendingRequestsCount > 0 && (
+              <View style={styles.requestsBadge}>
+                <UiText style={styles.requestsBadgeText}>
+                  {pendingRequestsCount > 9 ? "9+" : pendingRequestsCount}
+                </UiText>
+              </View>
+            )}
+          </Pressable>
+        </View>
       ) : (
         <Pressable
           onPress={onSendMessage}
@@ -272,6 +292,22 @@ export default function ProfileScreen() {
 
   const followingCount = following.length;
 
+  // ── Pending follow requests count ──────────────────────────────
+  const { data: pendingRequestsCount = 0 } = useQuery({
+    queryKey: ["follow-requests-count", user?.id],
+    enabled: !!user?.id,
+    queryFn: async (): Promise<number> => {
+      if (!user?.id) return 0;
+      const { count, error } = await supabase
+        .from("follows")
+        .select("*", { count: "exact", head: true })
+        .eq("followee_id", user.id)
+        .eq("status", "pending");
+      if (error) return 0;
+      return count ?? 0;
+    },
+  });
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     qc.invalidateQueries({ queryKey: ["profile"] });
@@ -332,6 +368,10 @@ export default function ProfileScreen() {
     } as never);
   }, [router, user?.id]);
 
+  const handleFollowRequests = useCallback(() => {
+    router.push("/follow-requests" as never);
+  }, [router]);
+
   const handleSendMessage = useCallback(async () => {
     // otherUserId will be provided when viewing another user's profile.
     // For now, isOwnProfile is always true so this is unreachable.
@@ -360,6 +400,8 @@ export default function ProfileScreen() {
       followingCount={followingCount}
       onFollowersTap={handleFollowersTap}
       onFollowingTap={handleFollowingTap}
+      pendingRequestsCount={pendingRequestsCount}
+      onFollowRequests={handleFollowRequests}
       otherUserId={null}
       onSendMessage={handleSendMessage}
     />
@@ -618,6 +660,7 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
   },
   editProfileBtn: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -628,6 +671,38 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(10,132,255,0.25)",
     marginBottom: 16,
+  },
+  ownActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 16,
+  },
+  requestsBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  requestsBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: theme.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 5,
+  },
+  requestsBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "800" as const,
   },
   editProfileBtnText: {
     color: theme.accent,

@@ -9,7 +9,7 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, UserPlus, UserCheck } from "lucide-react-native";
+import { ArrowLeft, Clock, UserPlus, UserCheck } from "lucide-react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { theme } from "@/constants/theme";
@@ -35,7 +35,7 @@ export default function FollowListScreen() {
   }>();
   const { userId, type, title } = params;
   const { user } = useAuth();
-  const { followUser, unfollowUser, following } = usePosts();
+  const { followUser, unfollowUser, following, pendingFollowing } = usePosts();
   const qc = useQueryClient();
   const [followPending, setFollowPending] = useState<Set<string>>(new Set());
 
@@ -94,16 +94,17 @@ export default function FollowListScreen() {
   });
 
   const followingSet = useMemo(() => new Set(following), [following]);
+  const pendingSet = useMemo(() => new Set(pendingFollowing), [pendingFollowing]);
 
   const handleToggleFollow = useCallback(
-    async (targetId: string, currentlyFollowing: boolean) => {
+    async (targetId: string, currentState: "none" | "pending" | "accepted") => {
       setFollowPending((prev) => {
         const next = new Set(prev);
         next.add(targetId);
         return next;
       });
       try {
-        if (currentlyFollowing) {
+        if (currentState === "accepted" || currentState === "pending") {
           await unfollowUser.mutateAsync(targetId);
         } else {
           await followUser.mutateAsync(targetId);
@@ -161,7 +162,13 @@ export default function FollowListScreen() {
               </View>
             }
             renderItem={({ item }) => {
-              const isFollowing = followingSet.has(item.id);
+              const followState: "none" | "pending" | "accepted" = followingSet.has(item.id)
+                ? "accepted"
+                : pendingSet.has(item.id)
+                  ? "pending"
+                  : "none";
+              const isFollowing = followState === "accepted";
+              const isRequested = followState === "pending";
               const isSelf = item.id === user?.id;
               const pending = followPending.has(item.id);
               const displayName = item.display_name ?? item.username;
@@ -186,18 +193,18 @@ export default function FollowListScreen() {
                   </Pressable>
                   {!isSelf && (
                     <Pressable
-                      onPress={() => handleToggleFollow(item.id, isFollowing)}
+                      onPress={() => handleToggleFollow(item.id, followState)}
                       disabled={pending}
                       style={({ pressed }) => [
                         styles.followBtn,
-                        isFollowing && styles.followBtnActive,
-                        pressed && !isFollowing && styles.followBtnPressed,
-                        pressed && isFollowing && styles.followBtnActivePressed,
+                        (isFollowing || isRequested) && styles.followBtnActive,
+                        pressed && !isFollowing && !isRequested && styles.followBtnPressed,
+                        pressed && (isFollowing || isRequested) && styles.followBtnActivePressed,
                       ]}
                     >
                       {pending ? (
                         <ActivityIndicator
-                          color={isFollowing ? theme.textMuted : "#fff"}
+                          color={isFollowing || isRequested ? theme.textMuted : "#fff"}
                           size="small"
                         />
                       ) : isFollowing ? (
@@ -208,6 +215,15 @@ export default function FollowListScreen() {
                             strokeWidth={2.5}
                           />
                           <UiText style={styles.followBtnTextActive}>Following</UiText>
+                        </>
+                      ) : isRequested ? (
+                        <>
+                          <Clock
+                            color={theme.textMuted}
+                            size={14}
+                            strokeWidth={2.5}
+                          />
+                          <UiText style={styles.followBtnTextActive}>Requested</UiText>
                         </>
                       ) : (
                         <>

@@ -23,16 +23,19 @@ export type Database = {
           created_at: string | null
           followee_id: string
           follower_id: string
+          status: string
         }
         Insert: {
           created_at?: string | null
           followee_id: string
           follower_id: string
+          status?: string
         }
         Update: {
           created_at?: string | null
           followee_id?: string
           follower_id?: string
+          status?: string
         }
         Relationships: [
           {
@@ -164,6 +167,7 @@ export type Database = {
           display_name: string | null
           id: string
           instagram_handle: string | null
+          is_private: boolean
           tiktok_handle: string | null
           username: string
           website: string | null
@@ -175,6 +179,7 @@ export type Database = {
           display_name?: string | null
           id: string
           instagram_handle?: string | null
+          is_private?: boolean
           tiktok_handle?: string | null
           username: string
           website?: string | null
@@ -186,6 +191,7 @@ export type Database = {
           display_name?: string | null
           id?: string
           instagram_handle?: string | null
+          is_private?: boolean
           tiktok_handle?: string | null
           username?: string
           website?: string | null

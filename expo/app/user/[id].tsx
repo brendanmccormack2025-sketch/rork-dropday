@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  Clock,
   Heart,
   MessageCircle,
   Sparkles,
@@ -143,41 +144,41 @@ export default function PublicProfileScreen() {
     },
   });
 
-  // ── Is the current user following this profile? ──────────────────────
-  const { data: isFollowing = false } = useQuery({
+  // ── Follow status: 'none' | 'pending' | 'accepted' ──────────────────
+  const { data: followStatus = "none" } = useQuery({
     queryKey: ["is-following", user?.id, id],
     enabled: !!user?.id && !!id && !isOwnProfile,
-    queryFn: async (): Promise<boolean> => {
-      if (!user?.id || !id) return false;
+    queryFn: async (): Promise<"none" | "pending" | "accepted"> => {
+      if (!user?.id || !id) return "none";
       const { data, error } = await supabase
         .from("follows")
-        .select("follower_id")
+        .select("status")
         .eq("follower_id", user.id)
         .eq("followee_id", id)
         .maybeSingle();
-      if (error) return false;
-      return !!data;
+      if (error) return "none";
+      if (!data) return "none";
+      return (data.status as "pending" | "accepted") ?? "none";
     },
   });
 
-  // ── Follow / Unfollow ────────────────────────────────────────────────
+  const isFollowing = followStatus === "accepted";
+  const isRequested = followStatus === "pending";
+
+  // ── Follow / Unfollow / Cancel request ───────────────────────────────
   const handleToggleFollow = useCallback(async () => {
-    console.log("[follow-debug] handler called. id:", id, "isOwnProfile:", isOwnProfile, "followPending:", followPending, "isFollowing:", isFollowing);
+    console.log("[follow-debug] handler called. id:", id, "isOwnProfile:", isOwnProfile, "followPending:", followPending, "followStatus:", followStatus);
     if (!id || isOwnProfile || followPending) return;
     setFollowPending(true);
     try {
-      // Raw check: does a follows row already exist?
-      const { data: existingRow, error: rawErr } = await supabase
-        .from("follows")
-        .select("follower_id, followee_id, created_at")
-        .eq("follower_id", user!.id)
-        .eq("followee_id", id)
-        .maybeSingle();
-      console.log("[follow-debug] raw follows check:", { existingRow, rawErr: rawErr?.message, viewerId: user!.id, profileId: id });
-      console.log("[follow-debug] isFollowing:", isFollowing, "calling:", isFollowing ? "unfollow" : "follow");
-      if (isFollowing) {
+      if (followStatus === "accepted") {
+        // Following → Unfollow (delete row)
+        await unfollowUser.mutateAsync(id);
+      } else if (followStatus === "pending") {
+        // Requested → Cancel request (delete row)
         await unfollowUser.mutateAsync(id);
       } else {
+        // Not following → Follow (insert row; trigger sets status)
         await followUser.mutateAsync(id);
       }
     } catch (e) {
@@ -185,7 +186,7 @@ export default function PublicProfileScreen() {
     } finally {
       setFollowPending(false);
     }
-  }, [id, isOwnProfile, isFollowing, followPending, followUser, unfollowUser]);
+  }, [id, isOwnProfile, followStatus, followPending, followUser, unfollowUser]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -280,20 +281,25 @@ export default function PublicProfileScreen() {
                         disabled={followPending}
                         style={({ pressed }) => [
                           styles.followBtn,
-                          isFollowing && styles.followBtnActive,
-                          pressed && !isFollowing && styles.followBtnPressed,
-                          pressed && isFollowing && styles.followBtnActivePressed,
+                          (isFollowing || isRequested) && styles.followBtnActive,
+                          pressed && !isFollowing && !isRequested && styles.followBtnPressed,
+                          pressed && (isFollowing || isRequested) && styles.followBtnActivePressed,
                         ]}
                       >
                         {followPending ? (
                           <ActivityIndicator
-                            color={isFollowing ? theme.textMuted : "#fff"}
+                            color={isFollowing || isRequested ? theme.textMuted : "#fff"}
                             size="small"
                           />
                         ) : isFollowing ? (
                           <>
                             <UserCheck color={theme.textMuted} size={16} strokeWidth={2.5} />
                             <UiText style={styles.followBtnTextActive}>Following</UiText>
+                          </>
+                        ) : isRequested ? (
+                          <>
+                            <Clock color={theme.textMuted} size={16} strokeWidth={2.5} />
+                            <UiText style={styles.followBtnTextActive}>Requested</UiText>
                           </>
                         ) : (
                           <>

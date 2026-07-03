@@ -122,6 +122,7 @@ export type MyProfile = {
   website: string | null;
   instagram_handle: string | null;
   tiktok_handle: string | null;
+  is_private: boolean;
 };
 
 export type DraftClip = {
@@ -591,11 +592,35 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("follows")
           .select("followee_id")
-          .eq("follower_id", user.id);
+          .eq("follower_id", user.id)
+          .eq("status", "accepted");
         if (error) return [];
         return (data ?? []).map((r: { followee_id: string }) => r.followee_id);
       } catch (e) {
         console.warn("[follows] network error", (e as Error)?.message ?? e);
+        return [];
+      }
+    },
+  });
+
+  // Pending follow requests sent by the current user (status='pending')
+  const pendingFollowingQuery = useQuery({
+    queryKey: ["follows", "pending", user?.id],
+    enabled: !!user?.id,
+    retry: 1,
+    staleTime: 30_000,
+    queryFn: async (): Promise<string[]> => {
+      if (!user?.id) return [];
+      try {
+        const { data, error } = await supabase
+          .from("follows")
+          .select("followee_id")
+          .eq("follower_id", user.id)
+          .eq("status", "pending");
+        if (error) return [];
+        return (data ?? []).map((r: { followee_id: string }) => r.followee_id);
+      } catch (e) {
+        console.warn("[follows:pending] network error", (e as Error)?.message ?? e);
         return [];
       }
     },
@@ -801,7 +826,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (!user?.id) return null;
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle")
+        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, is_private")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -825,6 +850,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           website: (data.website as string | null) ?? null,
           instagram_handle: (data.instagram_handle as string | null) ?? null,
           tiktok_handle: (data.tiktok_handle as string | null) ?? null,
+          is_private: (data.is_private as boolean | null) ?? false,
         };
       }
 
@@ -841,6 +867,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       website?: string | null;
       instagram_handle?: string | null;
       tiktok_handle?: string | null;
+      is_private?: boolean;
     }) => {
       if (!user?.id) throw new Error("Not signed in.");
 
@@ -852,6 +879,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (input.website !== undefined) updateData.website = input.website;
       if (input.instagram_handle !== undefined) updateData.instagram_handle = input.instagram_handle;
       if (input.tiktok_handle !== undefined) updateData.tiktok_handle = input.tiktok_handle;
+      if (input.is_private !== undefined) updateData.is_private = input.is_private;
       if (Object.keys(updateData).length === 0) return;
 
       const { error } = await supabase
@@ -2208,6 +2236,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       updateProfile,
       following: followingQuery.data ?? [],
       followingProfiles: followingQuery.data ?? [],
+      pendingFollowing: pendingFollowingQuery.data ?? [],
       suggestedUsers: suggestedQuery.data ?? [],
       suggestedLoading: suggestedQuery.isLoading,
       refetchSuggested: suggestedQuery.refetch,
@@ -2250,6 +2279,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       updateProfile,
       allReactionsQuery,
       followingQuery,
+      pendingFollowingQuery,
       suggestedQuery,
       lastQueryError,
       followUser,
