@@ -2,7 +2,6 @@ import React, { useEffect, useRef } from "react";
 import {
   Animated,
   Easing,
-  Platform,
   Pressable,
   StyleSheet,
   View,
@@ -10,8 +9,7 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import * as AppleAuthentication from "expo-apple-authentication";
-import { Apple, Mail } from "lucide-react-native";
+import { Mail } from "lucide-react-native";
 
 import ScreenBackground from "@/components/ScreenBackground";
 import DropletLogo from "@/components/DropletLogo";
@@ -20,7 +18,6 @@ import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 
 export default function WelcomeScreen() {
-  const { signInWithApple, signInWithGoogle } = useAuth();
   const floatAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
 
@@ -72,22 +69,6 @@ export default function WelcomeScreen() {
     outputRange: [1, 1.55],
   });
 
-  const handleApple = async () => {
-    try {
-      await signInWithApple();
-    } catch (e: any) {
-      console.warn("[welcome] apple", e?.message);
-    }
-  };
-
-  const handleGoogle = async () => {
-    try {
-      await signInWithGoogle();
-    } catch (e: any) {
-      console.warn("[welcome] google", e?.message);
-    }
-  };
-
   return (
     <ScreenBackground>
       <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
@@ -123,38 +104,6 @@ export default function WelcomeScreen() {
             label="Continue with Email"
             icon={<Mail color="#fff" size={18} />}
             onPress={() => router.push("/(auth)/sign-up")}
-          />
-
-          {Platform.OS === "ios" ? (
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={
-                AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
-              }
-              buttonStyle={
-                AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
-              }
-              cornerRadius={14}
-              style={styles.appleBtn}
-              onPress={handleApple}
-            />
-          ) : (
-            <PrimaryButton
-              label="Continue with Apple"
-              variant="outline"
-              icon={<Apple color={theme.text} size={18} />}
-              onPress={handleApple}
-            />
-          )}
-
-          <PrimaryButton
-            label="Continue with Google"
-            variant="outline"
-            icon={
-              <View style={styles.gIcon}>
-                <UiText style={styles.gIconText}>G</UiText>
-              </View>
-            }
-            onPress={handleGoogle}
           />
 
           <UiText style={styles.legal}>
@@ -228,20 +177,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600" as const,
     letterSpacing: 0.3,
-  },
-  appleBtn: { height: 52, width: "100%" },
-  gIcon: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  gIconText: {
-    color: "#0A0A0A",
-    fontWeight: "800" as const,
-    fontSize: 13,
   },
   legal: {
     color: theme.textDim,
