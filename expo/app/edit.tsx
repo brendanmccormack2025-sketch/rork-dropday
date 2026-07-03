@@ -217,7 +217,7 @@ export default function EditScreen() {
   // ── Playback ──────────────────────────────────────────────────────────────
   const videoRef = useRef<Video>(null);
   const [activeIndex, setActiveIndex] = useState<number>(0);
-  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [positionMs, setPositionMs] = useState<number>(0);
   const pendingSeekRef = useRef<number | null>(null);
   const segmentOffsetRef = useRef<number>(0);
@@ -409,6 +409,14 @@ export default function EditScreen() {
   const videoRetryCountRef = useRef<number>(0);
   const [videoKey, setVideoKey] = useState<number>(0);
   const [videoReady, setVideoReady] = useState<boolean>(false);
+
+  // Reset playback state whenever the Video component remounts due to an edit
+  // (videoKey bump or activeClip.uri change) — prevents auto-play stutter on load.
+  const activeClipUri = activeClip?.uri ?? null;
+  useEffect(() => {
+    setIsPlaying(false);
+    setVideoReady(false);
+  }, [videoKey, activeClipUri]);
 
   const handleVideoLoadError = useCallback((errorMsg: string) => {
     const isAssetError =
