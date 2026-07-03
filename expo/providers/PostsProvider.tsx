@@ -488,7 +488,8 @@ function rankFeed(posts: Post[], followingIds: string[], currentUserId?: string)
   const win = getDropWindowState(new Date(now));
 
   const scored = posts.map((p) => {
-    const ageHours = Math.max(0, (now - new Date(p.created_at).getTime()) / 3.6e6);
+    const ageMs = now - new Date(p.created_at).getTime();
+    const ageHours = Math.max(0, ageMs / 3.6e6);
     const freshness = Math.exp(-ageHours / 12);
     const engagement = Math.log1p((p.like_count ?? 0) + 2 * (p.comment_count ?? 0));
     const followBoost = follows.has(p.user_id) ? 3.5 : 0;
@@ -497,16 +498,14 @@ function rankFeed(posts: Post[], followingIds: string[], currentUserId?: string)
       win.isOpen && created >= win.windowStart && created < win.windowEnd;
     const liveBoost = inLiveWindow ? 1.8 : 0;
     const jitter = Math.random() * 0.15;
-    const score = followBoost + engagement * 1.2 + freshness * 2.5 + liveBoost + jitter;
+    // Brief self-boost: guarantee the user's own just-posted drop stays at
+    // the top for ~90s, then normal ranking resumes. Uses ageMs (ms) vs
+    // 90_000 ms — NOT ageHours, which is in HOURS.
+    const isOwn = currentUserId != null && p.user_id === currentUserId;
+    const selfBoost = isOwn && ageMs < 90_000 ? 10 : 0;
+    const score = followBoost + engagement * 1.2 + freshness * 2.5 + liveBoost + jitter + selfBoost;
     return { p, score };
   });
-
-  console.log("[rank-debug] top 3:", scored
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map(s => ({ id: s.p.id.slice(0,8), user: s.p.user_id.slice(0,8),
-      score: s.score.toFixed(2), created: s.p.created_at,
-      isMe: s.p.user_id === currentUserId })));
 
   scored.sort((a, b) => b.score - a.score);
 
@@ -1623,9 +1622,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           return [newPost, ...filtered];
         });
 
-        console.log("[rank-debug] cache after post, top 2:",
-          qc.getQueryData<Post[]>(["posts", "fyp", user?.id])?.slice(0, 2)
-            .map(p => ({ id: p.id.slice(0,8), created: p.created_at })));
       }
 
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
