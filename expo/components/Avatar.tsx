@@ -4,6 +4,7 @@ import UiText from "@/components/UiText";
 import { Image } from "expo-image";
 
 import { resolveAvatarUrl } from "@/providers/PostsProvider";
+import { theme } from "@/constants/theme";
 
 /**
  * Avatar for feed items (posts, reactions).
@@ -79,6 +80,7 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
+    backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -92,6 +94,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
+    backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",

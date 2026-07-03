@@ -593,11 +593,8 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "rgba(10,132,255,0.3)",
     overflow: "hidden",
   },
   avatarText: {

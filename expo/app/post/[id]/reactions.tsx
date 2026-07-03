@@ -566,7 +566,6 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: theme.violet,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
