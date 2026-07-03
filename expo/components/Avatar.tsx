@@ -84,6 +84,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
   },
   avatarText: {
     color: "#fff",
@@ -98,6 +100,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.2)",
   },
   profileAvatarText: {
     color: "#fff",
