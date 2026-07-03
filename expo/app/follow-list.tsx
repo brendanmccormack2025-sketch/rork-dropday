@@ -168,17 +168,22 @@ export default function FollowListScreen() {
 
               return (
                 <View style={styles.userRow}>
-                  <View style={styles.avatar}>
-                    <FeedAvatar profile={item} name={displayName} />
-                  </View>
-                  <View style={styles.userInfo}>
-                    <UiText style={styles.userName} numberOfLines={1}>
-                      {displayName}
-                    </UiText>
-                    <UiText style={styles.userHandle} numberOfLines={1}>
-                      @{item.username}
-                    </UiText>
-                  </View>
+                  <Pressable
+                    onPress={() => router.push(`/user/${item.id}`)}
+                    style={styles.userRowLeft}
+                  >
+                    <View style={styles.avatar}>
+                      <FeedAvatar profile={item} name={displayName} />
+                    </View>
+                    <View style={styles.userInfo}>
+                      <UiText style={styles.userName} numberOfLines={1}>
+                        {displayName}
+                      </UiText>
+                      <UiText style={styles.userHandle} numberOfLines={1}>
+                        @{item.username}
+                      </UiText>
+                    </View>
+                  </Pressable>
                   {!isSelf && (
                     <Pressable
                       onPress={() => handleToggleFollow(item.id, isFollowing)}
@@ -275,6 +280,12 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
+  },
+  userRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
   },
   avatar: {
     width: 46,
