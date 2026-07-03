@@ -52,14 +52,14 @@ export default function ExploreScreen() {
   }, [refetchExploreCreators]);
 
   const handleToggleFollow = useCallback(
-    async (targetId: string, isFollowing: boolean) => {
+    async (targetId: string, currentlyFollowing: boolean) => {
       setFollowPending((prev) => {
         const next = new Set(prev);
         next.add(targetId);
         return next;
       });
       try {
-        if (isFollowing) {
+        if (currentlyFollowing) {
           await unfollowUser.mutateAsync(targetId);
         } else {
           await followUser.mutateAsync(targetId);
@@ -258,7 +258,7 @@ function CreatorRow({
   creator: ExploreCreator;
   isFollowing: boolean;
   followPending: boolean;
-  onToggleFollow: (id: string, isFollowing: boolean) => void;
+  onToggleFollow: (id: string, currentlyFollowing: boolean) => void;
   onPress: () => void;
   showEngagement: boolean;
 }) {

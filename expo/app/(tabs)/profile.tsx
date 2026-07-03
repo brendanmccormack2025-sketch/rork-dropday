@@ -618,7 +618,6 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
   },
   editProfileBtn: {
-    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",

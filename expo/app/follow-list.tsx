@@ -96,14 +96,14 @@ export default function FollowListScreen() {
   const followingSet = useMemo(() => new Set(following), [following]);
 
   const handleToggleFollow = useCallback(
-    async (targetId: string, isFollowing: boolean) => {
+    async (targetId: string, currentlyFollowing: boolean) => {
       setFollowPending((prev) => {
         const next = new Set(prev);
         next.add(targetId);
         return next;
       });
       try {
-        if (isFollowing) {
+        if (currentlyFollowing) {
           await unfollowUser.mutateAsync(targetId);
         } else {
           await followUser.mutateAsync(targetId);
