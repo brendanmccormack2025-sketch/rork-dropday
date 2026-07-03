@@ -20,6 +20,7 @@ import {
 
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { PostsProvider } from "@/providers/PostsProvider";
+import { NotificationsProvider } from "@/providers/NotificationsProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { theme } from "@/constants/theme";
 
@@ -198,9 +199,11 @@ export default function RootLayout() {
             <StatusBar style="light" />
             <AuthProvider>
               <PostsProvider>
-                <AuthGate>
-                  <RootLayoutNav />
-                </AuthGate>
+                <NotificationsProvider>
+                  <AuthGate>
+                    <RootLayoutNav />
+                  </AuthGate>
+                </NotificationsProvider>
               </PostsProvider>
             </AuthProvider>
           </View>

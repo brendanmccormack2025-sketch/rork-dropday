@@ -6,9 +6,12 @@ import { BlurView } from "expo-blur";
 
 import CenterPostButton from "@/components/CenterPostButton";
 import { theme } from "@/constants/theme";
+import { useNotifications } from "@/providers/NotificationsProvider";
+import UiText from "@/components/UiText";
 
 export default function TabLayout() {
   const router = useRouter();
+  const { unreadCount } = useNotifications();
 
   const openCamera = useCallback(() => {
     router.push("/camera");
@@ -70,7 +73,18 @@ export default function TabLayout() {
         name="friends"
         options={{
           title: "Friends",
-          tabBarIcon: ({ color, size }) => <Users color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => (
+            <View>
+              <Users color={color} size={size} />
+              {unreadCount > 0 && (
+                <View style={styles.tabBadge}>
+                  <UiText style={styles.tabBadgeText}>
+                    {unreadCount > 9 ? "9+" : String(unreadCount)}
+                  </UiText>
+                </View>
+              )}
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
@@ -104,5 +118,24 @@ const styles = StyleSheet.create({
     height: "100%",
     alignItems: "center",
     justifyContent: "center",
+  },
+  tabBadge: {
+    position: "absolute",
+    top: -6,
+    right: -10,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: theme.danger,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: "#0A0A14",
+  },
+  tabBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "800" as const,
   },
 });
