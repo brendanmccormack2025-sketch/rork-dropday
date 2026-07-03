@@ -26,7 +26,7 @@ import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
 import { theme, getDropWindowState } from "@/constants/theme";
-import { usePosts, type Post } from "@/providers/PostsProvider";
+import { usePosts, type Post, type TextOverlay, type TextBackgroundStyle } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 
@@ -51,6 +51,78 @@ function ActionButton({
     </Pressable>
   );
 }
+
+/** Resolve background style preset to colors for feed rendering. */
+function resolveFeedBg(
+  style: TextBackgroundStyle,
+  accentColor: string,
+): { backgroundColor: string; color: string } {
+  switch (style) {
+    case "none-white":
+      return { backgroundColor: "transparent", color: "#FFFFFF" };
+    case "none-black":
+      return { backgroundColor: "transparent", color: "#000000" };
+    case "white-box":
+      return { backgroundColor: "#FFFFFF", color: "#000000" };
+    case "black-box":
+      return { backgroundColor: "#000000", color: "#FFFFFF" };
+    case "accent-box":
+      return { backgroundColor: accentColor, color: "#FFFFFF" };
+    case "translucent-box":
+      return { backgroundColor: "rgba(0,0,0,0.55)", color: "#FFFFFF" };
+  }
+}
+
+/** Non-interactive text overlay rendered on top of feed media. */
+const FeedTextOverlay = memo(function FeedTextOverlay({
+  overlay,
+  frameWidth,
+  frameHeight,
+}: {
+  overlay: TextOverlay;
+  frameWidth: number;
+  frameHeight: number;
+}) {
+  const { backgroundColor, color } = resolveFeedBg(
+    overlay.backgroundStyle,
+    overlay.color,
+  );
+  // x/y are center fractions — convert to top-left offset
+  const left = overlay.x * frameWidth;
+  const top = overlay.y * frameHeight;
+
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.textOverlayWrap,
+        {
+          left,
+          top,
+          transform: [{ translateX: -9999 }, { rotate: `${overlay.rotation}deg` }, { translateX: 9999 }],
+        },
+      ]}
+    >
+      <UiText
+        style={[
+          styles.textOverlayText,
+          {
+            color,
+            fontSize: overlay.fontSize,
+            backgroundColor,
+          },
+        ]}
+        numberOfLines={undefined}
+      >
+        {overlay.text}
+      </UiText>
+    </View>
+  );
+},
+(prev, next) =>
+  prev.overlay === next.overlay &&
+  prev.frameWidth === next.frameWidth &&
+  prev.frameHeight === next.frameHeight);
 
 function timeAgo(d: Date): string {
   const s = Math.max(1, Math.floor((Date.now() - d.getTime()) / 1000));
@@ -417,6 +489,20 @@ export const FeedItem = memo(function FeedItem({
           contentFit="cover"
           transition={150}
         />
+      )}
+
+      {/* Text overlays — rendered on top of media, below UI chrome */}
+      {post.text_overlays && post.text_overlays.length > 0 && !post._optimistic?.status && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          {post.text_overlays.map((ov) => (
+            <FeedTextOverlay
+              key={ov.id}
+              overlay={ov}
+              frameWidth={SCREEN_W}
+              frameHeight={SCREEN_H}
+            />
+          ))}
+        </View>
       )}
 
       {/* Optimistic posting overlay */}
@@ -802,5 +888,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700" as const,
     letterSpacing: 0.3,
+  },
+
+  /* Text overlays (feed playback) */
+  textOverlayWrap: {
+    position: "absolute",
+  },
+  textOverlayText: {
+    fontWeight: "800" as const,
+    textAlign: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: "hidden",
+    textShadowColor: "rgba(0,0,0,0.4)",
+    textShadowRadius: 2,
   },
 });

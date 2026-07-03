@@ -1528,8 +1528,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         mediaUrl = input.uri;
         segmentUrls = input.segmentUris ?? null;
       } else {
-        // When stitched, upload the combined file instead of the original reaction
-        const urisToUpload = [uploadUri];
+        // Upload all segments when present (multi-clip), otherwise the single primary clip.
+        // This mirrors the isRemoteUrl branch which correctly passes through segmentUris.
+        const urisToUpload =
+          input.segmentUris && input.segmentUris.length > 1
+            ? input.segmentUris
+            : [uploadUri];
 
         const uploadedUrls: string[] = [];
         for (let i = 0; i < urisToUpload.length; i++) {
