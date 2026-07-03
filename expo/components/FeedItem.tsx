@@ -35,6 +35,43 @@ const TAB_BAR_HEIGHT = 88;
 /** Height reserved for the action buttons + username row at the bottom of each feed item. */
 const BOTTOM_OVERLAY_HEIGHT = 130;
 
+/** Assumed aspect ratio (w/h) of video content — matches the editor's ASPECT = 9/16. */
+const ASSUMED_VIDEO_ASPECT = 9 / 16;
+
+/**
+ * Compute the visible fraction of a video after COVER resize mode crops it
+ * to fill a container of different aspect ratio.
+ *
+ * COVER scales the video so both dimensions >= container, then crops the
+ * overflow symmetrically (centered crop).
+ *
+ * @returns visibleW/visibleH — fraction of the original video that remains
+ *          visible; cropLeft/cropTop — fraction cropped off each edge.
+ */
+function computeCoverCrop(
+  containerW: number,
+  containerH: number,
+  videoAspect: number,
+): { visibleW: number; visibleH: number; cropLeft: number; cropTop: number } {
+  if (containerW <= 0 || containerH <= 0) {
+    return { visibleW: 1, visibleH: 1, cropLeft: 0, cropTop: 0 };
+  }
+  const containerAspect = containerW / containerH;
+
+  if (videoAspect < containerAspect) {
+    // Video is narrower/taller than container → scale to fill width, crop top/bottom
+    const scaledVideoH = containerW / videoAspect;
+    const visibleH = containerH / scaledVideoH;
+    const cropTop = (1 - visibleH) / 2;
+    return { visibleW: 1, visibleH, cropLeft: 0, cropTop };
+  }
+  // Video is wider than container → scale to fill height, crop left/right
+  const scaledVideoW = containerH * videoAspect;
+  const visibleW = containerW / scaledVideoW;
+  const cropLeft = (1 - visibleW) / 2;
+  return { visibleW, visibleH: 1, cropLeft, cropTop: 0 };
+}
+
 function ActionButton({
   icon,
   label,
@@ -73,23 +110,43 @@ function resolveFeedBg(
   }
 }
 
-/** Non-interactive text overlay rendered on top of feed media. */
+/** Non-interactive text overlay rendered on top of feed media.
+ *  Translates editor-space fractions (relative to the full CONTAIN video
+ *  frame) into feed-space pixels, accounting for COVER's centered crop. */
 const FeedTextOverlay = memo(function FeedTextOverlay({
   overlay,
-  frameWidth,
-  frameHeight,
+  containerW,
+  containerH,
+  videoAspect = ASSUMED_VIDEO_ASPECT,
 }: {
   overlay: TextOverlay;
-  frameWidth: number;
-  frameHeight: number;
+  containerW: number;
+  containerH: number;
+  videoAspect?: number;
 }) {
   const { backgroundColor, color } = resolveFeedBg(
     overlay.backgroundStyle,
     overlay.color,
   );
-  // x/y are center fractions — convert to top-left offset
-  const left = overlay.x * frameWidth;
-  const top = overlay.y * frameHeight;
+
+  // Compute how much of the original video is visible after COVER cropping
+  const { visibleW, visibleH, cropLeft, cropTop } = computeCoverCrop(
+    containerW,
+    containerH,
+    videoAspect,
+  );
+
+  // Map overlay.x/y (fractions of the full uncropped video) to screen
+  // position within the COVER-cropped container.
+  const adjustedX = (overlay.x - cropLeft) / visibleW;
+  const adjustedY = (overlay.y - cropTop) / visibleH;
+
+  // Clamp to visible bounds so overlays near cropped edges remain on-screen
+  const clampedX = Math.max(0, Math.min(1, adjustedX));
+  const clampedY = Math.max(0, Math.min(1, adjustedY));
+
+  const left = clampedX * containerW;
+  const top = clampedY * containerH;
 
   return (
     <View
@@ -121,8 +178,8 @@ const FeedTextOverlay = memo(function FeedTextOverlay({
 },
 (prev, next) =>
   prev.overlay === next.overlay &&
-  prev.frameWidth === next.frameWidth &&
-  prev.frameHeight === next.frameHeight);
+  prev.containerW === next.containerW &&
+  prev.containerH === next.containerH);
 
 function timeAgo(d: Date): string {
   const s = Math.max(1, Math.floor((Date.now() - d.getTime()) / 1000));
@@ -156,6 +213,10 @@ export const FeedItem = memo(function FeedItem({
   bottomInset?: number;
 }) {
   const [isPaused, setIsPaused] = useState<boolean>(false);
+  // Measured container dimensions — used for cover-crop-aware overlay positioning
+  const [containerDims, setContainerDims] = useState<{ w: number; h: number }>(
+    { w: SCREEN_W, h: SCREEN_H },
+  );
   const { reactionsByParent, deletePost, toggleLike, likedPosts } = usePosts();
   const { user } = useAuth();
   const liked = likedPosts.some((p) => p.id === post.id);
@@ -397,7 +458,15 @@ export const FeedItem = memo(function FeedItem({
   }, [deletePost, post.id]);
 
   return (
-    <View style={styles.item}>
+    <View
+      style={styles.item}
+      onLayout={(e) => {
+        const { width, height } = e.nativeEvent.layout;
+        if (width > 0 && height > 0 && (width !== containerDims.w || height !== containerDims.h)) {
+          setContainerDims({ w: width, h: height });
+        }
+      }}
+    >
       {post.media_type === "video" ? (
         <View style={StyleSheet.absoluteFill}>
           <Video
@@ -498,8 +567,8 @@ export const FeedItem = memo(function FeedItem({
             <FeedTextOverlay
               key={ov.id}
               overlay={ov}
-              frameWidth={SCREEN_W}
-              frameHeight={SCREEN_H}
+              containerW={containerDims.w}
+              containerH={containerDims.h}
             />
           ))}
         </View>
