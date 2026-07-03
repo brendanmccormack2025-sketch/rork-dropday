@@ -162,9 +162,18 @@ export default function PublicProfileScreen() {
 
   // ── Follow / Unfollow ────────────────────────────────────────────────
   const handleToggleFollow = useCallback(async () => {
+    console.log("[follow-debug] handler called. id:", id, "isOwnProfile:", isOwnProfile, "followPending:", followPending, "isFollowing:", isFollowing);
     if (!id || isOwnProfile || followPending) return;
     setFollowPending(true);
     try {
+      // Raw check: does a follows row already exist?
+      const { data: existingRow, error: rawErr } = await supabase
+        .from("follows")
+        .select("id, follower_id, followee_id, created_at")
+        .eq("follower_id", user!.id)
+        .eq("followee_id", id)
+        .maybeSingle();
+      console.log("[follow-debug] raw follows check:", { existingRow, rawErr: rawErr?.message, viewerId: user!.id, profileId: id });
       console.log("[follow-debug] isFollowing:", isFollowing, "calling:", isFollowing ? "unfollow" : "follow");
       if (isFollowing) {
         await unfollowUser.mutateAsync(id);
