@@ -481,7 +481,7 @@ async function uploadToStorage(
   }
 }
 
-function rankFeed(posts: Post[], followingIds: string[]): Post[] {
+function rankFeed(posts: Post[], followingIds: string[], currentUserId?: string): Post[] {
   if (posts.length === 0) return posts;
   const follows = new Set(followingIds);
   const now = Date.now();
@@ -500,6 +500,13 @@ function rankFeed(posts: Post[], followingIds: string[]): Post[] {
     const score = followBoost + engagement * 1.2 + freshness * 2.5 + liveBoost + jitter;
     return { p, score };
   });
+
+  console.log("[rank-debug] top 3:", scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map(s => ({ id: s.p.id.slice(0,8), user: s.p.user_id.slice(0,8),
+      score: s.score.toFixed(2), created: s.p.created_at,
+      isMe: s.p.user_id === currentUserId })));
 
   scored.sort((a, b) => b.score - a.score);
 
@@ -647,7 +654,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         reaction_count: (row.reaction_count as number | undefined) ?? 0,
         profile: (row.profiles as Post["profile"]) ?? null,
       }));
-      return rankFeed(raw, followingQuery.data ?? []);
+      return rankFeed(raw, followingQuery.data ?? [], user?.id);
     },
   });
 
@@ -1615,6 +1622,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           if (filtered.some((p) => p.id === newPost.id)) return filtered;
           return [newPost, ...filtered];
         });
+
+        console.log("[rank-debug] cache after post, top 2:",
+          qc.getQueryData<Post[]>(["posts", "fyp", user?.id])?.slice(0, 2)
+            .map(p => ({ id: p.id.slice(0,8), created: p.created_at })));
       }
 
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
