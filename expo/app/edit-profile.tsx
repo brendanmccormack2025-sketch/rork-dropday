@@ -467,8 +467,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "rgba(10,132,255,0.3)",
     overflow: "hidden",
   },
   avatarText: {

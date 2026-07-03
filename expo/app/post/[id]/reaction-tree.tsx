@@ -943,8 +943,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.violet,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: theme.violet,
     overflow: "hidden",
   },
   username: {

@@ -628,8 +628,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: theme.accent,
     overflow: "hidden",
   },
   username: {

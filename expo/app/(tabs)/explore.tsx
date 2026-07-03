@@ -416,8 +416,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "rgba(10,132,255,0.2)",
   },
   userInfo: {
     flex: 1,
