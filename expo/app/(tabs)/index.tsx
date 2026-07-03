@@ -34,13 +34,20 @@ import { supabase } from "@/lib/supabase";
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const FREE_VIEWS_BEFORE_GATE = 5;
 
+type FeedTab = "following" | "foryou";
+
 export default function FeedScreen() {
   const router = useRouter();
-  const { feed, feedLoading, refetchFeed, refetchMyPosts, optimisticPosts, lastPostCreatedAtRef } = usePosts();
+  const {
+    feed, feedLoading, refetchFeed,
+    followingFeed, followingFeedLoading, refetchFollowingFeed,
+    refetchMyPosts, optimisticPosts, lastPostCreatedAtRef,
+  } = usePosts();
   const [now, setNow] = useState<Date>(new Date());
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
   const [sharePost, setSharePost] = useState<Post | null>(null);
+  const [activeTab, setActiveTab] = useState<FeedTab>("following");
   const isFirstFocusRef = useRef<boolean>(true);
 
   useEffect(() => {
@@ -59,14 +66,16 @@ export default function FeedScreen() {
   // Re-enable before launch by restoring: !hasPostedInWindow && viewedCount >= FREE_VIEWS_BEFORE_GATE
   const gateActive = false;
 
+  const activePosts = activeTab === "following" ? followingFeed : feed;
+  const activeLoading = activeTab === "following" ? followingFeedLoading : feedLoading;
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // Refetch both feed and myPosts so hasPostedInWindow updates correctly.
-    // Previously only feed was refetched, so the participation gate
-    // would stay active even after posting a drop.
-    await Promise.all([refetchFeed(), refetchMyPosts()]);
+    // Refetch the active feed + myPosts so hasPostedInWindow updates correctly.
+    const refetchActive = activeTab === "following" ? refetchFollowingFeed : refetchFeed;
+    await Promise.all([refetchActive(), refetchMyPosts()]);
     setRefreshing(false);
-  }, [refetchFeed, refetchMyPosts]);
+  }, [activeTab, refetchFeed, refetchFollowingFeed, refetchMyPosts]);
 
   // Refetch on tab focus — ensures fresh data when returning from camera
   // or edit-profile without needing a manual pull-to-refresh.
@@ -96,18 +105,20 @@ export default function FeedScreen() {
       const justPosted = msSincePost < 5_000;
       if (!hasPendingUpload && !justPosted) {
         refetchFeed();
+        refetchFollowingFeed();
       }
-    }, [refetchFeed, optimisticPosts, lastPostCreatedAtRef])
+    }, [refetchFeed, refetchFollowingFeed, optimisticPosts, lastPostCreatedAtRef])
   );
 
   return (
     <View style={styles.root}>
       <FeedListView
-        posts={feed}
-        isLoading={feedLoading}
+        posts={activePosts}
+        isLoading={activeLoading}
         onRefresh={onRefresh}
         isRefreshing={refreshing}
         initialIndex={0}
+        resetToken={activeTab}
         showGate={gateActive}
         onSharePost={(post) => setSharePost(post)}
         onReactionsPost={(post) => {
@@ -138,6 +149,25 @@ export default function FeedScreen() {
               </View>
             </View>
 
+            {/* Tab switcher */}
+            <View style={styles.tabBar} pointerEvents="box-none">
+              <Pressable
+                onPress={() => setActiveTab("following")}
+                style={[styles.tab, activeTab === "following" && styles.tabActive]}
+              >
+                <UiText style={[styles.tabText, activeTab === "following" && styles.tabTextActive]}>
+                  Following
+                </UiText>
+              </Pressable>
+              <Pressable
+                onPress={() => setActiveTab("foryou")}
+                style={[styles.tab, activeTab === "foryou" && styles.tabActive]}
+              >
+                <UiText style={[styles.tabText, activeTab === "foryou" && styles.tabTextActive]}>
+                  For You
+                </UiText>
+              </Pressable>
+            </View>
           </SafeAreaView>
         }
         emptyComponent={<EmptyState />}
@@ -396,6 +426,35 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+  },
+
+  /* Tab switcher */
+  tabBar: {
+    flexDirection: "row",
+    alignSelf: "center",
+    gap: 4,
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+    paddingTop: 2,
+  },
+  tab: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "transparent",
+  },
+  tabActive: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  tabText: {
+    color: theme.textMuted,
+    fontSize: 13,
+    fontWeight: "700" as const,
+    letterSpacing: 0.2,
+  },
+  tabTextActive: {
+    color: theme.text,
+    fontWeight: "800" as const,
   },
   dmBtn: {
     width: 36,

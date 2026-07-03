@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -44,6 +44,9 @@ export interface FeedListViewProps {
   /** Bottom offset for action buttons and user info (default: 88 = tab bar height).
    *  Pass a safe-area-based value on screens without a tab bar. */
   bottomInset?: number;
+  /** When this value changes, the list scrolls back to the top.
+   *  Used to reset scroll position when switching feed tabs. */
+  resetToken?: string | number;
 }
 
 /**
@@ -70,6 +73,7 @@ export function FeedListView({
   onSharePost,
   onReactionsPost,
   bottomInset,
+  resetToken,
 }: FeedListViewProps) {
   const tabFocused = useVideoFocus();
 
@@ -99,6 +103,12 @@ export function FeedListView({
   ).current;
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
+
+  // Scroll to top whenever resetToken changes (e.g. feed tab switch)
+  useEffect(() => {
+    if (resetToken === undefined) return;
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [resetToken]);
 
   const getItemLayout = useCallback(
     (_: ArrayLike<Post> | null | undefined, index: number) => ({

@@ -522,6 +522,41 @@ function rankFeed(posts: Post[], followingIds: string[], currentUserId?: string)
   return out;
 }
 
+/**
+ * Rank the "Following" feed: chronological (newest first) with a
+ * live-window sort override (the "trending sprinkle") and a brief
+ * self-boost so the user's own just-posted drop stays at the top.
+ *
+ * Tiers (highest surfaces first):
+ *   2 — own post created < 90s ago (self-boost)
+ *   1 — post within the current drop window (live boost)
+ *   0 — everything else
+ * Within each tier, posts are ordered by created_at descending.
+ */
+function rankFollowingFeed(posts: Post[], currentUserId?: string): Post[] {
+  if (posts.length === 0) return posts;
+  const now = Date.now();
+  const win = getDropWindowState(new Date(now));
+
+  const annotated = posts.map((p) => {
+    const created = new Date(p.created_at);
+    const ageMs = now - created.getTime();
+    const isOwn = currentUserId != null && p.user_id === currentUserId;
+    const selfBoost = isOwn && ageMs < 90_000;
+    const inLiveWindow =
+      win.isOpen && created >= win.windowStart && created < win.windowEnd;
+    const tier = selfBoost ? 2 : inLiveWindow ? 1 : 0;
+    return { p, tier, createdMs: created.getTime() };
+  });
+
+  annotated.sort((a, b) => {
+    if (b.tier !== a.tier) return b.tier - a.tier;
+    return b.createdMs - a.createdMs;
+  });
+
+  return annotated.map((a) => a.p);
+}
+
 export const [PostsProvider, usePosts] = createContextHook(() => {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -657,6 +692,58 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
   });
 
+  // ── Following feed: chronological with live-window sort override ──
+  // Fetches posts only from users the current user follows, ordered by
+  // created_at descending. rankFollowingFeed applies a live-window tier
+  // boost (posts in tonight's drop window surface to the top) and a brief
+  // 90-second self-boost so the user's own just-posted drop stays #1.
+  const followingFeedQuery = useQuery({
+    queryKey: ["posts", "following-feed", user?.id],
+    enabled: !!user?.id,
+    retry: 1,
+    staleTime: 30_000,
+    queryFn: async (): Promise<Post[]> => {
+      const followingIds = followingQuery.data ?? [];
+      if (!user?.id || followingIds.length === 0) return [];
+      try {
+        const res = await supabase
+          .from("posts")
+          .select(
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+          )
+          .is("parent_post_id", null)
+          .in("user_id", followingIds)
+          .order("created_at", { ascending: false })
+          .limit(200);
+        if (res.error) {
+          logQueryError("following-feed", res.error);
+          return [];
+        }
+        const raw: Post[] = ((res.data ?? []) as Record<string, unknown>[]).map((row) => ({
+          id: row.id as string,
+          user_id: row.user_id as string,
+          media_url: row.media_url as string,
+          media_type: row.media_type as "image" | "video",
+          caption: (row.caption as string | null) ?? null,
+          parent_post_id: (row.parent_post_id as string | null) ?? null,
+          segments: (row.segments as string[] | null) ?? null,
+          audio_url: (row.audio_url as string | null) ?? null,
+          trim_data: (row.trim_data as Post["trim_data"]) ?? null,
+          thumbnail_url: (row.thumbnail_url as string | null) ?? null,
+          created_at: row.created_at as string,
+          like_count: (row.like_count as number | undefined) ?? 0,
+          comment_count: (row.comment_count as number | undefined) ?? 0,
+          reaction_count: (row.reaction_count as number | undefined) ?? 0,
+          profile: (row.profiles as Post["profile"]) ?? null,
+        }));
+        return rankFollowingFeed(raw, user.id);
+      } catch (e) {
+        logQueryError("following-feed", e);
+        return [];
+      }
+    },
+  });
+
   const myPostsQuery = useQuery({
     queryKey: ["posts", "mine", user?.id],
     enabled: !!user?.id,
@@ -765,12 +852,20 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     onMutate: async ({ postId, liked }) => {
       // Snapshot current feed caches for rollback on error
       const prevFyp = qc.getQueryData<Post[]>(["posts", "fyp", user?.id]);
+      const prevFollowing = qc.getQueryData<Post[]>(["posts", "following-feed", user?.id]);
       const prevMine = qc.getQueryData<Post[]>(["posts", "mine", user?.id]);
 
       // Optimistically patch like_count in place — no refetch, no reorder
       const delta = liked ? 1 : -1;
       if (prevFyp) {
         qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) =>
+          (old ?? []).map((p) =>
+            p.id === postId ? { ...p, like_count: (p.like_count ?? 0) + delta } : p
+          )
+        );
+      }
+      if (prevFollowing) {
+        qc.setQueryData<Post[]>(["posts", "following-feed", user?.id], (old) =>
           (old ?? []).map((p) =>
             p.id === postId ? { ...p, like_count: (p.like_count ?? 0) + delta } : p
           )
@@ -784,12 +879,15 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         );
       }
 
-      return { prevFyp, prevMine };
+      return { prevFyp, prevFollowing, prevMine };
     },
     onError: (_error, _vars, context) => {
       // Rollback optimistic cache patches
       if (context?.prevFyp) {
         qc.setQueryData(["posts", "fyp", user?.id], context.prevFyp);
+      }
+      if (context?.prevFollowing) {
+        qc.setQueryData(["posts", "following-feed", user?.id], context.prevFollowing);
       }
       if (context?.prevMine) {
         qc.setQueryData(["posts", "mine", user?.id], context.prevMine);
@@ -1160,6 +1258,13 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           if (!old) return [optPost];
           return [optPost, ...old];
         });
+        // Also insert into the following-feed cache — the user's own posts
+        // appear there via the self-boost tier, so the optimistic entry must
+        // be visible immediately while the upload is in flight.
+        qc.setQueryData<Post[]>(["posts", "following-feed", user?.id], (old) => {
+          if (!old) return [optPost];
+          return [optPost, ...old];
+        });
       }
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
         if (!old) return [optPost];
@@ -1212,6 +1317,17 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             : p
         );
       });
+      qc.setQueryData<Post[]>(["posts", "following-feed", user?.id], (old) => {
+        if (!old) return old;
+        return old.map((p) =>
+          p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
+            ? {
+                ...p,
+                _optimistic: { ...p._optimistic!, progress },
+              }
+            : p
+        );
+      });
     },
     [user?.id, qc]
   );
@@ -1233,6 +1349,17 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
       // Only update fyp cache for root Drops — reactions aren't in this cache.
       qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+        if (!old) return old;
+        return old.map((p) =>
+          p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
+            ? {
+                ...p,
+                _optimistic: { ...p._optimistic!, status: "failed" as const, error },
+              }
+            : p
+        );
+      });
+      qc.setQueryData<Post[]>(["posts", "following-feed", user?.id], (old) => {
         if (!old) return old;
         return old.map((p) =>
           p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
@@ -1621,7 +1748,17 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           if (filtered.some((p) => p.id === newPost.id)) return filtered;
           return [newPost, ...filtered];
         });
-
+        // Also insert into the following-feed cache — the user's own post
+        // appears at the top via the self-boost tier. Without this, the
+        // optimistic entry would vanish from the Following tab on success.
+        qc.setQueryData<Post[]>(["posts", "following-feed", user?.id], (old) => {
+          if (!old) return [newPost];
+          const filtered = old.filter(
+            (p) => p._optimistic?.tempId !== variables.optimisticTempId
+          );
+          if (filtered.some((p) => p.id === newPost.id)) return filtered;
+          return [newPost, ...filtered];
+        });
       }
 
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
@@ -1654,6 +1791,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       }
 
       persistOptimisticPosts();
+
+      // Record timestamp so the feed screen can skip a refetch that would
+      // overwrite this cache patch before the self-boost window kicks in.
+      lastPostCreatedAtRef.current = Date.now();
 
       console.log("[createPost] onSuccess — reaction saved successfully", {
         postId: newPost.id?.slice(0, 8),
@@ -1715,6 +1856,17 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
       // Only update the feed cache for root Drops — reactions aren't in it.
       qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+        if (!old) return old;
+        return old.map((p) =>
+          p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
+            ? {
+                ...p,
+                _optimistic: { ...p._optimistic!, status: "uploading" as const, progress: 0, error: undefined },
+              }
+            : p
+        );
+      });
+      qc.setQueryData<Post[]>(["posts", "following-feed", user?.id], (old) => {
         if (!old) return old;
         return old.map((p) =>
           p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
@@ -2076,6 +2228,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return old.filter((p) => p.id !== postId);
       });
 
+      // Remove from following feed cache
+      qc.setQueryData<Post[]>(["posts", "following-feed", user?.id], (old) => {
+        if (!old) return [];
+        return old.filter((p) => p.id !== postId);
+      });
+
       // Remove from my posts cache
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
         if (!old) return [];
@@ -2213,6 +2371,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       feed: feedQuery.data ?? [],
       feedLoading: feedQuery.isLoading,
       refetchFeed: feedQuery.refetch,
+      followingFeed: followingFeedQuery.data ?? [],
+      followingFeedLoading: followingFeedQuery.isLoading,
+      refetchFollowingFeed: followingFeedQuery.refetch,
       myPosts: myPostsQuery.data ?? [],
       refetchMyPosts: myPostsQuery.refetch,
       myProfile: myProfileQuery.data ?? null,
@@ -2258,6 +2419,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     [
       exploreCreatorsQuery,
       feedQuery,
+      followingFeedQuery,
       myPostsQuery,
       myProfileQuery,
       updateProfile,
