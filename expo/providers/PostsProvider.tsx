@@ -1,6 +1,6 @@
 import createContextHook from "@nkzw/create-context-hook";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { documentDirectory, cacheDirectory, getInfoAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
@@ -521,6 +521,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const qc = useQueryClient();
   const [draftProjects, setDraftProjects] = useState<DraftProject[]>([]);
   const [draftsLoaded, setDraftsLoaded] = useState(false);
+
+  // Timestamp of the most recent successful post creation — used by the feed
+  // screen's useFocusEffect to skip a refetch that would overwrite the
+  // onSuccess cache patch (which inserts the new post at the top).
+  const lastPostCreatedAtRef = useRef<number>(0);
 
   // Load draft projects from AsyncStorage on mount
   useEffect(() => {
@@ -2227,6 +2232,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       reactionsLoading: allReactionsQuery.isLoading,
       refetchReactions: allReactionsQuery.refetch,
       lastQueryError,
+      lastPostCreatedAtRef,
       optimisticPosts,
       addOptimisticPost,
       updateOptimisticProgress,
@@ -2252,6 +2258,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       followingQuery,
       suggestedQuery,
       lastQueryError,
+      lastPostCreatedAtRef,
       followUser,
       unfollowUser,
       hasPostedInWindow,

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import type { RefObject } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -35,7 +36,7 @@ const FREE_VIEWS_BEFORE_GATE = 5;
 
 export default function FeedScreen() {
   const router = useRouter();
-  const { feed, feedLoading, refetchFeed, refetchMyPosts, optimisticPosts } = usePosts();
+  const { feed, feedLoading, refetchFeed, refetchMyPosts, optimisticPosts, lastPostCreatedAtRef } = usePosts();
   const [now, setNow] = useState<Date>(new Date());
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
@@ -76,6 +77,12 @@ export default function FeedScreen() {
   // Also skip refetch while optimistic posts are uploading — the refetch
   // can race with createPost's DB insert (Supabase eventual consistency)
   // and overwrite the cache, making the optimistic post disappear.
+  //
+  // Additionally skip refetch if a post was just created within the last
+  // 5 seconds — createPost's onSuccess already patched the cache with the
+  // new post at the top, and an immediate refetch would re-run rankFeed()
+  // before the self-boost window kicks in, potentially pushing the new
+  // post down.
   useFocusEffect(
     useCallback(() => {
       if (isFirstFocusRef.current) {
@@ -85,10 +92,12 @@ export default function FeedScreen() {
       const hasPendingUpload = optimisticPosts.some(
         (p) => p._optimistic?.status === "uploading",
       );
-      if (!hasPendingUpload) {
+      const msSincePost = Date.now() - (lastPostCreatedAtRef as RefObject<number>).current;
+      const justPosted = msSincePost < 5_000;
+      if (!hasPendingUpload && !justPosted) {
         refetchFeed();
       }
-    }, [refetchFeed, optimisticPosts])
+    }, [refetchFeed, optimisticPosts, lastPostCreatedAtRef])
   );
 
   return (
