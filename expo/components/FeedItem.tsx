@@ -18,6 +18,8 @@ import {
   Sparkles,
   RotateCcw,
   Trash2,
+  X,
+  AlertCircle,
 } from "lucide-react-native";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
@@ -68,6 +70,7 @@ export const FeedItem = memo(function FeedItem({
   onShare,
   onReactions,
   onRetry,
+  onDismiss,
   bottomInset = TAB_BAR_HEIGHT,
 }: {
   post: Post;
@@ -76,6 +79,7 @@ export const FeedItem = memo(function FeedItem({
   onShare: () => void;
   onReactions: () => void;
   onRetry: () => void;
+  onDismiss: () => void;
   /** Bottom offset for action buttons and user info — TAB_BAR_HEIGHT on main feed, safe-area-based on profile view. */
   bottomInset?: number;
 }) {
@@ -328,10 +332,13 @@ export const FeedItem = memo(function FeedItem({
             key={`${post.id}_seg${segIdx}`}
             ref={videoRef}
             source={{ uri: currentUri }}
-            style={StyleSheet.absoluteFill}
+            style={[
+              StyleSheet.absoluteFill,
+              post._optimistic?.status === "failed" && { opacity: 0.3 },
+            ]}
             resizeMode={ResizeMode.COVER}
             isLooping
-            shouldPlay={active && playbackReady && !isPaused}
+            shouldPlay={active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
             isMuted={!active}
             useNativeControls={false}
             progressUpdateIntervalMillis={250}
@@ -403,7 +410,10 @@ export const FeedItem = memo(function FeedItem({
       ) : (
         <Image
           source={{ uri: post.media_url }}
-          style={StyleSheet.absoluteFill}
+          style={[
+            StyleSheet.absoluteFill,
+            post._optimistic?.status === "failed" && { opacity: 0.3 },
+          ]}
           contentFit="cover"
           transition={150}
         />
@@ -437,16 +447,27 @@ export const FeedItem = memo(function FeedItem({
       {post._optimistic?.status === "failed" && (
         <View style={styles.optOverlay} pointerEvents="auto">
           <LinearGradient
-            colors={["rgba(0,0,0,0.65)", "rgba(0,0,0,0.65)"]}
+            colors={["rgba(20,20,20,0.85)", "rgba(0,0,0,0.92)"]}
             style={StyleSheet.absoluteFill}
           />
           <View style={styles.optInner}>
-            <UiText style={styles.optErrorIcon}>!</UiText>
+            <View style={styles.optErrorCircle}>
+              <AlertCircle color={theme.danger} size={28} strokeWidth={2.5} />
+            </View>
             <UiText style={styles.optTitle}>Upload failed</UiText>
-            <UiText style={styles.optSub} numberOfLines={2}>{post._optimistic?.error ?? "Something went wrong."}</UiText>
-            <Pressable onPress={onRetry} style={styles.optRetryBtn}>
-              <UiText style={styles.optRetryText}>Retry</UiText>
-            </Pressable>
+            <UiText style={styles.optSub} numberOfLines={3}>
+              {post._optimistic?.error ?? "Something went wrong during upload."}
+            </UiText>
+            <View style={styles.optBtnRow}>
+              <Pressable onPress={onRetry} style={styles.optRetryBtn} hitSlop={8}>
+                <RotateCcw color="#fff" size={16} strokeWidth={2.5} />
+                <UiText style={styles.optRetryText}>Retry</UiText>
+              </Pressable>
+              <Pressable onPress={onDismiss} style={styles.optDismissBtn} hitSlop={8}>
+                <X color="rgba(255,255,255,0.5)" size={16} strokeWidth={2.5} />
+                <UiText style={styles.optDismissText}>Dismiss</UiText>
+              </Pressable>
+            </View>
           </View>
         </View>
       )}
@@ -732,22 +753,25 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 18,
   },
-  optErrorIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: theme.danger,
-    color: "#fff",
-    fontSize: 24,
-    fontWeight: "800" as const,
-    textAlign: "center",
-    lineHeight: 48,
-    overflow: "hidden",
+  optErrorCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(255,59,48,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  optBtnRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 8,
   },
   optRetryBtn: {
-    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     backgroundColor: theme.accent,
-    paddingHorizontal: 28,
+    paddingHorizontal: 22,
     paddingVertical: 12,
     borderRadius: 999,
     shadowColor: theme.accent,
@@ -760,6 +784,23 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "800" as const,
+    letterSpacing: 0.3,
+  },
+  optDismissBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  optDismissText: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 14,
+    fontWeight: "700" as const,
     letterSpacing: 0.3,
   },
 });

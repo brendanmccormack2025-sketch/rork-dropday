@@ -90,7 +90,7 @@ export function FeedListView({
   const [activeIndex, setActiveIndex] = useState<number>(initialIndex);
   const listRef = useRef<FlatList<Post>>(null);
 
-  const { retryOptimisticPost } = usePosts();
+  const { retryOptimisticPost, removeOptimisticPost } = usePosts();
   const win = useMemo(() => getDropWindowState(new Date()), []);
 
   const onViewableItemsChanged = useRef(
@@ -129,9 +129,10 @@ export function FeedListView({
         onShare={() => onSharePost?.(item)}
         onReactions={() => onReactionsPost?.(item)}
         onRetry={() => retryOptimisticPost(item._optimistic?.tempId ?? "")}
+        onDismiss={() => removeOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),
-    [activeIndex, screenFocused, win.isOpen, retryOptimisticPost, bottomInset, onSharePost, onReactionsPost],
+    [activeIndex, screenFocused, win.isOpen, retryOptimisticPost, removeOptimisticPost, bottomInset, onSharePost, onReactionsPost],
   );
 
   const safeInitialIndex = Math.max(0, Math.min(initialIndex, posts.length - 1));

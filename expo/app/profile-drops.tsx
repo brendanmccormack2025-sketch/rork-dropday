@@ -64,6 +64,7 @@ export default function ProfileDropsScreen() {
         segments: (row.segments as string[] | null) ?? null,
         audio_url: null,
         trim_data: null,
+        text_overlays: null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         created_at: row.created_at as string,
         like_count: (row.like_count as number | undefined) ?? 0,

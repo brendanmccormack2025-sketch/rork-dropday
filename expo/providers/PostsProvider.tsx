@@ -23,6 +23,7 @@ export type Post = {
   segments: string[] | null;
   audio_url: string | null;
   trim_data: { trimStartMs: number; trimEndMs: number }[] | null;
+  text_overlays: TextOverlay[] | null;
   thumbnail_url: string | null;
   created_at: string;
   like_count?: number;
@@ -657,7 +658,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const res = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .order("created_at", { ascending: false })
@@ -681,6 +682,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         segments: (row.segments as string[] | null) ?? null,
         audio_url: (row.audio_url as string | null) ?? null,
         trim_data: (row.trim_data as Post["trim_data"]) ?? null,
+        text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         created_at: row.created_at as string,
         like_count: (row.like_count as number | undefined) ?? 0,
@@ -709,7 +711,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const res = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .in("user_id", followingIds)
@@ -729,6 +731,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
+          text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           created_at: row.created_at as string,
           like_count: (row.like_count as number | undefined) ?? 0,
@@ -754,7 +757,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       try {
         const { data, error } = await supabase
           .from("posts")
-          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
+          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(50);
@@ -772,6 +775,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
+          text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           created_at: row.created_at as string,
           like_count: (row.like_count as number | undefined) ?? 0,
@@ -807,7 +811,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data: postRows, error: postErr } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .in("id", postIds);
         if (postErr || !postRows) return [];
@@ -823,6 +827,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
+          text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           created_at: row.created_at as string,
           like_count: (row.like_count as number | undefined) ?? 0,
@@ -1089,7 +1094,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .not("parent_post_id", "is", null)
           .order("created_at", { ascending: false })
@@ -1108,6 +1113,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           segments: (row.segments as string[] | null) ?? null,
           audio_url: (row.audio_url as string | null) ?? null,
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
+          text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           created_at: row.created_at as string,
           like_count: (row.like_count as number | undefined) ?? 0,
@@ -1229,6 +1235,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         segments: payload.segmentUris ?? null,
         audio_url: null,
         trim_data: payload.trimData ?? null,
+        text_overlays: payload.textOverlays ?? null,
         thumbnail_url: payload.thumbnailUri ?? null,
         created_at: new Date().toISOString(),
         like_count: 0,
@@ -1902,6 +1909,32 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     [optimisticPosts, createPost, failOptimisticPost, updateOptimisticProgress, persistOptimisticPosts, user?.id, qc]
   );
 
+  /** Remove a failed optimistic post from all caches and AsyncStorage.
+   *  Called when the user dismisses a failed upload instead of retrying. */
+  const removeOptimisticPost = useCallback(
+    (tempId: string) => {
+      setOptimisticPosts((prev) => {
+        const next = prev.filter((p) => p._optimistic?.tempId !== tempId);
+        persistOptimisticPosts(next);
+        return next;
+      });
+      // Remove from all feed caches
+      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+        if (!old) return old;
+        return old.filter((p) => p._optimistic?.tempId !== tempId);
+      });
+      qc.setQueryData<Post[]>(["posts", "following-feed", user?.id], (old) => {
+        if (!old) return old;
+        return old.filter((p) => p._optimistic?.tempId !== tempId);
+      });
+      qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
+        if (!old) return old;
+        return old.filter((p) => p._optimistic?.tempId !== tempId);
+      });
+    },
+    [user?.id, qc, persistOptimisticPosts]
+  );
+
   // ── DM: Conversations ─────────────────────────────────────────────────────
   const conversationsQuery = useQuery({
     queryKey: ["conversations", user?.id],
@@ -2405,6 +2438,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       addOptimisticPost,
       updateOptimisticProgress,
       retryOptimisticPost,
+      removeOptimisticPost,
       conversations: conversationsQuery.data ?? [],
       conversationsLoading: conversationsQuery.isLoading,
       refetchConversations: conversationsQuery.refetch,
