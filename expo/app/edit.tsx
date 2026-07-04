@@ -240,9 +240,10 @@ export default function EditScreen() {
   const clipsRef = useRef(clips);
   const safeSeekActiveRef = useRef<boolean>(false);
 
-  // Stable refs for execution functions (no params — thumbnails auto-generated)
+  // Stable ref for save-draft only (Post calls executePost directly — see
+  // handlePostPress — to avoid the stale-ref race where executePostRef.current
+  // lagged one render behind the latest `clips` closure after a trim edit.)
   const executeSaveDraftRef = useRef<() => Promise<void>>(async () => {});
-  const executePostRef = useRef<() => Promise<void>>(async () => {});
 
   // Stable refs for undo/redo handlers
   const clipsForUndoRef = useRef(clips);
@@ -689,10 +690,29 @@ export default function EditScreen() {
   }, [handleVideoLoadError]);
 
   // ── Preload slot handlers ──────────────────────────────────────────────────
-  // The inactive slot only tracks readiness so advanceToNextClip can hot-swap.
-  const onPreloadLoad = useCallback((status: AVPlaybackStatus) => {
+  // The inactive slot tracks readiness AND positions itself at the upcoming
+  // clip's trimStart so the hot-swap lands at the correct playback position.
+  const onPreloadLoad = useCallback((status: AVPlaybackStatus, slot: 0 | 1) => {
     if (status.isLoaded) {
-      preloadReadyRef.current = true;
+      const expectedUri = preloadExpectedUriRef.current;
+      if (!expectedUri) {
+        preloadReadyRef.current = true;
+        return;
+      }
+      const clip = clipsRef.current.find((c) => c.uri === expectedUri);
+      const trimStart = clip?.trimStartMs ?? 0;
+      const vRef = slot === 0 ? videoRefA.current : videoRefB.current;
+      if (trimStart > 0 && vRef) {
+        // Block hot-swap until the seek completes so preloadReadyRef truly
+        // means "loaded AND positioned at trimStart".
+        preloadReadyRef.current = false;
+        vRef
+          .setPositionAsync(trimStart)
+          .then(() => { preloadReadyRef.current = true; })
+          .catch(() => { preloadReadyRef.current = true; });
+      } else {
+        preloadReadyRef.current = true;
+      }
     } else if (!status.isLoaded && "error" in status && status.error) {
       preloadReadyRef.current = false;
     }
@@ -709,13 +729,14 @@ export default function EditScreen() {
     [onVideoStatus],
   );
 
+  // onReadyForDisplay only drives the active slot's readiness; the inactive
+  // slot's readiness is managed solely by onPreloadLoad (+ seek completion)
+  // so preloadReadyRef never flips true before the trimStart seek finishes.
   const onReadySlot0 = useCallback(() => {
     if (activeSlotRef.current === 0) setVideoReady(true);
-    else preloadReadyRef.current = true;
   }, []);
   const onReadySlot1 = useCallback(() => {
     if (activeSlotRef.current === 1) setVideoReady(true);
-    else preloadReadyRef.current = true;
   }, []);
 
   const onLoadSlot0 = useCallback((status: AVPlaybackStatus) => {
@@ -726,7 +747,7 @@ export default function EditScreen() {
         setVideoReady(true);
       }
     } else {
-      onPreloadLoad(status);
+      onPreloadLoad(status, 0);
     }
   }, [onPreloadLoad]);
   const onLoadSlot1 = useCallback((status: AVPlaybackStatus) => {
@@ -737,7 +758,7 @@ export default function EditScreen() {
         setVideoReady(true);
       }
     } else {
-      onPreloadLoad(status);
+      onPreloadLoad(status, 1);
     }
   }, [onPreloadLoad]);
 
@@ -793,7 +814,10 @@ export default function EditScreen() {
         prevTrimStartRef.current = trimStartRef.current;
         prevTrimEndRef.current = trimEndRef.current;
         trimEndHandledRef.current = false;
-        trimSeekDoneRef.current = true;
+        // Only trust the preloaded player's position if preloadReadyRef is true,
+        // which now also guarantees the trimStart seek completed (onPreloadLoad).
+        // Otherwise let onVideoStatus's seek path handle it.
+        trimSeekDoneRef.current = preloadReadyRef.current;
         trimGenerationRef.current += 1;
         pendingSeekRef.current = null;
         durationSetRef.current = true;
@@ -894,7 +918,9 @@ export default function EditScreen() {
         prevTrimEndRef.current = trimEndRef.current;
         segmentOffsetRef.current = 0;
         trimEndHandledRef.current = false;
-        trimSeekDoneRef.current = true;
+        // Same conditional as the forward hot-swap: trust the preload's position
+        // only when preloadReadyRef confirms the seek completed.
+        trimSeekDoneRef.current = preloadReadyRef.current;
         trimGenerationRef.current += 1;
         pendingSeekRef.current = null;
         durationSetRef.current = true;
@@ -1064,6 +1090,38 @@ export default function EditScreen() {
           c.id === clipId ? { ...c, ...updates } : c,
         );
         clipsRef.current = next;
+
+        // If the updated clip is currently preloading in the inactive slot
+        // (i.e. it's the upcoming clip), the preloaded player may be parked at
+        // the OLD trimStart. Re-seek it to the new trimStart so the hot-swap
+        // lands at the right position. We re-derive the trimStart from `next`
+        // because `updates` may only contain one of trimStartMs/trimEndMs.
+        const updatedClip = next.find((c) => c.id === clipId);
+        const isActiveClip = updatedClip
+          ? activeIndexRef.current >= 0 &&
+            next[activeIndexRef.current]?.id === updatedClip.id
+          : false;
+        if (
+          updatedClip &&
+          !isActiveClip &&
+          updatedClip.uri === preloadExpectedUriRef.current &&
+          updatedClip.type === "video"
+        ) {
+          const newTrimStart = updatedClip.trimStartMs ?? 0;
+          // Figure out which slot is inactive right now.
+          const inactiveSlot: 0 | 1 =
+            activeSlotRef.current === 0 ? 1 : 0;
+          const vRef =
+            inactiveSlot === 0 ? videoRefA.current : videoRefB.current;
+          if (vRef) {
+            preloadReadyRef.current = false; // block hot-swap until seek done
+            vRef
+              .setPositionAsync(newTrimStart)
+              .then(() => { preloadReadyRef.current = true; })
+              .catch(() => { preloadReadyRef.current = true; });
+          }
+        }
+
         return next;
       });
     },
@@ -1543,51 +1601,6 @@ export default function EditScreen() {
     });
   }, [clips]);
 
-  const handlePostPress = useCallback(() => {
-    console.log("[edit] handlePostPress: Post Drop tapped — clips:", clips.length, "user:", !!user?.id);
-
-    try {
-      if (!router) {
-        console.error("[edit] handlePostPress: router is null/undefined");
-        setError("Navigation is not available. Please restart the app.");
-        return;
-      }
-      if (!clips || clips.length === 0) {
-        console.warn("[edit] handlePostPress: no clips to post");
-        return;
-      }
-      if (!user?.id || !session) {
-        console.error("[edit] handlePostPress: not authenticated", { hasUser: !!user, hasSession: !!session });
-        setError("You must be signed in to post. Please sign in and try again.");
-        return;
-      }
-
-      setError(null);
-      setSuccess(null);
-      console.log("[edit] handlePostPress: calling executePost...");
-      const postPromise = executePostRef.current();
-      if (!postPromise || typeof postPromise.catch !== "function") {
-        console.error("[edit] handlePostPress: executePost did not return a Promise — got", typeof postPromise);
-        setError("Something went wrong. Please try again.");
-        return;
-      }
-      postPromise.catch((e: any) => {
-        console.error("[edit] handlePostPress: executePost FAILED (fallback)", (e as Error)?.message ?? e);
-        // executePost already showed Alert.alert() — just set banner as fallback
-        setError(e instanceof Error ? e.message : "Could not post your drop.");
-      });
-    } catch (err) {
-      console.error("[edit] handlePostPress: CRASH in handler", (err as Error)?.message ?? err);
-      showAlert(
-        "Post Failed",
-        err instanceof Error ? err.message : "Something went wrong. Please try again.",
-      );
-      setError(
-        err instanceof Error ? err.message : "Something went wrong. Please try again.",
-      );
-    }
-  }, [clips, router, user, session]);
-
   const executeSaveDraft = useCallback(async () => {
     if (clips.length === 0) return;
     setError(null);
@@ -1902,7 +1915,56 @@ export default function EditScreen() {
   }, [clips, draftId, textOverlays, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
-  useEffect(() => { executePostRef.current = executePost; }, [executePost]);
+
+  // handlePostPress calls executePost directly (no ref indirection) so the
+  // `clips` closure used at tap time is always the most recent one. Earlier the
+  // handler read executePostRef.current, whose sync effect ran after render —
+  // so a tap that landed between a trim edit and the effect would invoke a
+  // stale executePost closure and silently drop trimmed clips from the upload.
+  const handlePostPress = useCallback(() => {
+    console.log("[edit] handlePostPress: Post Drop tapped — clips:", clips.length, "user:", !!user?.id);
+
+    try {
+      if (!router) {
+        console.error("[edit] handlePostPress: router is null/undefined");
+        setError("Navigation is not available. Please restart the app.");
+        return;
+      }
+      if (!clips || clips.length === 0) {
+        console.warn("[edit] handlePostPress: no clips to post");
+        return;
+      }
+      if (!user?.id || !session) {
+        console.error("[edit] handlePostPress: not authenticated", { hasUser: !!user, hasSession: !!session });
+        setError("You must be signed in to post. Please sign in and try again.");
+        return;
+      }
+
+      setError(null);
+      setSuccess(null);
+      console.log("[edit] handlePostPress: calling executePost...");
+      const postPromise = executePost();
+      if (!postPromise || typeof postPromise.catch !== "function") {
+        console.error("[edit] handlePostPress: executePost did not return a Promise — got", typeof postPromise);
+        setError("Something went wrong. Please try again.");
+        return;
+      }
+      postPromise.catch((e: any) => {
+        console.error("[edit] handlePostPress: executePost FAILED (fallback)", (e as Error)?.message ?? e);
+        // executePost already showed Alert.alert() — just set banner as fallback
+        setError(e instanceof Error ? e.message : "Could not post your drop.");
+      });
+    } catch (err) {
+      console.error("[edit] handlePostPress: CRASH in handler", (err as Error)?.message ?? err);
+      showAlert(
+        "Post Failed",
+        err instanceof Error ? err.message : "Something went wrong. Please try again.",
+      );
+      setError(
+        err instanceof Error ? err.message : "Something went wrong. Please try again.",
+      );
+    }
+  }, [clips, router, user, session, executePost]);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (draftId && !draftsLoaded) {
