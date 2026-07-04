@@ -706,12 +706,14 @@ export default function EditScreen() {
         // Block hot-swap until the seek completes so preloadReadyRef truly
         // means "loaded AND positioned at trimStart".
         preloadReadyRef.current = false;
+        console.log("[preload-debug] seeking preload to trimStart:", trimStart, "for clip:", expectedUri.slice(-20));
         vRef
           .setPositionAsync(trimStart)
-          .then(() => { preloadReadyRef.current = true; })
-          .catch(() => { preloadReadyRef.current = true; });
+          .then(() => { preloadReadyRef.current = true; console.log("[preload-debug] preload seek complete, preloadReadyRef:", preloadReadyRef.current); })
+          .catch(() => { preloadReadyRef.current = true; console.log("[preload-debug] preload seek FAILED, preloadReadyRef:", preloadReadyRef.current); });
       } else {
         preloadReadyRef.current = true;
+        console.log("[preload-debug] preload loaded, no seek needed (trimStart=0), preloadReadyRef:", preloadReadyRef.current);
       }
     } else if (!status.isLoaded && "error" in status && status.error) {
       preloadReadyRef.current = false;
@@ -802,6 +804,7 @@ export default function EditScreen() {
 
       // Hot swap: the inactive slot has preloaded this exact clip and is ready
       // → flip slots instead of cold-loading a new source on the active player.
+      console.log("[preload-debug] hot-swap check — preloadReadyRef:", preloadReadyRef.current, "trimSeekDoneRef will be set to:", preloadReadyRef.current, "expectedUri:", preloadExpectedUriRef.current?.slice(-20), "nextClipUri:", nextClip?.uri.slice(-20));
       if (
         !sameUri &&
         nextClip?.type === "video" &&
@@ -1108,6 +1111,7 @@ export default function EditScreen() {
           updatedClip.type === "video"
         ) {
           const newTrimStart = updatedClip.trimStartMs ?? 0;
+          console.log("[preload-debug] trim changed on preloading clip, re-seeking to:", newTrimStart);
           // Figure out which slot is inactive right now.
           const inactiveSlot: 0 | 1 =
             activeSlotRef.current === 0 ? 1 : 0;
@@ -1117,8 +1121,10 @@ export default function EditScreen() {
             preloadReadyRef.current = false; // block hot-swap until seek done
             vRef
               .setPositionAsync(newTrimStart)
-              .then(() => { preloadReadyRef.current = true; })
-              .catch(() => { preloadReadyRef.current = true; });
+              .then(() => { preloadReadyRef.current = true; console.log("[preload-debug] handleClipUpdate re-seek complete, preloadReadyRef:", preloadReadyRef.current); })
+              .catch(() => { preloadReadyRef.current = true; console.log("[preload-debug] handleClipUpdate re-seek FAILED, preloadReadyRef:", preloadReadyRef.current); });
+          } else {
+            console.log("[preload-debug] handleClipUpdate re-seek skipped — no inactive vRef");
           }
         }
 
