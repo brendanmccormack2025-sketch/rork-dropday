@@ -412,38 +412,38 @@ export const FeedItem = memo(function FeedItem({
         }
       }
 
-      // End-of-trim detection
-      const trimEnd = trimEndRef.current;
-      if (
-        !status.didJustFinish &&
-        !trimEndHandledRef.current &&
-        sourceDur > 0 &&
-        trimEnd > 0 &&
-        trimEnd < sourceDur &&
-        status.positionMillis >= trimEnd
-      ) {
-        trimEndHandledRef.current = true;
-        const current = segIdxRef.current;
-        if (allSegments.length === 1) {
-          videoRef.current
-            ?.setPositionAsync(trimStartRef.current)
-            .then(() => {
-              trimEndHandledRef.current = false;
-            })
-            .catch(() => {});
-        } else {
-          const next = (current + 1) % allSegments.length;
-          setSegIdx(next);
+      // ── Unified end-of-segment detection ──
+      // Clamp trimEnd to the player's reported source duration so that a
+      // stored trimEnd that equals (or slightly exceeds) sourceDur is
+      // treated as "no trim end" instead of falling into a dead zone
+      // where neither the trimmed nor untrimmed advance path fires.
+      if (!status.didJustFinish && !trimEndHandledRef.current && sourceDur > 0) {
+        const effectiveTrimEnd =
+          trimEndRef.current > 0
+            ? Math.min(trimEndRef.current, sourceDur)
+            : sourceDur;
+
+        if (status.positionMillis >= effectiveTrimEnd - 120) {
+          trimEndHandledRef.current = true;
+          const current = segIdxRef.current;
+          if (allSegments.length === 1) {
+            videoRef.current
+              ?.setPositionAsync(trimStartRef.current)
+              .then(() => {
+                trimEndHandledRef.current = false;
+              })
+              .catch(() => {});
+          } else {
+            const next = (current + 1) % allSegments.length;
+            setSegIdx(next);
+          }
+          return;
         }
-        return;
       }
 
-      // ── Untrimmed end-of-source: advance before native loop ──
-      if (
-        sourceDur > 0 &&
-        status.positionMillis >= sourceDur - 120 &&
-        trimEndRef.current <= 0
-      ) {
+      // Native just-finished fallback (covers edge cases the position
+      // check misses, e.g. very short clips)
+      if (status.didJustFinish && allSegments.length > 1) {
         const current = segIdxRef.current;
         const next = (current + 1) % allSegments.length;
         setSegIdx(next);
@@ -460,7 +460,7 @@ export const FeedItem = memo(function FeedItem({
       .then(() =>
         videoRef.current?.loadAsync(
           { uri: currentUri },
-          { shouldPlay: active, isLooping: true },
+          { shouldPlay: active, isLooping: allSegments.length === 1 },
           false,
         ),
       )
@@ -504,7 +504,7 @@ export const FeedItem = memo(function FeedItem({
               post._optimistic?.status === "failed" && { opacity: 0.3 },
             ]}
             resizeMode={ResizeMode.COVER}
-            isLooping
+            isLooping={allSegments.length === 1}
             shouldPlay={active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
             isMuted={!active}
             useNativeControls={false}
