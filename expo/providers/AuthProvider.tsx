@@ -174,7 +174,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   );
 
   const signUpWithEmail = useCallback(
-    async (email: string, password: string, username: string) => {
+    async (email: string, password: string, username: string, birthdate?: string) => {
       if (inFlight.current.signUp) {
         console.log("[auth] signUp already in flight, ignoring duplicate");
         return;
@@ -187,10 +187,32 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           email: normalizedEmail,
           password,
           options: {
-            data: { username: username.trim() },
+            data: {
+              username: username.trim(),
+              birthdate: birthdate ?? undefined,
+            },
           },
         });
         if (signUpErr) throw signUpErr;
+        // Persist birthdate to the profile row. The handle_new_user DB
+        // trigger creates the profile from raw_user_meta_data, but it
+        // doesn't currently copy birthdate — so we upsert it here as a
+        // belt-and-braces step. This runs AFTER the auth user exists,
+        // so for under-13 users we abort BEFORE this point (the caller
+        // gates on age before invoking this function).
+        if (birthdate) {
+          const uid = data.user?.id;
+          if (uid) {
+            try {
+              await supabase
+                .from("profiles")
+                .update({ birthdate })
+                .eq("id", uid);
+            } catch (e) {
+              console.warn("[auth] birthdate profile update failed", (e as Error)?.message);
+            }
+          }
+        }
         if (data.session) {
           console.log("[auth] signUp returned session — user is signed in");
           return;

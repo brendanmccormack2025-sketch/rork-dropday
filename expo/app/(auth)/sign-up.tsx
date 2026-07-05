@@ -18,6 +18,64 @@ import DropletLogo from "@/components/DropletLogo";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 
+/** Compute age in years from a YYYY-MM-DD string. Returns NaN on bad input. */
+function ageFromBirthdate(bd: string): number {
+  const d = new Date(bd);
+  if (Number.isNaN(d.getTime())) return Number.NaN;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const hadBirthday =
+    now.getMonth() > d.getMonth() ||
+    (now.getMonth() === d.getMonth() && now.getDate() >= d.getDate());
+  if (!hadBirthday) age -= 1;
+  return age;
+}
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+function MonthPicker({
+  selected,
+  onSelect,
+}: {
+  selected: string;
+  onSelect: (m: number) => void;
+}) {
+  return (
+    <View style={styles.monthGrid}>
+      {MONTHS.map((name, i) => {
+        const idx = String(i + 1);
+        const active = selected === idx;
+        return (
+          <Pressable
+            key={name}
+            onPress={() => onSelect(i + 1)}
+            style={({ pressed }) => [
+              styles.monthChip,
+              active && styles.monthChipActive,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <UiText
+              style={active ? styles.monthChipTextActive : styles.monthChipText}
+            >
+              {name.slice(0, 3)}
+            </UiText>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Build the list of days for the selected month/year (1-based). */
+function daysInMonth(year: number, month1: number): number {
+  if (!year || !month1) return 31;
+  return new Date(year, month1, 0).getDate();
+}
+
 export default function SignUpScreen() {
   const { signUpWithEmail } = useAuth();
   const [username, setUsername] = useState<string>("");
@@ -26,6 +84,11 @@ export default function SignUpScreen() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showCheckInbox, setShowCheckInbox] = useState<boolean>(false);
+
+  // Birthdate state (day/month/year)
+  const [bdYear, setBdYear] = useState<string>("");
+  const [bdMonth, setBdMonth] = useState<string>(""); // 1-12
+  const [bdDay, setBdDay] = useState<string>("");
 
   const onSubmit = async () => {
     setError(null);
@@ -37,9 +100,34 @@ export default function SignUpScreen() {
       setError("Password must be at least 6 characters.");
       return;
     }
+    // Validate birthdate BEFORE any auth user is created.
+    const yNum = parseInt(bdYear, 10);
+    const mNum = parseInt(bdMonth, 10);
+    const dNum = parseInt(bdDay, 10);
+    if (
+      !bdYear || !bdMonth || !bdDay ||
+      Number.isNaN(yNum) || Number.isNaN(mNum) || Number.isNaN(dNum) ||
+      mNum < 1 || mNum > 12 || dNum < 1 || dNum > daysInMonth(yNum, mNum) ||
+      yNum < 1900 || yNum > new Date().getFullYear()
+    ) {
+      setError("Please enter your full birthdate (day, month, year).");
+      return;
+    }
+    const paddedMonth = String(mNum).padStart(2, "0");
+    const paddedDay = String(dNum).padStart(2, "0");
+    const birthdate = `${yNum}-${paddedMonth}-${paddedDay}`;
+    const age = ageFromBirthdate(birthdate);
+    if (Number.isNaN(age)) {
+      setError("That birthdate doesn't look right. Try again.");
+      return;
+    }
+    if (age < 13) {
+      setError("You must be at least 13 to use DropDay.");
+      return;
+    }
     setLoading(true);
     try {
-      await signUpWithEmail(email, password, username);
+      await signUpWithEmail(email, password, username, birthdate);
     } catch (e: any) {
       const msg: string = e?.message ?? "Sign-up failed.";
       const code: string = (e as any)?.code ?? "";
@@ -137,6 +225,51 @@ export default function SignUpScreen() {
               secureTextEntry
               autoComplete="password-new"
             />
+            <View style={styles.fieldWrap}>
+              <UiText style={styles.fieldLabel}>Birthdate</UiText>
+              <View style={styles.bdRow}>
+                <TextInput
+                  style={styles.bdDay}
+                  value={bdDay}
+                  onChangeText={(t) => setBdDay(t.replace(/[^0-9]/g, "").slice(0, 2))}
+                  placeholder="DD"
+                  placeholderTextColor={theme.textDim}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                />
+                <View style={styles.bdMonthWrap}>
+                  {bdMonth ? (
+                    <Pressable
+                      onPress={() => setBdMonth("")}
+                      style={styles.bdMonthPill}
+                    >
+                      <UiText style={styles.bdMonthText}>
+                        {MONTHS[(parseInt(bdMonth, 10) || 1) - 1]}
+                      </UiText>
+                    </Pressable>
+                  ) : (
+                    <View style={styles.bdMonthPill}>
+                      <UiText style={styles.bdMonthPlaceholder}>Month</UiText>
+                    </View>
+                  )}
+                </View>
+                <TextInput
+                  style={styles.bdYear}
+                  value={bdYear}
+                  onChangeText={(t) => setBdYear(t.replace(/[^0-9]/g, "").slice(0, 4))}
+                  placeholder="YYYY"
+                  placeholderTextColor={theme.textDim}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                />
+              </View>
+              {bdMonth ? null : (
+                <MonthPicker
+                  selected={bdMonth}
+                  onSelect={(m) => setBdMonth(String(m))}
+                />
+              )}
+            </View>
             {error ? <UiText style={styles.error}>{error}</UiText> : null}
             <PrimaryButton
               label="Create account"
@@ -209,6 +342,70 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 16,
   },
+  bdRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  bdDay: {
+    flex: 0.7,
+    backgroundColor: theme.card,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    color: theme.text,
+    fontSize: 16,
+    textAlign: "center",
+  },
+  bdMonthWrap: { flex: 1.6 },
+  bdMonthPill: {
+    backgroundColor: theme.card,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bdMonthText: { color: theme.text, fontSize: 16, fontWeight: "600" as const },
+  bdMonthPlaceholder: { color: theme.textDim, fontSize: 16 },
+  bdYear: {
+    flex: 1,
+    backgroundColor: theme.card,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    color: theme.text,
+    fontSize: 16,
+    textAlign: "center",
+  },
+  monthGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 4,
+  },
+  monthChip: {
+    backgroundColor: theme.card,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minWidth: 56,
+    alignItems: "center",
+  },
+  monthChipActive: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  monthChipText: { color: theme.textMuted, fontSize: 13, fontWeight: "600" as const },
+  monthChipTextActive: { color: "#fff", fontSize: 13, fontWeight: "700" as const },
   error: { color: theme.danger, fontSize: 13, fontWeight: "500" as const },
   info: { color: theme.success, fontSize: 13, fontWeight: "500" as const },
   switch: { alignItems: "center", marginTop: 6 },

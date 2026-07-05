@@ -11,6 +11,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Switch,
   TouchableOpacity,
   View,
   Dimensions,
@@ -198,6 +199,7 @@ export default function EditScreen() {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
+  const [isMature, setIsMature] = useState<boolean>(false);
 
   // ── Drag-to-trash tracking ───────────────────────────────────────────────
   const [dragOverlayInfo, setDragOverlayInfo] = useState<{
@@ -1862,6 +1864,7 @@ export default function EditScreen() {
         trimData,
         textOverlays: overlaysForPost,
         thumbnailUri: thumbnailUri ?? undefined,
+        isMature,
         optimisticTempId: tempId,
         onProgress: (percent: number) => {
           updateOptimisticProgress(tempId, percent);
@@ -1921,7 +1924,7 @@ export default function EditScreen() {
       // DO NOT re-throw and DO NOT navigate. Stay on the edit screen
       // so the user can retry or save as draft.
     }
-  }, [clips, draftId, textOverlays, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId]);
+  }, [clips, draftId, textOverlays, isMature, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
 
@@ -2369,6 +2372,19 @@ export default function EditScreen() {
               <UiText style={styles.bannerSuccessText}>{success}</UiText>
             </View>
           )}
+          <View style={styles.matureRow}>
+            <View style={styles.matureLabelWrap}>
+              <UiText style={styles.matureLabel}>Mark as mature content</UiText>
+              <UiText style={styles.matureHint}>Hidden from teen viewers.</UiText>
+            </View>
+            <Switch
+              value={isMature}
+              onValueChange={setIsMature}
+              trackColor={{ false: theme.border, true: theme.danger }}
+              thumbColor="#fff"
+              ios_backgroundColor={theme.border}
+            />
+          </View>
           <View style={styles.actionRow}>
             <Pressable
               onPress={handleSaveDraftPress}
@@ -2619,6 +2635,29 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 1,
     borderColor: "rgba(255,69,58,0.25)",
+  },
+  matureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: theme.card,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: theme.border,
+    marginBottom: 8,
+  },
+  matureLabelWrap: { flex: 1, paddingRight: 12 },
+  matureLabel: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "600" as const,
+  },
+  matureHint: {
+    color: theme.textMuted,
+    fontSize: 12,
+    marginTop: 2,
   },
   bannerErrorText: {
     color: theme.danger,

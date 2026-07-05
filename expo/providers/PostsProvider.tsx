@@ -29,6 +29,8 @@ export type Post = {
   like_count?: number;
   comment_count?: number;
   reaction_count?: number;
+  /** Mature-content flag (server-side filtered for teen viewers). */
+  is_mature?: boolean;
   profile?: {
     username: string;
     display_name: string | null;
@@ -123,7 +125,28 @@ export type MyProfile = {
   website: string | null;
   instagram_handle: string | null;
   tiktok_handle: string | null;
+  /** ISO date string (YYYY-MM-DD) or null if not set. */
+  birthdate: string | null;
 };
+
+/** Age tier derived from a birthdate. "unknown" when birthdate is missing. */
+export type AgeTier = "under_13" | "teen" | "adult" | "unknown";
+
+/** Compute a viewer's age tier client-side from a birthdate string. */
+export function computeAgeTier(birthdate: string | null | undefined): AgeTier {
+  if (!birthdate) return "unknown";
+  const bd = new Date(birthdate);
+  if (Number.isNaN(bd.getTime())) return "unknown";
+  const now = new Date();
+  let age = now.getFullYear() - bd.getFullYear();
+  const hadBirthday =
+    now.getMonth() > bd.getMonth() ||
+    (now.getMonth() === bd.getMonth() && now.getDate() >= bd.getDate());
+  if (!hadBirthday) age -= 1;
+  if (age < 13) return "under_13";
+  if (age < 18) return "teen";
+  return "adult";
+}
 
 export type DraftClip = {
   id: string;
@@ -653,16 +676,39 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     retry: 1,
     staleTime: 30_000,
     queryFn: async (): Promise<Post[]> => {
+      // Server-side mature-content filtering: teen viewers never receive
+      // is_mature posts. Adult/unknown tiers see everything. (Under-13
+      // users can't sign up, but we treat unknown conservatively as
+      // adult here so existing users without a birthdate aren't locked
+      // out — they simply see everything until they set a birthdate.)
+      let viewerTier: AgeTier = "unknown";
+      if (user?.id) {
+        try {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("birthdate")
+            .eq("id", user.id)
+            .maybeSingle();
+          viewerTier = computeAgeTier(prof?.birthdate as string | null);
+        } catch {
+          // keep "unknown" — fail open so users can still see content
+        }
+      }
+      const hideMature = viewerTier === "teen";
       let data: unknown[] | null = null;
       try {
-        const res = await supabase
+        let q = supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, is_mature, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .order("created_at", { ascending: false })
           .limit(300);
+        if (hideMature) {
+          q = q.neq("is_mature", true);
+        }
+        const res = await q;
         if (res.error) {
           logQueryError("feed", res.error);
           return [];
@@ -684,6 +730,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         trim_data: (row.trim_data as Post["trim_data"]) ?? null,
         text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
+        is_mature: (row.is_mature as boolean | null) ?? false,
         created_at: row.created_at as string,
         like_count: (row.like_count as number | undefined) ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -707,16 +754,32 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     queryFn: async (): Promise<Post[]> => {
       const followingIds = followingQuery.data ?? [];
       if (!user?.id || followingIds.length === 0) return [];
+      let viewerTier: AgeTier = "unknown";
       try {
-        const res = await supabase
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("birthdate")
+          .eq("id", user.id)
+          .maybeSingle();
+        viewerTier = computeAgeTier(prof?.birthdate as string | null);
+      } catch {
+        // keep "unknown" — fail open
+      }
+      const hideMature = viewerTier === "teen";
+      try {
+        let q = supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, is_mature, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .in("user_id", followingIds)
           .order("created_at", { ascending: false })
           .limit(200);
+        if (hideMature) {
+          q = q.neq("is_mature", true);
+        }
+        const res = await q;
         if (res.error) {
           logQueryError("following-feed", res.error);
           return [];
@@ -733,6 +796,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           trim_data: (row.trim_data as Post["trim_data"]) ?? null,
           text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
+          is_mature: (row.is_mature as boolean | null) ?? false,
           created_at: row.created_at as string,
           like_count: (row.like_count as number | undefined) ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -915,7 +979,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (!user?.id) return null;
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle")
+        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, birthdate")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -939,6 +1003,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           website: (data.website as string | null) ?? null,
           instagram_handle: (data.instagram_handle as string | null) ?? null,
           tiktok_handle: (data.tiktok_handle as string | null) ?? null,
+          birthdate: (data.birthdate as string | null) ?? null,
         };
       }
 
@@ -1392,6 +1457,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       trimData?: Array<{ trimStartMs: number; trimEndMs: number }>;
       textOverlays?: TextOverlay[];
       thumbnailUri?: string;
+      isMature?: boolean;
       optimisticTempId?: string;
       onProgress?: (percent: number) => void;
     }) => {
@@ -1647,6 +1713,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         caption: input.caption?.trim() || null,
         parent_post_id: input.parentPostId || null,
         segments: segmentUrls,
+        is_mature: !!input.isMature,
       };
       if (input.trimData && input.trimData.length > 0) {
         row.trim_data = input.trimData;
@@ -1726,6 +1793,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         trim_data: input.trimData ?? null,
         text_overlays: input.textOverlays ?? null,
         thumbnail_url: thumbnailUrl,
+        is_mature: !!input.isMature,
         created_at: insData.created_at as string,
         like_count: 0,
         comment_count: 0,
