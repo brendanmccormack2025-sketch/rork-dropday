@@ -577,7 +577,8 @@ export default function EditScreen() {
           .catch(() => { safeSeekActiveRef.current = false; });
         return;
       }
-      if (!safeSeekActiveRef.current && trimSeekDoneRef.current && tEnd > 0 && tEnd < sourceDur && posMillis > tEnd + 150) {
+      const tEndClamped = tEnd > 0 ? Math.min(tEnd, sourceDur > 0 ? sourceDur : tEnd) : (sourceDur > 0 ? sourceDur : 0);
+      if (!safeSeekActiveRef.current && trimSeekDoneRef.current && tEndClamped > 0 && posMillis > tEndClamped + 150) {
         safeSeekActiveRef.current = true;
         trimEndHandledRef.current = true;
         const gen = trimGenerationRef.current;
@@ -611,13 +612,15 @@ export default function EditScreen() {
     }
 
     const trimEnd = trimEndRef.current;
+    const effectiveTrimEnd = trimEnd > 0 && sourceDur > 0
+      ? Math.min(trimEnd, sourceDur)
+      : trimEnd > 0 ? trimEnd : sourceDur;
     if (
       !status.didJustFinish &&
       !trimEndHandledRef.current &&
       sourceDur > 0 &&
-      trimEnd > 0 &&
-      trimEnd < sourceDur &&
-      status.positionMillis >= trimEnd
+      effectiveTrimEnd > 0 &&
+      status.positionMillis >= effectiveTrimEnd - 120
     ) {
       trimEndHandledRef.current = true;
       if (isIsolatedRef.current) {
