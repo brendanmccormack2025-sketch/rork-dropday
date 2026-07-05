@@ -47,7 +47,7 @@ export default function FeedScreen() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
   const [sharePost, setSharePost] = useState<Post | null>(null);
-  const [activeTab, setActiveTab] = useState<FeedTab>("following");
+  const [activeTab, setActiveTab] = useState<FeedTab>("foryou");
   const isFirstFocusRef = useRef<boolean>(true);
 
   useEffect(() => {
@@ -170,7 +170,13 @@ export default function FeedScreen() {
             </View>
           </SafeAreaView>
         }
-        emptyComponent={<EmptyState />}
+        emptyComponent={
+          activeTab === "following" ? (
+            <FollowingEmptyState onExploreForYou={() => setActiveTab("foryou")} />
+          ) : (
+            <EmptyState />
+          )
+        }
         gateComponent={
           gateActive ? (
             <GateOverlay
@@ -200,6 +206,21 @@ function EmptyState() {
       <DropletLogo size={56} />
       <UiText style={styles.emptyTitle}>No drops yet</UiText>
       <UiText style={styles.emptySub}>Be the first to drop.</UiText>
+    </SafeAreaView>
+  );
+}
+
+function FollowingEmptyState({ onExploreForYou }: { onExploreForYou: () => void }) {
+  return (
+    <SafeAreaView style={styles.emptyWrap}>
+      <Users color={theme.textMuted} size={48} />
+      <UiText style={styles.emptyTitle}>No drops from your follows yet</UiText>
+      <UiText style={styles.emptySub}>
+        Follow people to see their drops here. Head to For You to discover creators.
+      </UiText>
+      <Pressable onPress={onExploreForYou} style={styles.emptyBtn}>
+        <UiText style={styles.emptyBtnText}>Explore For You</UiText>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -535,6 +556,18 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
     fontSize: 13,
     textAlign: "center",
+  },
+  emptyBtn: {
+    marginTop: 12,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: theme.accent,
+  },
+  emptyBtnText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700" as const,
   },
 
   /* Gate overlay */
