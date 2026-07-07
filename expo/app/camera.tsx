@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
+  Linking,
   PanResponder,
   Platform,
   Pressable,
@@ -538,6 +540,7 @@ export default function CameraScreen() {
       <View style={[styles.fullscreen, styles.centered]}>
         <StatusBar style="light" />
         <ActivityIndicator color={theme.accent} size="large" />
+        <UiText style={styles.permSub}>Loading camera…</UiText>
       </View>
     );
   }
@@ -545,6 +548,11 @@ export default function CameraScreen() {
   // ─── Permissions: denied ───────────────────────────────────────
 
   if (!permission.granted) {
+    // iOS: once the user has denied the OS prompt, requestPermission()
+    // silently no-ops — the only path forward is Settings. Show the
+    // "Open Settings" button for denied/blocked status, and the
+    // "Grant Permission" button only for the first-time undetermined case.
+    const wasPrompted = permission.status === "denied";
     return (
       <View style={[styles.fullscreen, styles.centered]}>
         <StatusBar style="light" />
@@ -554,13 +562,26 @@ export default function CameraScreen() {
           DropDay needs your camera to capture content. You can prep anytime and
           post during The Drop.
         </UiText>
-        <PrimaryButton
-          label="Grant Permission"
-          onPress={async () => {
-            await requestPermission();
-            if (!micPermission?.granted) await requestMicPermission();
-          }}
-        />
+        {wasPrompted ? (
+          <PrimaryButton
+            label="Open Settings"
+            onPress={() => {
+              if (Platform.OS === "ios") {
+                Linking.openURL("app-settings:");
+              } else {
+                Linking.openSettings();
+              }
+            }}
+          />
+        ) : (
+          <PrimaryButton
+            label="Grant Permission"
+            onPress={async () => {
+              await requestPermission();
+              if (!micPermission?.granted) await requestMicPermission();
+            }}
+          />
+        )}
         <Pressable
           onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
           style={{ marginTop: 12, padding: 12 }}

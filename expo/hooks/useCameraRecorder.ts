@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Platform } from "react-native";
+import { Alert, Linking, Platform } from "react-native";
 import {
   CameraView,
   useCameraPermissions,
@@ -218,7 +218,26 @@ export function useCameraRecorder() {
       console.log("[camera] Requesting microphone permission...");
       const res = await requestMicPermission();
       if (!res.granted) {
-        setError("Microphone permission is required to record video.");
+        // iOS: once denied, requestMicPermission() no-ops. Give the user
+        // an actual path forward via Settings instead of a dead-end error.
+        Alert.alert(
+          "Microphone Access",
+          "DropDay needs microphone access to record video with sound. You can grant this in Settings.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Open Settings",
+              onPress: () => {
+                if (Platform.OS === "ios") {
+                  Linking.openURL("app-settings:");
+                } else {
+                  Linking.openSettings();
+                }
+              },
+            },
+          ],
+        );
+        setError("Microphone permission is required to record video with sound.");
         return;
       }
       console.log("[camera] Microphone permission granted");
