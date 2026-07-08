@@ -10,7 +10,7 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import { ArrowLeft, Mail } from "lucide-react-native";
+import { ArrowLeft, Check, Mail } from "lucide-react-native";
 
 import ScreenBackground from "@/components/ScreenBackground";
 import PrimaryButton from "@/components/PrimaryButton";
@@ -90,6 +90,9 @@ export default function SignUpScreen() {
   const [bdMonth, setBdMonth] = useState<string>(""); // 1-12
   const [bdDay, setBdDay] = useState<string>("");
 
+  // Terms acceptance
+  const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
+
   const onSubmit = async () => {
     setError(null);
     if (!username.trim() || !email || !password) {
@@ -125,9 +128,13 @@ export default function SignUpScreen() {
       setError("You must be at least 13 to use DropDay.");
       return;
     }
+    if (!agreedToTerms) {
+      setError("Please agree to the Terms of Use and Privacy Policy to continue.");
+      return;
+    }
     setLoading(true);
     try {
-      await signUpWithEmail(email, password, username, birthdate);
+      await signUpWithEmail(email, password, username, birthdate, true);
     } catch (e: any) {
       const msg: string = e?.message ?? "Sign-up failed.";
       const code: string = (e as any)?.code ?? "";
@@ -271,10 +278,51 @@ export default function SignUpScreen() {
               )}
             </View>
             {error ? <UiText style={styles.error}>{error}</UiText> : null}
+            <Pressable
+              onPress={() => setAgreedToTerms((v) => !v)}
+              style={styles.termsRow}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: agreedToTerms }}
+            >
+              <View
+                style={[
+                  styles.checkbox,
+                  agreedToTerms && styles.checkboxChecked,
+                ]}
+              >
+                {agreedToTerms ? (
+                  <Check color="#FFFFFF" size={16} strokeWidth={3} />
+                ) : null}
+              </View>
+              <UiText style={styles.termsText}>
+                I agree to the{" "}
+                <UiText
+                  style={styles.termsLink}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    router.push("/(auth)/legal?tab=terms");
+                  }}
+                >
+                  Terms of Use
+                </UiText>
+                {" and "}
+                <UiText
+                  style={styles.termsLink}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    router.push("/(auth)/legal?tab=privacy");
+                  }}
+                >
+                  Privacy Policy
+                </UiText>
+                .
+              </UiText>
+            </Pressable>
             <PrimaryButton
               label="Create account"
               onPress={onSubmit}
               loading={loading}
+              disabled={!agreedToTerms}
             />
             <Pressable
               onPress={() => router.replace("/(auth)/sign-in")}
@@ -408,6 +456,36 @@ const styles = StyleSheet.create({
   monthChipTextActive: { color: "#fff", fontSize: 13, fontWeight: "700" as const },
   error: { color: theme.danger, fontSize: 13, fontWeight: "500" as const },
   info: { color: theme.success, fontSize: 13, fontWeight: "500" as const },
+  termsRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    paddingVertical: 4,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: theme.border,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
+  },
+  checkboxChecked: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  termsText: {
+    color: theme.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+  },
+  termsLink: {
+    color: theme.accent,
+    fontWeight: "600" as const,
+  },
   switch: { alignItems: "center", marginTop: 6 },
   switchText: { color: theme.textMuted, fontSize: 14 },
   switchAccent: { color: theme.accent, fontWeight: "700" as const },

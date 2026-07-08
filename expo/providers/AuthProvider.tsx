@@ -174,7 +174,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   );
 
   const signUpWithEmail = useCallback(
-    async (email: string, password: string, username: string, birthdate?: string) => {
+    async (
+      email: string,
+      password: string,
+      username: string,
+      birthdate?: string,
+      agreedToTerms?: boolean,
+    ) => {
       if (inFlight.current.signUp) {
         console.log("[auth] signUp already in flight, ignoring duplicate");
         return;
@@ -190,6 +196,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             data: {
               username: username.trim(),
               birthdate: birthdate ?? undefined,
+              terms_accepted_at: agreedToTerms
+                ? new Date().toISOString()
+                : undefined,
             },
           },
         });
@@ -200,17 +209,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         // belt-and-braces step. This runs AFTER the auth user exists,
         // so for under-13 users we abort BEFORE this point (the caller
         // gates on age before invoking this function).
-        if (birthdate) {
-          const uid = data.user?.id;
-          if (uid) {
-            try {
-              await supabase
-                .from("profiles")
-                .update({ birthdate })
-                .eq("id", uid);
-            } catch (e) {
-              console.warn("[auth] birthdate profile update failed", (e as Error)?.message);
-            }
+        const uid = data.user?.id;
+        if (uid && (birthdate || agreedToTerms)) {
+          const update: Record<string, unknown> = {};
+          if (birthdate) update.birthdate = birthdate;
+          if (agreedToTerms) update.terms_accepted_at = new Date().toISOString();
+          try {
+            await supabase.from("profiles").update(update).eq("id", uid);
+          } catch (e) {
+            console.warn("[auth] profile update failed", (e as Error)?.message);
           }
         }
         if (data.session) {
