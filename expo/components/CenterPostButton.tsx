@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import { Plus } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { Platform } from "react-native";
@@ -11,8 +10,9 @@ type Props = {
 };
 
 /**
- * Floating center "+" button — pulses during the drop window.
- * Elevated above the tab bar with an electric-blue glow.
+ * Floating center "+" button — a compact outlined circle that
+ * pulses during the drop window. Visually distinct from the other
+ * tab icons while still reading as the primary action.
  */
 export default function CenterPostButton({ onPress }: Props) {
   const [now, setNow] = useState<Date>(new Date());
@@ -26,7 +26,7 @@ export default function CenterPostButton({ onPress }: Props) {
   const isOpen = useMemo(() => getDropWindowState(now).isOpen, [now]);
 
   useEffect(() => {
-    const to = isOpen ? 1.1 : 1.04;
+    const to = isOpen ? 1.12 : 1.05;
     const dur = isOpen ? 1000 : 2800;
     const loop = Animated.loop(
       Animated.sequence([
@@ -51,88 +51,68 @@ export default function CenterPostButton({ onPress }: Props) {
     };
   }, [isOpen, pulseAnim]);
 
-  const glowOpacity = pulseAnim.interpolate({
-    inputRange: [1, isOpen ? 1.1 : 1.04],
-    outputRange: [0.18, isOpen ? 0.55 : 0.28],
+  const ringOpacity = pulseAnim.interpolate({
+    inputRange: [1, isOpen ? 1.12 : 1.05],
+    outputRange: [0.25, isOpen ? 0.6 : 0.35],
   });
 
   const handlePress = () => {
     if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     }
     onPress?.();
   };
 
   return (
     <Pressable onPress={handlePress} style={styles.container} hitSlop={12}>
-      {/* Pulsing glow ring */}
+      {/* Pulsing outline ring */}
       <Animated.View
         style={[
-          styles.glow,
+          styles.ring,
           {
-            opacity: glowOpacity,
+            opacity: ringOpacity,
             transform: [{ scale: pulseAnim }],
           },
         ]}
-      >
-        <LinearGradient
-          colors={
-            isOpen
-              ? ["#3B9EFF", "#0A84FF", "#8B5CF6"]
-              : ["#0A84FF", "#0055CC"]
-          }
-          style={styles.glowFill}
-        />
-      </Animated.View>
-      {/* Button body */}
+      />
+      {/* Button body — outlined circle */}
       <View style={styles.btnOuter}>
-        <LinearGradient
-          colors={["#0A84FF", "#0055CC"]}
-          style={styles.btn}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          <Plus color="#FFFFFF" size={26} strokeWidth={2.5} />
-        </LinearGradient>
+        <View style={styles.btn}>
+          <Plus color={theme.accent} size={20} strokeWidth={2.5} />
+        </View>
       </View>
     </Pressable>
   );
 }
 
-const SIZE = 58;
-const GLOW_SIZE = 76;
+const SIZE = 44;
+const RING_SIZE = 56;
 
 const styles = StyleSheet.create({
   container: {
-    width: GLOW_SIZE,
-    height: GLOW_SIZE,
+    width: RING_SIZE,
+    height: RING_SIZE,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: -22,
+    marginTop: -14,
   },
-  glow: {
+  ring: {
     position: "absolute",
-    width: GLOW_SIZE,
-    height: GLOW_SIZE,
-    borderRadius: GLOW_SIZE / 2,
-    overflow: "hidden",
-  },
-  glowFill: {
-    width: "100%",
-    height: "100%",
-    borderRadius: GLOW_SIZE / 2,
-    opacity: 0.7,
+    width: RING_SIZE,
+    height: RING_SIZE,
+    borderRadius: RING_SIZE / 2,
+    borderWidth: 1.5,
+    borderColor: theme.accent,
   },
   btnOuter: {
     width: SIZE,
     height: SIZE,
     borderRadius: SIZE / 2,
-    overflow: "hidden",
-    shadowColor: "#0A84FF",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 10,
+    borderWidth: 2,
+    borderColor: theme.accent,
+    backgroundColor: "transparent",
+    alignItems: "center",
+    justifyContent: "center",
   },
   btn: {
     width: "100%",
