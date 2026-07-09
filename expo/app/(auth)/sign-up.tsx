@@ -1,8 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -46,8 +48,7 @@ function MonthPicker({
   return (
     <View style={styles.monthGrid}>
       {MONTHS.map((name, i) => {
-        const idx = String(i + 1);
-        const active = selected === idx;
+        const active = selected === String(i + 1);
         return (
           <Pressable
             key={name}
@@ -70,6 +71,82 @@ function MonthPicker({
   );
 }
 
+function DayPicker({
+  maxDay,
+  selected,
+  onSelect,
+}: {
+  maxDay: number;
+  selected: string;
+  onSelect: (d: number) => void;
+}) {
+  const days = Array.from({ length: maxDay }, (_, i) => i + 1);
+  return (
+    <View style={styles.monthGrid}>
+      {days.map((d) => {
+        const active = selected === String(d);
+        return (
+          <Pressable
+            key={d}
+            onPress={() => onSelect(d)}
+            style={({ pressed }) => [
+              styles.monthChip,
+              active && styles.monthChipActive,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <UiText
+              style={active ? styles.monthChipTextActive : styles.monthChipText}
+            >
+              {d}
+            </UiText>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function YearPicker({
+  selected,
+  onSelect,
+}: {
+  selected: string;
+  onSelect: (y: number) => void;
+}) {
+  const currentYear = new Date().getFullYear();
+  const years: number[] = [];
+  for (let y = currentYear; y >= 1900; y--) years.push(y);
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.yearScroll}
+    >
+      {years.map((y) => {
+        const active = selected === String(y);
+        return (
+          <Pressable
+            key={y}
+            onPress={() => onSelect(y)}
+            style={({ pressed }) => [
+              styles.yearChip,
+              active && styles.monthChipActive,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <UiText
+              style={active ? styles.monthChipTextActive : styles.monthChipText}
+            >
+              {y}
+            </UiText>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
 /** Build the list of days for the selected month/year (1-based). */
 function daysInMonth(year: number, month1: number): number {
   if (!year || !month1) return 31;
@@ -89,9 +166,18 @@ export default function SignUpScreen() {
   const [bdYear, setBdYear] = useState<string>("");
   const [bdMonth, setBdMonth] = useState<string>(""); // 1-12
   const [bdDay, setBdDay] = useState<string>("");
+  // Which birthdate sub-field is currently open for chip picking.
+  const [activeBdField, setActiveBdField] = useState<"day" | "month" | "year" | null>(null);
 
   // Terms acceptance
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
+
+  // Clamp/clear day if the selected month/year no longer supports it.
+  useEffect(() => {
+    if (!bdDay) return;
+    const max = daysInMonth(parseInt(bdYear, 10) || 0, parseInt(bdMonth, 10) || 0);
+    if (parseInt(bdDay, 10) > max) setBdDay("");
+  }, [bdMonth, bdYear, bdDay]);
 
   const onSubmit = async () => {
     setError(null);
@@ -192,15 +278,22 @@ export default function SignUpScreen() {
   return (
     <ScreenBackground>
       <SafeAreaView style={styles.safe}>
+        <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.back}>
+          <ArrowLeft color={theme.text} size={22} />
+        </Pressable>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={styles.kb}
         >
-          <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.back}>
-            <ArrowLeft color={theme.text} size={22} />
-          </Pressable>
-
-          <View style={styles.header}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.scrollContent}
+          >
+            <Pressable
+              onPress={() => { Keyboard.dismiss(); setActiveBdField(null); }}
+              style={styles.innerDismiss}
+            >
+              <View style={styles.header}>
             <DropletLogo size={48} />
             <UiText style={styles.title}>Join the drop</UiText>
             <UiText style={styles.sub}>Create your account in seconds.</UiText>
@@ -235,45 +328,69 @@ export default function SignUpScreen() {
             <View style={styles.fieldWrap}>
               <UiText style={styles.fieldLabel}>Birthdate</UiText>
               <View style={styles.bdRow}>
-                <TextInput
-                  style={styles.bdDay}
-                  value={bdDay}
-                  onChangeText={(t) => setBdDay(t.replace(/[^0-9]/g, "").slice(0, 2))}
-                  placeholder="DD"
-                  placeholderTextColor={theme.textDim}
-                  keyboardType="number-pad"
-                  maxLength={2}
-                />
-                <View style={styles.bdMonthWrap}>
-                  {bdMonth ? (
-                    <Pressable
-                      onPress={() => setBdMonth("")}
-                      style={styles.bdMonthPill}
-                    >
-                      <UiText style={styles.bdMonthText}>
-                        {MONTHS[(parseInt(bdMonth, 10) || 1) - 1]}
-                      </UiText>
-                    </Pressable>
-                  ) : (
-                    <View style={styles.bdMonthPill}>
-                      <UiText style={styles.bdMonthPlaceholder}>Month</UiText>
-                    </View>
-                  )}
-                </View>
-                <TextInput
-                  style={styles.bdYear}
-                  value={bdYear}
-                  onChangeText={(t) => setBdYear(t.replace(/[^0-9]/g, "").slice(0, 4))}
-                  placeholder="YYYY"
-                  placeholderTextColor={theme.textDim}
-                  keyboardType="number-pad"
-                  maxLength={4}
-                />
+                <Pressable
+                  onPress={() => setActiveBdField((f) => (f === "day" ? null : "day"))}
+                  style={[
+                    styles.bdMonthPill,
+                    { flex: 0.7 },
+                    activeBdField === "day" && styles.bdPillActive,
+                  ]}
+                >
+                  <UiText style={bdDay ? styles.bdMonthText : styles.bdMonthPlaceholder}>
+                    {bdDay || "DD"}
+                  </UiText>
+                </Pressable>
+                <Pressable
+                  onPress={() => setActiveBdField((f) => (f === "month" ? null : "month"))}
+                  style={[
+                    styles.bdMonthPill,
+                    { flex: 1.6 },
+                    activeBdField === "month" && styles.bdPillActive,
+                  ]}
+                >
+                  <UiText style={bdMonth ? styles.bdMonthText : styles.bdMonthPlaceholder}>
+                    {bdMonth ? MONTHS[(parseInt(bdMonth, 10) || 1) - 1] : "Month"}
+                  </UiText>
+                </Pressable>
+                <Pressable
+                  onPress={() => setActiveBdField((f) => (f === "year" ? null : "year"))}
+                  style={[
+                    styles.bdMonthPill,
+                    { flex: 1 },
+                    activeBdField === "year" && styles.bdPillActive,
+                  ]}
+                >
+                  <UiText style={bdYear ? styles.bdMonthText : styles.bdMonthPlaceholder}>
+                    {bdYear || "YYYY"}
+                  </UiText>
+                </Pressable>
               </View>
-              {bdMonth ? null : (
+              {activeBdField === "month" && (
                 <MonthPicker
                   selected={bdMonth}
-                  onSelect={(m) => setBdMonth(String(m))}
+                  onSelect={(m) => {
+                    setBdMonth(String(m));
+                    setActiveBdField("day");
+                  }}
+                />
+              )}
+              {activeBdField === "day" && (
+                <DayPicker
+                  maxDay={daysInMonth(parseInt(bdYear, 10) || 0, parseInt(bdMonth, 10) || 0)}
+                  selected={bdDay}
+                  onSelect={(d) => {
+                    setBdDay(String(d));
+                    setActiveBdField(bdYear ? null : "year");
+                  }}
+                />
+              )}
+              {activeBdField === "year" && (
+                <YearPicker
+                  selected={bdYear}
+                  onSelect={(y) => {
+                    setBdYear(String(y));
+                    setActiveBdField(null);
+                  }}
                 />
               )}
             </View>
@@ -334,6 +451,8 @@ export default function SignUpScreen() {
               </UiText>
             </Pressable>
           </View>
+        </Pressable>
+      </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </ScreenBackground>
@@ -359,6 +478,8 @@ function Field(
 const styles = StyleSheet.create({
   safe: { flex: 1, paddingHorizontal: 24 },
   kb: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingBottom: 40 },
+  innerDismiss: { flex: 1 },
   back: {
     width: 40,
     height: 40,
@@ -395,19 +516,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
-  bdDay: {
-    flex: 0.7,
-    backgroundColor: theme.card,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    color: theme.text,
-    fontSize: 16,
-    textAlign: "center",
-  },
-  bdMonthWrap: { flex: 1.6 },
   bdMonthPill: {
     backgroundColor: theme.card,
     borderWidth: 1,
@@ -420,17 +528,23 @@ const styles = StyleSheet.create({
   },
   bdMonthText: { color: theme.text, fontSize: 16, fontWeight: "600" as const },
   bdMonthPlaceholder: { color: theme.textDim, fontSize: 16 },
-  bdYear: {
-    flex: 1,
+  bdPillActive: {
+    borderColor: theme.accent,
+  },
+  yearScroll: {
+    flexDirection: "row",
+    gap: 6,
+    paddingVertical: 4,
+  },
+  yearChip: {
     backgroundColor: theme.card,
     borderWidth: 1,
     borderColor: theme.border,
-    borderRadius: 14,
+    borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 14,
-    color: theme.text,
-    fontSize: 16,
-    textAlign: "center",
+    paddingVertical: 8,
+    minWidth: 64,
+    alignItems: "center",
   },
   monthGrid: {
     flexDirection: "row",
