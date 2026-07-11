@@ -115,6 +115,7 @@ export default function CameraScreen() {
     handleMountError,
     teardown,
     handleCameraReady,
+    isCameraReady,
   } = useCameraRecorder();
 
   const [now, setNow] = useState<Date>(new Date());
@@ -124,7 +125,12 @@ export default function CameraScreen() {
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const buttonScale = useRef(new Animated.Value(1)).current;
   const lockDrag = useRef(new Animated.Value(0)).current;
+  /** Flip cover — stays opaque from flip-trigger until onCameraReady
+   *  fires (the new camera session is live), then fades out. This masks
+   *  the ~0.5s black gap during the native session rebuild. A 3s fallback
+   *  timer clears the cover if onCameraReady never fires. */
   const flipFlashOpacity = useRef(new Animated.Value(0)).current;
+  const flipCoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const frontFlashOpacity = useRef(new Animated.Value(0)).current;
   const frontFlashHighlightOpacity = useRef(new Animated.Value(0)).current;
 
@@ -190,6 +196,7 @@ export default function CameraScreen() {
       if (flipAnimRef.current) flipAnimRef.current.stop();
       if (frontFlashAnimRef.current) frontFlashAnimRef.current.stop();
       if (panZoomHideRef.current) clearTimeout(panZoomHideRef.current);
+      if (flipCoverTimer.current) clearTimeout(flipCoverTimer.current);
 
       setZoom(0);
       setPanZoomActive(false);
@@ -389,16 +396,25 @@ export default function CameraScreen() {
 
   // ─── Flip camera with flash ───────────────────────────────────
 
+  /** Show the flip cover at full opacity. It stays opaque until
+   *  isCameraReady flips true (onCameraReady fires for the new camera),
+   *  then a useEffect below animates it out. A 3s fallback timer clears
+   *  the cover if onCameraReady never fires (defensive — should not happen
+   *  in practice but prevents a permanent white screen). */
   const triggerFlipFlash = useCallback(() => {
     if (flipAnimRef.current) flipAnimRef.current.stop();
-    flipFlashOpacity.setValue(0.5);
-    flipAnimRef.current = Animated.timing(flipFlashOpacity, {
-      toValue: 0,
-      duration: 280,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    });
-    flipAnimRef.current.start();
+    flipFlashOpacity.setValue(1);
+    if (flipCoverTimer.current) clearTimeout(flipCoverTimer.current);
+    flipCoverTimer.current = setTimeout(() => {
+      console.warn("[camera] flip cover fallback timeout — forcing fade out");
+      flipAnimRef.current = Animated.timing(flipFlashOpacity, {
+        toValue: 0,
+        duration: 200,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      });
+      flipAnimRef.current.start();
+    }, 3000);
   }, [flipFlashOpacity]);
 
   const handleFlip = useCallback(() => {
@@ -408,6 +424,27 @@ export default function CameraScreen() {
     triggerFlipFlash();
     triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
   }, [flipCamera, setZoom, triggerFlipFlash]);
+
+  // ─── Fade out the flip cover once the new camera session is live ──
+  // isCameraReady transitions false → true when onCameraReady fires for
+  // the new facing. This is the signal that the black gap is over and we
+  // can reveal the preview. The fallback timer in triggerFlipFlash handles
+  // the case where onCameraReady never fires.
+  useEffect(() => {
+    if (!isCameraReady) return;
+    if (flipCoverTimer.current) {
+      clearTimeout(flipCoverTimer.current);
+      flipCoverTimer.current = null;
+    }
+    if (flipAnimRef.current) flipAnimRef.current.stop();
+    flipAnimRef.current = Animated.timing(flipFlashOpacity, {
+      toValue: 0,
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    flipAnimRef.current.start();
+  }, [isCameraReady, flipFlashOpacity]);
 
   // Double-tap anywhere on the preview to flip cameras.
   // react-native-gesture-handler TapGestureHandler configured for

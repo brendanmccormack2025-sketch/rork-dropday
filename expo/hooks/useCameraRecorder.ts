@@ -44,6 +44,9 @@ export function useCameraRecorder() {
   const cameraRef = useRef<CameraView>(null);
   /** True when the native camera session is ready for recording */
   const cameraReadyRef = useRef<boolean>(false);
+  /** Reactive mirror of cameraReadyRef — lets the UI (flip cover overlay)
+   *  react when the new camera session reports ready after a flip. */
+  const [isCameraReady, setIsCameraReady] = useState<boolean>(false);
   /** Resolves when onCameraReady fires after a flip — avoids spin-waiting */
   const cameraReadyResolveRef = useRef<(() => void) | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -140,6 +143,12 @@ export function useCameraRecorder() {
       isFlippingRef.current = true;
       cameraSwitchingRef.current = true;
     }
+
+    // Mark camera as not-ready — the native session is about to rebuild.
+    // This clears the flip cover overlay's "hold" condition; it will be
+    // re-set true when onCameraReady fires for the new camera.
+    cameraReadyRef.current = false;
+    setIsCameraReady(false);
 
     // Swap facing — CameraView re-renders with the new prop.
     const next = facingRef.current === "back" ? "front" : "back";
@@ -579,6 +588,7 @@ export function useCameraRecorder() {
   /** Ensure recording is stopped — call on unmount or navigation. */
   const teardown = useCallback((): void => {
     cameraReadyRef.current = false;
+    setIsCameraReady(false);
     try { cameraRef.current?.stopRecording(); } catch {}
   }, []);
 
@@ -587,6 +597,7 @@ export function useCameraRecorder() {
    *  any pending flip-wait promise so the loop wakes immediately. */
   const handleCameraReady = useCallback((): void => {
     cameraReadyRef.current = true;
+    setIsCameraReady(true);
     if (cameraReadyResolveRef.current) {
       cameraReadyResolveRef.current();
       cameraReadyResolveRef.current = null;
@@ -638,6 +649,7 @@ export function useCameraRecorder() {
     isRecording,
     cameraSwitchingRef,
     handleCameraReady,
+    isCameraReady,
     isLocked,
     isLockedRef,
     recordingStartedAtRef,
