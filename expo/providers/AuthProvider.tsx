@@ -313,6 +313,34 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     queryClient.clear();
   }, [queryClient]);
 
+  const deleteAccount = useCallback(async (): Promise<void> => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    if (!accessToken) throw new Error("Not signed in.");
+
+    const supabaseUrl =
+      process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_URL.length > 0
+        ? process.env.EXPO_PUBLIC_SUPABASE_URL
+        : "https://tfdjymogbtfavdzgfqas.supabase.co";
+
+    const res = await fetch(`${supabaseUrl}/functions/v1/delete-user`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || "Failed to delete account.");
+    }
+
+    // Sign out locally and clear all cached queries.
+    await supabase.auth.signOut();
+    queryClient.clear();
+  }, [queryClient]);
+
   return useMemo(
     () => ({
       ...state,
@@ -321,7 +349,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       signInWithApple,
       signInWithGoogle,
       signOut,
+      deleteAccount,
     }),
-    [state, signInWithEmail, signUpWithEmail, signInWithApple, signInWithGoogle, signOut]
+    [state, signInWithEmail, signUpWithEmail, signInWithApple, signInWithGoogle, signOut, deleteAccount]
   );
 });

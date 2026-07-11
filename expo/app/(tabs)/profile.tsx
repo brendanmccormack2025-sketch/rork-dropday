@@ -18,14 +18,13 @@ import {
   Globe,
   Heart,
   Instagram,
-  LogOut,
+  Settings,
   MessageCircle,
   Music2,
   Pencil,
   Sparkles,
   Video,
   Save,
-  Users,
 } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
@@ -90,7 +89,7 @@ function ProfileHeader({
   tab,
   onTab,
   onEditProfile,
-  onSignOut,
+  onSettings,
   isOwnProfile,
   followersCount,
   followingCount,
@@ -106,7 +105,7 @@ function ProfileHeader({
   tab: TabKey;
   onTab: (t: TabKey) => void;
   onEditProfile: () => void;
-  onSignOut: () => void;
+  onSettings: () => void;
   isOwnProfile: boolean;
   followersCount: number;
   followingCount: number;
@@ -137,8 +136,8 @@ function ProfileHeader({
           </UiText>
           <UiText style={styles.username}>@{username}</UiText>
         </View>
-        <Pressable onPress={onSignOut} style={styles.signOutBtn} hitSlop={8}>
-          <LogOut color={theme.textDim} size={16} strokeWidth={2} />
+        <Pressable onPress={onSettings} style={styles.signOutBtn} hitSlop={8}>
+          <Settings color={theme.textDim} size={16} strokeWidth={2} />
         </Pressable>
       </View>
 
@@ -245,7 +244,7 @@ function ProfileHeader({
 }
 
 export default function ProfileScreen() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const { myPosts, myProfile, draftProjects, refetchMyPosts, refetchProfile, following, findOrCreateConversation } = usePosts();
   const qc = useQueryClient();
   const router = useRouter();
@@ -354,7 +353,7 @@ export default function ProfileScreen() {
       tab={tab}
       onTab={setTab}
       onEditProfile={() => router.push("/edit-profile")}
-      onSignOut={signOut}
+      onSettings={() => router.push("/settings")}
       isOwnProfile={isOwnProfile}
       followersCount={followersCount}
       followingCount={followingCount}
