@@ -113,6 +113,32 @@ export default function ReactionTreeScreen() {
   const tier1Posts = tier1Query.data ?? [];
   const tier1Ids = useMemo(() => tier1Posts.map((p) => p.id), [tier1Posts]);
 
+  // ── Follow set for ranking ────────────────────────────────────────────
+  // Reuse the existing following array from PostsProvider — no extra fetch.
+  const { following } = usePosts();
+
+  // ── Rank tier 1 reactions by blended score ────────────────────────────
+  // Score = like_count + (10 if the reactor is followed by the current
+  // viewer, else 0). The follow bonus of 10 means a followed account
+  // needs to be outperformed by a non-followed reaction with 10+ more
+  // likes before it drops below. Tiebreaker: created_at descending (newer
+  // first). Tier 2 creator replies stay anchored under their parent
+  // tier 1 reaction regardless of score — the ranking only applies here.
+  const rankedTier1Posts = useMemo(() => {
+    if (tier1Posts.length === 0) return tier1Posts;
+    const follows = new Set(following);
+    const scored = tier1Posts.map((p) => ({
+      p,
+      score: (p.like_count ?? 0) + (follows.has(p.user_id) ? 10 : 0),
+      createdMs: new Date(p.created_at).getTime(),
+    }));
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.createdMs - a.createdMs;
+    });
+    return scored.map((s) => s.p);
+  }, [tier1Posts, following]);
+
   // ── Query 3: tier 2 replies (parent_post_id IN tier 1 IDs) ────────────
   // Only the creator needs tier 2 data, but we fetch for everyone — the
   // reply data is small and it avoids a query-mount flash for creators.
@@ -161,10 +187,10 @@ export default function ReactionTreeScreen() {
   const tier2Posts = tier2Query.data ?? [];
 
   // ── Build interleaved feed items ──────────────────────────────────────────
-  // Tier 1 reactions appear newest-first. For each tier 1 reaction, its tier 2
-  // replies are placed directly after it in the list (oldest reply first), so
-  // scrolling down goes from newest reactions → oldest, with replies grouped
-  // under their parent.
+  // Tier 1 reactions are ranked by blended score (see rankedTier1Posts).
+  // For each tier 1 reaction, its tier 2 replies are placed directly after
+  // it in the list (oldest reply first), so replies stay grouped under
+  // their parent regardless of the tier 1 ranking.
   const feedItems: FeedItem[] = useMemo(() => {
     // Index tier 2 replies by their parent_post_id
     const repliesByParent = new Map<string, Post[]>();
@@ -176,7 +202,7 @@ export default function ReactionTreeScreen() {
     }
 
     const items: FeedItem[] = [];
-    for (const reaction of tier1Posts) {
+    for (const reaction of rankedTier1Posts) {
       items.push({ kind: "reaction", post: reaction });
       const replies = repliesByParent.get(reaction.id);
       if (replies) {
@@ -186,7 +212,7 @@ export default function ReactionTreeScreen() {
       }
     }
     return items;
-  }, [tier1Posts, tier2Posts]);
+  }, [rankedTier1Posts, tier2Posts]);
 
   const qc = useQueryClient();
 
