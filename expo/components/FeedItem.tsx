@@ -272,6 +272,8 @@ export const FeedItem = memo(function FeedItem({
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
   const activeSlotRef = useRef<0 | 1>(0);
   const preloadReadyRef = useRef<boolean>(false);
+  // Debounce: prevent multiple advanceSegment calls within 500ms
+  const lastAdvanceTimeRef = useRef<number>(0);
 
   const preloadUri = useMemo<string>(
     () => allSegments[(segIdx + 1) % allSegments.length] ?? post.media_url,
@@ -297,6 +299,7 @@ export const FeedItem = memo(function FeedItem({
         setActiveSlot(0);
       }
       preloadReadyRef.current = false;
+      lastAdvanceTimeRef.current = 0;
     }
   }, [shouldMountPreload]);
 
@@ -418,6 +421,7 @@ export const FeedItem = memo(function FeedItem({
     activeSlotRef.current = 0;
     activeVideoRef.current = videoRefA.current;
     preloadReadyRef.current = false;
+    lastAdvanceTimeRef.current = 0;
     setVideoError(null);
     errorCountRef.current = 0;
     setIsPaused(false);
@@ -459,12 +463,21 @@ export const FeedItem = memo(function FeedItem({
   // onReadyForDisplay fires on the newly-active player.
   // Wrap-around (last segment → segment 0) is handled identically.
   const advanceSegment = useCallback(() => {
+    // Debounce: end-of-segment detection can fire multiple times rapidly
+    const now = Date.now();
+    if (now - lastAdvanceTimeRef.current < 500) {
+      console.log(`[FeedItem:${post.id}] advanceSegment DEBOUNCED`, {
+        elapsed: now - lastAdvanceTimeRef.current,
+      });
+      return;
+    }
+    lastAdvanceTimeRef.current = now;
+
     const current = segIdxRef.current;
     const next = (current + 1) % allSegments.length;
     const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
     const wasPreloadReady = preloadReadyRef.current;
 
-    // DIAGNOSTIC: log every advanceSegment call with full state
     console.log(`[FeedItem:${post.id}] advanceSegment CALLED`, {
       fromSegIdx: current,
       toSegIdx: next,
@@ -476,26 +489,43 @@ export const FeedItem = memo(function FeedItem({
       shouldMountPreload,
       allSegmentsLen: allSegments.length,
       nextUri: allSegments[next],
-      preloadUriWas: allSegments[(current + 1) % allSegments.length],
     });
 
     activeSlotRef.current = newSlot;
-    activeVideoRef.current = newSlot === 0 ? videoRefA.current : videoRefB.current;
+    const newActiveRef = newSlot === 0 ? videoRefA.current : videoRefB.current;
+    activeVideoRef.current = newActiveRef;
     preloadReadyRef.current = false;
 
     setActiveSlot(newSlot);
     setSegIdx(next);
     segIdxRef.current = next;
 
-    if (!wasPreloadReady) {
+    // Compute trim for the new segment directly (trim refs update in effect, not yet)
+    const trim =
+      post.trim_data && next < post.trim_data.length
+        ? post.trim_data[next]
+        : null;
+    const seekTo = trim?.trimStartMs ?? 0;
+
+    if (wasPreloadReady) {
+      // Preload was ready — the frame is already displayed on the new slot.
+      // The source URI didn't change (preloadUri === currentUri for this slot),
+      // so onReadyForDisplay will NOT re-fire. Seek to start and play immediately.
+      playbackReadyRef.current = true;
+      readyForDisplayRef.current = true;
+      setPlaybackReady(true);
+      newActiveRef?.setPositionAsync(seekTo).catch(() => {});
+      console.log(`[FeedItem:${post.id}] advanceSegment — preload WAS ready, seeked to ${seekTo}, playbackReady=true`);
+    } else {
+      // Preload wasn't ready — the load is still in progress on this slot.
+      // onReadyForDisplay WILL fire when it completes (fresh load, not a source change).
+      // The seek will be performed in the onReady handler.
       playbackReadyRef.current = false;
       readyForDisplayRef.current = false;
       setPlaybackReady(false);
-      console.log(`[FeedItem:${post.id}] advanceSegment — preload was NOT ready, resetting playbackReady=false`);
-    } else {
-      console.log(`[FeedItem:${post.id}] advanceSegment — preload WAS ready, keeping playbackReady=true`);
+      console.log(`[FeedItem:${post.id}] advanceSegment — preload NOT ready, waiting for onReadyForDisplay`);
     }
-  }, [allSegments.length, shouldMountPreload, post.id]);
+  }, [allSegments.length, shouldMountPreload, post.id, post.trim_data]);
 
   // When video finishes, advance to next segment or loop
   const onSegmentStatus = useCallback(
@@ -524,17 +554,18 @@ export const FeedItem = memo(function FeedItem({
       }
 
       // ── Pre-buffer gate ──
-      if (!playbackReadyRef.current) {
-        const hasFrame = readyForDisplayRef.current;
-        const notBuffering = !status.isBuffering;
-        if (hasFrame || notBuffering) {
-          playbackReadyRef.current = true;
-          setPlaybackReady(true);
-          console.log(`[FeedItem:${post.id}] pre-buffer gate PASSED`, { hasFrame, notBuffering });
-          if (prebufferTimerRef.current) {
-            clearTimeout(prebufferTimerRef.current);
-            prebufferTimerRef.current = null;
-          }
+      // Only pass on a real onReadyForDisplay event (readyForDisplayRef set
+      // by onReadySlotA/B). The notBuffering fallback was removed because it
+      // let playbackReady go true before the first frame was rendered.
+      // The 3s safety timeout (separate effect above) handles edge cases where
+      // onReadyForDisplay never fires.
+      if (!playbackReadyRef.current && readyForDisplayRef.current) {
+        playbackReadyRef.current = true;
+        setPlaybackReady(true);
+        console.log(`[FeedItem:${post.id}] pre-buffer gate PASSED via onReadyForDisplay`);
+        if (prebufferTimerRef.current) {
+          clearTimeout(prebufferTimerRef.current);
+          prebufferTimerRef.current = null;
         }
       }
 
@@ -656,6 +687,15 @@ export const FeedItem = memo(function FeedItem({
       if (!playbackReadyRef.current) {
         playbackReadyRef.current = true;
         setPlaybackReady(true);
+        // Seek to start position — needed after a swap where preload wasn't
+        // ready (the player may have loaded at a non-zero position).
+        const trim =
+          post.trim_data && segIdxRef.current < post.trim_data.length
+            ? post.trim_data[segIdxRef.current]
+            : null;
+        const seekTo = trim?.trimStartMs ?? 0;
+        videoRefA.current?.setPositionAsync(seekTo).catch(() => {});
+        console.log(`[FeedItem:${post.id}] SLOT_A active onReady — playbackReady=true, seeked to ${seekTo}`);
         if (prebufferTimerRef.current) {
           clearTimeout(prebufferTimerRef.current);
           prebufferTimerRef.current = null;
@@ -666,7 +706,7 @@ export const FeedItem = memo(function FeedItem({
       preloadReadyRef.current = true;
       console.log(`[FeedItem:${post.id}] SLOT_A preload marked READY`);
     }
-  }, [post.id, videoLog]);
+  }, [post.id, post.trim_data]);
 
   const onReadySlotB = useCallback(() => {
     console.log(`[FeedItem:${post.id}] onReadyForDisplay SLOT_B`, {
@@ -682,6 +722,14 @@ export const FeedItem = memo(function FeedItem({
       if (!playbackReadyRef.current) {
         playbackReadyRef.current = true;
         setPlaybackReady(true);
+        // Seek to start position — needed after a swap where preload wasn't ready.
+        const trim =
+          post.trim_data && segIdxRef.current < post.trim_data.length
+            ? post.trim_data[segIdxRef.current]
+            : null;
+        const seekTo = trim?.trimStartMs ?? 0;
+        videoRefB.current?.setPositionAsync(seekTo).catch(() => {});
+        console.log(`[FeedItem:${post.id}] SLOT_B active onReady — playbackReady=true, seeked to ${seekTo}`);
         if (prebufferTimerRef.current) {
           clearTimeout(prebufferTimerRef.current);
           prebufferTimerRef.current = null;
@@ -691,7 +739,7 @@ export const FeedItem = memo(function FeedItem({
       preloadReadyRef.current = true;
       console.log(`[FeedItem:${post.id}] SLOT_B preload marked READY`);
     }
-  }, [post.id, videoLog]);
+  }, [post.id, post.trim_data]);
 
   const onLoadSlotA = useCallback((status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
     if (status.isLoaded) {
