@@ -115,7 +115,6 @@ export default function CameraScreen() {
     handleMountError,
     teardown,
     handleCameraReady,
-    isCameraReady,
   } = useCameraRecorder();
 
   const [now, setNow] = useState<Date>(new Date());
@@ -396,17 +395,19 @@ export default function CameraScreen() {
 
   // ─── Flip camera with flash ───────────────────────────────────
 
-  /** Show the flip cover at full opacity. It stays opaque until
-   *  isCameraReady flips true (onCameraReady fires for the new camera),
-   *  then a useEffect below animates it out. A 3s fallback timer clears
-   *  the cover if onCameraReady never fires (defensive — should not happen
-   *  in practice but prevents a permanent white screen). */
+  /** Show the flip cover at full opacity, then fade it out after a
+   *  fixed 400ms delay. We use a fixed timer because expo-camera's
+   *  onCameraReady only fires ONCE on initial mount — it does NOT
+   *  re-fire when the facing prop changes. The previous approach waited
+   *  for isCameraReady to go true, which never happened after a flip,
+   *  causing a permanent white screen. The 400ms covers the native
+   *  session reconfiguration gap (typically 200-400ms). */
   const triggerFlipFlash = useCallback(() => {
     if (flipAnimRef.current) flipAnimRef.current.stop();
     flipFlashOpacity.setValue(1);
     if (flipCoverTimer.current) clearTimeout(flipCoverTimer.current);
     flipCoverTimer.current = setTimeout(() => {
-      console.warn("[camera] flip cover fallback timeout — forcing fade out");
+      console.log("[camera] flip cover — fading out after fixed delay");
       flipAnimRef.current = Animated.timing(flipFlashOpacity, {
         toValue: 0,
         duration: 200,
@@ -414,7 +415,7 @@ export default function CameraScreen() {
         useNativeDriver: true,
       });
       flipAnimRef.current.start();
-    }, 3000);
+    }, 400);
   }, [flipFlashOpacity]);
 
   const handleFlip = useCallback(() => {
@@ -425,26 +426,11 @@ export default function CameraScreen() {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
   }, [flipCamera, setZoom, triggerFlipFlash]);
 
-  // ─── Fade out the flip cover once the new camera session is live ──
-  // isCameraReady transitions false → true when onCameraReady fires for
-  // the new facing. This is the signal that the black gap is over and we
-  // can reveal the preview. The fallback timer in triggerFlipFlash handles
-  // the case where onCameraReady never fires.
-  useEffect(() => {
-    if (!isCameraReady) return;
-    if (flipCoverTimer.current) {
-      clearTimeout(flipCoverTimer.current);
-      flipCoverTimer.current = null;
-    }
-    if (flipAnimRef.current) flipAnimRef.current.stop();
-    flipAnimRef.current = Animated.timing(flipFlashOpacity, {
-      toValue: 0,
-      duration: 200,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    });
-    flipAnimRef.current.start();
-  }, [isCameraReady, flipFlashOpacity]);
+  // NOTE: The flip cover fade-out is handled entirely by the fixed timer
+  // in triggerFlipFlash. We previously had a useEffect here that watched
+  // isCameraReady, but expo-camera's onCameraReady does NOT re-fire on
+  // facing prop changes — it only fires once on initial mount. That
+  // useEffect never triggered after a flip, causing the white screen bug.
 
   // Double-tap anywhere on the preview to flip cameras.
   // react-native-gesture-handler TapGestureHandler configured for

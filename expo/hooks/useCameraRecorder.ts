@@ -144,11 +144,10 @@ export function useCameraRecorder() {
       cameraSwitchingRef.current = true;
     }
 
-    // Mark camera as not-ready — the native session is about to rebuild.
-    // This clears the flip cover overlay's "hold" condition; it will be
-    // re-set true when onCameraReady fires for the new camera.
-    cameraReadyRef.current = false;
-    setIsCameraReady(false);
+    // CRITICAL: Do NOT set cameraReadyRef to false here. expo-camera's
+    // onCameraReady only fires ONCE on initial mount. When facing changes,
+    // the session reconfigures but onCameraReady is NOT re-dispatched.
+    // Setting ready=false creates a permanent "not ready" state.
 
     // Swap facing — CameraView re-renders with the new prop.
     const next = facingRef.current === "back" ? "front" : "back";
@@ -329,10 +328,12 @@ export function useCameraRecorder() {
         }
 
         // When the camera flips mid-recording, the session rebuilds.
-        // Wait for onCameraReady (via a promise, not spin-wait) before
-        // calling recordAsync on the new camera.
+        // onCameraReady does NOT re-fire on facing change (expo-camera only
+        // dispatches it once on initial mount). So we wait a brief fixed
+        // delay for the native session to settle after the device swap,
+        // then resume recording on the new camera.
         if (isFlippingRef.current) {
-          console.log("[camera] Flip detected — session may have rebuilt");
+          console.log("[camera] Flip detected — waiting for session to settle");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
 
@@ -344,51 +345,22 @@ export function useCameraRecorder() {
             break;
           }
 
-          // Check if onCameraReady has ALREADY fired (the new session
-          // finished building before recordAsync resolved). In that
-          // case the camera is live right now — skip the wait.
-          if (!cameraReadyRef.current) {
-            console.log("[camera] Flip — waiting for camera to be ready");
-            cameraReadyRef.current = false;
+          // Brief delay for the native session to finish swapping devices.
+          // sessionManager.updateDevice() runs on a serial queue — this
+          // gives it time to complete without depending on onCameraReady
+          // (which won't fire). 500ms is generous; the swap typically
+          // completes in 200-400ms.
+          await new Promise((r) => setTimeout(r, 500));
 
-            // Resolve via onCameraReady (or timeout after 4 s)
-            let timedOut = false;
-            try {
-              await Promise.race([
-                new Promise<void>((resolve) => {
-                  cameraReadyResolveRef.current = resolve;
-                }),
-                new Promise<void>((_, reject) =>
-                  setTimeout(() => {
-                    timedOut = true;
-                    reject(new Error("timeout"));
-                  }, 4000)
-                ),
-              ]);
-            } catch {
-              // Timeout — camera didn't come back
-            }
-            cameraReadyResolveRef.current = null;
-
-            // Re-check stopRequested after the wait — user may have
-            // tapped stop while we were waiting for onCameraReady.
-            if (stopRequestedRef.current) {
-              console.log("[camera] Stop requested during flip-wait — finalizing");
-              keepRecording = false;
-              break;
-            }
-
-            if (timedOut || !cameraReadyRef.current) {
-              console.warn("[camera] Camera not ready after flip — aborting");
-              setError("Camera failed to restart after flip.");
-              keepRecording = false;
-              break;
-            }
-          } else {
-            console.log("[camera] Camera already ready — resuming immediately");
+          // Re-check stopRequested after the wait — user may have
+          // tapped stop while we were waiting.
+          if (stopRequestedRef.current) {
+            console.log("[camera] Stop requested during flip-wait — finalizing");
+            keepRecording = false;
+            break;
           }
 
-          console.log("[camera] Camera ready — resuming recording");
+          console.log("[camera] Session settled — resuming recording");
           continue;
         }
 
@@ -396,7 +368,7 @@ export function useCameraRecorder() {
         keepRecording = false;
       } catch (e) {
         if (isFlippingRef.current) {
-          console.log("[camera] Flip error detected — session may have rebuilt");
+          console.log("[camera] Flip error detected — error object:", e);
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
 
@@ -407,53 +379,22 @@ export function useCameraRecorder() {
             break;
           }
 
-          // Check if onCameraReady has ALREADY fired (the new session
-          // finished building before recordAsync threw). In that
-          // case the camera is live right now — skip the wait.
-          if (!cameraReadyRef.current) {
-            console.log("[camera] Flip error — waiting for camera to be ready");
-            cameraReadyRef.current = false;
+          // Brief delay for the native session to settle after the device swap.
+          // Same as the success path — onCameraReady won't re-fire.
+          await new Promise((r) => setTimeout(r, 500));
 
-            // Wait for onCameraReady (or timeout after 4 s)
-            let timedOut = false;
-            try {
-              await Promise.race([
-                new Promise<void>((resolve) => {
-                  cameraReadyResolveRef.current = resolve;
-                }),
-                new Promise<void>((_, reject) =>
-                  setTimeout(() => {
-                    timedOut = true;
-                    reject(new Error("timeout"));
-                  }, 4000)
-                ),
-              ]);
-            } catch {
-              // Timeout
-            }
-            cameraReadyResolveRef.current = null;
-
-            // Re-check after the wait.
-            if (stopRequestedRef.current) {
-              console.log("[camera] Stop requested during flip-error wait — finalizing");
-              keepRecording = false;
-              break;
-            }
-
-            if (timedOut || !cameraReadyRef.current) {
-              console.warn("[camera] Camera not ready after flip — aborting");
-              setError("Camera failed to restart after flip.");
-              keepRecording = false;
-              break;
-            }
-          } else {
-            console.log("[camera] Camera already ready — resuming immediately");
+          // Re-check after the wait.
+          if (stopRequestedRef.current) {
+            console.log("[camera] Stop requested during flip-error wait — finalizing");
+            keepRecording = false;
+            break;
           }
 
-          console.log("[camera] Camera ready — resuming recording");
+          console.log("[camera] Session settled after flip error — resuming recording");
           continue;
         }
         if (recordStateRef.current !== "idle") {
+          console.error("[camera] recordAsync threw — error object:", e);
           const msg = e instanceof Error ? e.message : "Recording failed.";
           setError(msg);
         }
