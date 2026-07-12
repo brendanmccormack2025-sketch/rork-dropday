@@ -262,6 +262,44 @@ export const FeedItem = memo(function FeedItem({
   const segIdxRef = useRef<number>(0);
   useEffect(() => { segIdxRef.current = segIdx; }, [segIdx]);
 
+  // ── Dual-player preload ────────────────────────────────────────────
+  // Two Video instances swap roles so the next segment is already loaded
+  // when the current one ends, avoiding a cold-load stall between segments.
+  // Matches the editor's videoRefA/videoRefB pattern in edit.tsx.
+  const videoRefA = useRef<Video>(null);
+  const videoRefB = useRef<Video>(null);
+  const activeVideoRef = useRef<Video | null>(null);
+  const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
+  const activeSlotRef = useRef<0 | 1>(0);
+  const preloadReadyRef = useRef<boolean>(false);
+
+  const preloadUri = useMemo<string>(
+    () => allSegments[(segIdx + 1) % allSegments.length] ?? post.media_url,
+    [allSegments, segIdx, post.media_url],
+  );
+
+  // Only multi-segment posts need the preload player, and only when the
+  // item is active/visible — off-screen items must not double up players.
+  const shouldMountPreload = active && allSegments.length > 1;
+
+  // Keep activeVideoRef in sync with the active slot
+  useEffect(() => {
+    activeSlotRef.current = activeSlot;
+    activeVideoRef.current = activeSlot === 0 ? videoRefA.current : videoRefB.current;
+  }, [activeSlot]);
+
+  // Reset to slot A when the preload player unmounts (item became inactive)
+  useEffect(() => {
+    if (!shouldMountPreload) {
+      if (activeSlotRef.current !== 0) {
+        activeSlotRef.current = 0;
+        activeVideoRef.current = videoRefA.current;
+        setActiveSlot(0);
+      }
+      preloadReadyRef.current = false;
+    }
+  }, [shouldMountPreload]);
+
   // Video error state for retry UI
   const [videoError, setVideoError] = useState<string | null>(null);
   const errorCountRef = useRef<number>(0);
@@ -273,7 +311,8 @@ export const FeedItem = memo(function FeedItem({
   const prebufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialMountRef = useRef<boolean>(true);
 
-  // Reset pre-buffer gate & pause state when the data source changes
+  // Reset pre-buffer gate & pause state when the post changes
+  // (segIdx changes are handled by advanceSegment's hot-swap logic)
   useEffect(() => {
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
@@ -283,7 +322,7 @@ export const FeedItem = memo(function FeedItem({
     playbackReadyRef.current = false;
     readyForDisplayRef.current = false;
     setIsPaused(false);
-  }, [post.id, segIdx]);
+  }, [post.id]);
 
   // Auto-unpause and ensure playback when scrolling back to this video.
   // expo-av can miss the shouldPlay transition from false→true when the
@@ -299,7 +338,7 @@ export const FeedItem = memo(function FeedItem({
     }
   }, [active, playbackReady]);
 
-  // Clear prebuffer safety timer on unmount or when deps change
+  // Clear prebuffer safety timer on unmount or when post changes
   useEffect(() => {
     return () => {
       if (prebufferTimerRef.current) {
@@ -307,7 +346,7 @@ export const FeedItem = memo(function FeedItem({
         prebufferTimerRef.current = null;
       }
     };
-  }, [post.id, segIdx]);
+  }, [post.id]);
 
   // ── Safety timeout: if onReadyForDisplay never fires (rare Android edge case)
   useEffect(() => {
@@ -337,7 +376,7 @@ export const FeedItem = memo(function FeedItem({
     videoRef,
     stallState,
     handlePlaybackStatus: handleStallDetection,
-  } = useVideoStallDetection(post.id, active, currentUri, videoLog);
+  } = useVideoStallDetection(post.id, active, currentUri, videoLog, activeVideoRef);
 
   // Trim tracking for the current segment
   const durationSetRef = useRef<boolean>(false);
@@ -370,13 +409,45 @@ export const FeedItem = memo(function FeedItem({
     );
   }, [createdAt]);
 
-  // Reset segment index when post changes
+  // Reset segment index and dual-player state when post changes
   useEffect(() => {
     setSegIdx(0);
+    segIdxRef.current = 0;
+    setActiveSlot(0);
+    activeSlotRef.current = 0;
+    activeVideoRef.current = videoRefA.current;
+    preloadReadyRef.current = false;
     setVideoError(null);
     errorCountRef.current = 0;
     setIsPaused(false);
   }, [post.id]);
+
+  // ── Advance to next segment via dual-player hot-swap ──────────────
+  // Flips the active/inactive slots. If the preload was ready, the
+  // transition is seamless (playbackReady stays true). If not, the
+  // pre-buffer gate resets and a buffering indicator shows until
+  // onReadyForDisplay fires on the newly-active player.
+  // Wrap-around (last segment → segment 0) is handled identically.
+  const advanceSegment = useCallback(() => {
+    const current = segIdxRef.current;
+    const next = (current + 1) % allSegments.length;
+    const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
+    const wasPreloadReady = preloadReadyRef.current;
+
+    activeSlotRef.current = newSlot;
+    activeVideoRef.current = newSlot === 0 ? videoRefA.current : videoRefB.current;
+    preloadReadyRef.current = false;
+
+    setActiveSlot(newSlot);
+    setSegIdx(next);
+    segIdxRef.current = next;
+
+    if (!wasPreloadReady) {
+      playbackReadyRef.current = false;
+      readyForDisplayRef.current = false;
+      setPlaybackReady(false);
+    }
+  }, [allSegments.length]);
 
   // When video finishes, advance to next segment or loop
   const onSegmentStatus = useCallback(
@@ -434,8 +505,7 @@ export const FeedItem = memo(function FeedItem({
               })
               .catch(() => {});
           } else {
-            const next = (current + 1) % allSegments.length;
-            setSegIdx(next);
+            advanceSegment();
           }
           return;
         }
@@ -444,12 +514,10 @@ export const FeedItem = memo(function FeedItem({
       // Native just-finished fallback (covers edge cases the position
       // check misses, e.g. very short clips)
       if (status.didJustFinish && allSegments.length > 1) {
-        const current = segIdxRef.current;
-        const next = (current + 1) % allSegments.length;
-        setSegIdx(next);
+        advanceSegment();
       }
     },
-    [allSegments.length, handleStallDetection],
+    [allSegments.length, handleStallDetection, advanceSegment],
   );
 
   // ── Error recovery: retry loading ──────────────────────────────────
@@ -483,6 +551,90 @@ export const FeedItem = memo(function FeedItem({
     );
   }, [deletePost, post.id]);
 
+  // ── Per-slot callbacks for dual-player ─────────────────────────────
+  // Only the active slot runs the full playback/stall logic; the inactive
+  // slot just tracks preload readiness via onReadyForDisplay.
+  const onStatusSlotA = useCallback(
+    (status: AVPlaybackStatus) => {
+      if (activeSlotRef.current === 0) onSegmentStatus(status);
+    },
+    [onSegmentStatus],
+  );
+  const onStatusSlotB = useCallback(
+    (status: AVPlaybackStatus) => {
+      if (activeSlotRef.current === 1) onSegmentStatus(status);
+    },
+    [onSegmentStatus],
+  );
+
+  const onReadySlotA = useCallback(() => {
+    videoLog({ type: "ready_for_display", postId: post.id });
+    if (activeSlotRef.current === 0) {
+      setVideoError(null);
+      readyForDisplayRef.current = true;
+      if (!playbackReadyRef.current) {
+        playbackReadyRef.current = true;
+        setPlaybackReady(true);
+        if (prebufferTimerRef.current) {
+          clearTimeout(prebufferTimerRef.current);
+          prebufferTimerRef.current = null;
+        }
+      }
+    } else {
+      // Inactive slot: preload is ready
+      preloadReadyRef.current = true;
+    }
+  }, [post.id, videoLog]);
+
+  const onReadySlotB = useCallback(() => {
+    videoLog({ type: "ready_for_display", postId: post.id });
+    if (activeSlotRef.current === 1) {
+      setVideoError(null);
+      readyForDisplayRef.current = true;
+      if (!playbackReadyRef.current) {
+        playbackReadyRef.current = true;
+        setPlaybackReady(true);
+        if (prebufferTimerRef.current) {
+          clearTimeout(prebufferTimerRef.current);
+          prebufferTimerRef.current = null;
+        }
+      }
+    } else {
+      preloadReadyRef.current = true;
+    }
+  }, [post.id, videoLog]);
+
+  const onLoadSlotA = useCallback((status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
+    if (status.isLoaded) {
+      videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
+    }
+  }, [post.id, videoLog]);
+
+  const onLoadSlotB = useCallback((status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
+    if (status.isLoaded) {
+      videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
+    }
+  }, [post.id, videoLog]);
+
+  const onErrorSlotA = useCallback((error: string) => {
+    videoLog({ type: "load_error", postId: post.id, error });
+    if (activeSlotRef.current === 0) {
+      errorCountRef.current += 1;
+      setVideoError(error);
+    }
+  }, [post.id, videoLog]);
+
+  const onErrorSlotB = useCallback((error: string) => {
+    videoLog({ type: "load_error", postId: post.id, error });
+    if (activeSlotRef.current === 1) {
+      errorCountRef.current += 1;
+      setVideoError(error);
+    } else {
+      // Preload failed — mark as not ready so hot-swap falls back gracefully
+      preloadReadyRef.current = false;
+    }
+  }, [post.id, videoLog]);
+
   return (
     <View
       style={styles.item}
@@ -495,46 +647,56 @@ export const FeedItem = memo(function FeedItem({
     >
       {post.media_type === "video" ? (
         <View style={StyleSheet.absoluteFill}>
+          {/* Slot A — primary player, always mounted for video posts */}
           <Video
-            key={`${post.id}_seg${segIdx}`}
-            ref={videoRef}
-            source={{ uri: currentUri }}
+            key={`slotA-${post.id}`}
+            ref={videoRefA}
+            source={{ uri: activeSlot === 0 ? currentUri : preloadUri }}
             style={[
               StyleSheet.absoluteFill,
+              { opacity: activeSlot === 0 ? 1 : 0 },
               post._optimistic?.status === "failed" && { opacity: 0.3 },
             ]}
             resizeMode={ResizeMode.COVER}
-            isLooping={allSegments.length === 1}
-            shouldPlay={active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
-            isMuted={!active}
+            isLooping={allSegments.length === 1 && activeSlot === 0}
+            shouldPlay={activeSlot === 0 && active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
+            isMuted={activeSlot === 0 ? !active : true}
             useNativeControls={false}
             progressUpdateIntervalMillis={250}
-            onPlaybackStatusUpdate={onSegmentStatus}
-            onError={(error: string) => {
-              errorCountRef.current += 1;
-              setVideoError(error);
-              videoLog({ type: "load_error", postId: post.id, error });
-            }}
-            onLoad={(status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
-              videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
-            }}
+            onPlaybackStatusUpdate={onStatusSlotA}
+            onError={onErrorSlotA}
+            onLoad={onLoadSlotA}
             onLoadStart={() => {
-              videoLog({ type: "load_start", postId: post.id, uri: currentUri });
+              videoLog({ type: "load_start", postId: post.id, uri: activeSlot === 0 ? currentUri : preloadUri });
             }}
-            onReadyForDisplay={() => {
-              videoLog({ type: "ready_for_display", postId: post.id });
-              setVideoError(null);
-              readyForDisplayRef.current = true;
-              if (!playbackReadyRef.current) {
-                playbackReadyRef.current = true;
-                setPlaybackReady(true);
-                if (prebufferTimerRef.current) {
-                  clearTimeout(prebufferTimerRef.current);
-                  prebufferTimerRef.current = null;
-                }
-              }
-            }}
+            onReadyForDisplay={onReadySlotA}
           />
+
+          {/* Slot B — preload player, only mounted for active multi-segment posts */}
+          {shouldMountPreload && (
+            <Video
+              key={`slotB-${post.id}`}
+              ref={videoRefB}
+              source={{ uri: activeSlot === 1 ? currentUri : preloadUri }}
+              style={[
+                StyleSheet.absoluteFill,
+                { opacity: activeSlot === 1 ? 1 : 0 },
+              ]}
+              resizeMode={ResizeMode.COVER}
+              isLooping={false}
+              shouldPlay={activeSlot === 1 && active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
+              isMuted={activeSlot === 1 ? !active : true}
+              useNativeControls={false}
+              progressUpdateIntervalMillis={250}
+              onPlaybackStatusUpdate={onStatusSlotB}
+              onError={onErrorSlotB}
+              onLoad={onLoadSlotB}
+              onLoadStart={() => {
+                videoLog({ type: "load_start", postId: post.id, uri: activeSlot === 1 ? currentUri : preloadUri });
+              }}
+              onReadyForDisplay={onReadySlotB}
+            />
+          )}
 
           {/* Double-tap to like zone */}
           <DoubleTapLikeZone

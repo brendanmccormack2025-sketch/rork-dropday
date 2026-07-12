@@ -45,8 +45,10 @@ export function useVideoStallDetection(
   active: boolean,
   sourceUri: string,
   onLog: (event: VideoEvent) => void,
+  externalVideoRef?: React.MutableRefObject<Video | null>,
 ) {
-  const videoRef = useRef<Video>(null);
+  const internalVideoRef = useRef<Video>(null);
+  const videoRef = externalVideoRef ?? internalVideoRef;
   const lastPositionRef = useRef<number>(0);
   const lastPositionTimeRef = useRef<number>(Date.now());
   const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
