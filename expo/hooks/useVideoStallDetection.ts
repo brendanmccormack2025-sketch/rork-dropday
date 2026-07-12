@@ -131,10 +131,16 @@ export function useVideoStallDetection(
     setStallState((s) => ({ ...s, recovering: true }));
 
     const attempt = retryCountRef.current + 1;
+    console.log(`[StallDetection:${postId}] RECOVERY ATTEMPT #${attempt} — playAsync`, {
+      pos: lastPositionRef.current,
+      sourceUri,
+      videoRefExists: !!videoRef.current,
+    });
     onLog({ type: "stall_recovery_attempt", postId, attempt, method: "playAsync" });
 
     // Safety: guard against null ref (component unmounted during stall window)
     if (!videoRef.current) {
+      console.log(`[StallDetection:${postId}] RECOVERY ABORTED — videoRef is null`);
       recoveringRef.current = false;
       setStallState((s) => ({ ...s, recovering: false }));
       return;
@@ -142,6 +148,7 @@ export function useVideoStallDetection(
     videoRef.current
       .playAsync()
       .then(() => {
+        console.log(`[StallDetection:${postId}] RECOVERY SUCCEEDED — playAsync`);
         lastReloadTimeRef.current = now;
         onLog({ type: "stall_recovered", postId, afterMs: 0 });
         recoveringRef.current = false;
@@ -149,6 +156,7 @@ export function useVideoStallDetection(
         setStallState((s) => ({ ...s, recovering: false }));
       })
       .catch((err) => {
+        console.log(`[StallDetection:${postId}] playAsync FAILED`, err);
         // playAsync failed — try reloading the source
         retryCountRef.current = attempt;
         if (attempt > MAX_RETRIES) {
@@ -159,6 +167,7 @@ export function useVideoStallDetection(
         }
 
         const nextMethod = attempt <= MAX_RETRIES ? "reload_source" : "exhausted";
+        console.log(`[StallDetection:${postId}] RECOVERY ATTEMPT #${attempt} — reload_source`, { sourceUri });
         onLog({ type: "stall_recovery_attempt", postId, attempt, method: nextMethod });
 
         if (attempt <= MAX_RETRIES) {
@@ -177,13 +186,15 @@ export function useVideoStallDetection(
               ),
             )
             .then(() => {
+              console.log(`[StallDetection:${postId}] RECOVERY SUCCEEDED — reload`);
               lastReloadTimeRef.current = Date.now();
               onLog({ type: "stall_recovered", postId, afterMs: 0 });
               recoveringRef.current = false;
               retryCountRef.current = 0;
               setStallState((s) => ({ ...s, recovering: false }));
             })
-            .catch(() => {
+            .catch((err2) => {
+              console.log(`[StallDetection:${postId}] reload FAILED`, err2);
               recoveringRef.current = false;
               setStallState((s) => ({ ...s, recovering: false }));
             });
@@ -219,10 +230,12 @@ export function useVideoStallDetection(
       // Detect buffering state changes (use ref to avoid stale closure)
       if (status.isBuffering && !isBufferingRef.current) {
         isBufferingRef.current = true;
+        console.log(`[StallDetection:${postId}] BUFFERING_START`, { pos, active, sourceUri });
         onLog({ type: "buffering_start", postId, positionMs: pos });
         setStallState((s) => ({ ...s, isBuffering: true }));
       } else if (!status.isBuffering && isBufferingRef.current) {
         isBufferingRef.current = false;
+        console.log(`[StallDetection:${postId}] BUFFERING_END`, { pos, active });
         onLog({ type: "buffering_end", postId, positionMs: pos });
         setStallState((s) => ({ ...s, isBuffering: false }));
       }
@@ -235,6 +248,7 @@ export function useVideoStallDetection(
         if (pos === lastPositionRef.current) {
           // Position frozen — start/continue stall timer
           if (!stallTimerRef.current) {
+            console.log(`[StallDetection:${postId}] POSITION FROZEN — starting stall timer`, { pos, active });
             lastPositionTimeRef.current = now;
             startStallTimer(pos, true);
           }
@@ -259,7 +273,7 @@ export function useVideoStallDetection(
         clearStallTimer();
       }
     },
-    [active, clearStallTimer, onLog, postId, startStallTimer],
+    [active, clearStallTimer, onLog, postId, sourceUri, startStallTimer],
   );
 
   // ── AppState listener: auto-recover when returning to foreground ──
@@ -302,6 +316,7 @@ export function useVideoStallDetection(
 
   // ── Reset when active toggles or source changes ─────────────────────
   useEffect(() => {
+    console.log(`[StallDetection:${postId}] RESET (active=${active}, sourceUri=${sourceUri})`);
     retryCountRef.current = 0;
     recoveringRef.current = false;
     lastPositionRef.current = 0;
@@ -310,12 +325,15 @@ export function useVideoStallDetection(
     isBufferingRef.current = false;
     clearStallTimer();
     setStallState({ isBuffering: false, stallCount: 0, lastStallPos: 0, recovering: false });
-  }, [active, sourceUri, clearStallTimer]);
+  }, [active, sourceUri, clearStallTimer, postId]);
 
   // ── Cleanup ─────────────────────────────────────────────────────────
   useEffect(() => {
-    return () => clearStallTimer();
-  }, [clearStallTimer]);
+    return () => {
+      console.log(`[StallDetection:${postId}] UNMOUNT — clearing stall timer`);
+      clearStallTimer();
+    };
+  }, [clearStallTimer, postId]);
 
   return {
     videoRef,

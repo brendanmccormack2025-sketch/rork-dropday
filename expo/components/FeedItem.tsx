@@ -368,9 +368,10 @@ export const FeedItem = memo(function FeedItem({
   }, [active, playbackReady, post.id]);
 
   // ── Stall detection + recovery ─────────────────────────────────────
+  // DIAGNOSTIC: log all video events to console for segment transition debugging
   const videoLog = useCallback((e: VideoEvent) => {
-    // Silent logging to keep console clean
-  }, []);
+    console.log(`[FeedItem:${post.id}] videoEvent`, e.type, 'segIdx=' + segIdxRef.current, 'activeSlot=' + activeSlotRef.current, e);
+  }, [post.id]);
 
   const {
     videoRef,
@@ -420,6 +421,35 @@ export const FeedItem = memo(function FeedItem({
     setVideoError(null);
     errorCountRef.current = 0;
     setIsPaused(false);
+    console.log(`[FeedItem:${post.id}] POST RESET — all dual-player state cleared`);
+  }, [post.id]);
+
+  // DIAGNOSTIC: Log state snapshot after every slot swap
+  useEffect(() => {
+    console.log(`[FeedItem:${post.id}] SLOT SWAP EFFECT`, {
+      activeSlot,
+      segIdx,
+      currentUri,
+      preloadUri,
+      shouldMountPreload,
+      shouldPlayA: activeSlot === 0 && active && playbackReady && !isPaused,
+      shouldPlayB: activeSlot === 1 && active && playbackReady && !isPaused,
+      videoRefAExists: !!videoRefA.current,
+      videoRefBExists: !!videoRefB.current,
+      activeVideoRefExists: !!activeVideoRef.current,
+    });
+  }, [activeSlot, segIdx, active, playbackReady, isPaused, currentUri, preloadUri, shouldMountPreload, post.id]);
+
+  // DIAGNOSTIC: Log on unmount to answer "what resets on unmount"
+  useEffect(() => {
+    return () => {
+      console.log(`[FeedItem:${post.id}] UNMOUNT — component tearing down`, {
+        segIdx: segIdxRef.current,
+        activeSlot: activeSlotRef.current,
+        preloadReady: preloadReadyRef.current,
+        playbackReady: playbackReadyRef.current,
+      });
+    };
   }, [post.id]);
 
   // ── Advance to next segment via dual-player hot-swap ──────────────
@@ -434,6 +464,21 @@ export const FeedItem = memo(function FeedItem({
     const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
     const wasPreloadReady = preloadReadyRef.current;
 
+    // DIAGNOSTIC: log every advanceSegment call with full state
+    console.log(`[FeedItem:${post.id}] advanceSegment CALLED`, {
+      fromSegIdx: current,
+      toSegIdx: next,
+      fromSlot: activeSlotRef.current,
+      toSlot: newSlot,
+      preloadReady: wasPreloadReady,
+      playbackReady: playbackReadyRef.current,
+      readyForDisplay: readyForDisplayRef.current,
+      shouldMountPreload,
+      allSegmentsLen: allSegments.length,
+      nextUri: allSegments[next],
+      preloadUriWas: allSegments[(current + 1) % allSegments.length],
+    });
+
     activeSlotRef.current = newSlot;
     activeVideoRef.current = newSlot === 0 ? videoRefA.current : videoRefB.current;
     preloadReadyRef.current = false;
@@ -446,8 +491,11 @@ export const FeedItem = memo(function FeedItem({
       playbackReadyRef.current = false;
       readyForDisplayRef.current = false;
       setPlaybackReady(false);
+      console.log(`[FeedItem:${post.id}] advanceSegment — preload was NOT ready, resetting playbackReady=false`);
+    } else {
+      console.log(`[FeedItem:${post.id}] advanceSegment — preload WAS ready, keeping playbackReady=true`);
     }
-  }, [allSegments.length]);
+  }, [allSegments.length, shouldMountPreload, post.id]);
 
   // When video finishes, advance to next segment or loop
   const onSegmentStatus = useCallback(
@@ -456,6 +504,25 @@ export const FeedItem = memo(function FeedItem({
 
       if (!status.isLoaded) return;
 
+      // DIAGNOSTIC: log key status fields during transitions
+      if (!playbackReadyRef.current || status.isBuffering || status.didJustFinish) {
+        console.log(`[FeedItem:${post.id}] onSegmentStatus`, {
+          segIdx: segIdxRef.current,
+          activeSlot: activeSlotRef.current,
+          positionMs: status.positionMillis,
+          durationMs: status.durationMillis,
+          isPlaying: status.isPlaying,
+          isBuffering: status.isBuffering,
+          didJustFinish: status.didJustFinish,
+          playbackReady: playbackReadyRef.current,
+          readyForDisplay: readyForDisplayRef.current,
+          preloadReady: preloadReadyRef.current,
+          trimEnd: trimEndRef.current,
+          trimEndHandled: trimEndHandledRef.current,
+          durationSet: durationSetRef.current,
+        });
+      }
+
       // ── Pre-buffer gate ──
       if (!playbackReadyRef.current) {
         const hasFrame = readyForDisplayRef.current;
@@ -463,6 +530,7 @@ export const FeedItem = memo(function FeedItem({
         if (hasFrame || notBuffering) {
           playbackReadyRef.current = true;
           setPlaybackReady(true);
+          console.log(`[FeedItem:${post.id}] pre-buffer gate PASSED`, { hasFrame, notBuffering });
           if (prebufferTimerRef.current) {
             clearTimeout(prebufferTimerRef.current);
             prebufferTimerRef.current = null;
@@ -475,6 +543,7 @@ export const FeedItem = memo(function FeedItem({
 
       if (!durationSetRef.current && sourceDur > 0) {
         durationSetRef.current = true;
+        console.log(`[FeedItem:${post.id}] duration set`, { sourceDur, trimStart: trimStartRef.current });
         if (trimStartRef.current > 0) {
           videoRef.current
             ?.setPositionAsync(trimStartRef.current)
@@ -484,10 +553,6 @@ export const FeedItem = memo(function FeedItem({
       }
 
       // ── Unified end-of-segment detection ──
-      // Clamp trimEnd to the player's reported source duration so that a
-      // stored trimEnd that equals (or slightly exceeds) sourceDur is
-      // treated as "no trim end" instead of falling into a dead zone
-      // where neither the trimmed nor untrimmed advance path fires.
       if (!status.didJustFinish && !trimEndHandledRef.current && sourceDur > 0) {
         const effectiveTrimEnd =
           trimEndRef.current > 0
@@ -497,6 +562,12 @@ export const FeedItem = memo(function FeedItem({
         if (status.positionMillis >= effectiveTrimEnd - 120) {
           trimEndHandledRef.current = true;
           const current = segIdxRef.current;
+          console.log(`[FeedItem:${post.id}] END OF SEGMENT detected`, {
+            segIdx: current,
+            positionMs: status.positionMillis,
+            effectiveTrimEnd,
+            isSingleSegment: allSegments.length === 1,
+          });
           if (allSegments.length === 1) {
             videoRef.current
               ?.setPositionAsync(trimStartRef.current)
@@ -511,13 +582,13 @@ export const FeedItem = memo(function FeedItem({
         }
       }
 
-      // Native just-finished fallback (covers edge cases the position
-      // check misses, e.g. very short clips)
+      // Native just-finished fallback
       if (status.didJustFinish && allSegments.length > 1) {
+        console.log(`[FeedItem:${post.id}] didJustFinish fallback → advanceSegment`);
         advanceSegment();
       }
     },
-    [allSegments.length, handleStallDetection, advanceSegment],
+    [allSegments.length, handleStallDetection, advanceSegment, post.id],
   );
 
   // ── Error recovery: retry loading ──────────────────────────────────
@@ -556,19 +627,29 @@ export const FeedItem = memo(function FeedItem({
   // slot just tracks preload readiness via onReadyForDisplay.
   const onStatusSlotA = useCallback(
     (status: AVPlaybackStatus) => {
-      if (activeSlotRef.current === 0) onSegmentStatus(status);
+      if (activeSlotRef.current === 0) {
+        onSegmentStatus(status);
+      }
     },
     [onSegmentStatus],
   );
   const onStatusSlotB = useCallback(
     (status: AVPlaybackStatus) => {
-      if (activeSlotRef.current === 1) onSegmentStatus(status);
+      if (activeSlotRef.current === 1) {
+        onSegmentStatus(status);
+      }
     },
     [onSegmentStatus],
   );
 
   const onReadySlotA = useCallback(() => {
-    videoLog({ type: "ready_for_display", postId: post.id });
+    console.log(`[FeedItem:${post.id}] onReadyForDisplay SLOT_A`, {
+      activeSlot: activeSlotRef.current,
+      isActive: activeSlotRef.current === 0,
+      playbackReady: playbackReadyRef.current,
+      preloadReady: preloadReadyRef.current,
+      segIdx: segIdxRef.current,
+    });
     if (activeSlotRef.current === 0) {
       setVideoError(null);
       readyForDisplayRef.current = true;
@@ -583,11 +664,18 @@ export const FeedItem = memo(function FeedItem({
     } else {
       // Inactive slot: preload is ready
       preloadReadyRef.current = true;
+      console.log(`[FeedItem:${post.id}] SLOT_A preload marked READY`);
     }
   }, [post.id, videoLog]);
 
   const onReadySlotB = useCallback(() => {
-    videoLog({ type: "ready_for_display", postId: post.id });
+    console.log(`[FeedItem:${post.id}] onReadyForDisplay SLOT_B`, {
+      activeSlot: activeSlotRef.current,
+      isActive: activeSlotRef.current === 1,
+      playbackReady: playbackReadyRef.current,
+      preloadReady: preloadReadyRef.current,
+      segIdx: segIdxRef.current,
+    });
     if (activeSlotRef.current === 1) {
       setVideoError(null);
       readyForDisplayRef.current = true;
@@ -601,6 +689,7 @@ export const FeedItem = memo(function FeedItem({
       }
     } else {
       preloadReadyRef.current = true;
+      console.log(`[FeedItem:${post.id}] SLOT_B preload marked READY`);
     }
   }, [post.id, videoLog]);
 
@@ -617,7 +706,7 @@ export const FeedItem = memo(function FeedItem({
   }, [post.id, videoLog]);
 
   const onErrorSlotA = useCallback((error: string) => {
-    videoLog({ type: "load_error", postId: post.id, error });
+    console.log(`[FeedItem:${post.id}] onError SLOT_A`, { error, activeSlot: activeSlotRef.current });
     if (activeSlotRef.current === 0) {
       errorCountRef.current += 1;
       setVideoError(error);
@@ -625,13 +714,14 @@ export const FeedItem = memo(function FeedItem({
   }, [post.id, videoLog]);
 
   const onErrorSlotB = useCallback((error: string) => {
-    videoLog({ type: "load_error", postId: post.id, error });
+    console.log(`[FeedItem:${post.id}] onError SLOT_B`, { error, activeSlot: activeSlotRef.current });
     if (activeSlotRef.current === 1) {
       errorCountRef.current += 1;
       setVideoError(error);
     } else {
       // Preload failed — mark as not ready so hot-swap falls back gracefully
       preloadReadyRef.current = false;
+      console.log(`[FeedItem:${post.id}] SLOT_B preload FAILED, preloadReady=false`);
     }
   }, [post.id, videoLog]);
 
