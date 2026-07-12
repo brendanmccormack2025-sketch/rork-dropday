@@ -124,12 +124,10 @@ export default function CameraScreen() {
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const buttonScale = useRef(new Animated.Value(1)).current;
   const lockDrag = useRef(new Animated.Value(0)).current;
-  /** Flip cover — stays opaque from flip-trigger until onCameraReady
-   *  fires (the new camera session is live), then fades out. This masks
-   *  the ~0.5s black gap during the native session rebuild. A 3s fallback
-   *  timer clears the cover if onCameraReady never fires. */
+  /** Flip flash — a quick subtle white hint on camera flip. Not a full
+   *  whiteout mask — just enough visual feedback so the user sees the
+   *  flip registered instantly, fading out in ~180ms. */
   const flipFlashOpacity = useRef(new Animated.Value(0)).current;
-  const flipCoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const frontFlashOpacity = useRef(new Animated.Value(0)).current;
   const frontFlashHighlightOpacity = useRef(new Animated.Value(0)).current;
 
@@ -195,7 +193,6 @@ export default function CameraScreen() {
       if (flipAnimRef.current) flipAnimRef.current.stop();
       if (frontFlashAnimRef.current) frontFlashAnimRef.current.stop();
       if (panZoomHideRef.current) clearTimeout(panZoomHideRef.current);
-      if (flipCoverTimer.current) clearTimeout(flipCoverTimer.current);
 
       setZoom(0);
       setPanZoomActive(false);
@@ -395,27 +392,20 @@ export default function CameraScreen() {
 
   // ─── Flip camera with flash ───────────────────────────────────
 
-  /** Show the flip cover at full opacity, then fade it out after a
-   *  fixed 400ms delay. We use a fixed timer because expo-camera's
-   *  onCameraReady only fires ONCE on initial mount — it does NOT
-   *  re-fire when the facing prop changes. The previous approach waited
-   *  for isCameraReady to go true, which never happened after a flip,
-   *  causing a permanent white screen. The 400ms covers the native
-   *  session reconfiguration gap (typically 200-400ms). */
+  /** Subtle quick flash — not a full whiteout. The underlying session
+   *  swap is handled by the recording loop's fixed delay; this is just
+   *  visual feedback so the user sees the flip registered instantly.
+   *  0.35 opacity + 180ms fade ≈ Snapchat's near-instant flip feel. */
   const triggerFlipFlash = useCallback(() => {
     if (flipAnimRef.current) flipAnimRef.current.stop();
-    flipFlashOpacity.setValue(1);
-    if (flipCoverTimer.current) clearTimeout(flipCoverTimer.current);
-    flipCoverTimer.current = setTimeout(() => {
-      console.log("[camera] flip cover — fading out after fixed delay");
-      flipAnimRef.current = Animated.timing(flipFlashOpacity, {
-        toValue: 0,
-        duration: 200,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      });
-      flipAnimRef.current.start();
-    }, 400);
+    flipFlashOpacity.setValue(0.35);
+    flipAnimRef.current = Animated.timing(flipFlashOpacity, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    flipAnimRef.current.start();
   }, [flipFlashOpacity]);
 
   const handleFlip = useCallback(() => {
@@ -426,11 +416,11 @@ export default function CameraScreen() {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
   }, [flipCamera, setZoom, triggerFlipFlash]);
 
-  // NOTE: The flip cover fade-out is handled entirely by the fixed timer
-  // in triggerFlipFlash. We previously had a useEffect here that watched
-  // isCameraReady, but expo-camera's onCameraReady does NOT re-fire on
-  // facing prop changes — it only fires once on initial mount. That
-  // useEffect never triggered after a flip, causing the white screen bug.
+  // NOTE: The flip flash is a simple fade-out with no hold timer.
+  // expo-camera's onCameraReady does NOT re-fire on facing prop changes,
+  // so we can't gate the flash on readiness — the fixed fade duration
+  // is calibrated to be short enough that the session swap completes
+  // around the same time the flash vanishes.
 
   // Double-tap anywhere on the preview to flip cameras.
   // react-native-gesture-handler TapGestureHandler configured for

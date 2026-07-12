@@ -2,7 +2,9 @@ import React, { memo, useEffect, useMemo, useRef, useState, useCallback } from "
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
+  Easing,
   Pressable,
   StyleSheet,
   View,
@@ -280,6 +282,10 @@ export const FeedItem = memo(function FeedItem({
   const slotALoadedUriRef = useRef<string | null>(null);
   const slotBLoadedUriRef = useRef<string | null>(null);
 
+  // Crossfade opacity for smooth segment transitions (~120ms dissolve)
+  const slotAOpacity = useRef(new Animated.Value(1)).current;
+  const slotBOpacity = useRef(new Animated.Value(0)).current;
+
   const preloadUri = useMemo<string>(
     () => allSegments[(segIdx + 1) % allSegments.length] ?? post.media_url,
     [allSegments, segIdx, post.media_url],
@@ -305,8 +311,10 @@ export const FeedItem = memo(function FeedItem({
       }
       preloadReadyRef.current = false;
       lastAdvanceTimeRef.current = 0;
+      slotAOpacity.setValue(1);
+      slotBOpacity.setValue(0);
     }
-  }, [shouldMountPreload]);
+  }, [shouldMountPreload, slotAOpacity, slotBOpacity]);
 
   // Video error state for retry UI
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -446,6 +454,8 @@ export const FeedItem = memo(function FeedItem({
     setIsPaused(false);
     slotALoadedUriRef.current = null;
     slotBLoadedUriRef.current = null;
+    slotAOpacity.setValue(1);
+    slotBOpacity.setValue(0);
     console.log(`[FeedItem:${post.id}] POST RESET — all dual-player state cleared`);
   }, [post.id]);
 
@@ -532,6 +542,24 @@ export const FeedItem = memo(function FeedItem({
     setActiveSlot(newSlot);
     setSegIdx(next);
     segIdxRef.current = next;
+
+    // Crossfade: outgoing slot fades out, incoming fades in over 120ms
+    const outgoingOpacity = newSlot === 0 ? slotBOpacity : slotAOpacity;
+    const incomingOpacity = newSlot === 0 ? slotAOpacity : slotBOpacity;
+    Animated.parallel([
+      Animated.timing(outgoingOpacity, {
+        toValue: 0,
+        duration: 120,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+      Animated.timing(incomingOpacity, {
+        toValue: 1,
+        duration: 120,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+    ]).start();
 
     // Compute trim for the new segment directly (trim refs update in effect, not yet)
     const trim =
@@ -833,54 +861,64 @@ export const FeedItem = memo(function FeedItem({
       {post.media_type === "video" ? (
         <View style={StyleSheet.absoluteFill}>
           {/* Slot A — primary player, always mounted for video posts */}
-          <Video
-            key={`slotA-${post.id}`}
-            ref={videoRefA}
-            source={{ uri: activeSlot === 0 ? currentUri : preloadUri }}
+          <Animated.View
             style={[
               StyleSheet.absoluteFill,
-              { opacity: activeSlot === 0 ? 1 : 0 },
-              post._optimistic?.status === "failed" && { opacity: 0.3 },
+              { opacity: slotAOpacity },
             ]}
-            resizeMode={ResizeMode.COVER}
-            isLooping={allSegments.length === 1 && activeSlot === 0}
-            shouldPlay={activeSlot === 0 && active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
-            isMuted={activeSlot === 0 ? !active : true}
-            useNativeControls={false}
-            progressUpdateIntervalMillis={250}
-            onPlaybackStatusUpdate={onStatusSlotA}
-            onError={onErrorSlotA}
-            onLoad={onLoadSlotA}
-            onLoadStart={() => {
-              videoLog({ type: "load_start", postId: post.id, uri: activeSlot === 0 ? currentUri : preloadUri });
-            }}
-            onReadyForDisplay={onReadySlotA}
-          />
+          >
+            <Video
+              key={`slotA-${post.id}`}
+              ref={videoRefA}
+              source={{ uri: activeSlot === 0 ? currentUri : preloadUri }}
+              style={[
+                StyleSheet.absoluteFill,
+                post._optimistic?.status === "failed" && { opacity: 0.3 },
+              ]}
+              resizeMode={ResizeMode.COVER}
+              isLooping={allSegments.length === 1 && activeSlot === 0}
+              shouldPlay={activeSlot === 0 && active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
+              isMuted={activeSlot === 0 ? !active : true}
+              useNativeControls={false}
+              progressUpdateIntervalMillis={250}
+              onPlaybackStatusUpdate={onStatusSlotA}
+              onError={onErrorSlotA}
+              onLoad={onLoadSlotA}
+              onLoadStart={() => {
+                videoLog({ type: "load_start", postId: post.id, uri: activeSlot === 0 ? currentUri : preloadUri });
+              }}
+              onReadyForDisplay={onReadySlotA}
+            />
+          </Animated.View>
 
           {/* Slot B — preload player, only mounted for active multi-segment posts */}
           {shouldMountPreload && (
-            <Video
-              key={`slotB-${post.id}`}
-              ref={videoRefB}
-              source={{ uri: activeSlot === 1 ? currentUri : preloadUri }}
+            <Animated.View
               style={[
                 StyleSheet.absoluteFill,
-                { opacity: activeSlot === 1 ? 1 : 0 },
+                { opacity: slotBOpacity },
               ]}
-              resizeMode={ResizeMode.COVER}
-              isLooping={false}
-              shouldPlay={activeSlot === 1 && active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
-              isMuted={activeSlot === 1 ? !active : true}
-              useNativeControls={false}
-              progressUpdateIntervalMillis={250}
-              onPlaybackStatusUpdate={onStatusSlotB}
-              onError={onErrorSlotB}
-              onLoad={onLoadSlotB}
-              onLoadStart={() => {
-                videoLog({ type: "load_start", postId: post.id, uri: activeSlot === 1 ? currentUri : preloadUri });
-              }}
-              onReadyForDisplay={onReadySlotB}
-            />
+            >
+              <Video
+                key={`slotB-${post.id}`}
+                ref={videoRefB}
+                source={{ uri: activeSlot === 1 ? currentUri : preloadUri }}
+                style={StyleSheet.absoluteFill}
+                resizeMode={ResizeMode.COVER}
+                isLooping={false}
+                shouldPlay={activeSlot === 1 && active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
+                isMuted={activeSlot === 1 ? !active : true}
+                useNativeControls={false}
+                progressUpdateIntervalMillis={250}
+                onPlaybackStatusUpdate={onStatusSlotB}
+                onError={onErrorSlotB}
+                onLoad={onLoadSlotB}
+                onLoadStart={() => {
+                  videoLog({ type: "load_start", postId: post.id, uri: activeSlot === 1 ? currentUri : preloadUri });
+                }}
+                onReadyForDisplay={onReadySlotB}
+              />
+            </Animated.View>
           )}
 
           {/* Double-tap to like zone */}
