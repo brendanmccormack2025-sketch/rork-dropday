@@ -274,6 +274,11 @@ export const FeedItem = memo(function FeedItem({
   const preloadReadyRef = useRef<boolean>(false);
   // Debounce: prevent multiple advanceSegment calls within 500ms
   const lastAdvanceTimeRef = useRef<number>(0);
+  // Track which URI each slot has loaded, so we can detect when a slot
+  // already has the correct content loaded (wrap-around for 2-segment posts)
+  // and skip waiting for onReadyForDisplay (which won't fire if unchanged).
+  const slotALoadedUriRef = useRef<string | null>(null);
+  const slotBLoadedUriRef = useRef<string | null>(null);
 
   const preloadUri = useMemo<string>(
     () => allSegments[(segIdx + 1) % allSegments.length] ?? post.media_url,
@@ -351,14 +356,28 @@ export const FeedItem = memo(function FeedItem({
     };
   }, [post.id]);
 
-  // ── Safety timeout: if onReadyForDisplay never fires (rare Android edge case)
+  // ── Safety timeout: if onReadyForDisplay never fires (e.g. wrap-around
+  // for 2-segment posts where the source URI doesn't change and the event
+  // never re-fires). Seek to trimStart so the player resumes from the
+  // correct position, not wherever it was left off.
   useEffect(() => {
     if (!active || playbackReady) return;
 
     prebufferTimerRef.current = setTimeout(() => {
       if (!playbackReadyRef.current) {
         playbackReadyRef.current = true;
+        readyForDisplayRef.current = true;
         setPlaybackReady(true);
+        // Seek to trimStart — the player may be at the wrong position
+        // (e.g. near trimEnd from the previous play-through of this segment).
+        const trim =
+          post.trim_data && segIdxRef.current < post.trim_data.length
+            ? post.trim_data[segIdxRef.current]
+            : null;
+        const seekTo = trim?.trimStartMs ?? 0;
+        const ref = activeSlotRef.current === 0 ? videoRefA.current : videoRefB.current;
+        ref?.setPositionAsync(seekTo).catch(() => {});
+        console.log(`[FeedItem:${post.id}] safety timeout — playbackReady=true, seeked to ${seekTo}`);
       }
     }, 3000);
 
@@ -368,7 +387,7 @@ export const FeedItem = memo(function FeedItem({
         prebufferTimerRef.current = null;
       }
     };
-  }, [active, playbackReady, post.id]);
+  }, [active, playbackReady, post.id, post.trim_data]);
 
   // ── Stall detection + recovery ─────────────────────────────────────
   // DIAGNOSTIC: log all video events to console for segment transition debugging
@@ -425,6 +444,8 @@ export const FeedItem = memo(function FeedItem({
     setVideoError(null);
     errorCountRef.current = 0;
     setIsPaused(false);
+    slotALoadedUriRef.current = null;
+    slotBLoadedUriRef.current = null;
     console.log(`[FeedItem:${post.id}] POST RESET — all dual-player state cleared`);
   }, [post.id]);
 
@@ -478,12 +499,24 @@ export const FeedItem = memo(function FeedItem({
     const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
     const wasPreloadReady = preloadReadyRef.current;
 
+    // Check if the new active slot already has the target URI loaded.
+    // This happens on wrap-around for 2-segment posts: slot A was loaded
+    // with segment 0's URL on initial mount, and when we wrap from segment 1
+    // back to segment 0, the source hasn't changed so onReadyForDisplay
+    // won't re-fire. Without this check, we'd wait 3s for a timeout.
+    const targetUri = allSegments[next];
+    const newSlotLoadedUri = newSlot === 0 ? slotALoadedUriRef.current : slotBLoadedUriRef.current;
+    const slotAlreadyLoaded = newSlotLoadedUri === targetUri;
+
     console.log(`[FeedItem:${post.id}] advanceSegment CALLED`, {
       fromSegIdx: current,
       toSegIdx: next,
       fromSlot: activeSlotRef.current,
       toSlot: newSlot,
       preloadReady: wasPreloadReady,
+      slotAlreadyLoaded,
+      newSlotLoadedUri,
+      targetUri,
       playbackReady: playbackReadyRef.current,
       readyForDisplay: readyForDisplayRef.current,
       shouldMountPreload,
@@ -507,25 +540,26 @@ export const FeedItem = memo(function FeedItem({
         : null;
     const seekTo = trim?.trimStartMs ?? 0;
 
-    if (wasPreloadReady) {
-      // Preload was ready — the frame is already displayed on the new slot.
-      // The source URI didn't change (preloadUri === currentUri for this slot),
-      // so onReadyForDisplay will NOT re-fire. Seek to start and play immediately.
+    if (wasPreloadReady || slotAlreadyLoaded) {
+      // Preload was ready OR the slot already has this URI loaded (wrap-around
+      // for 2-segment posts). The frame is already displayed on the new slot.
+      // The source URI didn't change, so onReadyForDisplay will NOT re-fire.
+      // Seek to start and play immediately.
       playbackReadyRef.current = true;
       readyForDisplayRef.current = true;
       setPlaybackReady(true);
       newActiveRef?.setPositionAsync(seekTo).catch(() => {});
-      console.log(`[FeedItem:${post.id}] advanceSegment — preload WAS ready, seeked to ${seekTo}, playbackReady=true`);
+      console.log(`[FeedItem:${post.id}] advanceSegment — ${wasPreloadReady ? 'preload WAS ready' : 'slot already loaded'}, seeked to ${seekTo}, playbackReady=true`);
     } else {
-      // Preload wasn't ready — the load is still in progress on this slot.
-      // onReadyForDisplay WILL fire when it completes (fresh load, not a source change).
+      // Preload wasn't ready and the slot has a different URI loaded.
+      // onReadyForDisplay WILL fire when the fresh load completes.
       // The seek will be performed in the onReady handler.
       playbackReadyRef.current = false;
       readyForDisplayRef.current = false;
       setPlaybackReady(false);
       console.log(`[FeedItem:${post.id}] advanceSegment — preload NOT ready, waiting for onReadyForDisplay`);
     }
-  }, [allSegments.length, shouldMountPreload, post.id, post.trim_data]);
+  }, [allSegments, shouldMountPreload, post.id, post.trim_data]);
 
   // When video finishes, advance to next segment or loop
   const onSegmentStatus = useCallback(
@@ -681,6 +715,10 @@ export const FeedItem = memo(function FeedItem({
       preloadReady: preloadReadyRef.current,
       segIdx: segIdxRef.current,
     });
+    // Track the URI that slot A has loaded
+    const slotAUri = activeSlotRef.current === 0 ? currentUri : preloadUri;
+    slotALoadedUriRef.current = slotAUri;
+
     if (activeSlotRef.current === 0) {
       setVideoError(null);
       readyForDisplayRef.current = true;
@@ -706,7 +744,7 @@ export const FeedItem = memo(function FeedItem({
       preloadReadyRef.current = true;
       console.log(`[FeedItem:${post.id}] SLOT_A preload marked READY`);
     }
-  }, [post.id, post.trim_data]);
+  }, [post.id, post.trim_data, currentUri, preloadUri]);
 
   const onReadySlotB = useCallback(() => {
     console.log(`[FeedItem:${post.id}] onReadyForDisplay SLOT_B`, {
@@ -716,6 +754,10 @@ export const FeedItem = memo(function FeedItem({
       preloadReady: preloadReadyRef.current,
       segIdx: segIdxRef.current,
     });
+    // Track the URI that slot B has loaded
+    const slotBUri = activeSlotRef.current === 1 ? currentUri : preloadUri;
+    slotBLoadedUriRef.current = slotBUri;
+
     if (activeSlotRef.current === 1) {
       setVideoError(null);
       readyForDisplayRef.current = true;
@@ -739,19 +781,24 @@ export const FeedItem = memo(function FeedItem({
       preloadReadyRef.current = true;
       console.log(`[FeedItem:${post.id}] SLOT_B preload marked READY`);
     }
-  }, [post.id, post.trim_data]);
+  }, [post.id, post.trim_data, currentUri, preloadUri]);
 
   const onLoadSlotA = useCallback((status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
     if (status.isLoaded) {
+      // Track loaded URI on load (fires before onReadyForDisplay) as a fallback
+      const slotAUri = activeSlotRef.current === 0 ? currentUri : preloadUri;
+      slotALoadedUriRef.current = slotAUri;
       videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
     }
-  }, [post.id, videoLog]);
+  }, [post.id, videoLog, currentUri, preloadUri]);
 
   const onLoadSlotB = useCallback((status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
     if (status.isLoaded) {
+      const slotBUri = activeSlotRef.current === 1 ? currentUri : preloadUri;
+      slotBLoadedUriRef.current = slotBUri;
       videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
     }
-  }, [post.id, videoLog]);
+  }, [post.id, videoLog, currentUri, preloadUri]);
 
   const onErrorSlotA = useCallback((error: string) => {
     console.log(`[FeedItem:${post.id}] onError SLOT_A`, { error, activeSlot: activeSlotRef.current });
