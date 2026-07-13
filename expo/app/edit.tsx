@@ -22,7 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
+import { Video, Audio, ResizeMode, type AVPlaybackStatus } from "expo-av";
 import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync } from "@/lib/fileSystemCompat";
 import * as Haptics from "expo-haptics";
 import {
@@ -321,26 +321,29 @@ export default function EditScreen() {
 
     // Use Audio.Sound.createAsync to load video metadata without rendering a
     // player. It returns AVPlaybackStatus with durationMillis, then we unload.
-    import("expo-av").then(({ Audio }) => {
-      Promise.all(
-        clipsToProbe.map(async (clip) => {
-          try {
-            const { sound, status } = await Audio.Sound.createAsync(
-              { uri: clip.uri },
-              { shouldPlay: false, isMuted: true },
-            );
-            const dur = status.isLoaded && typeof status.durationMillis === "number"
-              ? status.durationMillis
-              : 0;
-            await sound.unloadAsync();
-            console.log(`[edit] Duration probe: clip ${clip.id} → ${dur}ms`);
-            return { id: clip.id, durationMs: dur };
-          } catch (e) {
-            console.warn(`[edit] Duration probe failed for clip ${clip.id}:`, (e as Error)?.message);
-            return { id: clip.id, durationMs: 0 };
-          }
-        }),
-      ).then((results) => {
+    // Audio is imported statically from expo-av (top of file) — a dynamic
+    // import("expo-av") here caused a fetchThenEvalJs SyntaxError on Hermes.
+    (async () => {
+      try {
+        const results = await Promise.all(
+          clipsToProbe.map(async (clip) => {
+            try {
+              const { sound, status } = await Audio.Sound.createAsync(
+                { uri: clip.uri },
+                { shouldPlay: false, isMuted: true },
+              );
+              const dur = status.isLoaded && typeof status.durationMillis === "number"
+                ? status.durationMillis
+                : 0;
+              await sound.unloadAsync();
+              console.log(`[edit] Duration probe: clip ${clip.id} → ${dur}ms`);
+              return { id: clip.id, durationMs: dur };
+            } catch (e) {
+              console.warn(`[edit] Duration probe failed for clip ${clip.id}:`, (e as Error)?.message);
+              return { id: clip.id, durationMs: 0 };
+            }
+          }),
+        );
         if (cancelled) return;
         const valid = results.filter((r) => r.durationMs > 0);
         if (valid.length === 0) return;
@@ -360,8 +363,10 @@ export default function EditScreen() {
           });
           return changed ? next : prev;
         });
-      });
-    });
+      } catch (e) {
+        console.warn("[edit] Duration probe batch failed:", (e as Error)?.message);
+      }
+    })();
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -504,7 +509,11 @@ export default function EditScreen() {
   // (videoKey bump or activeClip.uri change) — prevents auto-play stutter on load.
   const activeClipUri = activeClip?.uri ?? null;
   useEffect(() => {
-    if (hotSwapRef.current) return; // hot swap: keep playing, next clip is ready
+    if (hotSwapRef.current) {
+      console.log("[edit] isPlaying/videoReady reset SKIPPED — hotSwapRef is true", { activeClipUri: activeClipUri?.slice(-20), activeIndex: activeIndexRef.current });
+      return; // hot swap: keep playing, next clip is ready
+    }
+    console.log("[edit] isPlaying/videoReady RESET TO FALSE — hotSwapRef is false", { activeClipUri: activeClipUri?.slice(-20), activeIndex: activeIndexRef.current, isAdvancing: isAdvancingRef.current });
     setIsPlaying(false);
     setVideoReady(false);
   }, [videoKey, activeClipUri]);
@@ -723,6 +732,12 @@ export default function EditScreen() {
             videoRef.current?.setIsMutedAsync(false);
           });
       } else {
+        console.log("[edit] END OF SEGMENT → advanceToNextClip (multi-clip, trimEnd reached)", {
+          activeIdx: activeIndexRef.current,
+          isAdvancing: isAdvancingRef.current,
+          posMillis,
+          effectiveTrimEnd,
+        });
         advanceToNextClip();
       }
       return;
@@ -733,6 +748,12 @@ export default function EditScreen() {
       posMillis >= sourceDur - 60 &&
       trimEndRef.current >= sourceDur - 50
     ) {
+      console.log("[edit] END OF SEGMENT → advanceToNextClip (sourceDur reached)", {
+        activeIdx: activeIndexRef.current,
+        isAdvancing: isAdvancingRef.current,
+        posMillis,
+        sourceDur,
+      });
       advanceToNextClip();
       return;
     }
@@ -740,7 +761,7 @@ export default function EditScreen() {
     // Auto-loop: when the player fires didJustFinish (end of file reached),
     // restart playback instead of letting the video stop at the last frame.
     if (status.didJustFinish) {
-      console.log("[edit] didJustFinish — isAdvancing:", isAdvancingRef.current, "activeIdx:", activeIndexRef.current, "trimEndHandled:", trimEndHandledRef.current, "isIsolated:", isIsolatedRef.current);
+      console.log("[edit] didJustFinish — isAdvancing:", isAdvancingRef.current, "activeIdx:", activeIndexRef.current, "trimEndHandled:", trimEndHandledRef.current, "isIsolated:", isIsolatedRef.current, "hotSwap:", hotSwapRef.current);
       const tStart = trimStartRef.current;
       if (isIsolatedRef.current) {
         // Isolated mode: loop the selected clip
@@ -887,6 +908,9 @@ export default function EditScreen() {
     const c = currentClips[currentIdx];
     const dur = c ? effectiveDurationMs(c) : 0;
     segmentOffsetRef.current += Math.max(0, dur);
+    console.log("[advance] advanceToNextClip ENTRY", {
+      currentIdx, clipsLen: currentClips.length, isAdvancing: isAdvancingRef.current, isIsolated: isIsolatedRef.current, hotSwap: hotSwapRef.current,
+    });
 
     if (currentIdx < currentClips.length - 1) {
       const nextIdx = currentIdx + 1;
@@ -962,13 +986,17 @@ export default function EditScreen() {
         return;
       }
 
-      console.log("[advance] COLD-LOAD forward — nextIdx:", nextIdx);
+      console.log("[advance] COLD-LOAD forward — nextIdx:", nextIdx, "isAdvancing was true, setting hotSwapRef to prevent isPlaying reset");
       trimStartRef.current = nextClip?.trimStartMs ?? 0;
       trimEndRef.current = nextClip?.trimEndMs ?? (nextClip?.durationMs ?? 0);
       prevTrimStartRef.current = trimStartRef.current;
       prevTrimEndRef.current = trimEndRef.current;
       trimEndHandledRef.current = true; // keep true to block stale didJustFinish
       trimGenerationRef.current += 1;
+      // Set hotSwapRef so the [videoKey, activeClipUri] effect doesn't reset
+      // isPlaying=false / videoReady=false. The cold-load path IS an auto-
+      // advance — the new clip should start playing as soon as it loads.
+      hotSwapRef.current = true;
 
       if (sameUri) {
         currentPlayingClipUriRef.current = nextClip?.uri ?? null;
@@ -1067,7 +1095,7 @@ export default function EditScreen() {
         return;
       }
 
-      console.log("[advance] COLD-LOAD wrap-around — to clip 0");
+      console.log("[advance] COLD-LOAD wrap-around — to clip 0, setting hotSwapRef");
       const seekTarget = firstClip?.trimStartMs ?? 0;
 
       trimStartRef.current = firstClip?.trimStartMs ?? 0;
@@ -1077,6 +1105,9 @@ export default function EditScreen() {
       segmentOffsetRef.current = 0;
       trimEndHandledRef.current = true; // keep true to block stale didJustFinish
       trimGenerationRef.current += 1;
+      // Same as cold-load forward: prevent the [activeClipUri] effect from
+      // resetting isPlaying=false on the wrap-around auto-advance.
+      hotSwapRef.current = true;
 
       if (sameUri) {
         currentPlayingClipUriRef.current = firstClip?.uri ?? null;
