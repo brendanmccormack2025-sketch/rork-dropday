@@ -317,7 +317,7 @@ export default function EditScreen() {
     );
     if (clipsToProbe.length === 0) return;
 
-    console.log(`[edit] Probing durations for ${clipsToProbe.length} clip(s) on mount`);
+    console.log(`[edit] Duration probe START — ${clipsToProbe.length} clip(s) to probe`);
 
     // Use Audio.Sound.createAsync to load video metadata without rendering a
     // player. It returns AVPlaybackStatus with durationMillis, then we unload.
@@ -346,6 +346,7 @@ export default function EditScreen() {
         );
         if (cancelled) return;
         const valid = results.filter((r) => r.durationMs > 0);
+        console.log(`[edit] Duration probe COMPLETE — ${valid.length}/${results.length} clips got valid durations`, { durations: results.map(r => ({ id: r.id.slice(-8), ms: r.durationMs })) });
         if (valid.length === 0) return;
         setClips((prev) => {
           let changed = false;
@@ -510,10 +511,10 @@ export default function EditScreen() {
   const activeClipUri = activeClip?.uri ?? null;
   useEffect(() => {
     if (hotSwapRef.current) {
-      console.log("[edit] isPlaying/videoReady reset SKIPPED — hotSwapRef is true", { activeClipUri: activeClipUri?.slice(-20), activeIndex: activeIndexRef.current });
+      console.log("[edit] RESET EFFECT SKIPPED — hotSwapRef=true", { uri: activeClipUri?.slice(-20), idx: activeIndexRef.current, isAdvancing: isAdvancingRef.current });
       return; // hot swap: keep playing, next clip is ready
     }
-    console.log("[edit] isPlaying/videoReady RESET TO FALSE — hotSwapRef is false", { activeClipUri: activeClipUri?.slice(-20), activeIndex: activeIndexRef.current, isAdvancing: isAdvancingRef.current });
+    console.log("[edit] RESET EFFECT → isPlaying=false, videoReady=false", { uri: activeClipUri?.slice(-20), idx: activeIndexRef.current, isAdvancing: isAdvancingRef.current, hotSwap: hotSwapRef.current });
     setIsPlaying(false);
     setVideoReady(false);
   }, [videoKey, activeClipUri]);
@@ -561,6 +562,21 @@ export default function EditScreen() {
     const sourceDur =
       typeof status.durationMillis === "number" ? status.durationMillis : 0;
     const posMillis = status.positionMillis ?? 0;
+
+    // Diagnostic: log play state every status update to catch frozen playback
+    const computedShouldPlay = activeSlotRef.current === activeSlotRef.current && isPlaying && videoReady;
+    console.log("[edit] onVideoStatus", {
+      slot: activeSlotRef.current,
+      idx: activeIndexRef.current,
+      statusIsPlaying: status.isPlaying,
+      isPlayingState: isPlaying,
+      videoReadyState: videoReady,
+      shouldPlayComputed: isPlaying && videoReady,
+      posMs: posMillis,
+      durMs: sourceDur,
+      isAdvancing: isAdvancingRef.current,
+      didJustFinish: status.didJustFinish,
+    });
 
     // Preload arming: when playback nears the clip's end, source the next clip
     // into the inactive slot so it's ready to swap in without a cold-load stall.
@@ -825,29 +841,35 @@ export default function EditScreen() {
   // slot's readiness is managed solely by onPreloadLoad (+ seek completion)
   // so preloadReadyRef never flips true before the trimStart seek finishes.
   const onReadySlot0 = useCallback(() => {
+    console.log("[edit] onReadyForDisplay SLOT_A", { isActiveSlot: activeSlotRef.current === 0, activeSlot: activeSlotRef.current, activeIndex: activeIndexRef.current });
     if (activeSlotRef.current === 0) setVideoReady(true);
   }, []);
   const onReadySlot1 = useCallback(() => {
+    console.log("[edit] onReadyForDisplay SLOT_B", { isActiveSlot: activeSlotRef.current === 1, activeSlot: activeSlotRef.current, activeIndex: activeIndexRef.current });
     if (activeSlotRef.current === 1) setVideoReady(true);
   }, []);
 
   const onLoadSlot0 = useCallback((status: AVPlaybackStatus) => {
+    console.log("[edit] onLoad SLOT_A", { isActiveSlot: activeSlotRef.current === 0, isLoaded: status.isLoaded, activeIndex: activeIndexRef.current, activeSlot: activeSlotRef.current });
     if (activeSlotRef.current === 0) {
       if (status.isLoaded) {
         videoRetryCountRef.current = 0;
         setVideoLoadError(null);
         setVideoReady(true);
+        console.log("[edit] onLoad SLOT_A → setVideoReady(true)");
       }
     } else {
       onPreloadLoad(status, 0);
     }
   }, [onPreloadLoad]);
   const onLoadSlot1 = useCallback((status: AVPlaybackStatus) => {
+    console.log("[edit] onLoad SLOT_B", { isActiveSlot: activeSlotRef.current === 1, isLoaded: status.isLoaded, activeIndex: activeIndexRef.current, activeSlot: activeSlotRef.current });
     if (activeSlotRef.current === 1) {
       if (status.isLoaded) {
         videoRetryCountRef.current = 0;
         setVideoLoadError(null);
         setVideoReady(true);
+        console.log("[edit] onLoad SLOT_B → setVideoReady(true)");
       }
     } else {
       onPreloadLoad(status, 1);
@@ -2131,7 +2153,36 @@ export default function EditScreen() {
     ? textOverlays.find((ov) => ov.id === editingOverlayId)
     : null;
 
+  // ── Periodic play-state diagnostic ─────────────────────────────────────
+  // Logs every 500ms so we can see if shouldPlay is true but the video
+  // isn't actually advancing (decoder frozen).
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const slot = activeSlotRef.current;
+      const computedShouldPlay = isPlaying && videoReady;
+      console.log("[edit] HEARTBEAT", {
+        slot,
+        idx: activeIndexRef.current,
+        isPlaying,
+        videoReady,
+        computedShouldPlay,
+        posMs: positionMs,
+        isAdvancing: isAdvancingRef.current,
+        hotSwap: hotSwapRef.current,
+        preloadArmed: preloadArmedRef.current,
+        clipUri: clips[activeIndexRef.current]?.uri?.slice(-30),
+      });
+    }, 500);
+    return () => clearInterval(interval);
+  }, [isPlaying, videoReady, positionMs, clips, activeIndex]);
+
   // ── RENDER — Full Production Editor ─────────────────────────────────────
+
+  // Debug: log the actual shouldPlay prop value being passed to the active Video
+  if (isVideo && videoSource) {
+    const activeShouldPlay = activeSlot === 0 ? isPlaying && videoReady : isPlaying && videoReady;
+    console.log("[edit] RENDER shouldPlay", { activeSlot, isPlaying, videoReady, activeShouldPlay, idx: activeIndex, uri: activeClip?.uri?.slice(-30) });
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
