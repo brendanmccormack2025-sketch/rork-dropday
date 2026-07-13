@@ -304,6 +304,69 @@ export default function EditScreen() {
     activeIndexRef.current = activeIndex;
   }, [activeIndex]);
 
+  // ── Probe all clip durations on mount ─────────────────────────────────────
+  // The timeline renders clip widths from effectiveDurationMs, which depends
+  // on clip.durationMs. Camera clips arrive with durationMs=undefined, so the
+  // timeline shows minimum-width placeholders until each clip plays and
+  // onVideoStatus populates the duration. This probe loads metadata for every
+  // clip up front so the timeline renders at correct width immediately.
+  useEffect(() => {
+    let cancelled = false;
+    const clipsToProbe = clipsRef.current.filter(
+      (c) => c.type === "video" && (c.durationMs === undefined || c.durationMs === 0),
+    );
+    if (clipsToProbe.length === 0) return;
+
+    console.log(`[edit] Probing durations for ${clipsToProbe.length} clip(s) on mount`);
+
+    // Use Audio.Sound.createAsync to load video metadata without rendering a
+    // player. It returns AVPlaybackStatus with durationMillis, then we unload.
+    import("expo-av").then(({ Audio }) => {
+      Promise.all(
+        clipsToProbe.map(async (clip) => {
+          try {
+            const { sound, status } = await Audio.Sound.createAsync(
+              { uri: clip.uri },
+              { shouldPlay: false, isMuted: true },
+            );
+            const dur = status.isLoaded && typeof status.durationMillis === "number"
+              ? status.durationMillis
+              : 0;
+            await sound.unloadAsync();
+            console.log(`[edit] Duration probe: clip ${clip.id} → ${dur}ms`);
+            return { id: clip.id, durationMs: dur };
+          } catch (e) {
+            console.warn(`[edit] Duration probe failed for clip ${clip.id}:`, (e as Error)?.message);
+            return { id: clip.id, durationMs: 0 };
+          }
+        }),
+      ).then((results) => {
+        if (cancelled) return;
+        const valid = results.filter((r) => r.durationMs > 0);
+        if (valid.length === 0) return;
+        setClips((prev) => {
+          let changed = false;
+          const next = prev.map((c) => {
+            const probed = valid.find((r) => r.id === c.id);
+            if (!probed) return c;
+            changed = true;
+            return {
+              ...c,
+              durationMs: probed.durationMs,
+              trimEndMs: c.trimEndMs !== undefined && c.trimEndMs > 0
+                ? c.trimEndMs
+                : probed.durationMs,
+            };
+          });
+          return changed ? next : prev;
+        });
+      });
+    });
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount only — probe once for all initial clips
+
   const currentPlayingClipUriRef = useRef<string | null>(null);
   useEffect(() => {
     const clip = clips[activeIndex];
@@ -677,6 +740,7 @@ export default function EditScreen() {
     // Auto-loop: when the player fires didJustFinish (end of file reached),
     // restart playback instead of letting the video stop at the last frame.
     if (status.didJustFinish) {
+      console.log("[edit] didJustFinish — isAdvancing:", isAdvancingRef.current, "activeIdx:", activeIndexRef.current, "trimEndHandled:", trimEndHandledRef.current, "isIsolated:", isIsolatedRef.current);
       const tStart = trimStartRef.current;
       if (isIsolatedRef.current) {
         // Isolated mode: loop the selected clip
@@ -778,10 +842,33 @@ export default function EditScreen() {
     else preloadReadyRef.current = false;
   }, [handleVideoLoadError]);
 
+  // Re-entrancy guard: prevents advanceToNextClip from being called again
+  // before the new clip has started playing. The old player can fire stale
+  // didJustFinish/status events after the source changes, causing cascading
+  // advances that skip clips.
+  const isAdvancingRef = useRef<boolean>(false);
+
   const advanceToNextClip = useCallback(() => {
+    if (isAdvancingRef.current) {
+      console.log("[advance] BLOCKED by isAdvancingRef — ignoring re-entrant call");
+      return;
+    }
+    isAdvancingRef.current = true;
+    // Safety-net: release the guard after 500ms so a legitimate future advance
+    // is never permanently blocked. All stale events from the old player fire
+    // within this window.
+    setTimeout(() => {
+      if (isAdvancingRef.current) {
+        console.log("[advance] isAdvancingRef released by timeout");
+        isAdvancingRef.current = false;
+      }
+    }, 500);
+
     const selIdx = selectedClipIdxRef.current;
     if (isIsolatedRef.current && selIdx >= 0 && selIdx < clipsRef.current.length && selIdx === activeIndexRef.current) {
       // Auto-loop: restart the selected clip instead of stopping
+      console.log("[advance] isolated loop — selIdx:", selIdx);
+      isAdvancingRef.current = false;
       setIsPlaying(true);
       const clip = clipsRef.current[selIdx];
       const tStart = clip?.trimStartMs ?? 0;
@@ -807,21 +894,20 @@ export default function EditScreen() {
       const sameUri =
         currentPlayingClipUriRef.current === (nextClip?.uri ?? null);
 
-      // Hot swap: the inactive slot has preloaded this exact clip and is ready
-      // → flip slots instead of cold-loading a new source on the active player.
-      console.log("[preload-debug] hot-swap check — preloadReadyRef:", preloadReadyRef.current, "trimSeekDoneRef will be set to:", preloadReadyRef.current, "expectedUri:", preloadExpectedUriRef.current?.slice(-20), "nextClipUri:", nextClip?.uri.slice(-20));
+      console.log("[advance] FORWARD — currentIdx:", currentIdx, "→ nextIdx:", nextIdx, "clipsLen:", currentClips.length, "sameUri:", sameUri, "preloadReady:", preloadReadyRef.current, "expectedUri:", preloadExpectedUriRef.current?.slice(-20), "nextClipUri:", nextClip?.uri.slice(-20));
       if (
         !sameUri &&
         nextClip?.type === "video" &&
         preloadReadyRef.current &&
         preloadExpectedUriRef.current === nextClip?.uri
       ) {
+        console.log("[advance] HOT-SWAP forward — slot flip, nextIdx:", nextIdx);
         const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
         trimStartRef.current = nextClip?.trimStartMs ?? 0;
         trimEndRef.current = nextClip?.trimEndMs ?? (nextClip?.durationMs ?? 0);
         prevTrimStartRef.current = trimStartRef.current;
         prevTrimEndRef.current = trimEndRef.current;
-        trimEndHandledRef.current = false;
+        trimEndHandledRef.current = true; // keep true to block stale didJustFinish
         // Only trust the preloaded player's position if preloadReadyRef is true,
         // which now also guarantees the trimStart seek completed (onPreloadLoad).
         // Otherwise let onVideoStatus's seek path handle it.
@@ -876,11 +962,12 @@ export default function EditScreen() {
         return;
       }
 
+      console.log("[advance] COLD-LOAD forward — nextIdx:", nextIdx);
       trimStartRef.current = nextClip?.trimStartMs ?? 0;
       trimEndRef.current = nextClip?.trimEndMs ?? (nextClip?.durationMs ?? 0);
       prevTrimStartRef.current = trimStartRef.current;
       prevTrimEndRef.current = trimEndRef.current;
-      trimEndHandledRef.current = false;
+      trimEndHandledRef.current = true; // keep true to block stale didJustFinish
       trimGenerationRef.current += 1;
 
       if (sameUri) {
@@ -912,6 +999,8 @@ export default function EditScreen() {
       const sameUri =
         currentPlayingClipUriRef.current === (firstClip?.uri ?? null);
 
+      console.log("[advance] WRAP-AROUND — currentIdx:", currentIdx, "→ 0, preloadReady:", preloadReadyRef.current, "expectedUri:", preloadExpectedUriRef.current?.slice(-20), "firstClipUri:", firstClip?.uri.slice(-20));
+
       // Hot swap for the wrap-around (last clip → first clip).
       if (
         !sameUri &&
@@ -919,13 +1008,14 @@ export default function EditScreen() {
         preloadReadyRef.current &&
         preloadExpectedUriRef.current === firstClip?.uri
       ) {
+        console.log("[advance] HOT-SWAP wrap-around — slot flip to clip 0");
         const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
         trimStartRef.current = firstClip?.trimStartMs ?? 0;
         trimEndRef.current = firstClip?.trimEndMs ?? (firstClip?.durationMs ?? 0);
         prevTrimStartRef.current = trimStartRef.current;
         prevTrimEndRef.current = trimEndRef.current;
         segmentOffsetRef.current = 0;
-        trimEndHandledRef.current = false;
+        trimEndHandledRef.current = true; // keep true to block stale didJustFinish
         // Same conditional as the forward hot-swap: trust the preload's position
         // only when preloadReadyRef confirms the seek completed.
         trimSeekDoneRef.current = preloadReadyRef.current;
@@ -977,6 +1067,7 @@ export default function EditScreen() {
         return;
       }
 
+      console.log("[advance] COLD-LOAD wrap-around — to clip 0");
       const seekTarget = firstClip?.trimStartMs ?? 0;
 
       trimStartRef.current = firstClip?.trimStartMs ?? 0;
@@ -984,7 +1075,7 @@ export default function EditScreen() {
       prevTrimStartRef.current = trimStartRef.current;
       prevTrimEndRef.current = trimEndRef.current;
       segmentOffsetRef.current = 0;
-      trimEndHandledRef.current = false;
+      trimEndHandledRef.current = true; // keep true to block stale didJustFinish
       trimGenerationRef.current += 1;
 
       if (sameUri) {

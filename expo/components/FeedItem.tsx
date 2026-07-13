@@ -285,6 +285,10 @@ export const FeedItem = memo(function FeedItem({
   // Crossfade opacity for smooth segment transitions (~120ms dissolve)
   const slotAOpacity = useRef(new Animated.Value(1)).current;
   const slotBOpacity = useRef(new Animated.Value(0)).current;
+  // Pending crossfade: when the incoming slot isn't ready at swap time, we
+  // defer the crossfade until onReadyForDisplay fires. This ref holds the
+  // slot that needs to fade in once ready, so onReadySlotA/B can trigger it.
+  const pendingCrossfadeRef = useRef<{ incomingSlot: 0 | 1 } | null>(null);
 
   const preloadUri = useMemo<string>(
     () => allSegments[(segIdx + 1) % allSegments.length] ?? post.media_url,
@@ -454,6 +458,7 @@ export const FeedItem = memo(function FeedItem({
     setIsPaused(false);
     slotALoadedUriRef.current = null;
     slotBLoadedUriRef.current = null;
+    pendingCrossfadeRef.current = null;
     slotAOpacity.setValue(1);
     slotBOpacity.setValue(0);
     console.log(`[FeedItem:${post.id}] POST RESET — all dual-player state cleared`);
@@ -543,23 +548,25 @@ export const FeedItem = memo(function FeedItem({
     setSegIdx(next);
     segIdxRef.current = next;
 
-    // Crossfade: outgoing slot fades out, incoming fades in over 120ms
-    const outgoingOpacity = newSlot === 0 ? slotBOpacity : slotAOpacity;
-    const incomingOpacity = newSlot === 0 ? slotAOpacity : slotBOpacity;
-    Animated.parallel([
-      Animated.timing(outgoingOpacity, {
-        toValue: 0,
-        duration: 120,
-        easing: Easing.out(Easing.ease),
-        useNativeDriver: true,
-      }),
-      Animated.timing(incomingOpacity, {
-        toValue: 1,
-        duration: 120,
-        easing: Easing.out(Easing.ease),
-        useNativeDriver: true,
-      }),
-    ]).start();
+    // Helper to run the crossfade animation
+    const runCrossfade = () => {
+      const outgoingOpacity = newSlot === 0 ? slotBOpacity : slotAOpacity;
+      const incomingOpacity = newSlot === 0 ? slotAOpacity : slotBOpacity;
+      Animated.parallel([
+        Animated.timing(outgoingOpacity, {
+          toValue: 0,
+          duration: 120,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(incomingOpacity, {
+          toValue: 1,
+          duration: 120,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]).start();
+    };
 
     // Compute trim for the new segment directly (trim refs update in effect, not yet)
     const trim =
@@ -572,20 +579,25 @@ export const FeedItem = memo(function FeedItem({
       // Preload was ready OR the slot already has this URI loaded (wrap-around
       // for 2-segment posts). The frame is already displayed on the new slot.
       // The source URI didn't change, so onReadyForDisplay will NOT re-fire.
-      // Seek to start and play immediately.
+      // Seek to start, play immediately, and crossfade now since the frame is ready.
       playbackReadyRef.current = true;
       readyForDisplayRef.current = true;
       setPlaybackReady(true);
       newActiveRef?.setPositionAsync(seekTo).catch(() => {});
-      console.log(`[FeedItem:${post.id}] advanceSegment — ${wasPreloadReady ? 'preload WAS ready' : 'slot already loaded'}, seeked to ${seekTo}, playbackReady=true`);
+      pendingCrossfadeRef.current = null;
+      runCrossfade();
+      console.log(`[FeedItem:${post.id}] advanceSegment — ${wasPreloadReady ? 'preload WAS ready' : 'slot already loaded'}, seeked to ${seekTo}, playbackReady=true, crossfade started`);
     } else {
       // Preload wasn't ready and the slot has a different URI loaded.
       // onReadyForDisplay WILL fire when the fresh load completes.
-      // The seek will be performed in the onReady handler.
+      // DEFER the crossfade — keep the outgoing frame at full opacity so the
+      // buffering state on the incoming slot is never visible through the dissolve.
+      // onReadySlotA/B will trigger the crossfade once the first frame is rendered.
       playbackReadyRef.current = false;
       readyForDisplayRef.current = false;
       setPlaybackReady(false);
-      console.log(`[FeedItem:${post.id}] advanceSegment — preload NOT ready, waiting for onReadyForDisplay`);
+      pendingCrossfadeRef.current = { incomingSlot: newSlot };
+      console.log(`[FeedItem:${post.id}] advanceSegment — preload NOT ready, deferring crossfade until onReadyForDisplay`);
     }
   }, [allSegments, shouldMountPreload, post.id, post.trim_data]);
 
@@ -750,6 +762,15 @@ export const FeedItem = memo(function FeedItem({
     if (activeSlotRef.current === 0) {
       setVideoError(null);
       readyForDisplayRef.current = true;
+      // Trigger deferred crossfade if this slot was the incoming one
+      if (pendingCrossfadeRef.current?.incomingSlot === 0) {
+        pendingCrossfadeRef.current = null;
+        console.log(`[FeedItem:${post.id}] SLOT_A active onReady — triggering DEFERRED crossfade`);
+        Animated.parallel([
+          Animated.timing(slotBOpacity, { toValue: 0, duration: 120, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          Animated.timing(slotAOpacity, { toValue: 1, duration: 120, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        ]).start();
+      }
       if (!playbackReadyRef.current) {
         playbackReadyRef.current = true;
         setPlaybackReady(true);
@@ -772,7 +793,7 @@ export const FeedItem = memo(function FeedItem({
       preloadReadyRef.current = true;
       console.log(`[FeedItem:${post.id}] SLOT_A preload marked READY`);
     }
-  }, [post.id, post.trim_data, currentUri, preloadUri]);
+  }, [post.id, post.trim_data, currentUri, preloadUri, slotAOpacity, slotBOpacity]);
 
   const onReadySlotB = useCallback(() => {
     console.log(`[FeedItem:${post.id}] onReadyForDisplay SLOT_B`, {
@@ -789,6 +810,15 @@ export const FeedItem = memo(function FeedItem({
     if (activeSlotRef.current === 1) {
       setVideoError(null);
       readyForDisplayRef.current = true;
+      // Trigger deferred crossfade if this slot was the incoming one
+      if (pendingCrossfadeRef.current?.incomingSlot === 1) {
+        pendingCrossfadeRef.current = null;
+        console.log(`[FeedItem:${post.id}] SLOT_B active onReady — triggering DEFERRED crossfade`);
+        Animated.parallel([
+          Animated.timing(slotAOpacity, { toValue: 0, duration: 120, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          Animated.timing(slotBOpacity, { toValue: 1, duration: 120, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        ]).start();
+      }
       if (!playbackReadyRef.current) {
         playbackReadyRef.current = true;
         setPlaybackReady(true);
@@ -809,7 +839,7 @@ export const FeedItem = memo(function FeedItem({
       preloadReadyRef.current = true;
       console.log(`[FeedItem:${post.id}] SLOT_B preload marked READY`);
     }
-  }, [post.id, post.trim_data, currentUri, preloadUri]);
+  }, [post.id, post.trim_data, currentUri, preloadUri, slotAOpacity, slotBOpacity]);
 
   const onLoadSlotA = useCallback((status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
     if (status.isLoaded) {
