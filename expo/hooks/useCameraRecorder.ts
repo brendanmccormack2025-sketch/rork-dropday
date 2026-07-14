@@ -118,7 +118,7 @@ export function useCameraRecorder() {
   const canTransition = useCallback((): boolean => {
     const elapsed = Date.now() - lastTransitionRef.current;
     if (elapsed < MIN_STATE_MS) {
-      console.log("[camera] blocked rapid transition, elapsed:", elapsed);
+      console.warn("[camera] blocked rapid transition, elapsed:", elapsed);
       return false;
     }
     lastTransitionRef.current = Date.now();
@@ -172,12 +172,10 @@ export function useCameraRecorder() {
     // new session hasn't started recording yet. Calling native
     // stopRecording() at this point crashes the camera process.
     if (isFlippingRef.current) {
-      console.log("[camera] safeStop skipped — camera is mid-flip, no active recording");
       return;
     }
     // If recordState is idle, there's nothing to stop.
     if (recordStateRef.current === "idle") {
-      console.log("[camera] safeStop skipped — already idle");
       return;
     }
     try {
@@ -201,7 +199,6 @@ export function useCameraRecorder() {
       }
       const _saveStart = Date.now();
       await MediaLibrary.saveToLibraryAsync(uri);
-      console.log(`[camera] saved to gallery: ${uri.slice(0, 60)} — took ${Date.now() - _saveStart}ms`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown save error";
       console.warn("[camera] gallery save failed:", msg);
@@ -218,13 +215,12 @@ export function useCameraRecorder() {
     if (recordStateRef.current !== "idle") return;
     if (!canTransition()) return;
     if (isMergingRef.current) {
-      console.log("[camera] Cannot start recording — merge in progress");
+      console.warn("[camera] Cannot start recording — merge in progress");
       return;
     }
 
     const currentMic = micPermissionRef.current;
     if (!currentMic?.granted) {
-      console.log("[camera] Requesting microphone permission...");
       const res = await requestMicPermission();
       if (!res.granted) {
         // iOS: once denied, requestMicPermission() no-ops. Give the user
@@ -249,10 +245,8 @@ export function useCameraRecorder() {
         setError("Microphone permission is required to record video with sound.");
         return;
       }
-      console.log("[camera] Microphone permission granted");
     }
 
-    console.log("[camera] START RECORDING");
     setRecordStateSync("recording");
     setError(null);
     isFlippingRef.current = false;
@@ -280,7 +274,6 @@ export function useCameraRecorder() {
       // on an unready session can resolve with a null URI — producing
       // a "phantom" recording that never appears in the timeline.
       if (!cameraReadyRef.current) {
-        console.log("[camera] Camera not ready — waiting for onCameraReady");
         let timedOut = false;
         try {
           await Promise.race([
@@ -304,7 +297,6 @@ export function useCameraRecorder() {
           keepRecording = false;
           break;
         }
-        console.log("[camera] Camera ready — starting recordAsync");
       }
 
       try {
@@ -312,7 +304,6 @@ export function useCameraRecorder() {
 
         if (result?.uri) {
           accumulatedSegmentUrisRef.current.push(result.uri);
-          console.log(`[camera] recordAsync resolved — collected URI: ${result.uri.slice(0, 60)}`);
           // File validation is deferred to the finalize phase to avoid
           // blocking the recording loop at every flip boundary.
         } else {
@@ -329,14 +320,12 @@ export function useCameraRecorder() {
         // delay for the native session to settle after the device swap,
         // then resume recording on the new camera.
         if (isFlippingRef.current) {
-          console.log("[camera] Flip detected — waiting for session to settle");
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
 
           // If the user already requested stop while we were flipping,
           // don't restart recording — just finalize and exit.
           if (stopRequestedRef.current) {
-            console.log("[camera] Stop requested during flip — finalizing");
             keepRecording = false;
             break;
           }
@@ -351,12 +340,10 @@ export function useCameraRecorder() {
           // Re-check stopRequested after the wait — user may have
           // tapped stop while we were waiting.
           if (stopRequestedRef.current) {
-            console.log("[camera] Stop requested during flip-wait — finalizing");
             keepRecording = false;
             break;
           }
 
-          console.log("[camera] Session settled — resuming recording");
           continue;
         }
 
@@ -364,13 +351,11 @@ export function useCameraRecorder() {
         keepRecording = false;
       } catch (e) {
         if (isFlippingRef.current) {
-          console.log("[camera] Flip error detected — error object:", e);
           isFlippingRef.current = false;
           cameraSwitchingRef.current = false;
 
           // If the user already requested stop, don't restart.
           if (stopRequestedRef.current) {
-            console.log("[camera] Stop requested during flip error — finalizing");
             keepRecording = false;
             break;
           }
@@ -381,12 +366,10 @@ export function useCameraRecorder() {
 
           // Re-check after the wait.
           if (stopRequestedRef.current) {
-            console.log("[camera] Stop requested during flip-error wait — finalizing");
             keepRecording = false;
             break;
           }
 
-          console.log("[camera] Session settled after flip error — resuming recording");
           continue;
         }
         if (recordStateRef.current !== "idle") {
@@ -398,8 +381,6 @@ export function useCameraRecorder() {
       }
     }
 
-    const _finalizeT0 = Date.now();
-    console.log(`[camera] RECORDING FINISHED — t=${_finalizeT0}ms, segments=${accumulatedSegmentUrisRef.current.length}`);
     setIsLockedSync(false);
 
     // Append clips IMMEDIATELY — no getInfoAsync validation here.
@@ -412,7 +393,6 @@ export function useCameraRecorder() {
     const uris = accumulatedSegmentUrisRef.current;
     if (uris.length > 0) {
       const sessionId = recordSessionIdRef.current ?? undefined;
-      console.log(`[camera] Finalize — appending ${uris.length} clip(s) — t=${Date.now() - _finalizeT0}ms since FINISHED`);
       for (const uri of uris) {
         const clip: Clip = {
           id: newClipId(),
@@ -424,7 +404,6 @@ export function useCameraRecorder() {
         appendClip(clip);
         // Save each segment to the gallery — fire-and-forget, never blocks UI.
         saveToGallery(uri).catch(() => {});
-        console.log(`[camera] Clip created — id: ${clip.id}, uri: ${uri.slice(0, 60)}`);
       }
     }
 
@@ -432,7 +411,6 @@ export function useCameraRecorder() {
     // button appears in the same frame the REC indicator disappears.
     setRecordStateSync("idle");
 
-    console.log(`[camera] Finalize DONE — total t=${Date.now() - _finalizeT0}ms since FINISHED`);
     recordingStartedAtRef.current = null;
     recordSessionIdRef.current = null;
     // Reset transition guard to allow back-to-back recordings.
@@ -447,10 +425,8 @@ export function useCameraRecorder() {
    *  Sets stopRequestedRef so the recording loop won't restart after a flip. */
   const stopRecording = useCallback((): void => {
     if (recordStateRef.current !== "recording" && recordStateRef.current !== "stopping") {
-      console.log("[camera] STOP RECORDING SKIPPED — not recording (state:", recordStateRef.current, ")");
       return;
     }
-    console.log("[camera] STOP RECORDING");
     stopRequestedRef.current = true;
     setRecordStateSync("stopping");
     safeStop();
@@ -459,7 +435,6 @@ export function useCameraRecorder() {
   /** Lock recording (hands-free) */
   const lockRecording = useCallback((): void => {
     if (recordStateRef.current !== "recording") return;
-    console.log("[camera] LOCK RECORDING");
     setIsLockedSync(true);
     triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
   }, []);
@@ -515,7 +490,6 @@ export function useCameraRecorder() {
       cameraReadyResolveRef.current();
       cameraReadyResolveRef.current = null;
     }
-    console.log("[camera] onCameraReady — session is live");
   }, []);
 
   /** Handle CameraView.onMountError — capture and display camera failures */

@@ -75,13 +75,6 @@ export default function CameraScreen() {
   const router = useRouter();
   const { reactingTo, rootDropId } = useLocalSearchParams<{ reactingTo?: string; rootDropId?: string }>();
 
-  // Log received params on mount
-  useEffect(() => {
-    console.log("[camera] mounted with params:", {
-      reactingTo: reactingTo?.slice(0, 12) ?? "(none)",
-      rootDropId: rootDropId?.slice(0, 12) ?? "(none)",
-    });
-  }, []);
   const insets = useSafeAreaInsets();
 
   const {
@@ -170,13 +163,11 @@ export default function CameraScreen() {
 
   // ─── Audio session: allow recording while camera is mounted ──────────
   useEffect(() => {
-    console.log("[camera] Setting audio mode → allowsRecording");
     Audio.setAudioModeAsync({
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
     }).catch(() => {});
     return () => {
-      console.log("[camera] Restoring audio mode → playback-only");
       Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
@@ -204,7 +195,6 @@ export default function CameraScreen() {
   // ─── Recording progress — driven by real elapsed time ───────────
   useEffect(() => {
     if (isRecording && !isLocked) {
-      console.log("[camera] RING ANIMATION START");
       progress.setValue(0);
 
       progressIntervalRef.current = setInterval(() => {
@@ -217,7 +207,6 @@ export default function CameraScreen() {
       }, 50);
 
       return () => {
-        console.log("[camera] RING ANIMATION STOP");
         if (progressIntervalRef.current) {
           clearInterval(progressIntervalRef.current);
           progressIntervalRef.current = null;
@@ -420,7 +409,6 @@ export default function CameraScreen() {
   }, [flipFlashOpacity]);
 
   const handleFlip = useCallback(() => {
-    console.log("[camera] DOUBLE TAP — executing flip");
     flipCamera();
     setZoom(0);
     triggerFlipFlash();
@@ -443,11 +431,7 @@ export default function CameraScreen() {
         .numberOfTaps(2)
         .maxDuration(300)
         .runOnJS(true)
-        .onStart(() => {
-          console.log("[camera] DOUBLE TAP DETECTED");
-        })
         .onEnd(() => {
-          console.log("[camera] DOUBLE TAP — firing handleFlip");
           handleFlip();
         }),
     [handleFlip]
@@ -512,9 +496,6 @@ export default function CameraScreen() {
   const goToEdit = useCallback(async () => {
     if (clips.length === 0) return;
 
-    const _goToEditT0 = Date.now();
-    console.log(`[camera] goToEdit START — ${clips.length} clip(s) — t=${_goToEditT0}`);
-
     // No getInfoAsync validation here — the files were just written by
     // recordAsync and the editor's Video component will surface any load
     // errors. The redundant check added 100-250ms of blocking before
@@ -525,24 +506,13 @@ export default function CameraScreen() {
     if (reactingTo) params.reactingTo = reactingTo;
     if (rootDropId) params.rootDropId = rootDropId;
 
-    const _jsonStart = Date.now();
-    const clipsJsonStr = JSON.stringify(clips);
-    console.log(`[camera] goToEdit — JSON.stringify took ${Date.now() - _jsonStart}ms, length=${clipsJsonStr.length}`);
-    params.clips = clipsJsonStr;
-
-    console.log(`[camera] goToEdit — navigating to edit with:`, {
-      clipsCount: clips.length,
-      reactingTo: reactingTo?.slice(0, 12) ?? "(none)",
-      rootDropId: rootDropId?.slice(0, 12) ?? "(none)",
-      totalElapsed: `${Date.now() - _goToEditT0}ms`,
-    });
+    params.clips = JSON.stringify(clips);
 
     router.push({
       pathname: "/edit",
       params,
     });
-    console.log(`[camera] goToEdit — router.push called — total t=${Date.now() - _goToEditT0}ms`);
-  }, [clips, reactingTo, rootDropId, router, setError]);
+  }, [clips, reactingTo, rootDropId, router]);
 
 
   // ─── Permissions: loading ──────────────────────────────────────

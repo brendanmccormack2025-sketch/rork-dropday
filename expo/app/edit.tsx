@@ -115,23 +115,7 @@ export default function EditScreen() {
     rootDropId?: string;
   }>();
 
-  // ── Debug: log what params the edit screen received ─────────────────────
   const _editMountT0 = useRef<number>(Date.now());
-  useEffect(() => {
-    _editMountT0.current = Date.now();
-    console.log(`[edit] Screen mounted — t=${_editMountT0.current}`);
-    console.log("  clipsJson length:", clipsJson?.length ?? 0);
-    console.log("  clipsJson first 200 chars:", clipsJson?.slice(0, 200));
-    console.log("  nativeVideoUrl:", nativeVideoUrl?.slice(0, 80));
-    console.log("  draftId:", draftId);
-    console.log("  reactingTo:", reactingTo?.slice(0, 12) ?? "(none)");
-    console.log("  rootDropId:", rootDropId?.slice(0, 12) ?? "(none)");
-    const _parseStart = Date.now();
-    try {
-      const _parsed = JSON.parse(clipsJson ?? "[]");
-      console.log(`[edit] mount — JSON.parse took ${Date.now() - _parseStart}ms, ${_parsed.length} clips`);
-    } catch {}
-  }, []);
 
   // ── Frame measurement ────────────────────────────────────────────────────
   const [previewAreaSize, setPreviewAreaSize] = useState({
@@ -149,20 +133,14 @@ export default function EditScreen() {
     if (draftId) {
       const draft = draftProjects.find((d) => d.id === draftId);
       if (draft) {
-        console.log("[edit] Loading clips from draft:", draft.id, "—", draft.clips.length, "clip(s)");
         return draft.clips;
       }
     }
     if (nativeVideoUrl && !clipsJson) {
-      console.log("[edit] Using nativeVideoUrl:", nativeVideoUrl.slice(0, 80));
       return [{ id: newClipId(), uri: nativeVideoUrl, type: "video" as const }];
     }
     try {
       const parsed = JSON.parse(clipsJson ?? "[]") as DraftClip[];
-      console.log("[edit] Parsed", parsed.length, "clip(s) from clipsJson");
-      parsed.forEach((c, i) => {
-        console.log(`  clip[${i}]: id=${c.id}, uri=${c.uri?.slice(0, 60)}, type=${c.type}, durationMs=${c.durationMs}`);
-      });
       return parsed.map((c) => ({
         ...c,
         trimStartMs: c.trimStartMs ?? 0,
@@ -246,7 +224,6 @@ export default function EditScreen() {
   const activeIndexRef = useRef<number>(0);
   const durationSetRef = useRef<boolean>(false);
   const lastPositionUpdate = useRef<number>(0);
-  const lastLoggedPosRef = useRef<number>(-9999);
   const clipsRef = useRef(clips);
   const safeSeekActiveRef = useRef<boolean>(false);
 
@@ -325,9 +302,6 @@ export default function EditScreen() {
     );
     if (clipsToProbe.length === 0) return;
 
-    const _probeT0 = Date.now();
-    console.log(`[edit] Duration probe START — ${clipsToProbe.length} clip(s) to probe — t=${Date.now() - _editMountT0.current}ms since mount`);
-
     // Use Audio.Sound.createAsync to load video metadata without rendering a
     // player. It returns AVPlaybackStatus with durationMillis, then we unload.
     // Audio is imported statically from expo-av (top of file) — a dynamic
@@ -337,30 +311,24 @@ export default function EditScreen() {
         const results = await Promise.all(
           clipsToProbe.map(async (clip) => {
             try {
-              const _clipProbeStart = Date.now();
-              console.log(`[edit] Duration probe — START clip ${clip.id.slice(-8)} — t=${Date.now() - _editMountT0.current}ms since mount`);
               const { sound, status } = await Audio.Sound.createAsync(
                 { uri: clip.uri },
                 { shouldPlay: false, isMuted: true },
               );
-              const _createAsyncMs = Date.now() - _clipProbeStart;
               const dur = status.isLoaded && typeof status.durationMillis === "number"
                 ? status.durationMillis
                 : 0;
               await sound.unloadAsync();
-              console.log(`[edit] Duration probe: clip ${clip.id.slice(-8)} → ${dur}ms — createAsync took ${_createAsyncMs}ms, unload took ${Date.now() - _clipProbeStart - _createAsyncMs}ms`);
               return { id: clip.id, durationMs: dur };
             } catch (e) {
-              console.warn(`[edit] Duration probe failed for clip ${clip.id.slice(-8)}:`, (e as Error)?.message, `— took ${Date.now() - _editMountT0.current}ms since mount`);
+              console.warn(`[edit] Duration probe failed for clip ${clip.id.slice(-8)}:`, (e as Error)?.message);
               return { id: clip.id, durationMs: 0 };
             }
           }),
         );
         if (cancelled) return;
         const valid = results.filter((r) => r.durationMs > 0);
-        console.log(`[edit] Duration probe COMPLETE — ${valid.length}/${results.length} clips got valid durations, took ${Date.now() - _probeT0}ms total — t=${Date.now() - _editMountT0.current}ms since mount`, { durations: results.map(r => ({ id: r.id.slice(-8), ms: r.durationMs })) });
         if (valid.length === 0) return;
-        const _setClipsStart = Date.now();
         setClips((prev) => {
           let changed = false;
           const next = prev.map((c) => {
@@ -375,7 +343,6 @@ export default function EditScreen() {
                 : probed.durationMs,
             };
           });
-          console.log(`[edit] Duration probe — setClips took ${Date.now() - _setClipsStart}ms, changed=${changed}`);
           return changed ? next : prev;
         });
       } catch (e) {
@@ -393,7 +360,6 @@ export default function EditScreen() {
     if (!clip || clip.type !== "video") return;
     if (currentPlayingClipUriRef.current === clip.uri) return;
     currentPlayingClipUriRef.current = clip.uri;
-    console.log("[edit] CLIP CHANGED → activeIndex:", activeIndex, "uri:", clip.uri?.slice(-30), "trimStart:", clip.trimStartMs ?? 0, "trimEnd:", clip.trimEndMs ?? clip.durationMs, "hotSwap:", hotSwapRef.current, "pendingSeek:", pendingSeekRef.current);
     if (hotSwapRef.current) return; // hot swap: next clip already loaded & ready
     pendingSeekRef.current = clip.trimStartMs ?? 0;
     durationSetRef.current = false;
@@ -444,32 +410,25 @@ export default function EditScreen() {
     return uri ? { uri } : undefined;
   }, [activeClip?.uri, activeClip?.type]);
 
-  // Log file size for debugging — but skip data: URIs (inline base64, always valid on web)
+  // Validate file on disk — skip data: URIs (inline base64, always valid on web)
   useEffect(() => {
     const uri = activeClip?.uri;
     if (!uri) return;
-    const slice = uri.slice(0, 60);
-    console.log("[edit] videoSource — uri:", uri.slice(0, 80), "type:", activeClip?.type);
 
     // Data URIs (data:image/png;base64,...) contain inline data — they're always valid,
     // and expo-file-system can't stat them on web. Skip the disk check entirely.
     if (uri.startsWith("data:")) {
-      console.log(`[edit] videoSource — inline data URI (skipping disk check): ${slice}`);
       return;
     }
 
-    const _vSrcCheckStart = Date.now();
     getInfoAsync(uri).then((info) => {
-      console.log(
-        `[edit] videoSource — file on disk: exists=${info.exists}, size=${info.exists ? (info.size ?? 0) : 0} bytes, uri=${slice} — getInfoAsync took ${Date.now() - _vSrcCheckStart}ms`,
-      );
       if (!info.exists) {
         console.error(`[edit] videoSource — FILE DOES NOT EXIST: ${uri.slice(0, 80)}`);
       } else if ((info.size ?? 0) === 0) {
         console.error(`[edit] videoSource — FILE IS EMPTY (0 bytes): ${uri.slice(0, 80)}`);
       }
     }).catch((e) => {
-      console.error(`[edit] videoSource — could not stat file: ${slice}`, (e as Error)?.message ?? e);
+      console.error(`[edit] videoSource — could not stat file: ${uri.slice(0, 60)}`, (e as Error)?.message ?? e);
     });
   }, [activeClip?.uri, activeClip?.type]);
 
@@ -527,10 +486,8 @@ export default function EditScreen() {
   const activeClipUri = activeClip?.uri ?? null;
   useEffect(() => {
     if (hotSwapRef.current) {
-      console.log("[edit] RESET EFFECT SKIPPED — hotSwapRef=true", { uri: activeClipUri?.slice(-20), idx: activeIndexRef.current, isAdvancing: isAdvancingRef.current });
       return; // hot swap: keep playing, next clip is ready
     }
-    console.log("[edit] RESET EFFECT → isPlaying=false, videoReady=false", { uri: activeClipUri?.slice(-20), idx: activeIndexRef.current, isAdvancing: isAdvancingRef.current, hotSwap: hotSwapRef.current });
     setIsPlaying(false);
     setVideoReady(false);
   }, [videoKey, activeClipUri]);
@@ -547,7 +504,7 @@ export default function EditScreen() {
       errorMsg.includes("not supported");
     if (isAssetError && videoRetryCountRef.current < maxVideoRetries) {
       videoRetryCountRef.current += 1;
-      console.log(
+      console.warn(
         `[edit] Video load error (attempt ${videoRetryCountRef.current}/${maxVideoRetries}): ${errorMsg} — retrying...`,
       );
       setVideoReady(false);
@@ -578,27 +535,6 @@ export default function EditScreen() {
     const sourceDur =
       typeof status.durationMillis === "number" ? status.durationMillis : 0;
     const posMillis = status.positionMillis ?? 0;
-
-    // Diagnostic: log play state — only when position changes or key events
-    // (not every 200ms tick, which floods the buffer).
-    const posChanged = Math.abs(posMillis - lastLoggedPosRef.current) > 50;
-    const isKeyEvent = status.didJustFinish || !status.isLoaded;
-    if (posChanged || isKeyEvent) {
-      lastLoggedPosRef.current = posMillis;
-      console.log("[edit] onVideoStatus", {
-        slot: activeSlotRef.current,
-        idx: activeIndexRef.current,
-        statusIsPlaying: status.isPlaying,
-        isPlayingState: isPlaying,
-        videoReadyState: videoReady,
-        posMs: posMillis,
-        durMs: sourceDur,
-        isAdvancing: isAdvancingRef.current,
-        trimEndHandled: trimEndHandledRef.current,
-        didJustFinish: status.didJustFinish,
-        pendingSeek: pendingSeekRef.current,
-      });
-    }
 
     // Preload arming: when playback nears the clip's end, source the next clip
     // into the inactive slot so it's ready to swap in without a cold-load stall.
@@ -770,12 +706,6 @@ export default function EditScreen() {
             videoRef.current?.setIsMutedAsync(false);
           });
       } else {
-        console.log("[edit] END OF SEGMENT → advanceToNextClip (multi-clip, trimEnd reached)", {
-          activeIdx: activeIndexRef.current,
-          isAdvancing: isAdvancingRef.current,
-          posMillis,
-          effectiveTrimEnd,
-        });
         advanceToNextClip();
       }
       return;
@@ -786,12 +716,6 @@ export default function EditScreen() {
       posMillis >= sourceDur - 60 &&
       trimEndRef.current >= sourceDur - 50
     ) {
-      console.log("[edit] END OF SEGMENT → advanceToNextClip (sourceDur reached)", {
-        activeIdx: activeIndexRef.current,
-        isAdvancing: isAdvancingRef.current,
-        posMillis,
-        sourceDur,
-      });
       advanceToNextClip();
       return;
     }
@@ -799,7 +723,6 @@ export default function EditScreen() {
     // Auto-loop: when the player fires didJustFinish (end of file reached),
     // restart playback instead of letting the video stop at the last frame.
     if (status.didJustFinish) {
-      console.log("[edit] didJustFinish — isAdvancing:", isAdvancingRef.current, "activeIdx:", activeIndexRef.current, "trimEndHandled:", trimEndHandledRef.current, "isIsolated:", isIsolatedRef.current, "hotSwap:", hotSwapRef.current);
       const tStart = trimStartRef.current;
       if (isIsolatedRef.current) {
         // Isolated mode: loop the selected clip
@@ -836,14 +759,12 @@ export default function EditScreen() {
       // to start near its end instead of from the beginning.
       if (vRef) {
         preloadReadyRef.current = false;
-        console.log("[preload-debug] seeking preload to trimStart:", trimStart, "for clip:", expectedUri.slice(-20));
         vRef
           .setPositionAsync(trimStart)
-          .then(() => { preloadReadyRef.current = true; console.log("[preload-debug] preload seek complete, preloadReadyRef:", preloadReadyRef.current); })
-          .catch(() => { preloadReadyRef.current = true; console.log("[preload-debug] preload seek FAILED, preloadReadyRef:", preloadReadyRef.current); });
+          .then(() => { preloadReadyRef.current = true; })
+          .catch(() => { preloadReadyRef.current = true; });
       } else {
         preloadReadyRef.current = true;
-        console.log("[preload-debug] preload loaded, no vRef to seek, preloadReadyRef:", preloadReadyRef.current);
       }
     } else if (!status.isLoaded && "error" in status && status.error) {
       preloadReadyRef.current = false;
@@ -865,35 +786,29 @@ export default function EditScreen() {
   // slot's readiness is managed solely by onPreloadLoad (+ seek completion)
   // so preloadReadyRef never flips true before the trimStart seek finishes.
   const onReadySlot0 = useCallback(() => {
-    console.log("[edit] onReadyForDisplay SLOT_A", { isActiveSlot: activeSlotRef.current === 0, activeSlot: activeSlotRef.current, activeIndex: activeIndexRef.current });
     if (activeSlotRef.current === 0) setVideoReady(true);
   }, []);
   const onReadySlot1 = useCallback(() => {
-    console.log("[edit] onReadyForDisplay SLOT_B", { isActiveSlot: activeSlotRef.current === 1, activeSlot: activeSlotRef.current, activeIndex: activeIndexRef.current });
     if (activeSlotRef.current === 1) setVideoReady(true);
   }, []);
 
   const onLoadSlot0 = useCallback((status: AVPlaybackStatus) => {
-    console.log("[edit] onLoad SLOT_A", { isActiveSlot: activeSlotRef.current === 0, isLoaded: status.isLoaded, activeIndex: activeIndexRef.current, activeSlot: activeSlotRef.current });
     if (activeSlotRef.current === 0) {
       if (status.isLoaded) {
         videoRetryCountRef.current = 0;
         setVideoLoadError(null);
         setVideoReady(true);
-        console.log("[edit] onLoad SLOT_A → setVideoReady(true)");
       }
     } else {
       onPreloadLoad(status, 0);
     }
   }, [onPreloadLoad]);
   const onLoadSlot1 = useCallback((status: AVPlaybackStatus) => {
-    console.log("[edit] onLoad SLOT_B", { isActiveSlot: activeSlotRef.current === 1, isLoaded: status.isLoaded, activeIndex: activeIndexRef.current, activeSlot: activeSlotRef.current });
     if (activeSlotRef.current === 1) {
       if (status.isLoaded) {
         videoRetryCountRef.current = 0;
         setVideoLoadError(null);
         setVideoReady(true);
-        console.log("[edit] onLoad SLOT_B → setVideoReady(true)");
       }
     } else {
       onPreloadLoad(status, 1);
@@ -917,7 +832,6 @@ export default function EditScreen() {
 
   const advanceToNextClip = useCallback(() => {
     if (isAdvancingRef.current) {
-      console.log("[advance] BLOCKED by isAdvancingRef — ignoring re-entrant call");
       return;
     }
     isAdvancingRef.current = true;
@@ -926,7 +840,6 @@ export default function EditScreen() {
     // within this window.
     setTimeout(() => {
       if (isAdvancingRef.current) {
-        console.log("[advance] isAdvancingRef released by timeout");
         isAdvancingRef.current = false;
       }
     }, 500);
@@ -934,7 +847,6 @@ export default function EditScreen() {
     const selIdx = selectedClipIdxRef.current;
     if (isIsolatedRef.current && selIdx >= 0 && selIdx < clipsRef.current.length && selIdx === activeIndexRef.current) {
       // Auto-loop: restart the selected clip instead of stopping
-      console.log("[advance] isolated loop — selIdx:", selIdx);
       isAdvancingRef.current = false;
       setIsPlaying(true);
       const clip = clipsRef.current[selIdx];
@@ -954,24 +866,18 @@ export default function EditScreen() {
     const c = currentClips[currentIdx];
     const dur = c ? effectiveDurationMs(c) : 0;
     segmentOffsetRef.current += Math.max(0, dur);
-    console.log("[advance] advanceToNextClip ENTRY", {
-      currentIdx, clipsLen: currentClips.length, isAdvancing: isAdvancingRef.current, isIsolated: isIsolatedRef.current, hotSwap: hotSwapRef.current,
-    });
-
     if (currentIdx < currentClips.length - 1) {
       const nextIdx = currentIdx + 1;
       const nextClip = currentClips[nextIdx];
       const sameUri =
         currentPlayingClipUriRef.current === (nextClip?.uri ?? null);
 
-      console.log("[advance] FORWARD — currentIdx:", currentIdx, "→ nextIdx:", nextIdx, "clipsLen:", currentClips.length, "sameUri:", sameUri, "preloadReady:", preloadReadyRef.current, "expectedUri:", preloadExpectedUriRef.current?.slice(-20), "nextClipUri:", nextClip?.uri.slice(-20));
       if (
         !sameUri &&
         nextClip?.type === "video" &&
         preloadReadyRef.current &&
         preloadExpectedUriRef.current === nextClip?.uri
       ) {
-        console.log("[advance] HOT-SWAP forward — slot flip, nextIdx:", nextIdx);
         const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
         trimStartRef.current = nextClip?.trimStartMs ?? 0;
         trimEndRef.current = nextClip?.trimEndMs ?? (nextClip?.durationMs ?? 0);
@@ -1025,7 +931,6 @@ export default function EditScreen() {
         // have inherited a stale position from a previous clip. Without this
         // seek, the new clip can start near its end and freeze.
         const seekTarget = trimStartRef.current;
-        console.log("[advance] HOT-SWAP forward — seeking to:", seekTarget, "then playing");
         incomingVideo
           ?.setPositionAsync(seekTarget)
           .then(() => {
@@ -1034,7 +939,6 @@ export default function EditScreen() {
             // end-of-segment check can fire for the new clip. It was set to
             // true above to block stale didJustFinish from the old player.
             trimEndHandledRef.current = false;
-            console.log("[advance] HOT-SWAP forward — seek done, trimEndHandledRef reset to false");
           })
           .catch(() => {
             incomingVideo?.playAsync().catch(() => {});
@@ -1043,7 +947,6 @@ export default function EditScreen() {
         return;
       }
 
-      console.log("[advance] COLD-LOAD forward — nextIdx:", nextIdx, "isAdvancing was true, setting hotSwapRef to prevent isPlaying reset");
       trimStartRef.current = nextClip?.trimStartMs ?? 0;
       trimEndRef.current = nextClip?.trimEndMs ?? (nextClip?.durationMs ?? 0);
       prevTrimStartRef.current = trimStartRef.current;
@@ -1081,7 +984,6 @@ export default function EditScreen() {
         lastPositionUpdate.current = 0;
         trimSeekDoneRef.current = false;
         durationSetRef.current = false; // force duration re-load for new clip
-        console.log("[advance] COLD-LOAD forward — pendingSeek set to:", pendingSeekRef.current, "for next clip");
       }
 
       // Reset trimEndHandledRef after a short delay so the end-of-segment
@@ -1089,7 +991,6 @@ export default function EditScreen() {
       // stale didJustFinish from the old player.
       setTimeout(() => {
         trimEndHandledRef.current = false;
-        console.log("[advance] COLD-LOAD forward — trimEndHandledRef reset to false by timeout");
       }, 300);
 
       activeIndexRef.current = nextIdx;
@@ -1101,8 +1002,6 @@ export default function EditScreen() {
       const sameUri =
         currentPlayingClipUriRef.current === (firstClip?.uri ?? null);
 
-      console.log("[advance] WRAP-AROUND — currentIdx:", currentIdx, "→ 0, preloadReady:", preloadReadyRef.current, "expectedUri:", preloadExpectedUriRef.current?.slice(-20), "firstClipUri:", firstClip?.uri.slice(-20));
-
       // Hot swap for the wrap-around (last clip → first clip).
       if (
         !sameUri &&
@@ -1110,7 +1009,6 @@ export default function EditScreen() {
         preloadReadyRef.current &&
         preloadExpectedUriRef.current === firstClip?.uri
       ) {
-        console.log("[advance] HOT-SWAP wrap-around — slot flip to clip 0");
         const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
         trimStartRef.current = firstClip?.trimStartMs ?? 0;
         trimEndRef.current = firstClip?.trimEndMs ?? (firstClip?.durationMs ?? 0);
@@ -1161,13 +1059,11 @@ export default function EditScreen() {
         // ALWAYS seek to trimStart (or 0) before playing — same reason as
         // forward hot-swap: preload slot may have a stale position.
         const wrapSeekTarget = trimStartRef.current;
-        console.log("[advance] HOT-SWAP wrap — seeking to:", wrapSeekTarget, "then playing");
         incomingVideo
           ?.setPositionAsync(wrapSeekTarget)
           .then(() => {
             incomingVideo?.playAsync().catch(() => {});
             trimEndHandledRef.current = false;
-            console.log("[advance] HOT-SWAP wrap — seek done, trimEndHandledRef reset to false");
           })
           .catch(() => {
             incomingVideo?.playAsync().catch(() => {});
@@ -1176,7 +1072,6 @@ export default function EditScreen() {
         return;
       }
 
-      console.log("[advance] COLD-LOAD wrap-around — to clip 0, setting hotSwapRef");
       const seekTarget = firstClip?.trimStartMs ?? 0;
 
       trimStartRef.current = firstClip?.trimStartMs ?? 0;
@@ -1209,14 +1104,12 @@ export default function EditScreen() {
         lastPositionUpdate.current = 0;
         trimSeekDoneRef.current = false;
         durationSetRef.current = false;
-        console.log("[advance] COLD-LOAD wrap — pendingSeek set to:", seekTarget, "for first clip");
       }
 
       // Reset trimEndHandledRef after a short delay so the end-of-segment
       // check can fire for the new clip.
       setTimeout(() => {
         trimEndHandledRef.current = false;
-        console.log("[advance] COLD-LOAD wrap — trimEndHandledRef reset to false by timeout");
       }, 300);
 
       activeIndexRef.current = 0;
@@ -1333,7 +1226,6 @@ export default function EditScreen() {
           updatedClip.type === "video"
         ) {
           const newTrimStart = updatedClip.trimStartMs ?? 0;
-          console.log("[preload-debug] trim changed on preloading clip, re-seeking to:", newTrimStart);
           // Figure out which slot is inactive right now.
           const inactiveSlot: 0 | 1 =
             activeSlotRef.current === 0 ? 1 : 0;
@@ -1343,10 +1235,8 @@ export default function EditScreen() {
             preloadReadyRef.current = false; // block hot-swap until seek done
             vRef
               .setPositionAsync(newTrimStart)
-              .then(() => { preloadReadyRef.current = true; console.log("[preload-debug] handleClipUpdate re-seek complete, preloadReadyRef:", preloadReadyRef.current); })
-              .catch(() => { preloadReadyRef.current = true; console.log("[preload-debug] handleClipUpdate re-seek FAILED, preloadReadyRef:", preloadReadyRef.current); });
-          } else {
-            console.log("[preload-debug] handleClipUpdate re-seek skipped — no inactive vRef");
+              .then(() => { preloadReadyRef.current = true; })
+              .catch(() => { preloadReadyRef.current = true; });
           }
         }
 
@@ -1837,8 +1727,7 @@ export default function EditScreen() {
       const firstVideo = clips.find((c) => c.type === "video");
       const thumbnailUri = firstVideo ? await generateThumbnail(firstVideo.uri) : null;
       if (firstVideo) {
-        console.log("[edit] executeSaveDraft: thumbnail generated", thumbnailUri ? thumbnailUri.slice(-40) : "FAILED");
-      }
+        }
 
       const draftIdFinal: string =
         draftId ??
@@ -1885,9 +1774,7 @@ export default function EditScreen() {
                 );
                 return c;
               }
-              console.log(
-                `[edit] executeSaveDraft: clip[${i}] copied & verified — ${destSize} bytes (matches source)`,
-              );
+              // clip copied & verified
             } catch {
               console.warn(
                 `[edit] executeSaveDraft: copy threw for clip[${i}] — keeping original URI`,
@@ -1936,7 +1823,6 @@ export default function EditScreen() {
         setError("Nothing to post. Please record or select media first.");
         return;
       }
-      console.log("[edit] executePost: starting optimistic post with", clips.length, "clip(s)");
       setError(null);
       setSuccess(null);
       setUploading(true);
@@ -1960,10 +1846,6 @@ export default function EditScreen() {
       const copiedClips = await Promise.all(
         clips.map(async (c, i) => {
           if (isWeb && c.uri.startsWith("data:")) {
-            const estimatedKB = Math.round(c.uri.length * 0.75 / 1024);
-            console.log(
-              `[edit] executePost: clip[${i}] is a data: URI (~${estimatedKB} KB) — skipping copy`,
-            );
             return c;
           }
 
@@ -1979,15 +1861,8 @@ export default function EditScreen() {
               `Source file is empty (0 bytes) before copy — clip[${i}]: ${c.uri.slice(0, 60)}`,
             );
           }
-          console.log(
-            `[edit] executePost: source verified — clip[${i}] ${c.uri.slice(0, 50)} — ${srcSize} bytes`,
-          );
-
           const ext = c.uri.match(/\.(\w+)(?:\?|$)/)?.[1] ?? (c.type === "video" ? "mov" : "jpg");
           const stableUri = `${stableDir}clip_${i}_${Date.now()}.${ext}`;
-          console.log(
-            `[edit] executePost: copying clip[${i}] — ${srcSize} bytes → ${stableUri.slice(-50)}`,
-          );
 
           await copyAsync({ from: c.uri, to: stableUri });
 
@@ -2008,21 +1883,16 @@ export default function EditScreen() {
               `Copy failed — size mismatch clip[${i}]: source ${srcSize} bytes, destination ${destSize} bytes. File may be corrupted.`,
             );
           }
-          console.log(
-            `[edit] executePost: clip[${i}] copied & verified — ${destSize} bytes (matches source)`,
-          );
           return { ...c, uri: stableUri };
         }),
       );
 
       let stablePrimary = copiedClips[0]!;
-      console.log("[edit] executePost: all clips copied to stable location — primary:", stablePrimary.uri.slice(-40));
 
       // ── 2b. Generate cover thumbnail from first video frame ──────────
       let thumbnailUri: string | null = null;
       if (stablePrimary.type === "video") {
         thumbnailUri = await generateThumbnail(stablePrimary.uri);
-        console.log("[edit] executePost: thumbnail generated", thumbnailUri ? thumbnailUri.slice(-40) : "FAILED — continuing without thumbnail");
       }
 
       // For multi-clip Drops, upload each segment individually.
@@ -2059,13 +1929,6 @@ export default function EditScreen() {
         reactingTo || null,
       );
 
-      console.log("[edit] executePost: optimistic post added", {
-        tempId: tempId?.slice(0, 8),
-        reactingTo: reactingTo?.slice(0, 12) ?? "(none — will be root Drop)",
-        rootDropId: rootDropId?.slice(0, 12) ?? "(none)",
-        mediaType: stablePrimary.type,
-      });
-
       // ── 4. Fire-and-forget upload in the background ──────────────────
       //    MUST come BEFORE navigation — if navigation throws, the mutation
       //    is already registered with TanStack Query and will still upload.
@@ -2088,14 +1951,6 @@ export default function EditScreen() {
         },
       });
 
-      console.log("[edit] executePost: createPost.mutate() REGISTERED", {
-        tempId: tempId?.slice(0, 8),
-        parentPostId: (reactingTo || undefined)?.slice(0, 12) ?? "(none)",
-        rootDropId: rootDropId?.slice(0, 12) ?? "(none)",
-        mediaType: stablePrimary.type,
-        uriStart: stablePrimary.uri.slice(0, 40),
-      });
-
       // ── 5. Navigate to the right screen (best-effort) ───────────────
       //    Root Drops → feed tab. Reactions & replies → reaction-tree
       //    Wrapped in try/catch so navigation failures are logged but
@@ -2108,10 +1963,8 @@ export default function EditScreen() {
           if (router.canGoBack()) router.back();
         }
         if (reactionTreeId) {
-          console.log("[edit] executePost: navigating to reaction-tree for", reactionTreeId.slice(0, 8));
           router.replace(`/post/${reactionTreeId}/reaction-tree` as never);
         } else {
-          console.log("[edit] executePost: navigating to feed");
           router.replace("/(tabs)");
         }
       } catch (navErr) {
@@ -2151,8 +2004,6 @@ export default function EditScreen() {
   // so a tap that landed between a trim edit and the effect would invoke a
   // stale executePost closure and silently drop trimmed clips from the upload.
   const handlePostPress = useCallback(() => {
-    console.log("[edit] handlePostPress: Post Drop tapped — clips:", clips.length, "user:", !!user?.id);
-
     try {
       if (!router) {
         console.error("[edit] handlePostPress: router is null/undefined");
@@ -2171,7 +2022,6 @@ export default function EditScreen() {
 
       setError(null);
       setSuccess(null);
-      console.log("[edit] handlePostPress: calling executePost...");
       const postPromise = executePost();
       if (!postPromise || typeof postPromise.catch !== "function") {
         console.error("[edit] handlePostPress: executePost did not return a Promise — got", typeof postPromise);
@@ -2226,36 +2076,7 @@ export default function EditScreen() {
     ? textOverlays.find((ov) => ov.id === editingOverlayId)
     : null;
 
-  // ── Periodic play-state diagnostic ─────────────────────────────────────
-  // Logs every 3s (NOT 500ms — that flooded the log buffer and pushed out
-  // transition events, making debugging impossible).
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const slot = activeSlotRef.current;
-      const computedShouldPlay = isPlaying && videoReady;
-      console.log("[edit] HEARTBEAT", {
-        slot,
-        idx: activeIndexRef.current,
-        isPlaying,
-        videoReady,
-        computedShouldPlay,
-        posMs: positionMs,
-        isAdvancing: isAdvancingRef.current,
-        hotSwap: hotSwapRef.current,
-        preloadArmed: preloadArmedRef.current,
-        clipUri: clips[activeIndexRef.current]?.uri?.slice(-30),
-      });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [isPlaying, videoReady, positionMs, clips, activeIndex]);
-
   // ── RENDER — Full Production Editor ─────────────────────────────────────
-
-  // Debug: log the actual shouldPlay prop value being passed to the active Video
-  if (isVideo && videoSource) {
-    const activeShouldPlay = activeSlot === 0 ? isPlaying && videoReady : isPlaying && videoReady;
-    console.log("[edit] RENDER shouldPlay", { activeSlot, isPlaying, videoReady, activeShouldPlay, idx: activeIndex, uri: activeClip?.uri?.slice(-30) });
-  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

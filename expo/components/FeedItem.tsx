@@ -394,7 +394,6 @@ export const FeedItem = memo(function FeedItem({
         const seekTo = trim?.trimStartMs ?? 0;
         const ref = activeSlotRef.current === 0 ? videoRefA.current : videoRefB.current;
         ref?.setPositionAsync(seekTo).catch(() => {});
-        console.log(`[FeedItem:${post.id}] safety timeout — playbackReady=true, seeked to ${seekTo}`);
       }
     }, 3000);
 
@@ -408,9 +407,7 @@ export const FeedItem = memo(function FeedItem({
 
   // ── Stall detection + recovery ─────────────────────────────────────
   // DIAGNOSTIC: log all video events to console for segment transition debugging
-  const videoLog = useCallback((e: VideoEvent) => {
-    console.log(`[FeedItem:${post.id}] videoEvent`, e.type, 'segIdx=' + segIdxRef.current, 'activeSlot=' + activeSlotRef.current, e);
-  }, [post.id]);
+  const videoLog = useCallback((_e: VideoEvent) => {}, []);
 
   const {
     videoRef,
@@ -466,35 +463,6 @@ export const FeedItem = memo(function FeedItem({
     pendingCrossfadeRef.current = null;
     slotAOpacity.setValue(1);
     slotBOpacity.setValue(0);
-    console.log(`[FeedItem:${post.id}] POST RESET — all dual-player state cleared`);
-  }, [post.id]);
-
-  // DIAGNOSTIC: Log state snapshot after every slot swap
-  useEffect(() => {
-    console.log(`[FeedItem:${post.id}] SLOT SWAP EFFECT`, {
-      activeSlot,
-      segIdx,
-      currentUri,
-      preloadUri,
-      shouldMountPreload,
-      shouldPlayA: activeSlot === 0 && active && playbackReady && !isPaused,
-      shouldPlayB: activeSlot === 1 && active && playbackReady && !isPaused,
-      videoRefAExists: !!videoRefA.current,
-      videoRefBExists: !!videoRefB.current,
-      activeVideoRefExists: !!activeVideoRef.current,
-    });
-  }, [activeSlot, segIdx, active, playbackReady, isPaused, currentUri, preloadUri, shouldMountPreload, post.id]);
-
-  // DIAGNOSTIC: Log on unmount to answer "what resets on unmount"
-  useEffect(() => {
-    return () => {
-      console.log(`[FeedItem:${post.id}] UNMOUNT — component tearing down`, {
-        segIdx: segIdxRef.current,
-        activeSlot: activeSlotRef.current,
-        preloadReady: preloadReadyRef.current,
-        playbackReady: playbackReadyRef.current,
-      });
-    };
   }, [post.id]);
 
   // ── Advance to next segment via dual-player hot-swap ──────────────
@@ -507,9 +475,6 @@ export const FeedItem = memo(function FeedItem({
     // Debounce: end-of-segment detection can fire multiple times rapidly
     const now = Date.now();
     if (now - lastAdvanceTimeRef.current < 500) {
-      console.log(`[FeedItem:${post.id}] advanceSegment DEBOUNCED`, {
-        elapsed: now - lastAdvanceTimeRef.current,
-      });
       return;
     }
     lastAdvanceTimeRef.current = now;
@@ -527,22 +492,6 @@ export const FeedItem = memo(function FeedItem({
     const targetUri = allSegments[next];
     const newSlotLoadedUri = newSlot === 0 ? slotALoadedUriRef.current : slotBLoadedUriRef.current;
     const slotAlreadyLoaded = newSlotLoadedUri === targetUri;
-
-    console.log(`[FeedItem:${post.id}] advanceSegment CALLED`, {
-      fromSegIdx: current,
-      toSegIdx: next,
-      fromSlot: activeSlotRef.current,
-      toSlot: newSlot,
-      preloadReady: wasPreloadReady,
-      slotAlreadyLoaded,
-      newSlotLoadedUri,
-      targetUri,
-      playbackReady: playbackReadyRef.current,
-      readyForDisplay: readyForDisplayRef.current,
-      shouldMountPreload,
-      allSegmentsLen: allSegments.length,
-      nextUri: allSegments[next],
-    });
 
     activeSlotRef.current = newSlot;
     const newActiveRef = newSlot === 0 ? videoRefA.current : videoRefB.current;
@@ -597,16 +546,13 @@ export const FeedItem = memo(function FeedItem({
         seekPromise
           .then(() => {
             runCrossfade();
-            console.log(`[FeedItem:${post.id}] advanceSegment — ${wasPreloadReady ? 'preload WAS ready' : 'slot already loaded'}, seeked to ${seekTo}, crossfade started AFTER seek`);
           })
           .catch(() => {
             // Seek failed — crossfade anyway so we don't freeze
             runCrossfade();
-            console.log(`[FeedItem:${post.id}] advanceSegment — seek FAILED, crossfade started as fallback`);
           });
       } else {
         runCrossfade();
-        console.log(`[FeedItem:${post.id}] advanceSegment — no seekPromise, crossfade started immediately`);
       }
     } else {
       // Preload wasn't ready and the slot has a different URI loaded.
@@ -618,7 +564,6 @@ export const FeedItem = memo(function FeedItem({
       readyForDisplayRef.current = false;
       setPlaybackReady(false);
       pendingCrossfadeRef.current = { incomingSlot: newSlot };
-      console.log(`[FeedItem:${post.id}] advanceSegment — preload NOT ready, deferring crossfade until onReadyForDisplay`);
     }
   }, [allSegments, shouldMountPreload, post.id, post.trim_data]);
 
@@ -629,20 +574,6 @@ export const FeedItem = memo(function FeedItem({
 
       if (!status.isLoaded) return;
 
-      // SEGTRACE: log segIdx + position on every status update for frame-by-frame analysis
-      console.log(`[FeedItem:${post.id}] SEGTRACE`, {
-        segIdx: segIdxRef.current,
-        activeSlot: activeSlotRef.current,
-        posMs: status.positionMillis,
-        durMs: status.durationMillis,
-        isPlaying: status.isPlaying,
-        isBuffering: status.isBuffering,
-        didJustFinish: status.didJustFinish,
-        trimEnd: trimEndRef.current,
-        trimEndHandled: trimEndHandledRef.current,
-        msSinceSwap: Date.now() - slotSwapTimeRef.current,
-      });
-
       // ── Pre-buffer gate ──
       // Only pass on a real onReadyForDisplay event (readyForDisplayRef set
       // by onReadySlotA/B). The notBuffering fallback was removed because it
@@ -652,7 +583,6 @@ export const FeedItem = memo(function FeedItem({
       if (!playbackReadyRef.current && readyForDisplayRef.current) {
         playbackReadyRef.current = true;
         setPlaybackReady(true);
-        console.log(`[FeedItem:${post.id}] pre-buffer gate PASSED via onReadyForDisplay`);
         if (prebufferTimerRef.current) {
           clearTimeout(prebufferTimerRef.current);
           prebufferTimerRef.current = null;
@@ -664,7 +594,6 @@ export const FeedItem = memo(function FeedItem({
 
       if (!durationSetRef.current && sourceDur > 0) {
         durationSetRef.current = true;
-        console.log(`[FeedItem:${post.id}] duration set`, { sourceDur, trimStart: trimStartRef.current });
         if (trimStartRef.current > 0) {
           videoRef.current
             ?.setPositionAsync(trimStartRef.current)
@@ -691,13 +620,6 @@ export const FeedItem = memo(function FeedItem({
 
         if (status.positionMillis >= effectiveTrimEnd - 120) {
           trimEndHandledRef.current = true;
-          const current = segIdxRef.current;
-          console.log(`[FeedItem:${post.id}] END OF SEGMENT detected`, {
-            segIdx: current,
-            positionMs: status.positionMillis,
-            effectiveTrimEnd,
-            isSingleSegment: allSegments.length === 1,
-          });
           if (allSegments.length === 1) {
             videoRef.current
               ?.setPositionAsync(trimStartRef.current)
@@ -714,7 +636,6 @@ export const FeedItem = memo(function FeedItem({
 
       // Native just-finished fallback
       if (status.didJustFinish && allSegments.length > 1) {
-        console.log(`[FeedItem:${post.id}] didJustFinish fallback → advanceSegment`);
         advanceSegment();
       }
     },
@@ -773,13 +694,6 @@ export const FeedItem = memo(function FeedItem({
   );
 
   const onReadySlotA = useCallback(() => {
-    console.log(`[FeedItem:${post.id}] onReadyForDisplay SLOT_A`, {
-      activeSlot: activeSlotRef.current,
-      isActive: activeSlotRef.current === 0,
-      playbackReady: playbackReadyRef.current,
-      preloadReady: preloadReadyRef.current,
-      segIdx: segIdxRef.current,
-    });
     // Track the URI that slot A has loaded
     const slotAUri = activeSlotRef.current === 0 ? currentUri : preloadUri;
     slotALoadedUriRef.current = slotAUri;
@@ -801,21 +715,18 @@ export const FeedItem = memo(function FeedItem({
         if (seekPromise) {
           seekPromise
             .then(() => {
-              console.log(`[FeedItem:${post.id}] SLOT_A active onReady — triggering DEFERRED crossfade AFTER seek to ${seekTo}`);
               Animated.parallel([
                 Animated.timing(slotBOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
                 Animated.timing(slotAOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
               ]).start();
             })
             .catch(() => {
-              console.log(`[FeedItem:${post.id}] SLOT_A active onReady — seek FAILED, crossfade as fallback`);
               Animated.parallel([
                 Animated.timing(slotBOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
                 Animated.timing(slotAOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
               ]).start();
             });
         } else {
-          console.log(`[FeedItem:${post.id}] SLOT_A active onReady — no seekPromise, crossfade immediately`);
           Animated.parallel([
             Animated.timing(slotBOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
             Animated.timing(slotAOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
@@ -836,7 +747,6 @@ export const FeedItem = memo(function FeedItem({
           // Only seek here if the deferred crossfade path didn't already seek
           videoRefA.current?.setPositionAsync(seekTo).catch(() => {});
         }
-        console.log(`[FeedItem:${post.id}] SLOT_A active onReady — playbackReady=true, seeked to ${seekTo}`);
         if (prebufferTimerRef.current) {
           clearTimeout(prebufferTimerRef.current);
           prebufferTimerRef.current = null;
@@ -845,18 +755,10 @@ export const FeedItem = memo(function FeedItem({
     } else {
       // Inactive slot: preload is ready
       preloadReadyRef.current = true;
-      console.log(`[FeedItem:${post.id}] SLOT_A preload marked READY`);
     }
   }, [post.id, post.trim_data, currentUri, preloadUri, slotAOpacity, slotBOpacity]);
 
   const onReadySlotB = useCallback(() => {
-    console.log(`[FeedItem:${post.id}] onReadyForDisplay SLOT_B`, {
-      activeSlot: activeSlotRef.current,
-      isActive: activeSlotRef.current === 1,
-      playbackReady: playbackReadyRef.current,
-      preloadReady: preloadReadyRef.current,
-      segIdx: segIdxRef.current,
-    });
     // Track the URI that slot B has loaded
     const slotBUri = activeSlotRef.current === 1 ? currentUri : preloadUri;
     slotBLoadedUriRef.current = slotBUri;
@@ -878,21 +780,18 @@ export const FeedItem = memo(function FeedItem({
         if (seekPromise) {
           seekPromise
             .then(() => {
-              console.log(`[FeedItem:${post.id}] SLOT_B active onReady — triggering DEFERRED crossfade AFTER seek to ${seekTo}`);
               Animated.parallel([
                 Animated.timing(slotAOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
                 Animated.timing(slotBOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
               ]).start();
             })
             .catch(() => {
-              console.log(`[FeedItem:${post.id}] SLOT_B active onReady — seek FAILED, crossfade as fallback`);
               Animated.parallel([
                 Animated.timing(slotAOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
                 Animated.timing(slotBOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
               ]).start();
             });
         } else {
-          console.log(`[FeedItem:${post.id}] SLOT_B active onReady — no seekPromise, crossfade immediately`);
           Animated.parallel([
             Animated.timing(slotAOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
             Animated.timing(slotBOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
@@ -912,7 +811,6 @@ export const FeedItem = memo(function FeedItem({
           // Only seek here if the deferred crossfade path didn't already seek
           videoRefB.current?.setPositionAsync(seekTo).catch(() => {});
         }
-        console.log(`[FeedItem:${post.id}] SLOT_B active onReady — playbackReady=true, seeked to ${seekTo}`);
         if (prebufferTimerRef.current) {
           clearTimeout(prebufferTimerRef.current);
           prebufferTimerRef.current = null;
@@ -920,7 +818,6 @@ export const FeedItem = memo(function FeedItem({
       }
     } else {
       preloadReadyRef.current = true;
-      console.log(`[FeedItem:${post.id}] SLOT_B preload marked READY`);
     }
   }, [post.id, post.trim_data, currentUri, preloadUri, slotAOpacity, slotBOpacity]);
 
@@ -942,7 +839,7 @@ export const FeedItem = memo(function FeedItem({
   }, [post.id, videoLog, currentUri, preloadUri]);
 
   const onErrorSlotA = useCallback((error: string) => {
-    console.log(`[FeedItem:${post.id}] onError SLOT_A`, { error, activeSlot: activeSlotRef.current });
+    console.error(`[FeedItem:${post.id}] onError SLOT_A`, { error, activeSlot: activeSlotRef.current });
     if (activeSlotRef.current === 0) {
       errorCountRef.current += 1;
       setVideoError(error);
@@ -950,14 +847,13 @@ export const FeedItem = memo(function FeedItem({
   }, [post.id, videoLog]);
 
   const onErrorSlotB = useCallback((error: string) => {
-    console.log(`[FeedItem:${post.id}] onError SLOT_B`, { error, activeSlot: activeSlotRef.current });
+    console.error(`[FeedItem:${post.id}] onError SLOT_B`, { error, activeSlot: activeSlotRef.current });
     if (activeSlotRef.current === 1) {
       errorCountRef.current += 1;
       setVideoError(error);
     } else {
       // Preload failed — mark as not ready so hot-swap falls back gracefully
       preloadReadyRef.current = false;
-      console.log(`[FeedItem:${post.id}] SLOT_B preload FAILED, preloadReady=false`);
     }
   }, [post.id, videoLog]);
 

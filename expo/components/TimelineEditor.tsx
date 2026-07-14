@@ -192,8 +192,6 @@ function useThumbnails(clips: DraftClip[]) {
   useEffect(() => {
     let cancelled = false;
     const newThumbs: Record<string, string> = {};
-    const _thumbT0 = Date.now();
-
     async function load() {
       for (const clip of clips) {
         if (clip.type !== "video") continue;
@@ -202,20 +200,16 @@ function useThumbnails(clips: DraftClip[]) {
           continue;
         }
         try {
-          const _thumbStart = Date.now();
-          console.log(`[timeline-thumb] START generate for clip ${clip.id.slice(-8)} — uri=${clip.uri.slice(-40)}`);
-          const result: VideoThumbnailsResult = await getThumbnailAsync(clip.uri, {
+              const result: VideoThumbnailsResult = await getThumbnailAsync(clip.uri, {
             time: Math.round((clip.durationMs ?? 1000) / 2),
           });
-          console.log(`[timeline-thumb] COMPLETE clip ${clip.id.slice(-8)} — took ${Date.now() - _thumbStart}ms`);
           newThumbs[clip.id] = result.uri;
         } catch {
-          console.warn(`[timeline-thumb] FAILED clip ${clip.id.slice(-8)} — took ${Date.now() - _thumbT0}ms since thumb load start`);
+          console.warn(`[timeline-thumb] FAILED clip ${clip.id.slice(-8)}`);
         }
       }
       if (!cancelled) {
         setThumbs((prev) => ({ ...prev, ...newThumbs }));
-        console.log(`[timeline-thumb] ALL DONE — took ${Date.now() - _thumbT0}ms, ${Object.keys(newThumbs).length} thumbnails`);
       }
     }
 
