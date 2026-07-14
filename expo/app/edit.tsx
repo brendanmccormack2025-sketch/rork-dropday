@@ -239,6 +239,7 @@ export default function EditScreen() {
   const activeIndexRef = useRef<number>(0);
   const durationSetRef = useRef<boolean>(false);
   const lastPositionUpdate = useRef<number>(0);
+  const lastLoggedPosRef = useRef<number>(-9999);
   const clipsRef = useRef(clips);
   const safeSeekActiveRef = useRef<boolean>(false);
 
@@ -379,6 +380,7 @@ export default function EditScreen() {
     if (!clip || clip.type !== "video") return;
     if (currentPlayingClipUriRef.current === clip.uri) return;
     currentPlayingClipUriRef.current = clip.uri;
+    console.log("[edit] CLIP CHANGED → activeIndex:", activeIndex, "uri:", clip.uri?.slice(-30), "trimStart:", clip.trimStartMs ?? 0, "trimEnd:", clip.trimEndMs ?? clip.durationMs, "hotSwap:", hotSwapRef.current, "pendingSeek:", pendingSeekRef.current);
     if (hotSwapRef.current) return; // hot swap: next clip already loaded & ready
     pendingSeekRef.current = clip.trimStartMs ?? 0;
     durationSetRef.current = false;
@@ -563,20 +565,26 @@ export default function EditScreen() {
       typeof status.durationMillis === "number" ? status.durationMillis : 0;
     const posMillis = status.positionMillis ?? 0;
 
-    // Diagnostic: log play state every status update to catch frozen playback
-    const computedShouldPlay = activeSlotRef.current === activeSlotRef.current && isPlaying && videoReady;
-    console.log("[edit] onVideoStatus", {
-      slot: activeSlotRef.current,
-      idx: activeIndexRef.current,
-      statusIsPlaying: status.isPlaying,
-      isPlayingState: isPlaying,
-      videoReadyState: videoReady,
-      shouldPlayComputed: isPlaying && videoReady,
-      posMs: posMillis,
-      durMs: sourceDur,
-      isAdvancing: isAdvancingRef.current,
-      didJustFinish: status.didJustFinish,
-    });
+    // Diagnostic: log play state — only when position changes or key events
+    // (not every 200ms tick, which floods the buffer).
+    const posChanged = Math.abs(posMillis - lastLoggedPosRef.current) > 50;
+    const isKeyEvent = status.didJustFinish || !status.isLoaded;
+    if (posChanged || isKeyEvent) {
+      lastLoggedPosRef.current = posMillis;
+      console.log("[edit] onVideoStatus", {
+        slot: activeSlotRef.current,
+        idx: activeIndexRef.current,
+        statusIsPlaying: status.isPlaying,
+        isPlayingState: isPlaying,
+        videoReadyState: videoReady,
+        posMs: posMillis,
+        durMs: sourceDur,
+        isAdvancing: isAdvancingRef.current,
+        trimEndHandled: trimEndHandledRef.current,
+        didJustFinish: status.didJustFinish,
+        pendingSeek: pendingSeekRef.current,
+      });
+    }
 
     // Preload arming: when playback nears the clip's end, source the next clip
     // into the inactive slot so it's ready to swap in without a cold-load stall.
@@ -808,9 +816,11 @@ export default function EditScreen() {
       const clip = clipsRef.current.find((c) => c.uri === expectedUri);
       const trimStart = clip?.trimStartMs ?? 0;
       const vRef = slot === 0 ? videoRefA.current : videoRefB.current;
-      if (trimStart > 0 && vRef) {
-        // Block hot-swap until the seek completes so preloadReadyRef truly
-        // means "loaded AND positioned at trimStart".
+      // ALWAYS seek to trimStart (even when 0) so the preload slot is at the
+      // correct starting position. Without this, the player can inherit a stale
+      // position from a previous clip that used this slot, causing the new clip
+      // to start near its end instead of from the beginning.
+      if (vRef) {
         preloadReadyRef.current = false;
         console.log("[preload-debug] seeking preload to trimStart:", trimStart, "for clip:", expectedUri.slice(-20));
         vRef
@@ -819,7 +829,7 @@ export default function EditScreen() {
           .catch(() => { preloadReadyRef.current = true; console.log("[preload-debug] preload seek FAILED, preloadReadyRef:", preloadReadyRef.current); });
       } else {
         preloadReadyRef.current = true;
-        console.log("[preload-debug] preload loaded, no seek needed (trimStart=0), preloadReadyRef:", preloadReadyRef.current);
+        console.log("[preload-debug] preload loaded, no vRef to seek, preloadReadyRef:", preloadReadyRef.current);
       }
     } else if (!status.isLoaded && "error" in status && status.error) {
       preloadReadyRef.current = false;
@@ -997,14 +1007,25 @@ export default function EditScreen() {
         setIsPlaying(true);
 
         incomingVideo?.setIsMutedAsync(false).catch(() => {});
-        if (trimStartRef.current > 0) {
-          incomingVideo
-            ?.setPositionAsync(trimStartRef.current)
-            .then(() => { incomingVideo?.playAsync().catch(() => {}); })
-            .catch(() => { incomingVideo?.playAsync().catch(() => {}); });
-        } else {
-          incomingVideo?.playAsync().catch(() => {});
-        }
+        // ALWAYS seek to trimStart (or 0) before playing — the preload slot may
+        // have inherited a stale position from a previous clip. Without this
+        // seek, the new clip can start near its end and freeze.
+        const seekTarget = trimStartRef.current;
+        console.log("[advance] HOT-SWAP forward — seeking to:", seekTarget, "then playing");
+        incomingVideo
+          ?.setPositionAsync(seekTarget)
+          .then(() => {
+            incomingVideo?.playAsync().catch(() => {});
+            // Reset trimEndHandledRef AFTER the seek completes so the
+            // end-of-segment check can fire for the new clip. It was set to
+            // true above to block stale didJustFinish from the old player.
+            trimEndHandledRef.current = false;
+            console.log("[advance] HOT-SWAP forward — seek done, trimEndHandledRef reset to false");
+          })
+          .catch(() => {
+            incomingVideo?.playAsync().catch(() => {});
+            trimEndHandledRef.current = false;
+          });
         return;
       }
 
@@ -1037,8 +1058,25 @@ export default function EditScreen() {
           trimSeekDoneRef.current = true;
         }
       } else {
+        // Different URI: the source will change on the same Video component.
+        // Set a pending seek so onVideoStatus seeks to trimStart (or 0) once
+        // the new source loads. Without this, the player inherits a stale
+        // position from the previous clip and can start near the end.
+        currentPlayingClipUriRef.current = nextClip?.uri ?? null;
+        pendingSeekRef.current = trimStartRef.current; // seek to 0 if no trim
+        lastPositionUpdate.current = 0;
         trimSeekDoneRef.current = false;
+        durationSetRef.current = false; // force duration re-load for new clip
+        console.log("[advance] COLD-LOAD forward — pendingSeek set to:", pendingSeekRef.current, "for next clip");
       }
+
+      // Reset trimEndHandledRef after a short delay so the end-of-segment
+      // check can fire for the new clip. It was set to true above to block
+      // stale didJustFinish from the old player.
+      setTimeout(() => {
+        trimEndHandledRef.current = false;
+        console.log("[advance] COLD-LOAD forward — trimEndHandledRef reset to false by timeout");
+      }, 300);
 
       activeIndexRef.current = nextIdx;
       setActiveIndex(nextIdx);
@@ -1106,14 +1144,21 @@ export default function EditScreen() {
         setIsPlaying(true);
 
         incomingVideo?.setIsMutedAsync(false).catch(() => {});
-        if (trimStartRef.current > 0) {
-          incomingVideo
-            ?.setPositionAsync(trimStartRef.current)
-            .then(() => { incomingVideo?.playAsync().catch(() => {}); })
-            .catch(() => { incomingVideo?.playAsync().catch(() => {}); });
-        } else {
-          incomingVideo?.playAsync().catch(() => {});
-        }
+        // ALWAYS seek to trimStart (or 0) before playing — same reason as
+        // forward hot-swap: preload slot may have a stale position.
+        const wrapSeekTarget = trimStartRef.current;
+        console.log("[advance] HOT-SWAP wrap — seeking to:", wrapSeekTarget, "then playing");
+        incomingVideo
+          ?.setPositionAsync(wrapSeekTarget)
+          .then(() => {
+            incomingVideo?.playAsync().catch(() => {});
+            trimEndHandledRef.current = false;
+            console.log("[advance] HOT-SWAP wrap — seek done, trimEndHandledRef reset to false");
+          })
+          .catch(() => {
+            incomingVideo?.playAsync().catch(() => {});
+            trimEndHandledRef.current = false;
+          });
         return;
       }
 
@@ -1143,8 +1188,22 @@ export default function EditScreen() {
           })
           .catch(() => {});
       } else {
+        // Different URI: set a pending seek so onVideoStatus seeks to
+        // trimStart (or 0) once the new source loads.
+        currentPlayingClipUriRef.current = firstClip?.uri ?? null;
+        pendingSeekRef.current = seekTarget;
+        lastPositionUpdate.current = 0;
         trimSeekDoneRef.current = false;
+        durationSetRef.current = false;
+        console.log("[advance] COLD-LOAD wrap — pendingSeek set to:", seekTarget, "for first clip");
       }
+
+      // Reset trimEndHandledRef after a short delay so the end-of-segment
+      // check can fire for the new clip.
+      setTimeout(() => {
+        trimEndHandledRef.current = false;
+        console.log("[advance] COLD-LOAD wrap — trimEndHandledRef reset to false by timeout");
+      }, 300);
 
       activeIndexRef.current = 0;
       setActiveIndex(0);
@@ -2154,8 +2213,8 @@ export default function EditScreen() {
     : null;
 
   // ── Periodic play-state diagnostic ─────────────────────────────────────
-  // Logs every 500ms so we can see if shouldPlay is true but the video
-  // isn't actually advancing (decoder frozen).
+  // Logs every 3s (NOT 500ms — that flooded the log buffer and pushed out
+  // transition events, making debugging impossible).
   useEffect(() => {
     const interval = setInterval(() => {
       const slot = activeSlotRef.current;
@@ -2172,7 +2231,7 @@ export default function EditScreen() {
         preloadArmed: preloadArmedRef.current,
         clipUri: clips[activeIndexRef.current]?.uri?.slice(-30),
       });
-    }, 500);
+    }, 3000);
     return () => clearInterval(interval);
   }, [isPlaying, videoReady, positionMs, clips, activeIndex]);
 
