@@ -313,13 +313,8 @@ export function useCameraRecorder() {
         if (result?.uri) {
           accumulatedSegmentUrisRef.current.push(result.uri);
           console.log(`[camera] recordAsync resolved — collected URI: ${result.uri.slice(0, 60)}`);
-
-          // ── RAW RECORDING DIAGNOSTICS ──────────────────────────────
-          // Verify the file is valid immediately after recordAsync returns,
-          // BEFORE any processing (merge, export, upload) touches it.
-          const rawInfo = await getInfoAsync(result.uri);
-          console.log(`[camera] RAW FILE — path: ${result.uri}`);
-          console.log(`[camera] RAW FILE — exists: ${rawInfo.exists}, size: ${rawInfo.exists ? (rawInfo.size ?? 0) : 'N/A'} bytes`);
+          // File validation is deferred to the finalize phase to avoid
+          // blocking the recording loop at every flip boundary.
         } else {
           // recordAsync resolved without a URI — the native session likely
           // wasn't fully ready.  Surface this as a visible error instead of
@@ -349,9 +344,9 @@ export function useCameraRecorder() {
           // Brief delay for the native session to finish swapping devices.
           // sessionManager.updateDevice() runs on a serial queue — this
           // gives it time to complete without depending on onCameraReady
-          // (which won't fire). 500ms is generous; the swap typically
-          // completes in 200-400ms.
-          await new Promise((r) => setTimeout(r, 500));
+          // (which won't fire). 150ms is sufficient on most devices; the
+          // swap typically completes in 50-100ms.
+          await new Promise((r) => setTimeout(r, 150));
 
           // Re-check stopRequested after the wait — user may have
           // tapped stop while we were waiting.
@@ -382,7 +377,7 @@ export function useCameraRecorder() {
 
           // Brief delay for the native session to settle after the device swap.
           // Same as the success path — onCameraReady won't re-fire.
-          await new Promise((r) => setTimeout(r, 500));
+          await new Promise((r) => setTimeout(r, 150));
 
           // Re-check after the wait.
           if (stopRequestedRef.current) {
@@ -422,15 +417,16 @@ export function useCameraRecorder() {
       console.log(`[camera] Finalize — ${uris.length} segment(s) to process — t=${Date.now() - _finalizeT0}ms since FINISHED`);
 
       try {
-        // Validate every segment up front so a missing/empty file fails cleanly
-        // before any clips are appended — matching the prior single-segment guard.
+        // Validate all segments in parallel so we don't block the JS thread
+        // sequentially — each getInfoAsync is independent.
         const _validateT0 = Date.now();
-        for (let i = 0; i < uris.length; i++) {
-          const uri = uris[i]!;
-          const _segProbeStart = Date.now();
-          const segInfo = await getInfoAsync(uri);
+        const segInfos = await Promise.all(
+          uris.map((uri) => getInfoAsync(uri)),
+        );
+        for (let i = 0; i < segInfos.length; i++) {
+          const segInfo = segInfos[i]!;
           console.log(
-            `[camera] Segment ${i + 1}/${uris.length} check — exists: ${segInfo.exists}, size: ${segInfo.exists ? (segInfo.size ?? 0) : 'N/A'} bytes — getInfoAsync took ${Date.now() - _segProbeStart}ms`,
+            `[camera] Segment ${i + 1}/${uris.length} check — exists: ${segInfo.exists}, size: ${segInfo.exists ? (segInfo.size ?? 0) : 'N/A'} bytes`,
           );
           if (!segInfo.exists) {
             throw new Error("Recording file was not saved. Please try recording again.");

@@ -504,16 +504,20 @@ export default function CameraScreen() {
     const _goToEditT0 = Date.now();
     console.log(`[camera] goToEdit START — ${clips.length} clip(s) — t=${_goToEditT0}`);
 
-    // Verify every clip's file exists and is non-empty before navigating.
-    // If the merge step produced a corrupt / empty / missing file, surface
-    // a visible error instead of sending the editor a dead URI (black screen).
-    for (const clip of clips) {
-      if (clip.type === "video" && clip.uri) {
-        try {
-          const _fileCheckStart = Date.now();
-          const info = await getInfoAsync(clip.uri);
+    // Verify all clip files in parallel — files were already validated in
+    // finalize, but this catches any post-finalize corruption. Running them
+    // concurrently avoids blocking the JS thread sequentially.
+    const videoClips = clips.filter((c) => c.type === "video" && c.uri);
+    if (videoClips.length > 0) {
+      try {
+        const infos = await Promise.all(
+          videoClips.map((clip) => getInfoAsync(clip.uri!)),
+        );
+        for (let i = 0; i < videoClips.length; i++) {
+          const clip = videoClips[i]!;
+          const info = infos[i]!;
           console.log(
-            `[camera] goToEdit — clip ${clip.id}: ${clip.uri.slice(0, 60)}, exists: ${info.exists}, size: ${info.exists ? (info.size ?? 0) : "N/A"} — getInfoAsync took ${Date.now() - _fileCheckStart}ms`,
+            `[camera] goToEdit — clip ${clip.id}: ${clip.uri!.slice(0, 60)}, exists: ${info.exists}, size: ${info.exists ? (info.size ?? 0) : "N/A"}`,
           );
           if (!info.exists) {
             setError("Video file is missing. Please record again.");
@@ -523,11 +527,11 @@ export default function CameraScreen() {
             setError("Video file is empty. Please record again.");
             return;
           }
-        } catch (e) {
-          console.error("[camera] goToEdit — file check failed", e);
-          setError("Could not verify video file. Please try again.");
-          return;
         }
+      } catch (e) {
+        console.error("[camera] goToEdit — file check failed", e);
+        setError("Could not verify video file. Please try again.");
+        return;
       }
     }
 
