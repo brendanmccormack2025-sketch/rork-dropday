@@ -501,15 +501,19 @@ export default function CameraScreen() {
   const goToEdit = useCallback(async () => {
     if (clips.length === 0) return;
 
+    const _goToEditT0 = Date.now();
+    console.log(`[camera] goToEdit START — ${clips.length} clip(s) — t=${_goToEditT0}`);
+
     // Verify every clip's file exists and is non-empty before navigating.
     // If the merge step produced a corrupt / empty / missing file, surface
     // a visible error instead of sending the editor a dead URI (black screen).
     for (const clip of clips) {
       if (clip.type === "video" && clip.uri) {
         try {
+          const _fileCheckStart = Date.now();
           const info = await getInfoAsync(clip.uri);
           console.log(
-            `[camera] goToEdit — clip ${clip.id}: ${clip.uri.slice(0, 60)}, exists: ${info.exists}, size: ${info.exists ? (info.size ?? 0) : "N/A"}`,
+            `[camera] goToEdit — clip ${clip.id}: ${clip.uri.slice(0, 60)}, exists: ${info.exists}, size: ${info.exists ? (info.size ?? 0) : "N/A"} — getInfoAsync took ${Date.now() - _fileCheckStart}ms`,
           );
           if (!info.exists) {
             setError("Video file is missing. Please record again.");
@@ -533,16 +537,23 @@ export default function CameraScreen() {
     if (reactingTo) params.reactingTo = reactingTo;
     if (rootDropId) params.rootDropId = rootDropId;
 
-    console.log("[camera] goToEdit — navigating to edit with:", {
+    const _jsonStart = Date.now();
+    const clipsJsonStr = JSON.stringify(clips);
+    console.log(`[camera] goToEdit — JSON.stringify took ${Date.now() - _jsonStart}ms, length=${clipsJsonStr.length}`);
+    params.clips = clipsJsonStr;
+
+    console.log(`[camera] goToEdit — navigating to edit with:`, {
       clipsCount: clips.length,
       reactingTo: reactingTo?.slice(0, 12) ?? "(none)",
       rootDropId: rootDropId?.slice(0, 12) ?? "(none)",
+      totalElapsed: `${Date.now() - _goToEditT0}ms`,
     });
 
     router.push({
       pathname: "/edit",
       params,
     });
+    console.log(`[camera] goToEdit — router.push called — total t=${Date.now() - _goToEditT0}ms`);
   }, [clips, reactingTo, rootDropId, router, setError]);
 
 

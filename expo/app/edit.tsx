@@ -116,14 +116,21 @@ export default function EditScreen() {
   }>();
 
   // ── Debug: log what params the edit screen received ─────────────────────
+  const _editMountT0 = useRef<number>(Date.now());
   useEffect(() => {
-    console.log("[edit] Screen mounted — received params:");
+    _editMountT0.current = Date.now();
+    console.log(`[edit] Screen mounted — t=${_editMountT0.current}`);
     console.log("  clipsJson length:", clipsJson?.length ?? 0);
     console.log("  clipsJson first 200 chars:", clipsJson?.slice(0, 200));
     console.log("  nativeVideoUrl:", nativeVideoUrl?.slice(0, 80));
     console.log("  draftId:", draftId);
     console.log("  reactingTo:", reactingTo?.slice(0, 12) ?? "(none)");
     console.log("  rootDropId:", rootDropId?.slice(0, 12) ?? "(none)");
+    const _parseStart = Date.now();
+    try {
+      const _parsed = JSON.parse(clipsJson ?? "[]");
+      console.log(`[edit] mount — JSON.parse took ${Date.now() - _parseStart}ms, ${_parsed.length} clips`);
+    } catch {}
   }, []);
 
   // ── Frame measurement ────────────────────────────────────────────────────
@@ -318,7 +325,8 @@ export default function EditScreen() {
     );
     if (clipsToProbe.length === 0) return;
 
-    console.log(`[edit] Duration probe START — ${clipsToProbe.length} clip(s) to probe`);
+    const _probeT0 = Date.now();
+    console.log(`[edit] Duration probe START — ${clipsToProbe.length} clip(s) to probe — t=${Date.now() - _editMountT0.current}ms since mount`);
 
     // Use Audio.Sound.createAsync to load video metadata without rendering a
     // player. It returns AVPlaybackStatus with durationMillis, then we unload.
@@ -329,26 +337,30 @@ export default function EditScreen() {
         const results = await Promise.all(
           clipsToProbe.map(async (clip) => {
             try {
+              const _clipProbeStart = Date.now();
+              console.log(`[edit] Duration probe — START clip ${clip.id.slice(-8)} — t=${Date.now() - _editMountT0.current}ms since mount`);
               const { sound, status } = await Audio.Sound.createAsync(
                 { uri: clip.uri },
                 { shouldPlay: false, isMuted: true },
               );
+              const _createAsyncMs = Date.now() - _clipProbeStart;
               const dur = status.isLoaded && typeof status.durationMillis === "number"
                 ? status.durationMillis
                 : 0;
               await sound.unloadAsync();
-              console.log(`[edit] Duration probe: clip ${clip.id} → ${dur}ms`);
+              console.log(`[edit] Duration probe: clip ${clip.id.slice(-8)} → ${dur}ms — createAsync took ${_createAsyncMs}ms, unload took ${Date.now() - _clipProbeStart - _createAsyncMs}ms`);
               return { id: clip.id, durationMs: dur };
             } catch (e) {
-              console.warn(`[edit] Duration probe failed for clip ${clip.id}:`, (e as Error)?.message);
+              console.warn(`[edit] Duration probe failed for clip ${clip.id.slice(-8)}:`, (e as Error)?.message, `— took ${Date.now() - _editMountT0.current}ms since mount`);
               return { id: clip.id, durationMs: 0 };
             }
           }),
         );
         if (cancelled) return;
         const valid = results.filter((r) => r.durationMs > 0);
-        console.log(`[edit] Duration probe COMPLETE — ${valid.length}/${results.length} clips got valid durations`, { durations: results.map(r => ({ id: r.id.slice(-8), ms: r.durationMs })) });
+        console.log(`[edit] Duration probe COMPLETE — ${valid.length}/${results.length} clips got valid durations, took ${Date.now() - _probeT0}ms total — t=${Date.now() - _editMountT0.current}ms since mount`, { durations: results.map(r => ({ id: r.id.slice(-8), ms: r.durationMs })) });
         if (valid.length === 0) return;
+        const _setClipsStart = Date.now();
         setClips((prev) => {
           let changed = false;
           const next = prev.map((c) => {
@@ -363,6 +375,7 @@ export default function EditScreen() {
                 : probed.durationMs,
             };
           });
+          console.log(`[edit] Duration probe — setClips took ${Date.now() - _setClipsStart}ms, changed=${changed}`);
           return changed ? next : prev;
         });
       } catch (e) {
@@ -445,9 +458,10 @@ export default function EditScreen() {
       return;
     }
 
+    const _vSrcCheckStart = Date.now();
     getInfoAsync(uri).then((info) => {
       console.log(
-        `[edit] videoSource — file on disk: exists=${info.exists}, size=${info.exists ? (info.size ?? 0) : 0} bytes, uri=${slice}`,
+        `[edit] videoSource — file on disk: exists=${info.exists}, size=${info.exists ? (info.size ?? 0) : 0} bytes, uri=${slice} — getInfoAsync took ${Date.now() - _vSrcCheckStart}ms`,
       );
       if (!info.exists) {
         console.error(`[edit] videoSource — FILE DOES NOT EXIST: ${uri.slice(0, 80)}`);

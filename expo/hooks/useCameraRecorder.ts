@@ -199,8 +199,9 @@ export function useCameraRecorder() {
         const result = await requestMediaPermission();
         if (!result.granted) return;
       }
+      const _saveStart = Date.now();
       await MediaLibrary.saveToLibraryAsync(uri);
-      console.log("[camera] saved to gallery:", uri.slice(0, 60));
+      console.log(`[camera] saved to gallery: ${uri.slice(0, 60)} — took ${Date.now() - _saveStart}ms`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown save error";
       console.warn("[camera] gallery save failed:", msg);
@@ -406,7 +407,8 @@ export function useCameraRecorder() {
     // recording UI disappear BEFORE the merge/processing starts. The
     // merge overlay (isMerging) is the only thing the user should see
     // while we concatenate segments.
-    console.log("[camera] RECORDING FINISHED");
+    const _finalizeT0 = Date.now();
+    console.log(`[camera] RECORDING FINISHED — t=${_finalizeT0}ms, segments=${accumulatedSegmentUrisRef.current.length}`);
     setRecordStateSync("idle");
     setIsLockedSync(false);
 
@@ -417,16 +419,18 @@ export function useCameraRecorder() {
     const uris = accumulatedSegmentUrisRef.current;
     if (uris.length > 0) {
       const sessionId = recordSessionIdRef.current ?? undefined;
-      console.log(`[camera] Finalize — ${uris.length} segment(s) to process`);
+      console.log(`[camera] Finalize — ${uris.length} segment(s) to process — t=${Date.now() - _finalizeT0}ms since FINISHED`);
 
       try {
         // Validate every segment up front so a missing/empty file fails cleanly
         // before any clips are appended — matching the prior single-segment guard.
+        const _validateT0 = Date.now();
         for (let i = 0; i < uris.length; i++) {
           const uri = uris[i]!;
+          const _segProbeStart = Date.now();
           const segInfo = await getInfoAsync(uri);
           console.log(
-            `[camera] Segment ${i + 1}/${uris.length} check — exists: ${segInfo.exists}, size: ${segInfo.exists ? (segInfo.size ?? 0) : 'N/A'} bytes`,
+            `[camera] Segment ${i + 1}/${uris.length} check — exists: ${segInfo.exists}, size: ${segInfo.exists ? (segInfo.size ?? 0) : 'N/A'} bytes — getInfoAsync took ${Date.now() - _segProbeStart}ms`,
           );
           if (!segInfo.exists) {
             throw new Error("Recording file was not saved. Please try recording again.");
@@ -436,7 +440,10 @@ export function useCameraRecorder() {
           }
         }
 
+        console.log(`[camera] Segment validation COMPLETE — took ${Date.now() - _validateT0}ms, t=${Date.now() - _finalizeT0}ms since FINISHED`);
+
         // All segments validated — append one Clip per segment in recording order.
+        const _appendT0 = Date.now();
         for (const uri of uris) {
           const clip: Clip = {
             id: newClipId(),
@@ -449,7 +456,7 @@ export function useCameraRecorder() {
           // Save each segment to the gallery — each is a standalone video file
           // the user would expect to appear in their camera roll.
           saveToGallery(uri).catch(() => {});
-          console.log(`[camera] Clip created — id: ${clip.id}, uri: ${uri.slice(0, 60)}`);
+          console.log(`[camera] Clip created — id: ${clip.id}, uri: ${uri.slice(0, 60)} — t=${Date.now() - _appendT0}ms since append start`);
         }
       } catch (finalizeErr) {
         const errMsg = finalizeErr instanceof Error ? finalizeErr.message : String(finalizeErr);
@@ -461,6 +468,7 @@ export function useCameraRecorder() {
       }
     }
 
+    console.log(`[camera] Finalize DONE — total t=${Date.now() - _finalizeT0}ms since FINISHED`);
     recordingStartedAtRef.current = null;
     recordSessionIdRef.current = null;
     // Reset transition guard to allow back-to-back recordings.
