@@ -391,19 +391,31 @@ export default function CameraScreen() {
 
   // ─── Flip camera with flash ───────────────────────────────────
 
-  /** Flip cover — an opaque white overlay that hides the native CameraView
-   *  session rebuild during a camera flip. The native session goes fully
-   *  black for ~150-250ms when swapping devices; this cover starts opaque
-   *  and fades out over 300ms, covering the gap seamlessly. */
+  /** Flip cover — an opaque overlay that hides the native CameraView
+   *  session rebuild during a camera flip. The native session goes blank
+   *  for ~150-250ms when swapping devices, showing the app's dark background
+   *  (#0A0A14, brightness ~15) through the transparent CameraView.
+   *
+   *  Previous approach: a simple 300ms fade with Easing.out(cubic) — but
+   *  the cubic easing dropped opacity to ~0.12 by 150ms, so the dark
+   *  background bled through during the session rebuild gap.
+   *
+   *  Current approach: hold at full opacity for 200ms (covering the entire
+   *  session rebuild window), then linear fade over 200ms. The overlay is
+   *  still fully opaque when the new camera frames arrive, so the user
+   *  never sees the dark background flash. */
   const triggerFlipFlash = useCallback(() => {
     if (flipAnimRef.current) flipAnimRef.current.stop();
     flipFlashOpacity.setValue(1);
-    flipAnimRef.current = Animated.timing(flipFlashOpacity, {
-      toValue: 0,
-      duration: 300,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    });
+    flipAnimRef.current = Animated.sequence([
+      Animated.delay(200),
+      Animated.timing(flipFlashOpacity, {
+        toValue: 0,
+        duration: 200,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    ]);
     flipAnimRef.current.start();
   }, [flipFlashOpacity]);
 
@@ -415,11 +427,11 @@ export default function CameraScreen() {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
   }, [flipCamera, setZoom, triggerFlipFlash]);
 
-  // NOTE: The flip flash is a simple fade-out with no hold timer.
-  // expo-camera's onCameraReady does NOT re-fire on facing prop changes,
-  // so we can't gate the flash on readiness — the fixed fade duration
-  // is calibrated to be short enough that the session swap completes
-  // around the same time the flash vanishes.
+  // The flip flash holds at full opacity for 200ms (covering the session
+  // rebuild) then fades linearly over 200ms. expo-camera's onCameraReady
+  // does NOT re-fire on facing prop changes, so we can't gate the flash
+  // on readiness — the fixed hold duration is calibrated to exceed the
+  // typical 150-250ms session rebuild time.
 
   // Double-tap anywhere on the preview to flip cameras.
   // react-native-gesture-handler TapGestureHandler configured for
