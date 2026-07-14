@@ -398,71 +398,39 @@ export function useCameraRecorder() {
       }
     }
 
-    // IMMEDIATELY mark recording as finished so the REC indicator and
-    // recording UI disappear BEFORE the merge/processing starts. The
-    // merge overlay (isMerging) is the only thing the user should see
-    // while we concatenate segments.
     const _finalizeT0 = Date.now();
     console.log(`[camera] RECORDING FINISHED — t=${_finalizeT0}ms, segments=${accumulatedSegmentUrisRef.current.length}`);
-    setRecordStateSync("idle");
     setIsLockedSync(false);
 
-    // Finalize: create a separate Clip for each recorded segment (one per
-    // camera-facing during a multi-flip recording), in recording order.
-    // The editor already handles multiple sequential clips the same way it
-    // handles splits — no merge into a single file is needed.
+    // Append clips IMMEDIATELY — no getInfoAsync validation here.
+    // The files were just written by recordAsync; if we got a URI, the file
+    // exists. The redundant getInfoAsync check that used to run here created
+    // a 100-250ms gap where the UI showed a bare idle camera screen (no REC
+    // indicator, no Next button, no merge overlay) — a visible black flash.
+    // goToEdit() already validates all files before navigating, so the
+    // check here was purely defensive and not worth the UI regression.
     const uris = accumulatedSegmentUrisRef.current;
     if (uris.length > 0) {
       const sessionId = recordSessionIdRef.current ?? undefined;
-      console.log(`[camera] Finalize — ${uris.length} segment(s) to process — t=${Date.now() - _finalizeT0}ms since FINISHED`);
-
-      try {
-        // Validate all segments in parallel so we don't block the JS thread
-        // sequentially — each getInfoAsync is independent.
-        const _validateT0 = Date.now();
-        const segInfos = await Promise.all(
-          uris.map((uri) => getInfoAsync(uri)),
-        );
-        for (let i = 0; i < segInfos.length; i++) {
-          const segInfo = segInfos[i]!;
-          console.log(
-            `[camera] Segment ${i + 1}/${uris.length} check — exists: ${segInfo.exists}, size: ${segInfo.exists ? (segInfo.size ?? 0) : 'N/A'} bytes`,
-          );
-          if (!segInfo.exists) {
-            throw new Error("Recording file was not saved. Please try recording again.");
-          }
-          if ((segInfo.size ?? 0) === 0) {
-            throw new Error("Recording file is empty (0 bytes). Please try recording again.");
-          }
-        }
-
-        console.log(`[camera] Segment validation COMPLETE — took ${Date.now() - _validateT0}ms, t=${Date.now() - _finalizeT0}ms since FINISHED`);
-
-        // All segments validated — append one Clip per segment in recording order.
-        const _appendT0 = Date.now();
-        for (const uri of uris) {
-          const clip: Clip = {
-            id: newClipId(),
-            uri,
-            type: "video",
-            durationMs: undefined, // editor computes it per clip
-            recordingSessionId: sessionId,
-          };
-          appendClip(clip);
-          // Save each segment to the gallery — each is a standalone video file
-          // the user would expect to appear in their camera roll.
-          saveToGallery(uri).catch(() => {});
-          console.log(`[camera] Clip created — id: ${clip.id}, uri: ${uri.slice(0, 60)} — t=${Date.now() - _appendT0}ms since append start`);
-        }
-      } catch (finalizeErr) {
-        const errMsg = finalizeErr instanceof Error ? finalizeErr.message : String(finalizeErr);
-        console.error("[camera] Finalize failed:", errMsg, finalizeErr);
-        setIsMergingSync(false);
-        // Validation error — no clips are created, the underlying files are
-        // missing/corrupted. Surface the message to the user.
-        setError(errMsg);
+      console.log(`[camera] Finalize — appending ${uris.length} clip(s) — t=${Date.now() - _finalizeT0}ms since FINISHED`);
+      for (const uri of uris) {
+        const clip: Clip = {
+          id: newClipId(),
+          uri,
+          type: "video",
+          durationMs: undefined, // editor computes it per clip
+          recordingSessionId: sessionId,
+        };
+        appendClip(clip);
+        // Save each segment to the gallery — fire-and-forget, never blocks UI.
+        saveToGallery(uri).catch(() => {});
+        console.log(`[camera] Clip created — id: ${clip.id}, uri: ${uri.slice(0, 60)}`);
       }
     }
+
+    // NOW mark recording as idle — after clips are appended so the Next
+    // button appears in the same frame the REC indicator disappears.
+    setRecordStateSync("idle");
 
     console.log(`[camera] Finalize DONE — total t=${Date.now() - _finalizeT0}ms since FINISHED`);
     recordingStartedAtRef.current = null;

@@ -36,7 +36,6 @@ import {
 } from "lucide-react-native";
 
 import PrimaryButton from "@/components/PrimaryButton";
-import { getInfoAsync } from "@/lib/fileSystemCompat";
 import { supabase } from "@/lib/supabase";
 import { theme, getDropWindowState } from "@/constants/theme";
 import { useCameraRecorder, type Clip, MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
@@ -392,16 +391,16 @@ export default function CameraScreen() {
 
   // ─── Flip camera with flash ───────────────────────────────────
 
-  /** Subtle quick flash — not a full whiteout. The underlying session
-   *  swap is handled by the recording loop's fixed delay; this is just
-   *  visual feedback so the user sees the flip registered instantly.
-   *  0.35 opacity + 180ms fade ≈ Snapchat's near-instant flip feel. */
+  /** Flip cover — an opaque white overlay that hides the native CameraView
+   *  session rebuild during a camera flip. The native session goes fully
+   *  black for ~150-250ms when swapping devices; this cover starts opaque
+   *  and fades out over 300ms, covering the gap seamlessly. */
   const triggerFlipFlash = useCallback(() => {
     if (flipAnimRef.current) flipAnimRef.current.stop();
-    flipFlashOpacity.setValue(0.35);
+    flipFlashOpacity.setValue(1);
     flipAnimRef.current = Animated.timing(flipFlashOpacity, {
       toValue: 0,
-      duration: 180,
+      duration: 300,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     });
@@ -504,37 +503,10 @@ export default function CameraScreen() {
     const _goToEditT0 = Date.now();
     console.log(`[camera] goToEdit START — ${clips.length} clip(s) — t=${_goToEditT0}`);
 
-    // Verify all clip files in parallel — files were already validated in
-    // finalize, but this catches any post-finalize corruption. Running them
-    // concurrently avoids blocking the JS thread sequentially.
-    const videoClips = clips.filter((c) => c.type === "video" && c.uri);
-    if (videoClips.length > 0) {
-      try {
-        const infos = await Promise.all(
-          videoClips.map((clip) => getInfoAsync(clip.uri!)),
-        );
-        for (let i = 0; i < videoClips.length; i++) {
-          const clip = videoClips[i]!;
-          const info = infos[i]!;
-          console.log(
-            `[camera] goToEdit — clip ${clip.id}: ${clip.uri!.slice(0, 60)}, exists: ${info.exists}, size: ${info.exists ? (info.size ?? 0) : "N/A"}`,
-          );
-          if (!info.exists) {
-            setError("Video file is missing. Please record again.");
-            return;
-          }
-          if ((info.size ?? 0) === 0) {
-            setError("Video file is empty. Please record again.");
-            return;
-          }
-        }
-      } catch (e) {
-        console.error("[camera] goToEdit — file check failed", e);
-        setError("Could not verify video file. Please try again.");
-        return;
-      }
-    }
-
+    // No getInfoAsync validation here — the files were just written by
+    // recordAsync and the editor's Video component will surface any load
+    // errors. The redundant check added 100-250ms of blocking before
+    // navigation, causing a visible black flash on the camera screen.
     const params: Record<string, string> = {
       clips: JSON.stringify(clips),
     };
@@ -691,7 +663,8 @@ export default function CameraScreen() {
         </GestureDetector>
       </View>
 
-      {/* Flip flash — brief white flash on successful camera switch */}
+      {/* Flip cover — opaque white overlay that hides the native session
+          rebuild gap during camera flip. Fades from 1→0 over 300ms. */}
       <Animated.View
         pointerEvents="none"
         style={[
