@@ -282,13 +282,18 @@ export const FeedItem = memo(function FeedItem({
   const slotALoadedUriRef = useRef<string | null>(null);
   const slotBLoadedUriRef = useRef<string | null>(null);
 
-  // Crossfade opacity for smooth segment transitions (~120ms dissolve)
+  // Crossfade opacity for smooth segment transitions (~200ms dissolve)
   const slotAOpacity = useRef(new Animated.Value(1)).current;
   const slotBOpacity = useRef(new Animated.Value(0)).current;
   // Pending crossfade: when the incoming slot isn't ready at swap time, we
   // defer the crossfade until onReadyForDisplay fires. This ref holds the
   // slot that needs to fade in once ready, so onReadySlotA/B can trigger it.
   const pendingCrossfadeRef = useRef<{ incomingSlot: 0 | 1 } | null>(null);
+  // Timestamp of the last slot swap — used to ignore stale position reports
+  // from the outgoing slot that arrive before the incoming slot's seek-to-0
+  // completes. Without this, a stale position near trimEnd triggers a
+  // premature END OF SEGMENT on the incoming segment.
+  const slotSwapTimeRef = useRef<number>(0);
 
   const preloadUri = useMemo<string>(
     () => allSegments[(segIdx + 1) % allSegments.length] ?? post.media_url,
@@ -543,25 +548,26 @@ export const FeedItem = memo(function FeedItem({
     const newActiveRef = newSlot === 0 ? videoRefA.current : videoRefB.current;
     activeVideoRef.current = newActiveRef;
     preloadReadyRef.current = false;
+    slotSwapTimeRef.current = Date.now();
 
     setActiveSlot(newSlot);
     setSegIdx(next);
     segIdxRef.current = next;
 
-    // Helper to run the crossfade animation
+    // Helper to run the crossfade animation (200ms smooth dissolve)
     const runCrossfade = () => {
       const outgoingOpacity = newSlot === 0 ? slotBOpacity : slotAOpacity;
       const incomingOpacity = newSlot === 0 ? slotAOpacity : slotBOpacity;
       Animated.parallel([
         Animated.timing(outgoingOpacity, {
           toValue: 0,
-          duration: 120,
+          duration: 200,
           easing: Easing.out(Easing.ease),
           useNativeDriver: true,
         }),
         Animated.timing(incomingOpacity, {
           toValue: 1,
-          duration: 120,
+          duration: 200,
           easing: Easing.out(Easing.ease),
           useNativeDriver: true,
         }),
@@ -579,14 +585,29 @@ export const FeedItem = memo(function FeedItem({
       // Preload was ready OR the slot already has this URI loaded (wrap-around
       // for 2-segment posts). The frame is already displayed on the new slot.
       // The source URI didn't change, so onReadyForDisplay will NOT re-fire.
-      // Seek to start, play immediately, and crossfade now since the frame is ready.
+      // Seek to start FIRST, then crossfade once the seek resolves — so the
+      // incoming slot shows position 0 during the dissolve, not a stale frame
+      // from the previous segment's end position.
       playbackReadyRef.current = true;
       readyForDisplayRef.current = true;
       setPlaybackReady(true);
-      newActiveRef?.setPositionAsync(seekTo).catch(() => {});
       pendingCrossfadeRef.current = null;
-      runCrossfade();
-      console.log(`[FeedItem:${post.id}] advanceSegment — ${wasPreloadReady ? 'preload WAS ready' : 'slot already loaded'}, seeked to ${seekTo}, playbackReady=true, crossfade started`);
+      const seekPromise = newActiveRef?.setPositionAsync(seekTo);
+      if (seekPromise) {
+        seekPromise
+          .then(() => {
+            runCrossfade();
+            console.log(`[FeedItem:${post.id}] advanceSegment — ${wasPreloadReady ? 'preload WAS ready' : 'slot already loaded'}, seeked to ${seekTo}, crossfade started AFTER seek`);
+          })
+          .catch(() => {
+            // Seek failed — crossfade anyway so we don't freeze
+            runCrossfade();
+            console.log(`[FeedItem:${post.id}] advanceSegment — seek FAILED, crossfade started as fallback`);
+          });
+      } else {
+        runCrossfade();
+        console.log(`[FeedItem:${post.id}] advanceSegment — no seekPromise, crossfade started immediately`);
+      }
     } else {
       // Preload wasn't ready and the slot has a different URI loaded.
       // onReadyForDisplay WILL fire when the fresh load completes.
@@ -608,24 +629,19 @@ export const FeedItem = memo(function FeedItem({
 
       if (!status.isLoaded) return;
 
-      // DIAGNOSTIC: log key status fields during transitions
-      if (!playbackReadyRef.current || status.isBuffering || status.didJustFinish) {
-        console.log(`[FeedItem:${post.id}] onSegmentStatus`, {
-          segIdx: segIdxRef.current,
-          activeSlot: activeSlotRef.current,
-          positionMs: status.positionMillis,
-          durationMs: status.durationMillis,
-          isPlaying: status.isPlaying,
-          isBuffering: status.isBuffering,
-          didJustFinish: status.didJustFinish,
-          playbackReady: playbackReadyRef.current,
-          readyForDisplay: readyForDisplayRef.current,
-          preloadReady: preloadReadyRef.current,
-          trimEnd: trimEndRef.current,
-          trimEndHandled: trimEndHandledRef.current,
-          durationSet: durationSetRef.current,
-        });
-      }
+      // SEGTRACE: log segIdx + position on every status update for frame-by-frame analysis
+      console.log(`[FeedItem:${post.id}] SEGTRACE`, {
+        segIdx: segIdxRef.current,
+        activeSlot: activeSlotRef.current,
+        posMs: status.positionMillis,
+        durMs: status.durationMillis,
+        isPlaying: status.isPlaying,
+        isBuffering: status.isBuffering,
+        didJustFinish: status.didJustFinish,
+        trimEnd: trimEndRef.current,
+        trimEndHandled: trimEndHandledRef.current,
+        msSinceSwap: Date.now() - slotSwapTimeRef.current,
+      });
 
       // ── Pre-buffer gate ──
       // Only pass on a real onReadyForDisplay event (readyForDisplayRef set
@@ -657,8 +673,17 @@ export const FeedItem = memo(function FeedItem({
         }
       }
 
+      // ── Stale position guard ──
+      // After a slot swap, the outgoing slot's last position report can
+      // arrive before the incoming slot's seek-to-0 completes. This stale
+      // position (often near the previous segment's trimEnd) can trigger a
+      // premature END OF SEGMENT on the new segment. Skip end-of-segment
+      // detection for 400ms after a slot swap to let the seek settle.
+      const msSinceSwap = Date.now() - slotSwapTimeRef.current;
+      const isStalePosition = msSinceSwap < 400;
+
       // ── Unified end-of-segment detection ──
-      if (!status.didJustFinish && !trimEndHandledRef.current && sourceDur > 0) {
+      if (!isStalePosition && !status.didJustFinish && !trimEndHandledRef.current && sourceDur > 0) {
         const effectiveTrimEnd =
           trimEndRef.current > 0
             ? Math.min(trimEndRef.current, sourceDur)
@@ -765,11 +790,37 @@ export const FeedItem = memo(function FeedItem({
       // Trigger deferred crossfade if this slot was the incoming one
       if (pendingCrossfadeRef.current?.incomingSlot === 0) {
         pendingCrossfadeRef.current = null;
-        console.log(`[FeedItem:${post.id}] SLOT_A active onReady — triggering DEFERRED crossfade`);
-        Animated.parallel([
-          Animated.timing(slotBOpacity, { toValue: 0, duration: 120, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-          Animated.timing(slotAOpacity, { toValue: 1, duration: 120, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-        ]).start();
+        // Seek to start FIRST, then crossfade once seek resolves — so the
+        // incoming slot shows position 0 during the dissolve, not a stale frame.
+        const trim =
+          post.trim_data && segIdxRef.current < post.trim_data.length
+            ? post.trim_data[segIdxRef.current]
+            : null;
+        const seekTo = trim?.trimStartMs ?? 0;
+        const seekPromise = videoRefA.current?.setPositionAsync(seekTo);
+        if (seekPromise) {
+          seekPromise
+            .then(() => {
+              console.log(`[FeedItem:${post.id}] SLOT_A active onReady — triggering DEFERRED crossfade AFTER seek to ${seekTo}`);
+              Animated.parallel([
+                Animated.timing(slotBOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+                Animated.timing(slotAOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+              ]).start();
+            })
+            .catch(() => {
+              console.log(`[FeedItem:${post.id}] SLOT_A active onReady — seek FAILED, crossfade as fallback`);
+              Animated.parallel([
+                Animated.timing(slotBOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+                Animated.timing(slotAOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+              ]).start();
+            });
+        } else {
+          console.log(`[FeedItem:${post.id}] SLOT_A active onReady — no seekPromise, crossfade immediately`);
+          Animated.parallel([
+            Animated.timing(slotBOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+            Animated.timing(slotAOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          ]).start();
+        }
       }
       if (!playbackReadyRef.current) {
         playbackReadyRef.current = true;
@@ -781,7 +832,10 @@ export const FeedItem = memo(function FeedItem({
             ? post.trim_data[segIdxRef.current]
             : null;
         const seekTo = trim?.trimStartMs ?? 0;
-        videoRefA.current?.setPositionAsync(seekTo).catch(() => {});
+        if (!pendingCrossfadeRef.current) {
+          // Only seek here if the deferred crossfade path didn't already seek
+          videoRefA.current?.setPositionAsync(seekTo).catch(() => {});
+        }
         console.log(`[FeedItem:${post.id}] SLOT_A active onReady — playbackReady=true, seeked to ${seekTo}`);
         if (prebufferTimerRef.current) {
           clearTimeout(prebufferTimerRef.current);
@@ -813,11 +867,37 @@ export const FeedItem = memo(function FeedItem({
       // Trigger deferred crossfade if this slot was the incoming one
       if (pendingCrossfadeRef.current?.incomingSlot === 1) {
         pendingCrossfadeRef.current = null;
-        console.log(`[FeedItem:${post.id}] SLOT_B active onReady — triggering DEFERRED crossfade`);
-        Animated.parallel([
-          Animated.timing(slotAOpacity, { toValue: 0, duration: 120, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-          Animated.timing(slotBOpacity, { toValue: 1, duration: 120, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-        ]).start();
+        // Seek to start FIRST, then crossfade once seek resolves — so the
+        // incoming slot shows position 0 during the dissolve, not a stale frame.
+        const trim =
+          post.trim_data && segIdxRef.current < post.trim_data.length
+            ? post.trim_data[segIdxRef.current]
+            : null;
+        const seekTo = trim?.trimStartMs ?? 0;
+        const seekPromise = videoRefB.current?.setPositionAsync(seekTo);
+        if (seekPromise) {
+          seekPromise
+            .then(() => {
+              console.log(`[FeedItem:${post.id}] SLOT_B active onReady — triggering DEFERRED crossfade AFTER seek to ${seekTo}`);
+              Animated.parallel([
+                Animated.timing(slotAOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+                Animated.timing(slotBOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+              ]).start();
+            })
+            .catch(() => {
+              console.log(`[FeedItem:${post.id}] SLOT_B active onReady — seek FAILED, crossfade as fallback`);
+              Animated.parallel([
+                Animated.timing(slotAOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+                Animated.timing(slotBOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+              ]).start();
+            });
+        } else {
+          console.log(`[FeedItem:${post.id}] SLOT_B active onReady — no seekPromise, crossfade immediately`);
+          Animated.parallel([
+            Animated.timing(slotAOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+            Animated.timing(slotBOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          ]).start();
+        }
       }
       if (!playbackReadyRef.current) {
         playbackReadyRef.current = true;
@@ -828,7 +908,10 @@ export const FeedItem = memo(function FeedItem({
             ? post.trim_data[segIdxRef.current]
             : null;
         const seekTo = trim?.trimStartMs ?? 0;
-        videoRefB.current?.setPositionAsync(seekTo).catch(() => {});
+        if (!pendingCrossfadeRef.current) {
+          // Only seek here if the deferred crossfade path didn't already seek
+          videoRefB.current?.setPositionAsync(seekTo).catch(() => {});
+        }
         console.log(`[FeedItem:${post.id}] SLOT_B active onReady — playbackReady=true, seeked to ${seekTo}`);
         if (prebufferTimerRef.current) {
           clearTimeout(prebufferTimerRef.current);
