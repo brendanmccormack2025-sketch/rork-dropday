@@ -8,6 +8,23 @@ import { showAlert } from "@/lib/showAlert";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { concatMP4Files } from "@/src/integrations/concatMP4";
 
+/**
+ * Returns the device's IANA timezone string (e.g. 'America/New_York').
+ * Falls back to a UTC offset string if the runtime doesn't support
+ * `Intl.DateTimeFormat().resolvedOptions().timeZone`.
+ */
+function getDeviceTimezone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && tz.length > 0) return tz;
+  } catch {
+    // ignore
+  }
+  // Fallback: construct a UTC offset like 'UTC-5'
+  const offset = -new Date().getTimezoneOffset() / 60;
+  return `UTC${offset >= 0 ? '+' : ''}${offset}`;
+}
+
 import { useAuth, ensureProfileById } from "@/providers/AuthProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { getDropWindowState } from "@/constants/theme";
@@ -1482,11 +1499,19 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         throw new Error("Not signed in.");
       }
 
-      // TODO: Re-enable drop window check before launch
-      // const win = getDropWindowState(new Date());
-      // if (!win.isOpen) {
-      //   throw new Error("Drop window is closed. Save as draft and post when it opens at 8 PM.");
-      // }
+      // ── Client-side pre-check: reject top-level Drops outside the 8-10 PM window ──
+      // This prevents wasting time uploading a large video file only to have the
+      // server-side trigger reject it. The server-side trigger is the real
+      // enforcement; this is just an optimisation to fail fast.
+      // Reactions (parentPostId set) are never restricted.
+      if (!input.parentPostId) {
+        const win = getDropWindowState(new Date());
+        if (!win.isOpen) {
+          throw new Error(
+            "Drops can only be posted between 8 PM and 10 PM your time. Save as draft and try again during tonight's drop window!",
+          );
+        }
+      }
 
       const baseTs = Date.now();
       const isRemoteUrl = input.uri.startsWith("http");
@@ -1728,6 +1753,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         parent_post_id: input.parentPostId || null,
         segments: segmentUrls,
         is_mature: !!input.isMature,
+        poster_timezone: getDeviceTimezone(),
       };
       if (input.trimData && input.trimData.length > 0) {
         row.trim_data = input.trimData;

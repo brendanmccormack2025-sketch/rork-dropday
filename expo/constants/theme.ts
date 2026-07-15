@@ -17,8 +17,8 @@ export const theme = {
 } as const;
 
 export const DROP_WINDOW = {
-  startHour: 20,
-  endHour: 24,
+  startHour: 20, // 8 PM
+  endHour: 22,   // 10 PM
 } as const;
 
 export interface DropWindowState {
@@ -33,8 +33,13 @@ export function getDropWindowState(now: Date = new Date()): DropWindowState {
   const start = new Date(now);
   start.setHours(DROP_WINDOW.startHour, 0, 0, 0);
   const end = new Date(now);
-  end.setHours(0, 0, 0, 0);
-  end.setDate(end.getDate() + 1);
+  end.setHours(DROP_WINDOW.endHour, 0, 0, 0);
+
+  // If end would be before start (shouldn't happen with 20→22, but guard anyway),
+  // push end to the next day.
+  if (end <= start) {
+    end.setDate(end.getDate() + 1);
+  }
 
   const isOpen = now >= start && now < end;
   let msUntilOpen = start.getTime() - now.getTime();

@@ -153,6 +153,7 @@ export type Database = {
           moderation_status: string
           original_duration_ms: number | null
           parent_post_id: string | null
+          poster_timezone: string | null
           reaction_count: number
           segments: Json | null
           text_overlays: Json | null
@@ -173,6 +174,7 @@ export type Database = {
           moderation_status?: string
           original_duration_ms?: number | null
           parent_post_id?: string | null
+          poster_timezone?: string | null
           reaction_count?: number
           segments?: Json | null
           text_overlays?: Json | null
@@ -193,6 +195,7 @@ export type Database = {
           moderation_status?: string
           original_duration_ms?: number | null
           parent_post_id?: string | null
+          poster_timezone?: string | null
           reaction_count?: number
           segments?: Json | null
           text_overlays?: Json | null
@@ -373,6 +376,7 @@ export type Database = {
           moderation_status: string
           original_duration_ms: number | null
           parent_post_id: string | null
+          poster_timezone: string | null
           reaction_count: number
           segments: Json | null
           text_overlays: Json | null

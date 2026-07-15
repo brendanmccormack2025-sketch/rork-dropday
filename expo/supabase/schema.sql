@@ -67,6 +67,7 @@ create table if not exists public.posts (
   trim_data jsonb,
   text_overlays jsonb,
   thumbnail_url text,
+  poster_timezone text,
   like_count integer default 0,
   comment_count integer default 0,
   reaction_count integer not null default 0,
