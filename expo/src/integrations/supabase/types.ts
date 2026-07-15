@@ -23,16 +23,19 @@ export type Database = {
           created_at: string | null
           followee_id: string
           follower_id: string
+          status: string
         }
         Insert: {
           created_at?: string | null
           followee_id: string
           follower_id: string
+          status?: string
         }
         Update: {
           created_at?: string | null
           followee_id?: string
           follower_id?: string
+          status?: string
         }
         Relationships: [
           {
@@ -84,6 +87,58 @@ export type Database = {
           },
         ]
       }
+      notifications: {
+        Row: {
+          actor_id: string
+          created_at: string | null
+          id: string
+          post_id: string | null
+          read: boolean
+          recipient_id: string
+          type: string
+        }
+        Insert: {
+          actor_id: string
+          created_at?: string | null
+          id?: string
+          post_id?: string | null
+          read?: boolean
+          recipient_id: string
+          type: string
+        }
+        Update: {
+          actor_id?: string
+          created_at?: string | null
+          id?: string
+          post_id?: string | null
+          read?: boolean
+          recipient_id?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       posts: {
         Row: {
           audio_url: string | null
@@ -91,9 +146,11 @@ export type Database = {
           comment_count: number | null
           created_at: string | null
           id: string
+          is_mature: boolean
           like_count: number | null
           media_type: string
           media_url: string
+          moderation_status: string
           original_duration_ms: number | null
           parent_post_id: string | null
           reaction_count: number
@@ -109,9 +166,11 @@ export type Database = {
           comment_count?: number | null
           created_at?: string | null
           id?: string
+          is_mature?: boolean
           like_count?: number | null
           media_type: string
           media_url: string
+          moderation_status?: string
           original_duration_ms?: number | null
           parent_post_id?: string | null
           reaction_count?: number
@@ -127,9 +186,11 @@ export type Database = {
           comment_count?: number | null
           created_at?: string | null
           id?: string
+          is_mature?: boolean
           like_count?: number | null
           media_type?: string
           media_url?: string
+          moderation_status?: string
           original_duration_ms?: number | null
           parent_post_id?: string | null
           reaction_count?: number
@@ -160,10 +221,13 @@ export type Database = {
         Row: {
           avatar_url: string | null
           bio: string | null
+          birthdate: string | null
           created_at: string | null
           display_name: string | null
           id: string
           instagram_handle: string | null
+          is_private: boolean
+          terms_accepted_at: string | null
           tiktok_handle: string | null
           username: string
           website: string | null
@@ -171,10 +235,13 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           bio?: string | null
+          birthdate?: string | null
           created_at?: string | null
           display_name?: string | null
           id: string
           instagram_handle?: string | null
+          is_private?: boolean
+          terms_accepted_at?: string | null
           tiktok_handle?: string | null
           username: string
           website?: string | null
@@ -182,21 +249,96 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           bio?: string | null
+          birthdate?: string | null
           created_at?: string | null
           display_name?: string | null
           id?: string
           instagram_handle?: string | null
+          is_private?: boolean
+          terms_accepted_at?: string | null
           tiktok_handle?: string | null
           username?: string
           website?: string | null
         }
         Relationships: []
       }
+      reports: {
+        Row: {
+          created_at: string | null
+          id: string
+          reason: string
+          reporter_id: string
+          status: string
+          target_id: string
+          target_type: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          reason: string
+          reporter_id: string
+          status?: string
+          target_id: string
+          target_type: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          reason?: string
+          reporter_id?: string
+          status?: string
+          target_id?: string
+          target_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reports_reporter_id_fkey"
+            columns: ["reporter_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_blocks: {
+        Row: {
+          blocked_id: string
+          blocker_id: string
+          created_at: string | null
+        }
+        Insert: {
+          blocked_id: string
+          blocker_id: string
+          created_at?: string | null
+        }
+        Update: {
+          blocked_id?: string
+          blocker_id?: string
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_blocks_blocked_id_fkey"
+            columns: ["blocked_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_blocks_blocker_id_fkey"
+            columns: ["blocker_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      age_tier: { Args: { birthdate: string }; Returns: string }
       get_avatar_debug: {
         Args: never
         Returns: {
@@ -224,9 +366,11 @@ export type Database = {
           comment_count: number | null
           created_at: string | null
           id: string
+          is_mature: boolean
           like_count: number | null
           media_type: string
           media_url: string
+          moderation_status: string
           original_duration_ms: number | null
           parent_post_id: string | null
           reaction_count: number
