@@ -377,7 +377,6 @@ export default function ReactionTreeScreen() {
           <Pressable
             onPress={() => {
               if (!id) return;
-              console.log("[reaction-tree] Record Reaction tapped — id:", id.slice(0, 8));
               router.push(`/camera?reactingTo=${id}` as never);
             }}
             style={({ pressed }) => [
@@ -471,9 +470,6 @@ function ReactionItem({
 
     prebufferTimerRef.current = setTimeout(() => {
       if (!playbackReadyRef.current) {
-        console.log("[reaction-tree] pre-buffer safety timeout — forcing playback", {
-          postId: post.id.slice(0, 8),
-        });
         playbackReadyRef.current = true;
         setPlaybackReady(true);
       }
@@ -508,7 +504,6 @@ function ReactionItem({
 
   // ── Stall detection + recovery ─────────────────────────────────────
   const videoLog = useCallback((e: VideoEvent) => {
-    console.log("[reaction-tree] video", e);
   }, []);
 
   const {
@@ -539,11 +534,6 @@ function ReactionItem({
             clearTimeout(prebufferTimerRef.current);
             prebufferTimerRef.current = null;
           }
-          console.log("[reaction-tree] pre-buffer complete, starting playback", {
-            postId: post.id.slice(0, 8),
-            trigger: hasFrame ? "onReadyForDisplay" : "notBuffering",
-            playableDurationMs: status.playableDurationMillis,
-          });
         }
       }
     },
@@ -631,9 +621,6 @@ function ReactionItem({
                   clearTimeout(prebufferTimerRef.current);
                   prebufferTimerRef.current = null;
                 }
-                console.log("[reaction-tree] onReadyForDisplay — starting playback", {
-                  postId: post.id.slice(0, 8),
-                });
               }
             }}
           />

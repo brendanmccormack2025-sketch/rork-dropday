@@ -25,7 +25,6 @@ import { NotificationsProvider } from "@/providers/NotificationsProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { theme } from "@/constants/theme";
 
-console.log("[DEBUG] Supabase URL in use:", process.env.EXPO_PUBLIC_SUPABASE_URL);
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 

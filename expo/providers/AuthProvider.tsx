@@ -14,7 +14,6 @@ import { supabase, SUPABASE_READY } from "@/lib/supabase";
  * Exported so createPost and other mutations can self-heal when a profile is missing.
  */
 export async function ensureProfile(user: User, displayNameOverride?: string) {
-  console.log("[auth:ensureProfile] checking profile for", user.id.slice(0, 12));
   const { data: existing, error: selErr } = await supabase
     .from("profiles")
     .select("id")
@@ -24,24 +23,17 @@ export async function ensureProfile(user: User, displayNameOverride?: string) {
     console.warn("[auth] ensureProfile select error", selErr.message, selErr);
   }
   if (existing) {
-    console.log("[auth:ensureProfile] profile already exists, skipping insert");
     return;
   }
-  console.log("[auth:ensureProfile] no profile found, creating one");
   const metaUsername = (user.user_metadata?.username as string | undefined)?.trim();
   const fallback = `dropper_${user.id.slice(0, 8)}`;
   const username = metaUsername && metaUsername.length > 0 ? metaUsername : fallback;
   const display_name = displayNameOverride?.trim() || username;
-  console.log("[auth:ensureProfile] inserting", { username, display_name });
   const { error: insErr } = await supabase
     .from("profiles")
     .insert({ id: user.id, username, display_name });
   if (insErr && insErr.code !== "23505") {
     console.warn("[auth] ensureProfile insert error", insErr.message);
-  } else if (insErr) {
-    console.log("[auth:ensureProfile] duplicate key (23505) — profile already exists");
-  } else {
-    console.log("[auth:ensureProfile] profile created successfully");
   }
 }
 
@@ -50,25 +42,21 @@ export async function ensureProfile(user: User, displayNameOverride?: string) {
  * Used by createPost for self-healing when the full User object isn't available.
  */
 export async function ensureProfileById(userId: string) {
-  console.log("[auth:ensureProfileById] checking profile for", userId.slice(0, 12));
   const { data: existing } = await supabase
     .from("profiles")
     .select("id")
     .eq("id", userId)
     .maybeSingle();
   if (existing) {
-    console.log("[auth:ensureProfileById] profile already exists");
     return;
   }
   const fallback = `dropper_${userId.slice(0, 8)}`;
-  console.log("[auth:ensureProfileById] creating profile with fallback username", fallback);
   const { error: insErr } = await supabase
     .from("profiles")
     .insert({ id: userId, username: fallback, display_name: fallback });
   if (insErr && insErr.code !== "23505") {
     console.warn("[auth] ensureProfileById insert error", insErr.message, insErr);
   } else {
-    console.log("[auth:ensureProfileById] profile created or already exists");
   }
 }
 
@@ -95,16 +83,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return;
     }
     let mounted = true;
-    console.log("[auth:init] getSession starting");
     supabase.auth
       .getSession()
       .then(({ data }) => {
         if (!mounted) return;
-        console.log("[auth:init] getSession result", {
-          hasSession: !!data.session,
-          userId: data.session?.user?.id?.slice(0, 12),
-          email: data.session?.user?.email,
-        });
         setState({
           session: data.session,
           user: data.session?.user ?? null,
@@ -125,12 +107,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         setState((s) => ({ ...s, loading: false }));
       });
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("[auth:event]", event, {
-        hasSession: !!session,
-        userId: session?.user?.id?.slice(0, 12),
-        email: session?.user?.email,
-        now: new Date().toISOString(),
-      });
       setState((prev) => ({
         ...prev,
         session,
@@ -143,7 +119,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       // profile is never created and posts fail with FK violations.
       if (event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") {
         if (session?.user) {
-          console.log("[auth:event]", event, "— calling ensureProfile");
           ensureProfile(session.user).catch((err) => {
             console.warn("[auth] ensureProfile failed", err?.message ?? err);
           });
@@ -182,13 +157,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       agreedToTerms?: boolean,
     ) => {
       if (inFlight.current.signUp) {
-        console.log("[auth] signUp already in flight, ignoring duplicate");
         return;
       }
       inFlight.current.signUp = true;
       try {
         const normalizedEmail = email.trim().toLowerCase();
-        console.log("[auth] signUp ->", normalizedEmail);
         const { data, error: signUpErr } = await supabase.auth.signUp({
           email: normalizedEmail,
           password,
@@ -221,20 +194,17 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           }
         }
         if (data.session) {
-          console.log("[auth] signUp returned session — user is signed in");
           return;
         }
         // No session returned — sign in explicitly so the user lands in
         // the app immediately. This handles the case where email
         // confirmation is disabled but signUp still doesn't return a
         // session (observed in some Supabase project configurations).
-        console.log("[auth] signUp no session — signing in explicitly");
         const { error: signInErr } = await supabase.auth.signInWithPassword({
           email: normalizedEmail,
           password,
         });
         if (signInErr) throw signInErr;
-        console.log("[auth] explicit sign-in succeeded");
       } finally {
         inFlight.current.signUp = false;
       }

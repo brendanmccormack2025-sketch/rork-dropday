@@ -199,7 +199,6 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
 
   // ── Stall detection + auto-recovery ───────────────────────────────
   const videoLog = useCallback((e: VideoEvent) => {
-    console.log("[reactions] video", e);
   }, []);
 
   const {

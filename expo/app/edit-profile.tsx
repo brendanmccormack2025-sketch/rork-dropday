@@ -49,7 +49,6 @@ async function uriToBlob(uri: string): Promise<Uint8Array> {
     throw new Error(`File read returned empty data from ${uri.slice(0, 60)}`);
   }
   const fileData = new Uint8Array(decode(base64));
-  console.log(`[uriToBlob] decoded size=${fileData.byteLength} from ${uri.slice(0, 60)}`);
   return fileData;
 }
 
@@ -139,7 +138,6 @@ export default function EditProfileScreen() {
         const ext = avatarUri.endsWith(".png") ? "png" : "jpg";
         const path = `${user.id}/avatar_${Date.now()}.${ext}`;
         const fileData = await uriToBlob(avatarUri);
-        console.log(`[saveProfile] uploading avatar size=${fileData.byteLength} to ${path}`);
         const { data: upData, error: upErr } = await supabase.storage
           .from(BUCKET)
           .upload(path, fileData, {
@@ -152,12 +150,10 @@ export default function EditProfileScreen() {
           setSaving(false);
           return;
         }
-        console.log(`[saveProfile] upload OK path=${upData?.path}`);
         const { data: pub } = supabase.storage
           .from(BUCKET)
           .getPublicUrl(path);
         finalAvatarUrl = pub.publicUrl;
-        console.log(`[saveProfile] publicUrl=${finalAvatarUrl?.slice(0, 80)}`);
       }
 
       await updateProfile.mutateAsync({

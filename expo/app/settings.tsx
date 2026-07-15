@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from "react";
 import {
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,7 +10,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { ChevronLeft, LogOut, Trash2, User } from "lucide-react-native";
+import { ChevronLeft, FileText, LogOut, Shield, Trash2, User } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -92,6 +93,52 @@ export default function SettingsScreen() {
             >
               <User color={theme.textMuted} size={18} strokeWidth={2} />
               <UiText style={styles.rowText}>Edit Profile</UiText>
+              <ChevronLeft
+                color={theme.textDim}
+                size={18}
+                strokeWidth={2}
+                style={{ transform: [{ rotate: "180deg" }] }}
+              />
+            </Pressable>
+          </View>
+
+          {/* Legal section */}
+          <UiText style={styles.sectionLabel}>Legal</UiText>
+          <View style={styles.sectionCard}>
+            <Pressable
+              onPress={() =>
+                Linking.openURL(
+                  "https://brendanmccormack2025-sketch.github.io/DropDay-Legal/privacy.html",
+                )
+              }
+              style={({ pressed }) => [
+                styles.row,
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Shield color={theme.textMuted} size={18} strokeWidth={2} />
+              <UiText style={styles.rowText}>Privacy Policy</UiText>
+              <ChevronLeft
+                color={theme.textDim}
+                size={18}
+                strokeWidth={2}
+                style={{ transform: [{ rotate: "180deg" }] }}
+              />
+            </Pressable>
+            <View style={styles.rowDivider} />
+            <Pressable
+              onPress={() =>
+                Linking.openURL(
+                  "https://brendanmccormack2025-sketch.github.io/DropDay-Legal/terms.html",
+                )
+              }
+              style={({ pressed }) => [
+                styles.row,
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <FileText color={theme.textMuted} size={18} strokeWidth={2} />
+              <UiText style={styles.rowText}>Terms of Use</UiText>
               <ChevronLeft
                 color={theme.textDim}
                 size={18}
@@ -224,6 +271,12 @@ const styles = StyleSheet.create({
     color: theme.danger,
     fontSize: 15,
     fontWeight: "700" as const,
+  },
+
+  rowDivider: {
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    marginLeft: 46,
   },
 
   footerText: {

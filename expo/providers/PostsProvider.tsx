@@ -291,9 +291,6 @@ async function uploadToStorage(
 ): Promise<void> {
   const maxRetries = 2;
 
-  console.log(
-    `[uploadToStorage] CALLED — fileUri: "${fileUri.slice(0, 80)}", sizeMB: ${sizeMB}, contentType: ${contentType}, attempt: ${attempt}/${maxRetries}`,
-  );
 
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;
@@ -301,13 +298,9 @@ async function uploadToStorage(
     console.error("[uploadToStorage] ABORT — no access token from session");
     throw new Error("Not authenticated — cannot upload files.");
   }
-  console.log("[uploadToStorage] Auth token obtained — length:", token.length);
 
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${BUCKET}/${storagePath}`;
 
-  console.log(
-    `[uploadToStorage] START — ${sizeMB} MB → ${BUCKET}/${storagePath} (${contentType}, attempt ${attempt}/${maxRetries})`,
-  );
   const startTime = Date.now();
 
   try {
@@ -334,9 +327,6 @@ async function uploadToStorage(
 
         xhr.onload = () => {
           const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
-          console.log(
-            `[uploadToStorage] DONE in ${durationSec}s — HTTP ${xhr.status}`,
-          );
           if (xhr.status >= 200 && xhr.status < 300) {
             resolve();
           } else {
@@ -378,7 +368,6 @@ async function uploadToStorage(
       });
     } else {
       // ── Web: fetch + FormData ──────────────────────────────────────
-      console.log("[uploadToStorage] WEB path — preparing FormData...");
 
       // Fire initial progress so the UI updates from "Uploading... 0%"
       if (onProgress) onProgress(0, 1);
@@ -386,13 +375,9 @@ async function uploadToStorage(
       let body: Blob | { uri: string; type: string; name: string };
 
       if (fileUri.startsWith("data:")) {
-        console.log("[uploadToStorage] WEB — resolving data: URI to Blob...");
         const blobStart = Date.now();
         try {
           body = await fetch(fileUri).then((r) => r.blob());
-          console.log(
-            `[uploadToStorage] WEB — Blob created in ${Date.now() - blobStart}ms, size: ${(body as Blob).size} bytes, type: ${(body as Blob).type}`,
-          );
         } catch (blobErr) {
           console.error("[uploadToStorage] WEB — FAILED to create Blob from data URI:", {
             message: (blobErr as Error)?.message,
@@ -409,12 +394,10 @@ async function uploadToStorage(
           type: contentType,
           name: storagePath.split("/").pop() ?? "file",
         } as unknown as { uri: string; type: string; name: string };
-        console.log("[uploadToStorage] WEB — using file URI object");
       }
 
       const formData = new FormData();
       formData.append("file", body as unknown as Blob);
-      console.log("[uploadToStorage] WEB — FormData built, starting fetch POST...");
 
       // Show "uploading" progress after prep
       if (onProgress) onProgress(0.2, 1);
@@ -442,14 +425,10 @@ async function uploadToStorage(
       }
 
       const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(
-        `[uploadToStorage] WEB — fetch completed in ${durationSec}s — HTTP ${response.status} ${response.statusText}`,
-      );
 
       // Log response headers for debugging
       const headers: Record<string, string> = {};
       response.headers.forEach((v, k) => { headers[k] = v; });
-      console.log("[uploadToStorage] WEB — response headers:", JSON.stringify(headers).slice(0, 300));
 
       if (!response.ok) {
         const errText = await response
@@ -465,7 +444,6 @@ async function uploadToStorage(
 
       // Fire 100% on success
       if (onProgress) onProgress(1, 1);
-      console.log("[uploadToStorage] WEB — upload SUCCESS");
     }
   } catch (err) {
     const durationMs = Date.now() - startTime;
@@ -503,7 +481,6 @@ async function uploadToStorage(
     );
 
     if (attempt < maxRetries && isTimeout) {
-      console.log(`[uploadToStorage] Retrying in 2s (fresh request)...`);
       // Wait so any lingering broken session fully closes before retrying
       await new Promise((r) => setTimeout(r, 2000));
       return uploadToStorage(
@@ -1069,7 +1046,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (error) throw error;
     },
     onSuccess: () => {
-      console.log("[updateProfile] success — invalidating queries");
       qc.invalidateQueries({ queryKey: ["profile", user?.id] });
       qc.invalidateQueries({ queryKey: ["suggested", user?.id] });
       qc.invalidateQueries({ queryKey: ["posts"] });
@@ -1137,12 +1113,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
   const followUser = useMutation({
     mutationFn: async (followeeId: string) => {
-      console.log("[follow-debug] followUser mutationFn called with:", followeeId);
       if (!user?.id) throw new Error("Not signed in.");
       const { data, error } = await supabase
         .from("follows")
         .insert({ follower_id: user.id, followee_id: followeeId });
-      console.log("[follow-debug] follow insert result:", { data, error });
       if (error) throw error;
     },
     onSuccess: (_data, followeeId) => {
@@ -1492,7 +1466,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       optimisticTempId?: string;
       onProgress?: (percent: number) => void;
     }) => {
-      console.log("[createPost] mutationFn START — user:", user?.id?.slice(0, 8), "mediaType:", input.mediaType, "hasSegmentUris:", !!input.segmentUris?.length, "hasThumbnail:", !!input.thumbnailUri, "draftId:", input.draftId?.slice(0, 8), "platform:", Platform.OS, "uriStart:", input.uri.slice(0, 60), "parentPostId:", input.parentPostId?.slice(0, 8));
 
       if (!user?.id) {
         console.error("[createPost] mutationFn ABORT — no user.id");
@@ -1528,7 +1501,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       /*
       if (input.parentPostId && input.mediaType === "video" && !isRemoteUrl) {
         try {
-          console.log("[createPost] STITCH: fetching parent post", input.parentPostId.slice(0, 8));
           input.onProgress?.(5);
 
           // Fetch parent post to get its media_url
@@ -1545,18 +1517,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             );
           } else {
             const parentUrl = parentPost.media_url as string;
-            console.log("[createPost] STITCH: parent URL:", parentUrl.slice(0, 60));
 
             // Download parent clip to cache directory
             parentDownloadUri = cacheDirectory + `stitch_parent_${baseTs}.mp4`;
             input.onProgress?.(10);
 
-            console.log("[createPost] STITCH: downloading parent to", parentDownloadUri.slice(0, 60));
             const downloadResult = await downloadAsync(parentUrl, parentDownloadUri);
-            console.log(
-              "[createPost] STITCH: download result — status:",
-              downloadResult?.status,
-            );
 
             if (!downloadResult || downloadResult.status < 200 || downloadResult.status >= 300) {
               console.warn(
@@ -1571,12 +1537,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
               // Stitch: parent + reaction
               stitchedUri = cacheDirectory + `stitch_output_${baseTs}.mp4`;
-              console.log(
-                "[createPost] STITCH: concatenating — parent:",
-                parentDownloadUri.slice(0, 50),
-                "+ reaction:",
-                input.uri.slice(0, 50),
-              );
 
               const stitchResult = await concatMP4Files(
                 parentDownloadUri,
@@ -1593,15 +1553,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
                 await deleteAsync(stitchedUri, { idempotent: true }).catch(() => {});
                 stitchedUri = null;
               } else {
-                console.log(
-                  "[createPost] STITCH SUCCESS — combined duration:",
-                  stitchResult.combinedDurationMs,
-                  "ms (parent:",
-                  stitchResult.parentDurationMs,
-                  "+ reaction:",
-                  stitchResult.reactionDurationMs,
-                  ")",
-                );
                 uploadUri = stitchedUri;
               }
             }
@@ -1643,11 +1594,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const uploadedUrls: string[] = [];
         for (let i = 0; i < urisToUpload.length; i++) {
           const segUri = urisToUpload[i]!;
-          console.log(`[createPost] STEP [${i}]: checking file — ${segUri.slice(0, 60)}`);
 
           // Verify the file exists on disk BEFORE attempting to upload.
           const fileInfo = await getInfoAsync(segUri);
-          console.log(`[createPost] STEP [${i}]: getInfoAsync result — exists=${fileInfo.exists}, size=${fileInfo.size}, isDir=${fileInfo.isDirectory ?? false}`);
           if (!fileInfo.exists) {
             const errMsg = `File does not exist at upload time: ${segUri.slice(0, 80)}`;
             console.error(`[createPost] ${errMsg}`);
@@ -1659,7 +1608,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             throw new Error(errMsg);
           }
           const sizeMB = ((fileInfo.size ?? 0) / (1024 * 1024)).toFixed(2);
-          console.log(`[createPost] File verified [${i}]: ${sizeMB} MB — ${segUri.slice(0, 60)}`);
 
           // Determine file extension and MIME type from the URI
           const uriExt = segUri.match(/\.(\w+)(?:\?|$)/)?.[1]?.toLowerCase();
@@ -1679,7 +1627,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           };
           const contentType = mimeByExt[segExt] ?? (input.mediaType === "video" ? "video/quicktime" : "image/jpeg");
 
-          console.log(`[createPost] Uploading [${i}]: ${sizeMB} MB → ${BUCKET}/${segPath}, contentType: ${contentType}`);
 
           // Track per-file progress and compute overall percentage
           await uploadToStorage(
@@ -1689,7 +1636,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             sizeMB,
             1,
             (loaded, total) => {
-              console.log(`[createPost] UPLOAD PROGRESS [${i}]: loaded=${loaded}, total=${total}, computable=${total > 0}`);
               if (total > 0 && input.onProgress) {
                 // When stitching, the first 20% was for download+stitch preparation.
                 // Map upload progress to the 20–100% range.
@@ -1711,7 +1657,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             input.onProgress(Math.round(uploadStartPct + ((i + 1) / urisToUpload.length) * uploadRange));
           }
 
-          console.log(`[createPost] Upload SUCCESS [${i}] — ${BUCKET}/${segPath}`);
 
           const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(segPath);
           uploadedUrls.push(pub.publicUrl);
@@ -1726,7 +1671,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // Upload thumbnail if provided (always JPEG)
       let thumbnailUrl: string | null = null;
       if (input.thumbnailUri) {
-        console.log("[createPost] THUMBNAIL — before uriToBlob, thumbnailUri:", input.thumbnailUri.slice(0, 60));
         const thumbPath = `${user.id}/${baseTs}_thumb.jpg`;
         try {
           const thumbBody = await uriToBlob(input.thumbnailUri);
@@ -1768,18 +1712,13 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // If ensureProfile was never called (e.g. INITIAL_SESSION event didn't
       // trigger it), the FK on posts.user_id → profiles.id will fail. This
       // call creates the profile on-the-fly so the post always succeeds.
-      console.log("[createPost] ensuring profile exists for", user.id.slice(0, 12));
       try {
         await ensureProfileById(user.id);
-        console.log("[createPost] profile check complete");
       } catch (profileErr) {
         console.warn("[createPost] ensureProfileById failed (non-fatal)", (profileErr as Error)?.message);
       }
 
-      console.log("[createPost] BEFORE insert — row keys:", Object.keys(row), "media_url:", (row.media_url as string)?.slice(0, 50));
       const { data: insData, error: insErr } = await supabase.from("posts").insert(row).select("id, created_at").single();
-      console.log("[DEBUG] Post insert result:", { data: insData, error: insErr });
-      console.log("[createPost] AFTER insert — result:", JSON.stringify({ hasData: !!insData, hasError: !!insErr, id: insData?.id, created_at: insData?.created_at, errorMessage: insErr?.message, errorCode: insErr?.code }));
 
       if (insErr) {
         const insErrAny = insErr as unknown as Record<string, unknown>;
@@ -1915,12 +1854,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // overwrite this cache patch before the self-boost window kicks in.
       lastPostCreatedAtRef.current = Date.now();
 
-      console.log("[createPost] onSuccess — reaction saved successfully", {
-        postId: newPost.id?.slice(0, 8),
-        parentPostId: newPost.parent_post_id?.slice(0, 8) ?? null,
-        mediaUrl: (newPost.media_url as string)?.slice(0, 50),
-        mediaType: newPost.media_type,
-      });
     },
     onError: (err, variables) => {
       const errAny = err as unknown as Record<string, unknown> | undefined;
@@ -2297,7 +2230,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     mutationFn: async (postId: string): Promise<void> => {
       if (!user?.id) throw new Error("Not signed in.");
 
-      console.log("[deletePost] START — postId:", postId.slice(0, 8));
 
       // 1. Fetch the post to get media_urls before deleting the row
       const { data: postRow, error: fetchErr } = await supabase
@@ -2335,7 +2267,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         if (thumbPath) pathsToDelete.push(thumbPath);
       }
 
-      console.log("[deletePost] paths to delete:", pathsToDelete.length);
 
       // 3. Delete from DB (cascade will handle child reactions via the FK)
       const { error: delErr } = await supabase
@@ -2348,7 +2279,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         throw delErr;
       }
 
-      console.log("[deletePost] DB row deleted");
 
       // 4. Delete media files from storage (best-effort, non-fatal if fails)
       if (pathsToDelete.length > 0) {
@@ -2358,14 +2288,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         if (storageErr) {
           console.warn("[deletePost] storage cleanup error (non-fatal)", storageErr.message);
         } else {
-          console.log("[deletePost] storage files deleted:", pathsToDelete.length);
         }
       }
 
-      console.log("[deletePost] COMPLETE");
     },
     onSuccess: (_data, postId) => {
-      console.log("[deletePost] onSuccess — removing post from caches", postId.slice(0, 8));
 
       // Remove from main feed cache
       qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
@@ -2407,7 +2334,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     mutationFn: async (reactionId: string): Promise<string | null> => {
       if (!user?.id) throw new Error("Not signed in.");
 
-      console.log("[deleteReaction] START — reactionId:", reactionId.slice(0, 8));
 
       // 1. Fetch the reaction to get media_url and parent_post_id
       const { data: reactionRow, error: fetchErr } = await supabase
@@ -2446,7 +2372,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         if (thumbPath) pathsToDelete.push(thumbPath);
       }
 
-      console.log("[deleteReaction] paths to delete:", pathsToDelete.length);
 
       // 3. Delete from DB
       const { error: delErr } = await supabase
@@ -2459,7 +2384,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         throw delErr;
       }
 
-      console.log("[deleteReaction] DB row deleted");
 
       // 4. Delete media files from storage (best-effort)
       if (pathsToDelete.length > 0) {
@@ -2469,17 +2393,14 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         if (storageErr) {
           console.warn("[deleteReaction] storage cleanup error (non-fatal)", storageErr.message);
         } else {
-          console.log("[deleteReaction] storage files deleted:", pathsToDelete.length);
         }
       }
 
-      console.log("[deleteReaction] COMPLETE — parentPostId:", parentPostId?.slice(0, 8));
 
       // Return parentPostId for cache updates
       return parentPostId;
     },
     onSuccess: (parentPostId, reactionId) => {
-      console.log("[deleteReaction] onSuccess — removing reaction from caches", reactionId.slice(0, 8));
 
       // Remove from my posts cache
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {

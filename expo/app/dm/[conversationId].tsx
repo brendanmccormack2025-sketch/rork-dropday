@@ -339,7 +339,9 @@ export default function ChatThreadScreen() {
           <Pressable
             style={styles.headerUser}
             onPress={() => {
-              // Could navigate to user profile
+              if (otherUser?.id) {
+                router.push(`/user/${otherUser.id}` as never);
+              }
             }}
           >
             <View style={styles.headerAvatar}>

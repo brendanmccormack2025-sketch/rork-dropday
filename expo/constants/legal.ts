@@ -5,8 +5,9 @@
  * body (one or more paragraphs separated by a blank line). The legal screen
  * renders these as styled text — no markdown parser needed.
  *
- * Replace the text below with your final reviewed copy at any time; the screen
- * picks up changes automatically.
+ * This text mirrors the published HTML versions at:
+ *   https://brendanmccormack2025-sketch.github.io/DropDay-Legal/privacy.html
+ *   https://brendanmccormack2025-sketch.github.io/DropDay-Legal/terms.html
  */
 
 export interface LegalSection {
@@ -26,115 +27,98 @@ export interface LegalDocument {
 
 export const TERMS_OF_USE: LegalDocument = {
   title: "Terms of Use",
-  lastUpdated: "[Insert Date]",
+  lastUpdated: "July 15, 2026",
   intro:
-    "These Terms of Use govern your use of DropDay. By accessing or using the Service, you agree to be bound by these Terms. If you do not agree, do not use the Service. These Terms should be read alongside our Privacy Policy, which explains how we collect and use your information.",
+    "Welcome to DropDay. These Terms of Use (\"Terms\") govern your access to and use of the DropDay mobile application (the \"App\"), operated by DropDay (\"we,\" \"us,\" or \"our\"). By creating an account or using the App, you agree to these Terms.",
   sections: [
     {
-      heading: "1. Agreement to Terms",
+      heading: "1. Eligibility",
       paragraphs: [
-        "By accessing or using DropDay (the \"Service\"), you agree to be bound by these Terms of Use (\"Terms\"). If you do not agree, do not use the Service. These Terms should be read alongside our Privacy Policy, which explains how we collect and use your information.",
+        "You must be at least 13 years old to use DropDay. By using the App, you represent that you meet this requirement and that the birth date you provide is accurate.",
       ],
     },
     {
-      heading: "2. Eligibility",
+      heading: "2. Your Account",
       paragraphs: [
-        "You must be at least 13 years old to use DropDay. By using the Service, you represent that you meet this age requirement. Users between 13 and 17 may be subject to additional content restrictions as described in our Privacy Policy.",
-        "If you are using DropDay on behalf of a minor as a parent or guardian, you are responsible for that minor's compliance with these Terms.",
+        "You are responsible for maintaining the security of your account and for all activity that occurs under it. You must provide accurate information when creating your account.",
       ],
     },
     {
-      heading: "3. Your Account",
+      heading: "3. Content Ownership and License",
       paragraphs: [
-        "You are responsible for maintaining the confidentiality of your account credentials and for all activity under your account. You must provide accurate information when creating an account. We reserve the right to suspend or terminate accounts that violate these Terms.",
+        "You retain ownership of all content you create and post on DropDay (\"User Content\"). By posting User Content, you grant DropDay a non-exclusive, worldwide, royalty-free license to host, store, display, reproduce, and distribute your User Content solely for the purpose of operating and providing the App's features to you and other users. This license ends when you delete your content or your account, except to the extent your content has been shared with or saved by other users through normal use of the App prior to deletion.",
       ],
     },
     {
-      heading: "4. User Content",
+      heading: "4. Acceptable Use",
       paragraphs: [
-        "Ownership. You retain ownership of the videos, images, text, and other content you create and post to DropDay (\"User Content\").",
-        "License to DropDay. By posting User Content, you grant DropDay a worldwide, non-exclusive, royalty-free, sublicensable license to host, store, reproduce, distribute, display, and perform your User Content solely for the purpose of operating, providing, and improving the Service. This license ends when you delete your content or your account, except where your content has been shared with or reposted by other users, or where retention is required for legal purposes.",
-        "Your responsibility for content. You are solely responsible for the content you post. You represent that you have all necessary rights to post it, and that it does not violate any law or the rights of any third party.",
-        "Prohibited content. You may not post content that:",
-        "• Is illegal, harassing, hateful, or threatening",
-        "• Infringes on another person's intellectual property, privacy, or other rights",
-        "• Depicts or promotes child sexual abuse material (CSAM) — such content will be removed immediately and reported to the National Center for Missing & Exploited Children (NCMEC) and/or law enforcement as required by law",
-        "• Constitutes spam, impersonation, or fraud",
-        "• Violates any applicable law or regulation",
-        "We reserve the right, but not the obligation, to remove any content and/or terminate accounts that violate these Terms.",
+        "You agree not to post content that:",
+        "• Is illegal, harassing, hateful, or threatens violence",
+        "• Sexually exploits or endangers minors in any way",
+        "• Infringes on another person's intellectual property or privacy rights",
+        "• Impersonates another person or entity",
+        "• Is spam or intended to deceive other users",
+        "We reserve the right to remove any content that violates these Terms and to suspend or terminate accounts that repeatedly or seriously violate them.",
       ],
     },
     {
-      heading: "5. Mature Content",
+      heading: "5. Reporting and Moderation",
       paragraphs: [
-        "DropDay allows users to flag their own content as \"mature.\" Content flagged as mature is restricted from being shown to users identified as being under 18. Users are responsible for accurately flagging their content; misuse of this feature may result in content removal or account suspension.",
+        "DropDay provides tools for users to report content or block other users. We review reports and may remove content or restrict accounts found to violate these Terms. Content that receives multiple reports may be automatically hidden pending review.",
       ],
     },
     {
-      heading: "6. Intellectual Property",
+      heading: "6. Account Termination",
       paragraphs: [
-        "DropDay, the DropDay logo, and associated branding are trademarks of [Your Name / LLC Name Once Formed]. You may not use our trademarks without our prior written permission. All other trademarks referenced are the property of their respective owners.",
-        "The Service itself (excluding User Content) — including its design, software, and features — is owned by DropDay and protected by intellectual property laws. These Terms do not grant you any rights to our intellectual property beyond what's necessary to use the Service as intended.",
+        "You may delete your account at any time. We may suspend or terminate your account if you violate these Terms, engage in harmful conduct, or if required by law.",
       ],
     },
     {
-      heading: "7. Copyright Complaints (DMCA)",
+      heading: "7. Age-Appropriate Content",
       paragraphs: [
-        "If you believe content on DropDay infringes your copyright, please send a notice to our designated agent at [Insert DMCA Contact Email], including:",
-        "• Identification of the copyrighted work claimed to be infringed",
-        "• Identification of the material you claim is infringing, with enough detail for us to locate it",
-        "• Your contact information",
-        "• A statement that you have a good-faith belief the use is not authorized",
-        "• A statement, under penalty of perjury, that the information is accurate and you are authorized to act on behalf of the copyright owner",
-        "• Your physical or electronic signature",
-        "We will respond to valid notices in accordance with the Digital Millennium Copyright Act, which may include removing the reported content and, for repeat infringers, terminating accounts.",
+        "Users aged 13–17 will not be shown content that creators have marked as \"mature.\" Users are responsible for accurately marking their own content as mature where appropriate.",
       ],
     },
     {
-      heading: "8. Termination",
+      heading: "8. Disclaimers",
       paragraphs: [
-        "You may delete your account at any time. We may suspend or terminate your access to the Service at our discretion, with or without notice, for conduct that violates these Terms or is otherwise harmful to the Service, other users, or third parties.",
+        "The App is provided \"as is\" without warranties of any kind, express or implied. We do not guarantee the App will be uninterrupted, secure, or error-free.",
       ],
     },
     {
-      heading: "9. Disclaimers",
+      heading: "9. Limitation of Liability",
       paragraphs: [
-        "THE SERVICE IS PROVIDED \"AS IS\" AND \"AS AVAILABLE,\" WITHOUT WARRANTIES OF ANY KIND, WHETHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, SECURE, OR ERROR-FREE.",
-        "WE ARE NOT RESPONSIBLE FOR USER CONTENT AND DO NOT ENDORSE ANY OPINIONS OR INFORMATION EXPRESSED BY USERS.",
+        "To the maximum extent permitted by law, DropDay shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of the App.",
       ],
     },
     {
-      heading: "10. Limitation of Liability",
+      heading: "10. Changes to These Terms",
       paragraphs: [
-        "TO THE MAXIMUM EXTENT PERMITTED BY LAW, DROPDAY AND ITS OWNERS, EMPLOYEES, AND AFFILIATES SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES ARISING FROM YOUR USE OF THE SERVICE, INCLUDING BUT NOT LIMITED TO LOSS OF DATA, LOSS OF PROFITS, OR DAMAGES RESULTING FROM USER CONTENT OR CONDUCT OF ANY THIRD PARTY.",
-        "OUR TOTAL LIABILITY FOR ANY CLAIM ARISING FROM THESE TERMS OR THE SERVICE SHALL NOT EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID US IN THE PAST 12 MONTHS, OR (B) $100.",
+        "We may update these Terms from time to time. Continued use of the App after changes take effect constitutes acceptance of the updated Terms.",
       ],
     },
     {
-      heading: "11. Indemnification",
+      heading: "11. Governing Law",
       paragraphs: [
-        "You agree to indemnify and hold harmless DropDay and its owners, employees, and affiliates from any claims, damages, losses, or expenses (including reasonable attorneys' fees) arising from your use of the Service, your User Content, or your violation of these Terms.",
+        "These Terms are governed by the laws of the State of California, USA, without regard to conflict of law principles.",
       ],
     },
     {
       heading: "12. Dispute Resolution",
       paragraphs: [
-        "[Placeholder — to be finalized with an attorney before publishing.]",
+        "Any dispute arising from these Terms or your use of the App will first be attempted to be resolved informally by contacting us at DropDayApp@yahoo.com. If a dispute cannot be resolved informally, it will be resolved through binding arbitration on an individual basis, and you waive any right to participate in a class action.",
       ],
     },
     {
-      heading: "13. Changes to These Terms",
+      heading: "13. DMCA / Copyright Complaints",
       paragraphs: [
-        "We may modify these Terms at any time. We will notify users of material changes through the app or other reasonable means. Continued use of the Service after changes take effect constitutes acceptance of the revised Terms.",
+        "If you believe content on DropDay infringes your copyright, contact us at DropDayApp@yahoo.com with a description of the material and your contact information.",
       ],
     },
     {
-      heading: "14. Contact",
+      heading: "14. Contact Us",
       paragraphs: [
-        "Questions about these Terms should be directed to:",
-        "[Insert business name]",
-        "[Insert contact email]",
-        "[Insert mailing address, if applicable]",
+        "Questions about these Terms? Contact us at DropDayApp@yahoo.com",
       ],
     },
   ],
@@ -142,109 +126,78 @@ export const TERMS_OF_USE: LegalDocument = {
 
 export const PRIVACY_POLICY: LegalDocument = {
   title: "Privacy Policy",
-  lastUpdated: "[Insert Date]",
+  lastUpdated: "July 15, 2026",
   intro:
-    "This Privacy Policy explains how DropDay collects, uses, and protects information when you use the app. By using DropDay, you agree to the collection and use of information as described in this policy.",
+    "DropDay (\"we,\" \"us,\" or \"our\") operates the DropDay mobile application (the \"App\"). This Privacy Policy explains what information we collect, how we use it, and your rights regarding that information.",
   sections: [
     {
-      heading: "1. Introduction",
+      heading: "1. Information We Collect",
       paragraphs: [
-        "DropDay (\"we,\" \"us,\" or \"our\") operates a mobile application that allows users to capture, edit, and share short-form video content (\"Drops\"). This Privacy Policy explains how we collect, use, and protect information when you use the DropDay app (the \"Service\").",
-        "By using DropDay, you agree to the collection and use of information as described in this policy.",
+        "• Account information: email address, date of birth (used only to verify age eligibility), and username.",
+        "• Content you create: videos, images, captions, and reactions you post to the App.",
+        "• Usage data: basic app interaction data (e.g., likes, follows, views) needed to operate core features.",
+        "• Device information: general device and app version information for crash reporting and compatibility.",
+        "We do not collect more personal information than is necessary to operate DropDay's core features.",
       ],
     },
     {
-      heading: "2. Age Requirements",
+      heading: "2. How We Use Your Information",
       paragraphs: [
-        "DropDay is intended for users who are 13 years of age or older. We do not knowingly collect personal information from children under 13. If we become aware that a user under 13 has created an account, we will take steps to delete that account and any associated information.",
-        "Parents or guardians who believe their child under 13 has created an account should contact us at [insert contact email] so we can investigate and remove the account.",
-        "Teen Accounts (Ages 13–17). Users between the ages of 13 and 17 are subject to additional content protections:",
-        "• Content flagged as mature by its creator is automatically filtered from teen users' feeds.",
-        "• [Insert any additional teen-specific protections you implement.]",
+        "• To create and maintain your account",
+        "• To operate core app features (feed, reactions, follows, notifications)",
+        "• To enforce our age requirements and content moderation policies",
+        "• To respond to support requests",
+        "• To comply with legal obligations",
+        "We do not sell your personal information to third parties.",
       ],
     },
     {
-      heading: "3. Information We Collect",
+      heading: "3. Teen Users (Ages 13–17)",
       paragraphs: [
-        "Information you provide directly:",
-        "• Account information: username, email address, password, birthdate",
-        "• Profile information: display name, bio, avatar, website, and social media handles you choose to add",
-        "• Content: videos, captions, text overlays, and other content you create and post",
-        "• Communications: messages you send through the app, if applicable",
-        "Information collected automatically:",
-        "• Device information (device type, operating system)",
-        "• Usage data (features used, content viewed, interactions such as likes and follows)",
-        "• Log data (IP address, access times, app crashes)",
-        "Information from your use of camera and media features:",
-        "• Camera and microphone access, used solely to allow you to record content, with your permission granted through your device's operating system",
+        "DropDay requires all users to be at least 13 years old. Users who indicate they are between 13 and 17 years old have additional protections:",
+        "• Content marked as \"mature\" by its creator is automatically filtered out of their feed and is not shown to them.",
+        "• We do not knowingly allow targeted advertising based on the personal information of users under 18.",
       ],
     },
     {
-      heading: "4. How We Use Information",
+      heading: "4. Third-Party Services",
       paragraphs: [
-        "We use collected information to:",
-        "• Provide, operate, and maintain the Service",
-        "• Create and manage your account",
-        "• Enable content posting, viewing, likes, follows, and other social features",
-        "• Filter content appropriately based on age tier (e.g., restricting mature content from teen accounts)",
-        "• Improve and personalize the Service, including content ranking in feeds",
-        "• Communicate with you about your account or the Service",
-        "• Detect, prevent, and address technical issues, fraud, or violations of our Terms of Service",
+        "DropDay uses the following third-party services to operate:",
+        "• Supabase (database, authentication, and file storage) — your account data, posted content, and media files are stored on Supabase's infrastructure.",
+        "These providers only process your data to the extent necessary to provide their services to us and are not permitted to use your data for their own purposes.",
       ],
     },
     {
-      heading: "5. How We Share Information",
+      heading: "5. Data Retention and Deletion",
       paragraphs: [
-        "We do not sell your personal information. We may share information:",
-        "• With other users, as a normal part of the Service's social functionality",
-        "• With service providers who perform services on our behalf (e.g., cloud hosting and storage providers)",
-        "• For legal reasons, if required by law, subpoena, or other legal process",
-        "• In connection with a business transaction, such as a merger, acquisition, or sale of assets",
+        "You may permanently delete your account at any time from Settings → Delete Account. When you do:",
+        "• Your profile, posts, reactions, likes, and follow relationships are permanently deleted from our database immediately.",
+        "• Associated media files (videos/images) are permanently deleted from our storage within 30 days.",
+        "• This action cannot be undone.",
       ],
     },
     {
-      heading: "6. Children's Privacy (COPPA Compliance)",
+      heading: "6. Your Rights",
       paragraphs: [
-        "DropDay does not permit users under the age of 13 to create accounts, and we do not knowingly collect personal information from children under 13. Our sign-up process requires users to confirm their date of birth, and accounts are not created for users who indicate they are under 13.",
-        "If we learn that we have inadvertently collected personal information from a child under 13, we will delete that information as quickly as possible. Parents who believe we may have collected information from their child under 13 should contact us at [insert contact email].",
+        "Depending on your location, you may have the right to access, correct, or request deletion of your personal information. To exercise these rights, contact us at DropDayApp@yahoo.com.",
       ],
     },
     {
-      heading: "7. Your Rights and Choices",
+      heading: "7. Children's Privacy",
       paragraphs: [
-        "Depending on your location, you may have rights to:",
-        "• Access the personal information we hold about you",
-        "• Request correction of inaccurate information",
-        "• Request deletion of your account and associated data",
-        "• Object to or restrict certain processing of your information",
-        "To exercise these rights, contact us at [insert contact email].",
+        "DropDay is not directed at children under 13, and we do not knowingly collect personal information from anyone under 13. If we learn that we have collected personal information from a child under 13, we will delete it promptly.",
       ],
     },
     {
-      heading: "8. Data Retention",
+      heading: "8. Changes to This Policy",
       paragraphs: [
-        "We retain your information for as long as your account is active or as needed to provide the Service. If you delete your account, we will delete or anonymize your personal information within [insert timeframe], except where retention is required for legal or legitimate business purposes.",
+        "We may update this Privacy Policy from time to time. We will notify users of material changes through the App.",
       ],
     },
     {
-      heading: "9. Data Security",
+      heading: "9. Contact Us",
       paragraphs: [
-        "We use reasonable administrative, technical, and physical safeguards to protect your information. However, no method of transmission or storage is 100% secure, and we cannot guarantee absolute security.",
-      ],
-    },
-    {
-      heading: "10. Changes to This Policy",
-      paragraphs: [
-        "We may update this Privacy Policy from time to time. We will notify users of material changes through the app or by other means before the changes take effect.",
-      ],
-    },
-    {
-      heading: "11. Contact Us",
-      paragraphs: [
-        "If you have questions about this Privacy Policy, please contact us at:",
-        "[Insert business name]",
-        "[Insert contact email]",
-        "[Insert mailing address, if applicable]",
+        "If you have questions about this Privacy Policy, contact us at: DropDayApp@yahoo.com",
       ],
     },
   ],
