@@ -16,13 +16,14 @@ import { Image } from "expo-image";
 import { Video, ResizeMode } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, EllipsisVertical, Heart, Reply, RotateCcw, Sparkles, X } from "lucide-react-native";
+import { ArrowLeft, EllipsisVertical, Flag, Heart, Reply, RotateCcw, Sparkles, X } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
 import { usePosts, type Post } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
+import { useReportContent } from "@/hooks/useReportContent";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
@@ -175,6 +176,7 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
   const errorCountRef = useRef<number>(0);
   const { deleteReaction } = usePosts();
   const { user } = useAuth();
+  const { reportContent } = useReportContent();
   const name = post.profile?.display_name || post.profile?.username || "dropper";
   const isOwner = !!user?.id && post.user_id === user.id;
 
@@ -334,6 +336,17 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
           hitSlop={8}
         >
           <EllipsisVertical color="rgba(255,255,255,0.8)" size={22} strokeWidth={2} />
+        </Pressable>
+      )}
+
+      {/* Report button — visible to non-owners */}
+      {!isOwner && (
+        <Pressable
+          onPress={() => reportContent("reaction", post.id)}
+          style={styles.moreBtn}
+          hitSlop={8}
+        >
+          <Flag color="rgba(255,255,255,0.8)" size={20} strokeWidth={2} />
         </Pressable>
       )}
 

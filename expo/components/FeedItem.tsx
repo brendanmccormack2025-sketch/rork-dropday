@@ -22,6 +22,7 @@ import {
   Trash2,
   X,
   AlertCircle,
+  Flag,
 } from "lucide-react-native";
 import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
@@ -31,6 +32,7 @@ import { theme, getDropWindowState } from "@/constants/theme";
 import { usePosts, type Post, type TextOverlay, type TextBackgroundStyle } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
+import { useReportContent } from "@/hooks/useReportContent";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
@@ -247,6 +249,7 @@ export const FeedItem = memo(function FeedItem({
   );
   const { reactionsByParent, deletePost, toggleLike, likedPosts } = usePosts();
   const { user } = useAuth();
+  const { reportContent } = useReportContent();
   const liked = likedPosts.some((p) => p.id === post.id);
   const [likedOptimistic, setLikedOptimistic] = useState<boolean>(liked);
   // Sync optimistic state when the source-of-truth changes (e.g. query refetch)
@@ -1095,6 +1098,13 @@ export const FeedItem = memo(function FeedItem({
             icon={<Trash2 color={theme.danger} size={24} strokeWidth={2} />}
             label="Delete"
             onPress={handleDelete}
+          />
+        )}
+        {!isOwner && (
+          <ActionButton
+            icon={<Flag color="#fff" size={22} strokeWidth={2} />}
+            label="Report"
+            onPress={() => reportContent("post", post.id)}
           />
         )}
       </View>

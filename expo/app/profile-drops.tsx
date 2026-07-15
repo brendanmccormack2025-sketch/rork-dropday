@@ -44,10 +44,11 @@ export default function ProfileDropsScreen() {
       const { data, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, moderation_status, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("user_id", userId)
         .is("parent_post_id", null)
+        .eq("moderation_status", "active")
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) {

@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  Ban,
   Heart,
   MessageCircle,
   Sparkles,
@@ -29,6 +30,7 @@ import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
 import { usePosts, resolveAvatarUrl, type Post } from "@/providers/PostsProvider";
 import { supabase } from "@/lib/supabase";
+import { useUserBlocks } from "@/hooks/useUserBlocks";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const GAP = 4;
@@ -43,6 +45,8 @@ export default function PublicProfileScreen() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
   const isOwnProfile = !!user?.id && user.id === id;
+  const { blockUser, unblockUser, isBlocked, blockPending } = useUserBlocks();
+  const userProfileBlocked = !isOwnProfile && isBlocked(id);
 
   // ── Profile query ────────────────────────────────────────────────────
   const profileQuery = useQuery({
@@ -82,10 +86,11 @@ export default function PublicProfileScreen() {
       const { data, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, moderation_status, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("user_id", id)
         .is("parent_post_id", null)
+        .eq("moderation_status", "active")
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) {
@@ -273,7 +278,7 @@ export default function PublicProfileScreen() {
                     <UiText style={styles.bio}>{profile.bio}</UiText>
                   ) : null}
 
-                  {/* Follow / Send Message button */}
+                  {/* Follow / Block buttons */}
                   {!isOwnProfile && (
                     <View style={styles.actionRow}>
                       <Pressable
@@ -300,6 +305,36 @@ export default function PublicProfileScreen() {
                           <>
                             <UserPlus color="#fff" size={16} strokeWidth={2.5} />
                             <UiText style={styles.followBtnText}>Follow</UiText>
+                          </>
+                        )}
+                      </Pressable>
+                      <Pressable
+                        onPress={() => {
+                          if (userProfileBlocked) {
+                            unblockUser(id);
+                          } else {
+                            blockUser(id);
+                          }
+                        }}
+                        disabled={blockPending}
+                        style={({ pressed }) => [
+                          styles.blockBtn,
+                          userProfileBlocked && styles.blockBtnActive,
+                          pressed && styles.blockBtnPressed,
+                        ]}
+                      >
+                        {blockPending ? (
+                          <ActivityIndicator color={theme.textMuted} size="small" />
+                        ) : (
+                          <>
+                            <Ban
+                              color={userProfileBlocked ? theme.textMuted : theme.textMuted}
+                              size={16}
+                              strokeWidth={2.5}
+                            />
+                            <UiText style={styles.blockBtnText}>
+                              {userProfileBlocked ? "Unblock" : "Block"}
+                            </UiText>
                           </>
                         )}
                       </Pressable>
@@ -533,6 +568,32 @@ const styles = StyleSheet.create({
     fontWeight: "700" as const,
   },
   followBtnTextActive: {
+    color: theme.textMuted,
+    fontSize: 15,
+    fontWeight: "600" as const,
+  },
+
+  /* Block button */
+  blockBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    paddingVertical: 13,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+  },
+  blockBtnActive: {
+    backgroundColor: "rgba(255,69,58,0.1)",
+    borderColor: "rgba(255,69,58,0.2)",
+  },
+  blockBtnPressed: {
+    opacity: 0.7,
+  },
+  blockBtnText: {
     color: theme.textMuted,
     fontSize: 15,
     fontWeight: "600" as const,

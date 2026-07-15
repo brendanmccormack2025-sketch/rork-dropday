@@ -18,7 +18,7 @@ import { Video, ResizeMode, Audio, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Heart, Sparkles, Reply, RotateCcw, ShieldCheck, Trash2 } from "lucide-react-native";
+import { ArrowLeft, Flag, Heart, Sparkles, Reply, RotateCcw, ShieldCheck, Trash2 } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
@@ -27,6 +27,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 import { usePosts, type Post } from "@/providers/PostsProvider";
+import { useReportContent } from "@/hooks/useReportContent";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
@@ -79,9 +80,10 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("parent_post_id", id)
+        .eq("moderation_status", "active")
         .order("created_at", { ascending: false })
         .limit(200);
 
@@ -102,6 +104,7 @@ export default function ReactionTreeScreen() {
         trim_data: null,
         text_overlays: null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
+        moderation_status: (row.moderation_status as string | undefined) ?? "active",
         created_at: row.created_at as string,
         like_count: (row.like_count as number | undefined) ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -153,9 +156,10 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .in("parent_post_id", tier1Ids)
+        .eq("moderation_status", "active")
         .order("created_at", { ascending: true })
         .limit(500);
 
@@ -176,6 +180,7 @@ export default function ReactionTreeScreen() {
         trim_data: null,
         text_overlays: null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
+        moderation_status: (row.moderation_status as string | undefined) ?? "active",
         created_at: row.created_at as string,
         like_count: (row.like_count as number | undefined) ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -404,6 +409,7 @@ function ReactionItem({
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const { deleteReaction } = usePosts();
   const { user: authUser } = useAuth();
+  const { reportContent } = useReportContent();
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
   const isOwner = !!authUser?.id && post.user_id === authUser.id;
@@ -733,6 +739,12 @@ function ReactionItem({
           <Pressable onPress={handleDeleteReaction} style={styles.actionBtn} hitSlop={8}>
             <Trash2 color="rgba(255,255,255,0.85)" size={24} strokeWidth={2} />
             <UiText style={styles.actionLabel}>Delete</UiText>
+          </Pressable>
+        )}
+        {!isOwner && (
+          <Pressable onPress={() => reportContent("reaction", post.id)} style={styles.actionBtn} hitSlop={8}>
+            <Flag color="#fff" size={22} strokeWidth={2} />
+            <UiText style={styles.actionLabel}>Report</UiText>
           </Pressable>
         )}
       </View>
