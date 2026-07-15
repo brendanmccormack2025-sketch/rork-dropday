@@ -143,8 +143,7 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
           table: "notifications",
           filter: `recipient_id=eq.${userId}`,
         },
-        (payload) => {
-          console.log("[notifications:realtime] INSERT", payload.new?.id);
+        () => {
           // Refetch both notifications list and unread count
           qc.invalidateQueries({ queryKey: QUERY_KEY(userId) });
           qc.invalidateQueries({ queryKey: UNREAD_KEY(userId) });
@@ -163,9 +162,7 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
           qc.invalidateQueries({ queryKey: UNREAD_KEY(userId) });
         },
       )
-      .subscribe((status) => {
-        console.log("[notifications:realtime] channel status:", status);
-      });
+      .subscribe();
 
     channelRef.current = channel;
 

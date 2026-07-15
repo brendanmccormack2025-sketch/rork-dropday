@@ -56,7 +56,6 @@ export async function ensureProfileById(userId: string) {
     .insert({ id: userId, username: fallback, display_name: fallback });
   if (insErr && insErr.code !== "23505") {
     console.warn("[auth] ensureProfileById insert error", insErr.message, insErr);
-  } else {
   }
 }
 

@@ -21,7 +21,6 @@ export function useVideoFocus(): boolean {
 
   useFocusEffect(
     useCallback(() => {
-      console.log("[useVideoFocus] Screen focused — ensuring playback audio mode");
       setFocused(true);
 
       // Restore playback-only audio mode whenever the feed/reactions tabs gain focus.
@@ -34,7 +33,6 @@ export function useVideoFocus(): boolean {
       }).catch(() => {});
 
       return () => {
-        console.log("[useVideoFocus] Screen blurred");
         setFocused(false);
       };
     }, []),

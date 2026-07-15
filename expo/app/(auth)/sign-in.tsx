@@ -10,7 +10,8 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import { ArrowLeft } from "lucide-react-native";
+import { ArrowLeft, FileText } from "lucide-react-native";
+import * as Linking from "expo-linking";
 
 import ScreenBackground from "@/components/ScreenBackground";
 import PrimaryButton from "@/components/PrimaryButton";
@@ -89,6 +90,14 @@ export default function SignInScreen() {
               loading={loading}
             />
 
+            <Pressable
+              onPress={() => Linking.openURL("https://brendanmccormack2025-sketch.github.io/DropDay-Legal/privacy.html")}
+              style={styles.privacyLink}
+            >
+              <FileText size={14} color={theme.textMuted} />
+              <UiText style={styles.privacyText}>Privacy Policy</UiText>
+            </Pressable>
+
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -155,5 +164,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "500" as const,
   },
-
+  privacyLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "center",
+    marginTop: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  privacyText: {
+    color: theme.textMuted,
+    fontSize: 13,
+    fontWeight: "500" as const,
+  },
 });
