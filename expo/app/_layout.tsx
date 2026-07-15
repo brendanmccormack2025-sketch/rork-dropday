@@ -19,6 +19,7 @@ import {
 } from "@expo-google-fonts/plus-jakarta-sans";
 
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
+import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import { PostsProvider } from "@/providers/PostsProvider";
 import { NotificationsProvider } from "@/providers/NotificationsProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -207,13 +208,15 @@ export default function RootLayout() {
           <View style={{ flex: 1, backgroundColor: theme.bg }}>
             <StatusBar style="light" />
             <AuthProvider>
-              <PostsProvider>
-                <NotificationsProvider>
-                  <AuthGate>
-                    <RootLayoutNav />
-                  </AuthGate>
-                </NotificationsProvider>
-              </PostsProvider>
+              <UserBlocksProvider>
+                <PostsProvider>
+                  <NotificationsProvider>
+                    <AuthGate>
+                      <RootLayoutNav />
+                    </AuthGate>
+                  </NotificationsProvider>
+                </PostsProvider>
+              </UserBlocksProvider>
             </AuthProvider>
           </View>
         </SafeAreaProvider>

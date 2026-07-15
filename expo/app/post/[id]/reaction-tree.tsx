@@ -27,6 +27,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 import { usePosts, type Post } from "@/providers/PostsProvider";
+import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { useReportContent } from "@/hooks/useReportContent";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
@@ -43,6 +44,7 @@ export default function ReactionTreeScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
+  const { blockedUserIds } = useUserBlocks();
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [screenFocused, setScreenFocused] = useState<boolean>(false);
 
@@ -128,9 +130,13 @@ export default function ReactionTreeScreen() {
   // first). Tier 2 creator replies stay anchored under their parent
   // tier 1 reaction regardless of score — the ranking only applies here.
   const rankedTier1Posts = useMemo(() => {
-    if (tier1Posts.length === 0) return tier1Posts;
+    // Filter out blocked users' reactions before ranking
+    const visible = blockedUserIds.size > 0
+      ? tier1Posts.filter((p) => !blockedUserIds.has(p.user_id))
+      : tier1Posts;
+    if (visible.length === 0) return visible;
     const follows = new Set(following);
-    const scored = tier1Posts.map((p) => ({
+    const scored = visible.map((p) => ({
       p,
       score: (p.like_count ?? 0) + (follows.has(p.user_id) ? 10 : 0),
       createdMs: new Date(p.created_at).getTime(),
@@ -140,7 +146,7 @@ export default function ReactionTreeScreen() {
       return b.createdMs - a.createdMs;
     });
     return scored.map((s) => s.p);
-  }, [tier1Posts, following]);
+  }, [tier1Posts, following, blockedUserIds]);
 
   // ── Query 3: tier 2 replies (parent_post_id IN tier 1 IDs) ────────────
   // Only the creator needs tier 2 data, but we fetch for everyone — the
@@ -198,8 +204,10 @@ export default function ReactionTreeScreen() {
   // their parent regardless of the tier 1 ranking.
   const feedItems: FeedItem[] = useMemo(() => {
     // Index tier 2 replies by their parent_post_id
+    // Filter out replies from blocked users
     const repliesByParent = new Map<string, Post[]>();
     for (const reply of tier2Posts) {
+      if (blockedUserIds.has(reply.user_id)) continue;
       const pid = reply.parent_post_id;
       if (!pid) continue;
       if (!repliesByParent.has(pid)) repliesByParent.set(pid, []);
@@ -217,7 +225,7 @@ export default function ReactionTreeScreen() {
       }
     }
     return items;
-  }, [rankedTier1Posts, tier2Posts]);
+  }, [rankedTier1Posts, tier2Posts, blockedUserIds]);
 
   const qc = useQueryClient();
 

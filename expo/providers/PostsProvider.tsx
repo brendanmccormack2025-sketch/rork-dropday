@@ -9,6 +9,7 @@ import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { concatMP4Files } from "@/src/integrations/concatMP4";
 
 import { useAuth, ensureProfileById } from "@/providers/AuthProvider";
+import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { getDropWindowState } from "@/constants/theme";
 
 export type OptimisticStatus = "uploading" | "failed";
@@ -585,6 +586,7 @@ function rankFollowingFeed(posts: Post[], currentUserId?: string): Post[] {
 
 export const [PostsProvider, usePosts] = createContextHook(() => {
   const { user } = useAuth();
+  const { blockedUserIds } = useUserBlocks();
   const qc = useQueryClient();
   const [draftProjects, setDraftProjects] = useState<DraftProject[]>([]);
   const [draftsLoaded, setDraftsLoaded] = useState(false);
@@ -2480,15 +2482,41 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
   });
 
+  // ── Filter blocked users' content from all feeds ───────────────────────
+  // Applied client-side in the return memo so that when blockedUserIds
+  // changes (user blocks/unblocks someone), all feeds update immediately
+  // without a server refetch. Server-side filtering isn't possible because
+  // RLS can't do cross-table blocking without a function.
+  const filterBlocked = useCallback(
+    (posts: Post[]): Post[] => {
+      if (blockedUserIds.size === 0) return posts;
+      return posts.filter((p) => !blockedUserIds.has(p.user_id));
+    },
+    [blockedUserIds],
+  );
+
+  const filterBlockedReactions = useCallback(
+    (grouped: Record<string, Post[]>): Record<string, Post[]> => {
+      if (blockedUserIds.size === 0) return grouped;
+      const filtered: Record<string, Post[]> = {};
+      for (const [pid, posts] of Object.entries(grouped)) {
+        const kept = posts.filter((p) => !blockedUserIds.has(p.user_id));
+        if (kept.length > 0) filtered[pid] = kept;
+      }
+      return filtered;
+    },
+    [blockedUserIds],
+  );
+
   return useMemo(
     () => ({
       exploreCreators: exploreCreatorsQuery.data ?? [],
       exploreCreatorsLoading: exploreCreatorsQuery.isLoading,
       refetchExploreCreators: exploreCreatorsQuery.refetch,
-      feed: feedQuery.data ?? [],
+      feed: filterBlocked(feedQuery.data ?? []),
       feedLoading: feedQuery.isLoading,
       refetchFeed: feedQuery.refetch,
-      followingFeed: followingFeedQuery.data ?? [],
+      followingFeed: filterBlocked(followingFeedQuery.data ?? []),
       followingFeedLoading: followingFeedQuery.isLoading,
       refetchFollowingFeed: followingFeedQuery.refetch,
       myPosts: myPostsQuery.data ?? [],
@@ -2509,11 +2537,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       saveDraftProject,
       deleteDraftProject,
       createPost,
-      likedPosts: likedPostsQuery.data ?? [],
+      likedPosts: filterBlocked(likedPostsQuery.data ?? []),
       likedPostsLoading: likedPostsQuery.isLoading,
       refetchLikedPosts: likedPostsQuery.refetch,
       toggleLike,
-      reactionsByParent: allReactionsQuery.data ?? {},
+      reactionsByParent: filterBlockedReactions(allReactionsQuery.data ?? {}),
       reactionsLoading: allReactionsQuery.isLoading,
       refetchReactions: allReactionsQuery.refetch,
       lastQueryError,
@@ -2567,6 +2595,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       sendDropAsMessage,
       deletePost,
       deleteReaction,
+      filterBlocked,
+      filterBlockedReactions,
     ]
   );
 });

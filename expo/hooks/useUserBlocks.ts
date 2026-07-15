@@ -1,21 +1,31 @@
 import { useState, useCallback, useEffect } from "react";
 import { Alert } from "react-native";
+import createContextHook from "@nkzw/create-context-hook";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 
 /**
- * Hook for blocking and unblocking users.
+ * Shared block-user state via context hook.
  *
  * Apple requires a block-user feature distinct from content reporting
  * (App Store Guideline 1.2). Blocked users' content is filtered out
- * of feeds client-side since RLS can't easily do cross-table blocking
- * without a function.
+ * of feeds client-side after queries return, using the `blockedUserIds`
+ * set exposed here.
+ *
+ * Must be wrapped ABOVE PostsProvider in the tree so PostsProvider can
+ * call useUserBlocks() to access the shared block set.
  *
  * Usage:
+ *   // In _layout.tsx:
+ *   <UserBlocksProvider>
+ *     <PostsProvider>...</PostsProvider>
+ *   </UserBlocksProvider>
+ *
+ *   // In any component:
  *   const { blockedUserIds, blockUser, unblockUser, isBlocked, blockPending } = useUserBlocks();
  */
 
-export function useUserBlocks() {
+function useUserBlocksInternal() {
   const { user } = useAuth();
   const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
   const [blockPending, setBlockPending] = useState<boolean>(false);
@@ -121,3 +131,5 @@ export function useUserBlocks() {
 
   return { blockedUserIds, blockUser, unblockUser, isBlocked, blockPending };
 }
+
+export const [UserBlocksProvider, useUserBlocks] = createContextHook(useUserBlocksInternal);
