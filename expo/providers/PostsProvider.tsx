@@ -147,6 +147,10 @@ export type MyProfile = {
   tiktok_handle: string | null;
   /** ISO date string (YYYY-MM-DD) or null if not set. */
   birthdate: string | null;
+  /** Consecutive nightly drop streak count. */
+  current_streak: number;
+  /** ISO date string of the last top-level Drop, or null. */
+  last_post_date: string | null;
 };
 
 /** Age tier derived from a birthdate. "unknown" when birthdate is missing. */
@@ -985,7 +989,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (!user?.id) return null;
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, birthdate")
+        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, birthdate, current_streak, last_post_date")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -1010,6 +1014,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           instagram_handle: (data.instagram_handle as string | null) ?? null,
           tiktok_handle: (data.tiktok_handle as string | null) ?? null,
           birthdate: (data.birthdate as string | null) ?? null,
+          current_streak: (data.current_streak as number | null) ?? 0,
+          last_post_date: (data.last_post_date as string | null) ?? null,
         };
       }
 

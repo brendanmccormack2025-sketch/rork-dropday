@@ -226,10 +226,12 @@ export type Database = {
           bio: string | null
           birthdate: string | null
           created_at: string | null
+          current_streak: number
           display_name: string | null
           id: string
           instagram_handle: string | null
           is_private: boolean
+          last_post_date: string | null
           terms_accepted_at: string | null
           tiktok_handle: string | null
           username: string
@@ -240,10 +242,12 @@ export type Database = {
           bio?: string | null
           birthdate?: string | null
           created_at?: string | null
+          current_streak?: number
           display_name?: string | null
           id: string
           instagram_handle?: string | null
           is_private?: boolean
+          last_post_date?: string | null
           terms_accepted_at?: string | null
           tiktok_handle?: string | null
           username: string
@@ -254,10 +258,12 @@ export type Database = {
           bio?: string | null
           birthdate?: string | null
           created_at?: string | null
+          current_streak?: number
           display_name?: string | null
           id?: string
           instagram_handle?: string | null
           is_private?: boolean
+          last_post_date?: string | null
           terms_accepted_at?: string | null
           tiktok_handle?: string | null
           username?: string
@@ -391,6 +397,7 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      get_tonight_drop_count: { Args: { since_ts: string }; Returns: number }
       user_id: { Args: never; Returns: string }
     }
     Enums: {

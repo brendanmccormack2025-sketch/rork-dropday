@@ -30,6 +30,7 @@ import { FeedListView } from "@/components/FeedListView";
 import { theme, getDropWindowState, formatCountdown } from "@/constants/theme";
 import { usePosts, type Post, resolveAvatarUrl } from "@/providers/PostsProvider";
 import { supabase } from "@/lib/supabase";
+import { useLiveDropCount, formatDropCount } from "@/hooks/useLiveDropCount";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const FREE_VIEWS_BEFORE_GATE = 5;
@@ -60,6 +61,8 @@ export default function FeedScreen() {
     () => formatCountdown(win.isOpen ? win.msUntilClose : win.msUntilOpen),
     [win]
   );
+
+  const liveDropCount = useLiveDropCount();
 
   const viewedCount = viewedIds.size;
   // MVP: participation gate disabled — all users can scroll the full feed.
@@ -147,6 +150,16 @@ export default function FeedScreen() {
                   </UiText>
                 </View>
               </View>
+
+              {/* Live participant counter — only during 8-10PM window */}
+              {liveDropCount !== null && liveDropCount > 0 && (
+                <View style={styles.liveCountPill} pointerEvents="none">
+                  <View style={styles.liveCountDot} />
+                  <UiText style={styles.liveCountText}>
+                    {formatDropCount(liveDropCount)}
+                  </UiText>
+                </View>
+              )}
             </View>
 
             {/* Tab switcher */}
@@ -532,6 +545,32 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: theme.textMuted,
+  },
+
+  /* Live participant counter */
+  liveCountPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(48,209,88,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(48,209,88,0.3)",
+    marginTop: 4,
+  },
+  liveCountDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.success,
+  },
+  liveCountText: {
+    color: theme.success,
+    fontSize: 11,
+    fontWeight: "700" as const,
+    letterSpacing: 0.3,
   },
 
   /* Empty */
