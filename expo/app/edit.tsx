@@ -40,7 +40,12 @@ import {
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
-import { theme } from "@/constants/theme";
+import {
+  theme,
+  getDropWindowState,
+  formatCountdown,
+  type DropWindowState,
+} from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
   usePosts,
@@ -185,6 +190,19 @@ export default function EditScreen() {
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [isMature, setIsMature] = useState<boolean>(false);
+
+  // ── Drop window state (live-updating) ────────────────────────────────────
+  // Re-checks every second so the Post button enables/disables automatically
+  // if the user is editing around 8 PM or 10 PM.
+  const [dropWindow, setDropWindow] = useState<DropWindowState>(() =>
+    getDropWindowState(),
+  );
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDropWindow(getDropWindowState());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // ── Drag-to-trash tracking ───────────────────────────────────────────────
   const [dragOverlayInfo, setDragOverlayInfo] = useState<{
@@ -2466,17 +2484,25 @@ export default function EditScreen() {
             </Pressable>
             <Pressable
               onPress={handlePostPress}
-              disabled={clips.length === 0 || uploading}
+              disabled={clips.length === 0 || uploading || !dropWindow.isOpen}
               style={({ pressed }) => [
                 styles.postBtn,
+                !dropWindow.isOpen && styles.postBtnDisabled,
                 (clips.length === 0 || uploading) && { opacity: 0.35 },
-                pressed && !uploading && { opacity: 0.8 },
+                pressed && !uploading && dropWindow.isOpen && { opacity: 0.8 },
               ]}
             >
               {uploading ? (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <ActivityIndicator size="small" color="#fff" />
                   <UiText style={styles.postBtnText}>Preparing...</UiText>
+                </View>
+              ) : !dropWindow.isOpen ? (
+                <View style={{ alignItems: "center", gap: 2 }}>
+                  <UiText style={styles.postBtnText}>Drops open at 8 PM</UiText>
+                  <UiText style={styles.postBtnSubtext}>
+                    in {formatCountdown(dropWindow.msUntilOpen)}
+                  </UiText>
                 </View>
               ) : (
                 <UiText style={styles.postBtnText}>Post Drop</UiText>
@@ -2788,6 +2814,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800" as const,
     letterSpacing: 0.3,
+  },
+  postBtnSubtext: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 11,
+    fontWeight: "600" as const,
+    letterSpacing: 0.2,
+  },
+  postBtnDisabled: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    shadowOpacity: 0,
+    elevation: 0,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
   },
   actionRow: {
     flexDirection: "row",
