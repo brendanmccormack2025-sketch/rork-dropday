@@ -1,0 +1,29 @@
+# Node
+node_modules/
+.expo/
+.expo-shared/
+web-build/
+dist/
+
+# Native build output (EAS generates these in the cloud)
+ios/
+android/
+
+# IDE / OS
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+*.log
+
+# Tests / coverage
+__tests__/
+coverage/
+
+# Cloud sim / scratch
+tmp/
