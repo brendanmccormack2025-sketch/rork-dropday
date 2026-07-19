@@ -42,6 +42,15 @@ import { useCameraRecorder, type Clip, MAX_VIDEO_SECONDS } from "@/hooks/useCame
 
 const LOCK_DRAG_DISTANCE = 70;
 
+/** Minimum hold duration (ms) before a touch on the capture button is
+ *  interpreted as a hold-to-record gesture instead of a tap-to-capture.
+ *  Must be comfortably above the upper bound of a natural tap duration
+ *  (~300–350ms on the cloud-simulated WebRTC preview) so a genuine tap
+ *  never crosses into the recording path. iOS's default long-press is
+ *  500ms; 400ms is the sweet spot — fast enough to feel responsive for a
+ *  hold, high enough that a slow tap stays a tap. */
+const LONG_PRESS_THRESHOLD_MS = 400;
+
 /** Wraps a View, stripping `collapsable` only on web so it
  *  never reaches the DOM. On native, `collapsable={false}` is
  *  required by react-native-gesture-handler to prevent the
@@ -126,6 +135,15 @@ export default function CameraScreen() {
   // Gesture-local refs
   const didLongPress = useRef<boolean>(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** True while the finger is physically down on the capture button.
+   *  The long-press timer checks this before firing startRecording() —
+   *  if the finger lifted before the threshold elapsed (a genuine tap),
+   *  the timer aborts and handleRelease runs the photo path instead.
+   *  This is the guard that keeps a slow tap from leaking into the
+   *  recording path, which previously caused recordAsync to throw
+   *  "An error occurred while recording" when stopRecording() fired
+   *  before the native session could establish itself. */
+  const isTouchDownRef = useRef<boolean>(false);
   const flipAnimRef = useRef<Animated.CompositeAnimation | null>(null);
   const frontFlashAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
@@ -280,14 +298,22 @@ export default function CameraScreen() {
         return;
       }
       didLongPress.current = false;
+      isTouchDownRef.current = true;
       if (longPressTimer.current) clearTimeout(longPressTimer.current);
       longPressTimer.current = setTimeout(() => {
+        // Abort if the finger has already lifted — this was a genuine
+        // tap that outlasted the threshold, not a hold-to-record intent.
+        // handleRelease has already run the photo path by now.
+        if (!isTouchDownRef.current) {
+          longPressTimer.current = null;
+          return;
+        }
         didLongPress.current = true;
         startRecording().catch((e) => {
           console.error("[camera] startRecording failed:", e);
           setError(e instanceof Error ? e.message : "Recording failed to start.");
         });
-      }, 260);
+      }, LONG_PRESS_THRESHOLD_MS);
     } catch (e) {
       console.error("[camera] handleLongPressStart error:", e);
       setError("Something went wrong. Please try again.");
@@ -319,6 +345,10 @@ export default function CameraScreen() {
 
   const handleRelease = useCallback(() => {
     try {
+      // Mark finger up FIRST — so a still-pending long-press timer
+      // (which checks isTouchDownRef) aborts instead of racing into
+      // startRecording() after we've already decided this is a tap.
+      isTouchDownRef.current = false;
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
         longPressTimer.current = null;
@@ -347,6 +377,7 @@ export default function CameraScreen() {
 
   const handleTerminate = useCallback(() => {
     try {
+      isTouchDownRef.current = false;
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
         longPressTimer.current = null;
