@@ -1,29 +1,43 @@
 const { getDefaultConfig } = require("expo/metro-config");
 const { withRorkMetro } = require("@rork-ai/toolkit-sdk/metro");
+const path = require("path");
 
-const config = getDefaultConfig(__dirname);
+const config = withRorkMetro(getDefaultConfig(__dirname));
 
-// @supabase/supabase-js@2.106.x ships an ESM bundle (dist/index.mjs) that
-// contains a dynamic `import('@opentelemetry/api')` expression guarded by
-// webpackIgnore/turbopackIgnore/@vite-ignore magic comments. Metro (Expo SDK
-// 55+) enables `unstable_enablePackageExports` by default, so it resolves the
-// `import` export condition and picks that ESM bundle. Hermes rejects `import()`
-// at parse time, breaking every release build with "Invalid expression encountered"
-// (supabase/supabase-js#2380, #2393).
+// Fix: @supabase/supabase-js@2.106.1's ESM bundle (dist/index.mjs) contains
+// a dynamic import(OTEL_PKG) expression that Hermes/hermesc rejects at parse
+// time, breaking all React Native release builds. The CJS bundle (dist/index.cjs)
+// is Hermes-safe — it uses require() instead of import().
 //
-// The CJS bundle (dist/index.cjs) hides the dynamic import behind a Function
-// constructor, so it is Hermes-safe. Force Metro onto the CJS bundle by
-// preferring the `require` export condition for this package.
-// See https://github.com/supabase/supabase-js/pull/2393
-config.resolver.conditionNames = Array.from(
-  new Set(["require", ...(config.resolver.conditionNames ?? [])])
+// Metro with unstable_enablePackageExports (default in RN 0.81) picks the
+// "import" export condition (ESM) because supabase-js@2.106.1 lacks a
+// "react-native" condition. The official fix in v2.106.2 (supabase-js PR #2393)
+// adds a "react-native" export condition pointing to the CJS bundle. Since the
+// package version can't be upgraded here, we replicate that resolution behavior
+// via a custom resolveRequest that forces supabase-js to the CJS bundle on native.
+const supabasePkgDir = path.dirname(
+  require.resolve("@supabase/supabase-js/package.json")
 );
-// `unstable_conditionNames` is the active field on some Metro versions; set
-// both to be safe across SDK revisions.
-if (config.resolver.unstable_conditionNames) {
-  config.resolver.unstable_conditionNames = Array.from(
-    new Set(["require", ...config.resolver.unstable_conditionNames])
-  );
-}
+const previousResolveRequest = config.resolver.resolveRequest;
 
-module.exports = withRorkMetro(config);
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (
+    platform !== "web" &&
+    (moduleName === "@supabase/supabase-js" ||
+      moduleName === "@supabase/supabase-js/cors")
+  ) {
+    const fileName = moduleName.endsWith("/cors")
+      ? "dist/cors.cjs"
+      : "dist/index.cjs";
+    return {
+      type: "sourceFile",
+      filePath: path.join(supabasePkgDir, fileName),
+    };
+  }
+  if (previousResolveRequest) {
+    return previousResolveRequest(context, moduleName, platform);
+  }
+  return context.resolveRequest(context, moduleName, platform);
+};
+
+module.exports = config;
