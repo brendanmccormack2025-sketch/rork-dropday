@@ -4,30 +4,39 @@ const path = require("path");
 
 const config = getDefaultConfig(__dirname);
 
-// Fix: @supabase/supabase-js@2.106.1 ships an ESM bundle (dist/index.mjs)
-// containing `import(/* webpackIgnore: true */ OTEL_PKG)` where OTEL_PKG is a
-// variable, not a string literal. Metro/Hermes cannot statically analyze a
-// variable-named import() and throws "Invalid expression encountered" during
-// production bundling. The CJS bundle (dist/index.cjs) uses require() instead,
-// which Metro handles correctly. RN 0.81 enables package exports by default,
-// so Metro resolves the "import" export condition → dist/index.mjs → crash.
-// This override intercepts the resolution and forces Metro to load the CJS
-// bundle for all platforms.
-const supabaseCjsPath = path.resolve(
-  __dirname,
-  "node_modules/@supabase/supabase-js/dist/index.cjs"
-);
-
-const rorkConfig = withRorkMetro(config);
-
-const originalResolveRequest = rorkConfig.resolver.resolveRequest;
-rorkConfig.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (moduleName === "@supabase/supabase-js") {
-    return { type: "sourceFile", filePath: supabaseCjsPath };
-  }
-  return originalResolveRequest
-    ? originalResolveRequest(context, moduleName, platform)
-    : context.resolveRequest(context, moduleName, platform);
+// Fix: @supabase/supabase-js@2.106.1's ESM bundle (dist/index.mjs) contains a
+// dynamic import() with a variable argument and webpack/turbopack/vite magic
+// comments that Metro cannot parse, causing "Invalid expression encountered"
+// during production bundling. Force Metro to use the CJS bundle (dist/index.cjs)
+// which uses Promise.resolve().then(require()) instead of import().
+const originalResolveRequest = config.resolver?.resolveRequest;
+config.resolver = {
+  ...config.resolver,
+  resolveRequest: (context, moduleName, platform) => {
+    if (
+      moduleName === "@supabase/supabase-js" ||
+      moduleName === "@supabase/supabase-js/package.json"
+    ) {
+      const base = path.resolve(
+        __dirname,
+        "node_modules/@supabase/supabase-js"
+      );
+      if (moduleName === "@supabase/supabase-js/package.json") {
+        return {
+          filePath: path.resolve(base, "package.json"),
+          type: "sourceFile",
+        };
+      }
+      return {
+        filePath: path.resolve(base, "dist/index.cjs"),
+        type: "sourceFile",
+      };
+    }
+    if (originalResolveRequest) {
+      return originalResolveRequest(context, moduleName, platform);
+    }
+    return context.resolveRequest(context, moduleName, platform);
+  },
 };
 
-module.exports = rorkConfig;
+module.exports = withRorkMetro(config);
