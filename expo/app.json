@@ -14,16 +14,20 @@
       "backgroundColor": "#050505"
     },
     "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "app.rork.fgum9ff0goqjv4vh7u4xf",
-      "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"],
+  "supportsTablet": false,
+  "bundleIdentifier": "app.rork.fgum9ff0goqjv4vh7u4xf",
+  "infoPlist": {
+    "ITSAppUsesNonExemptEncryption": false,
+    "UIBackgroundModes": [
+      "remote-notification"
+        ],
         "NSCameraUsageDescription": "DropDay uses your camera to capture tonight's drop — no uploads from your library.",
         "NSMicrophoneUsageDescription": "DropDay records audio with your video drops.",
         "NSPhotoLibraryUsageDescription": "DropDay needs access to your photo library so you can import media for your drops.",
         "NSPhotoLibraryAddUsageDescription": "DropDay saves your recorded drops to your photo library."
       },
-      "usesAppleSignIn": true
+      "usesAppleSignIn": true,
+      "buildNumber": "2"
     },
     "android": {
       "adaptiveIcon": {
@@ -36,7 +40,10 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_AUDIO"
       ]
     },
     "web": {
@@ -82,6 +89,15 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": "https://rork.com/"
+      },
+      "eas": {
+        "projectId": "dd7875e4-d7a1-46bf-a2be-4351576c3585"
+      }
+    },
+    "owner": "brendanbjhvh"
   }
 }
