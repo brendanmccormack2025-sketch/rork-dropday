@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 
-export type NotificationType = "like" | "reaction" | "follow";
+export type NotificationType = "like" | "reaction" | "follow" | "group_post";
 
 export type NotificationRow = {
   id: string;

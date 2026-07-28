@@ -21,6 +21,7 @@ import {
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import { PostsProvider } from "@/providers/PostsProvider";
+import { GroupsProvider } from "@/providers/GroupsProvider";
 import { NotificationsProvider } from "@/providers/NotificationsProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { theme } from "@/constants/theme";
@@ -181,6 +182,24 @@ function RootLayoutNav() {
             contentStyle: { backgroundColor: theme.bg },
           }}
         />
+        <Stack.Screen
+          name="group/new"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
+        <Stack.Screen
+          name="group/[id]"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
       </Stack>
     </View>
   );
@@ -214,11 +233,13 @@ export default function RootLayout() {
             <AuthProvider>
               <UserBlocksProvider>
                 <PostsProvider>
-                  <NotificationsProvider>
+                  <GroupsProvider>
+                    <NotificationsProvider>
                     <AuthGate>
                       <RootLayoutNav />
                     </AuthGate>
-                  </NotificationsProvider>
+                    </NotificationsProvider>
+                  </GroupsProvider>
                 </PostsProvider>
               </UserBlocksProvider>
             </AuthProvider>

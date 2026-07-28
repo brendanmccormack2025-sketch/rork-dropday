@@ -11,12 +11,13 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Search, Sparkles, UserPlus, UserCheck, X } from "lucide-react-native";
+import { Search, Sparkles, UserPlus, UserCheck, X, Users, Plus } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
 import { usePosts, type ExploreCreator } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
+import { useGroups } from "@/providers/GroupsProvider";
 import { supabase } from "@/lib/supabase";
 
 function formatEngagement(n: number): string {
@@ -43,13 +44,16 @@ export default function ExploreScreen() {
   const [searchResults, setSearchResults] = useState<ExploreCreator[]>([]);
   const [searchLoading, setSearchLoading] = useState<boolean>(false);
 
+  const { myGroups, groupsLoading, refetchGroups } = useGroups();
+
   const isSearching = searchQuery.trim().length > 0;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetchExploreCreators();
+    refetchGroups();
     setRefreshing(false);
-  }, [refetchExploreCreators]);
+  }, [refetchExploreCreators, refetchGroups]);
 
   const handleToggleFollow = useCallback(
     async (targetId: string, currentlyFollowing: boolean) => {
@@ -208,6 +212,74 @@ export default function ExploreScreen() {
             }
             ListHeaderComponent={
               <View style={styles.sectionHeaderWrap}>
+                {/* Groups section */}
+                <View style={styles.groupsSection}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.groupsBadge}>
+                      <Users color={theme.accent} size={14} strokeWidth={2} />
+                    </View>
+                    <UiText style={styles.sectionLabel}>Groups</UiText>
+                    <Pressable
+                      onPress={() => router.push("/group/new" as never)}
+                      style={({ pressed }) => [
+                        styles.newGroupBtn,
+                        pressed && styles.newGroupBtnPressed,
+                      ]}
+                      hitSlop={8}
+                    >
+                      <Plus color={theme.accent} size={18} strokeWidth={2.5} />
+                    </Pressable>
+                  </View>
+                  {groupsLoading && (
+                    <View style={styles.loadingWrap}>
+                      <ActivityIndicator color={theme.accent} size="small" />
+                    </View>
+                  )}
+                  {!groupsLoading && myGroups.length === 0 && (
+                    <Pressable
+                      onPress={() => router.push("/group/new" as never)}
+                      style={({ pressed }) => [
+                        styles.groupsEmpty,
+                        pressed && styles.groupsEmptyPressed,
+                      ]}
+                    >
+                      <Users color={theme.textDim} size={24} strokeWidth={1.5} />
+                      <UiText style={styles.groupsEmptyTitle}>Create your first group</UiText>
+                      <UiText style={styles.groupsEmptySub}>
+                        Groups let you share drops privately with friends.
+                      </UiText>
+                    </Pressable>
+                  )}
+                  {myGroups.map((g) => (
+                    <Pressable
+                      key={g.id}
+                      onPress={() =>
+                        router.push({
+                          pathname: "/group/[id]",
+                          params: { id: g.id },
+                        } as never)
+                      }
+                      style={({ pressed }) => [
+                        styles.groupRow,
+                        pressed && styles.groupRowPressed,
+                      ]}
+                    >
+                      <View style={styles.groupIcon}>
+                        <Users color="#fff" size={18} strokeWidth={2.5} />
+                      </View>
+                      <View style={styles.groupInfo}>
+                        <UiText style={styles.groupName} numberOfLines={1}>
+                          {g.name}
+                        </UiText>
+                        <UiText style={styles.groupMeta}>
+                          {g.member_count ?? 0} member{(g.member_count ?? 0) !== 1 ? "s" : ""}
+                        </UiText>
+                      </View>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* Suggested Creators */}
                 <View style={styles.sectionHeader}>
                   <View style={styles.sectionBadge}>
                     <Sparkles color={theme.accent} size={14} strokeWidth={2} />
@@ -481,5 +553,90 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
     fontSize: 13,
     fontWeight: "600" as const,
+  },
+
+  /* Groups section */
+  groupsSection: {
+    marginBottom: 24,
+  },
+  groupsBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: "rgba(10,132,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  newGroupBtn: {
+    marginLeft: "auto",
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "rgba(10,132,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  newGroupBtnPressed: {
+    transform: [{ scale: 0.92 }],
+    backgroundColor: "rgba(10,132,255,0.2)",
+  },
+  groupsEmpty: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+  },
+  groupsEmptyPressed: {
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  groupsEmptyTitle: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "700" as const,
+  },
+  groupsEmptySub: {
+    color: theme.textMuted,
+    fontSize: 12,
+    textAlign: "center",
+    lineHeight: 17,
+  },
+  groupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderRadius: 12,
+    marginBottom: 6,
+  },
+  groupRowPressed: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  groupIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: theme.primaryDeep,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  groupName: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: "700" as const,
+  },
+  groupMeta: {
+    color: theme.textMuted,
+    fontSize: 12,
+    fontWeight: "500" as const,
   },
 });
