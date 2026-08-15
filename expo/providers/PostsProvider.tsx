@@ -2517,7 +2517,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   );
 
   return useMemo(
-    () => ({
+    () => {
+      // TEMP DEBUG — remove after diagnosing reported-content-in-feed bug
+      console.log("[PostsProvider] useMemo recompute — reportedPostIds.size =", reportedPostIds.size, "blockedUserIds.size =", blockedUserIds.size);
+      return {
       exploreCreators: exploreCreatorsQuery.data ?? [],
       exploreCreatorsLoading: exploreCreatorsQuery.isLoading,
       refetchExploreCreators: exploreCreatorsQuery.refetch,
@@ -2570,7 +2573,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       sendDropAsMessage,
       deletePost,
       deleteReaction,
-    }),
+      };
+    },
     [
       exploreCreatorsQuery,
       feedQuery,
