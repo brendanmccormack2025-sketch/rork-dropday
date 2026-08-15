@@ -673,6 +673,57 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
   });
 
+  // ── My reports ────────────────────────────────────────────────────────
+  // Fetches the current user's own report rows so reported content can be
+  // filtered out on the read side (client-side exclusion). Cached for 120s
+  // like other self-owned data (blocks, profile, etc.).
+  const myReportsQuery = useQuery({
+    queryKey: ["reports", "mine", user?.id],
+    enabled: !!user?.id,
+    retry: 1,
+    staleTime: 120_000,
+    queryFn: async (): Promise<Array<{ target_id: string; target_type: string }>> => {
+      if (!user?.id) return [];
+      try {
+        const { data, error } = await supabase
+          .from("reports")
+          .select("target_id, target_type")
+          .eq("reporter_id", user.id);
+        if (error) {
+          console.warn("[reports:mine] error", error.message);
+          return [];
+        }
+        return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+          target_id: row.target_id as string,
+          target_type: row.target_type as string,
+        }));
+      } catch (e) {
+        console.warn("[reports:mine] fetch error", (e as Error)?.message ?? e);
+        return [];
+      }
+    },
+  });
+
+  /** Set of post IDs the current user has reported — used to filter them
+   *  out of feed/liked/mine results on the read side. */
+  const reportedPostIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of myReportsQuery.data ?? []) {
+      if (r.target_type === "post") set.add(r.target_id);
+    }
+    return set;
+  }, [myReportsQuery.data]);
+
+  /** Set of reaction IDs the current user has reported — used to filter
+   *  them out of reaction-tree/reactions-list results on the read side. */
+  const reportedReactionIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of myReportsQuery.data ?? []) {
+      if (r.target_type === "reaction") set.add(r.target_id);
+    }
+    return set;
+  }, [myReportsQuery.data]);
+
   const feedQuery = useQuery({
     queryKey: ["posts", "fyp", user?.id],
     retry: 1,
@@ -2442,23 +2493,27 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   // RLS can't do cross-table blocking without a function.
   const filterBlocked = useCallback(
     (posts: Post[]): Post[] => {
-      if (blockedUserIds.size === 0) return posts;
-      return posts.filter((p) => !blockedUserIds.has(p.user_id));
+      if (blockedUserIds.size === 0 && reportedPostIds.size === 0) return posts;
+      return posts.filter(
+        (p) => !blockedUserIds.has(p.user_id) && !reportedPostIds.has(p.id),
+      );
     },
-    [blockedUserIds],
+    [blockedUserIds, reportedPostIds],
   );
 
   const filterBlockedReactions = useCallback(
     (grouped: Record<string, Post[]>): Record<string, Post[]> => {
-      if (blockedUserIds.size === 0) return grouped;
+      if (blockedUserIds.size === 0 && reportedReactionIds.size === 0) return grouped;
       const filtered: Record<string, Post[]> = {};
       for (const [pid, posts] of Object.entries(grouped)) {
-        const kept = posts.filter((p) => !blockedUserIds.has(p.user_id));
+        const kept = posts.filter(
+          (p) => !blockedUserIds.has(p.user_id) && !reportedReactionIds.has(p.id),
+        );
         if (kept.length > 0) filtered[pid] = kept;
       }
       return filtered;
     },
-    [blockedUserIds],
+    [blockedUserIds, reportedReactionIds],
   );
 
   return useMemo(
@@ -2497,6 +2552,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       reactionsByParent: filterBlockedReactions(allReactionsQuery.data ?? {}),
       reactionsLoading: allReactionsQuery.isLoading,
       refetchReactions: allReactionsQuery.refetch,
+      reportedReactionIds,
       lastQueryError,
       lastPostCreatedAtRef,
       optimisticPosts,
@@ -2550,6 +2606,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       deleteReaction,
       filterBlocked,
       filterBlockedReactions,
+      myReportsQuery,
+      reportedPostIds,
+      reportedReactionIds,
     ]
   );
 });

@@ -120,7 +120,7 @@ export default function ReactionTreeScreen() {
 
   // ── Follow set for ranking ────────────────────────────────────────────
   // Reuse the existing following array from PostsProvider — no extra fetch.
-  const { following } = usePosts();
+  const { following, reportedReactionIds } = usePosts();
 
   // ── Rank tier 1 reactions by blended score ────────────────────────────
   // Score = like_count + (10 if the reactor is followed by the current
@@ -130,9 +130,10 @@ export default function ReactionTreeScreen() {
   // first). Tier 2 creator replies stay anchored under their parent
   // tier 1 reaction regardless of score — the ranking only applies here.
   const rankedTier1Posts = useMemo(() => {
-    // Filter out blocked users' reactions before ranking
-    const visible = blockedUserIds.size > 0
-      ? tier1Posts.filter((p) => !blockedUserIds.has(p.user_id))
+    // Filter out blocked users' reactions and reported reactions before ranking
+    const visible = (blockedUserIds.size > 0 || reportedReactionIds.size > 0)
+      ? tier1Posts.filter((p) =>
+          !blockedUserIds.has(p.user_id) && !reportedReactionIds.has(p.id))
       : tier1Posts;
     if (visible.length === 0) return visible;
     const follows = new Set(following);
@@ -146,7 +147,7 @@ export default function ReactionTreeScreen() {
       return b.createdMs - a.createdMs;
     });
     return scored.map((s) => s.p);
-  }, [tier1Posts, following, blockedUserIds]);
+  }, [tier1Posts, following, blockedUserIds, reportedReactionIds]);
 
   // ── Query 3: tier 2 replies (parent_post_id IN tier 1 IDs) ────────────
   // Only the creator needs tier 2 data, but we fetch for everyone — the
@@ -208,6 +209,7 @@ export default function ReactionTreeScreen() {
     const repliesByParent = new Map<string, Post[]>();
     for (const reply of tier2Posts) {
       if (blockedUserIds.has(reply.user_id)) continue;
+      if (reportedReactionIds.has(reply.id)) continue;
       const pid = reply.parent_post_id;
       if (!pid) continue;
       if (!repliesByParent.has(pid)) repliesByParent.set(pid, []);
@@ -225,7 +227,7 @@ export default function ReactionTreeScreen() {
       }
     }
     return items;
-  }, [rankedTier1Posts, tier2Posts, blockedUserIds]);
+  }, [rankedTier1Posts, tier2Posts, blockedUserIds, reportedReactionIds]);
 
   const qc = useQueryClient();
 
