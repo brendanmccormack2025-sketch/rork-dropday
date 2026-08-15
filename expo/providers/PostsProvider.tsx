@@ -708,6 +708,16 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
   });
 
+  // TEMP DEBUG — log query state on every render to diagnose why
+  // myReportsQuery doesn't fire after app reload.
+  console.log("[reports:debug]", {
+    userId: user?.id ?? null,
+    status: myReportsQuery.status,
+    fetchStatus: myReportsQuery.fetchStatus,
+    enabled: !!user?.id,
+    dataLen: myReportsQuery.data?.length ?? -1,
+  });
+
   /** Set of post IDs the current user has reported — used to filter them
    *  out of feed/liked/mine results on the read side. */
   const reportedPostIds = useMemo(() => {
