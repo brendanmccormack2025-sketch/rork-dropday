@@ -685,10 +685,14 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     queryFn: async (): Promise<Array<{ target_id: string; target_type: string }>> => {
       if (!user?.id) return [];
       try {
+        const sessionRes = await supabase.auth.getSession();
+        const sessionUser = sessionRes.data.session?.user?.id ?? "NO_SESSION";
         const { data, error } = await supabase
           .from("reports")
           .select("target_id, target_type")
           .eq("reporter_id", user.id);
+        // TEMP DEBUG — log session user + query result to diagnose oscillation
+        console.log("[reports:mine] sessionUser=", sessionUser, "queryUser=", user.id, "dataLen=", data?.length ?? -1, "error=", error?.message ?? null, "data=", JSON.stringify(data));
         if (error) {
           console.warn("[reports:mine] error", error.message);
           return [];
