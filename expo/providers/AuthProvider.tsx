@@ -77,14 +77,17 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    console.log("[auth] effect running, SUPABASE_READY=", SUPABASE_READY);
     if (!SUPABASE_READY) {
       setState((s) => ({ ...s, loading: false }));
       return;
     }
     let mounted = true;
+    console.log("[auth] calling getSession()...");
     supabase.auth
       .getSession()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        console.log("[auth] getSession resolved — session=", data.session ? "present" : "null", "user=", data.session?.user?.id ?? "null", "error=", error?.message ?? "none");
         if (!mounted) return;
         setState({
           session: data.session,
@@ -106,6 +109,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         setState((s) => ({ ...s, loading: false }));
       });
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("[auth] onAuthStateChange event=", event, "session=", session ? "present" : "null", "user=", session?.user?.id ?? "null");
       setState((prev) => ({
         ...prev,
         session,
