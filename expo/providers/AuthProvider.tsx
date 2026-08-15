@@ -73,6 +73,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     loading: true,
     ready: SUPABASE_READY,
   });
+
+  // TEMP DEBUG — render-body log (fires on every render, survives HMR)
+  console.log("[auth:render]", {
+    userId: state.user?.id ?? null,
+    hasSession: !!state.session,
+    loading: state.loading,
+  });
   const inFlight = useRef<Record<string, boolean>>({});
   const queryClient = useQueryClient();
 
