@@ -7,7 +7,9 @@
     "start": "bunx rork start -p fgum9ff0goqjv4vh7u4xf",
     "start-web": "bunx rork start -p fgum9ff0goqjv4vh7u4xf --web",
     "start-web-dev": "DEBUG=expo* bunx rork start -p fgum9ff0goqjv4vh7u4xf --web",
-    "lint": "expo lint"
+   "lint": "expo lint",
+    "postinstall": "node scripts/patch-supabase-otel.js",
+    "eas-build-post-install": "node scripts/patch-supabase-otel.js"
   },
   "dependencies": {
     "@expo-google-fonts/plus-jakarta-sans": "^0.4.2",
