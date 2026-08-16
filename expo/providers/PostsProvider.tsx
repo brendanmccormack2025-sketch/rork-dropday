@@ -583,9 +583,23 @@ function rankFollowingFeed(posts: Post[], currentUserId?: string): Post[] {
 }
 
 export const [PostsProvider, usePosts] = createContextHook(() => {
-  const { user } = useAuth();
+  const auth = useAuth();
+  const user = auth.user;
   const { blockedUserIds } = useUserBlocks();
   const qc = useQueryClient();
+
+  // TEMP DEBUG — log what useAuth() returns from the consumer side.
+  // This fires on every PostsProvider render (every 5s from nowForWindow).
+  console.log("[auth:consumer] userId=" + (user?.id ?? "null") + " loading=" + auth.loading + " hasSession=" + !!auth.session);
+
+  // TEMP DEBUG — one-time direct getSession() check, independent of AuthProvider
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data, error }) => {
+      console.log("[auth:direct] getSession session=" + (data.session ? "present" : "null") + " user=" + (data.session?.user?.id ?? "null") + " error=" + (error?.message ?? "none"));
+    }).catch((e) => {
+      console.log("[auth:direct] getSession REJECTED: " + (e?.message ?? e));
+    });
+  }, []);
   const [draftProjects, setDraftProjects] = useState<DraftProject[]>([]);
   const [draftsLoaded, setDraftsLoaded] = useState(false);
 

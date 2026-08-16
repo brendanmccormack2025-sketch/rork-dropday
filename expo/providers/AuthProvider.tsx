@@ -66,6 +66,9 @@ type AuthState = {
   ready: boolean;
 };
 
+// TEMP DEBUG — verify this module loads at all
+console.log("[auth:module] AuthProvider.tsx LOADED, SUPABASE_READY=" + SUPABASE_READY);
+
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [state, setState] = useState<AuthState>({
     session: null,
@@ -74,12 +77,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     ready: SUPABASE_READY,
   });
 
-  // TEMP DEBUG — render-body log (fires on every render, survives HMR)
-  console.log("[auth:render]", {
-    userId: state.user?.id ?? null,
-    hasSession: !!state.session,
-    loading: state.loading,
-  });
+  // TEMP DEBUG — string-only log to avoid serialization issues
+  console.log("[auth:render] userId=" + (state.user?.id ?? "null") + " hasSession=" + !!state.session + " loading=" + state.loading);
   const inFlight = useRef<Record<string, boolean>>({});
   const queryClient = useQueryClient();
 
