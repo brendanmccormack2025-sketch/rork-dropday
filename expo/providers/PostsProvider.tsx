@@ -588,18 +588,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const { blockedUserIds } = useUserBlocks();
   const qc = useQueryClient();
 
-  // TEMP DEBUG — log what useAuth() returns from the consumer side.
-  // This fires on every PostsProvider render (every 5s from nowForWindow).
-  console.log("[auth:consumer] userId=" + (user?.id ?? "null") + " loading=" + auth.loading + " hasSession=" + !!auth.session);
-
-  // TEMP DEBUG — one-time direct getSession() check, independent of AuthProvider
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data, error }) => {
-      console.log("[auth:direct] getSession session=" + (data.session ? "present" : "null") + " user=" + (data.session?.user?.id ?? "null") + " error=" + (error?.message ?? "none"));
-    }).catch((e) => {
-      console.log("[auth:direct] getSession REJECTED: " + (e?.message ?? e));
-    });
-  }, []);
   const [draftProjects, setDraftProjects] = useState<DraftProject[]>([]);
   const [draftsLoaded, setDraftsLoaded] = useState(false);
 
@@ -689,26 +677,32 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
   // ── My reports ────────────────────────────────────────────────────────
   // Fetches the current user's own report rows so reported content can be
-  // filtered out on the read side (client-side exclusion). Cached for 120s
-  // like other self-owned data (blocks, profile, etc.).
+  // filtered out on the read side (client-side exclusion). Cached for 120s.
+  //
+  // IMPORTANT: This query does NOT depend on useAuth() context for the user
+  // id — it calls supabase.auth.getSession() directly inside the queryFn.
+  // This sidesteps any context-propagation issues in dev/HMR where the
+  // AuthProvider's user value can be transiently null. The queryKey is a
+  // stable constant (no user id) so React Query never re-subscribes due to
+  // context changes, and the queryFn gracefully returns [] when no session
+  // exists.
   const myReportsQuery = useQuery({
-    queryKey: ["reports", "mine", user?.id],
-    enabled: !!user?.id,
+    queryKey: ["reports", "mine"],
+    enabled: true,
     retry: 1,
     staleTime: 120_000,
     queryFn: async (): Promise<Array<{ target_id: string; target_type: string }>> => {
-      if (!user?.id) return [];
       try {
-        const sessionRes = await supabase.auth.getSession();
-        const sessionUser = sessionRes.data.session?.user?.id ?? "NO_SESSION";
+        const { data: sessionData } = await supabase.auth.getSession();
+        const currentUserId = sessionData.session?.user?.id;
+        if (!currentUserId) return [];
+
         const { data, error } = await supabase
           .from("reports")
           .select("target_id, target_type")
-          .eq("reporter_id", user.id);
-        // TEMP DEBUG — log session user + query result to diagnose oscillation
-        console.log("[reports:mine] sessionUser=", sessionUser, "queryUser=", user.id, "dataLen=", data?.length ?? -1, "error=", error?.message ?? null, "data=", JSON.stringify(data));
+          .eq("reporter_id", currentUserId);
         if (error) {
-          console.warn("[reports:mine] error", error.message);
+          console.warn("[reports] fetch error", error.message);
           return [];
         }
         return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
@@ -716,20 +710,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           target_type: row.target_type as string,
         }));
       } catch (e) {
-        console.warn("[reports:mine] fetch error", (e as Error)?.message ?? e);
+        console.warn("[reports] unexpected error", (e as Error)?.message ?? e);
         return [];
       }
     },
-  });
-
-  // TEMP DEBUG — log query state on every render to diagnose why
-  // myReportsQuery doesn't fire after app reload.
-  console.log("[reports:debug]", {
-    userId: user?.id ?? null,
-    status: myReportsQuery.status,
-    fetchStatus: myReportsQuery.fetchStatus,
-    enabled: !!user?.id,
-    dataLen: myReportsQuery.data?.length ?? -1,
   });
 
   /** Set of post IDs the current user has reported — used to filter them
@@ -2546,8 +2530,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
   return useMemo(
     () => {
-      // TEMP DEBUG — remove after diagnosing reported-content-in-feed bug
-      console.log("[PostsProvider] useMemo recompute — reportedPostIds.size =", reportedPostIds.size, "blockedUserIds.size =", blockedUserIds.size);
       return {
       exploreCreators: exploreCreatorsQuery.data ?? [],
       exploreCreatorsLoading: exploreCreatorsQuery.isLoading,

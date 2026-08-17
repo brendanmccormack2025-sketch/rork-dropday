@@ -66,9 +66,6 @@ type AuthState = {
   ready: boolean;
 };
 
-// TEMP DEBUG — verify this module loads at all
-console.log("[auth:module] AuthProvider.tsx LOADED, SUPABASE_READY=" + SUPABASE_READY);
-
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [state, setState] = useState<AuthState>({
     session: null,
@@ -76,24 +73,18 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     loading: true,
     ready: SUPABASE_READY,
   });
-
-  // TEMP DEBUG — string-only log to avoid serialization issues
-  console.log("[auth:render] userId=" + (state.user?.id ?? "null") + " hasSession=" + !!state.session + " loading=" + state.loading);
   const inFlight = useRef<Record<string, boolean>>({});
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    console.log("[auth] effect running, SUPABASE_READY=", SUPABASE_READY);
     if (!SUPABASE_READY) {
       setState((s) => ({ ...s, loading: false }));
       return;
     }
     let mounted = true;
-    console.log("[auth] calling getSession()...");
     supabase.auth
       .getSession()
       .then(({ data, error }) => {
-        console.log("[auth] getSession resolved — session=", data.session ? "present" : "null", "user=", data.session?.user?.id ?? "null", "error=", error?.message ?? "none");
         if (!mounted) return;
         setState({
           session: data.session,
@@ -103,7 +94,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         });
       })
       .catch(async (err) => {
-        console.warn("[auth] getSession failed", err?.message ?? err);
         // Stale/expired refresh token — clear session storage to stop
         // the Supabase client from retrying the failed token refresh.
         try {
@@ -115,7 +105,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         setState((s) => ({ ...s, loading: false }));
       });
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("[auth] onAuthStateChange event=", event, "session=", session ? "present" : "null", "user=", session?.user?.id ?? "null");
       setState((prev) => ({
         ...prev,
         session,

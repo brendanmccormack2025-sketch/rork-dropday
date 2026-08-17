@@ -17,7 +17,7 @@ type ReportRow = { target_id: string; target_type: string };
  * Provides a `reportContent` function that shows a native Alert with
  * reason options (spam, harassment, nudity, other) and inserts a row
  * into the `reports` table. On successful insert, optimistically adds
- * the reported target_id to the ["reports", "mine", userId] React Query
+ * the reported target_id to the ["reports", "mine"] React Query
  * cache so the content disappears from feed/reaction views immediately
  * without waiting for a refetch.
  *
@@ -79,7 +79,7 @@ export function useReportContent() {
             // ── Optimistic update: add the reported target to the "my reports"
             //    cache immediately so filterBlocked / filterBlockedReactions
             //    exclude it on the next render — no refetch needed.
-            const cacheKey = ["reports", "mine", user.id] as const;
+            const cacheKey = ["reports", "mine"] as const;
             qc.setQueryData<ReportRow[]>(cacheKey, (old) => {
               const next = old ?? [];
               // Guard against duplicates (shouldn't happen, but safe)
