@@ -204,6 +204,10 @@ export default function EditScreen() {
     return () => clearInterval(interval);
   }, []);
 
+  // Reactions (reactingTo set) are postable 24/7 — only root Drops are
+  // gated to the 8–10 PM window.
+  const isWindowBlocked = !reactingTo && !dropWindow.isOpen;
+
   // ── Drag-to-trash tracking ───────────────────────────────────────────────
   const [dragOverlayInfo, setDragOverlayInfo] = useState<{
     id: string;
@@ -2484,12 +2488,12 @@ export default function EditScreen() {
             </Pressable>
             <Pressable
               onPress={handlePostPress}
-              disabled={clips.length === 0 || uploading || !dropWindow.isOpen}
+              disabled={clips.length === 0 || uploading || isWindowBlocked}
               style={({ pressed }) => [
                 styles.postBtn,
-                !dropWindow.isOpen && styles.postBtnDisabled,
+                isWindowBlocked && styles.postBtnDisabled,
                 (clips.length === 0 || uploading) && { opacity: 0.35 },
-                pressed && !uploading && dropWindow.isOpen && { opacity: 0.8 },
+                pressed && !uploading && !isWindowBlocked && { opacity: 0.8 },
               ]}
             >
               {uploading ? (
@@ -2497,7 +2501,7 @@ export default function EditScreen() {
                   <ActivityIndicator size="small" color="#fff" />
                   <UiText style={styles.postBtnText}>Preparing...</UiText>
                 </View>
-              ) : !dropWindow.isOpen ? (
+              ) : isWindowBlocked ? (
                 <View style={{ alignItems: "center", gap: 2 }}>
                   <UiText style={styles.postBtnText}>Drops open at 8 PM</UiText>
                   <UiText style={styles.postBtnSubtext}>
@@ -2505,7 +2509,7 @@ export default function EditScreen() {
                   </UiText>
                 </View>
               ) : (
-                <UiText style={styles.postBtnText}>Post Drop</UiText>
+                <UiText style={styles.postBtnText}>{reactingTo ? "Post Reaction" : "Post Drop"}</UiText>
               )}
             </Pressable>
           </View>
