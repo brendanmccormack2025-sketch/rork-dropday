@@ -2558,7 +2558,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       updateProfile,
       following: followingQuery.data ?? [],
       followingProfiles: followingQuery.data ?? [],
-      suggestedUsers: suggestedQuery.data ?? [],
+      suggestedUsers: (suggestedQuery.data ?? []).filter(
+        (u) => !blockedUserIds.has(u.id),
+      ),
       suggestedLoading: suggestedQuery.isLoading,
       refetchSuggested: suggestedQuery.refetch,
       followUser,
