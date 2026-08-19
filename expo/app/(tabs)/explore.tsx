@@ -18,6 +18,7 @@ import { FeedAvatar } from "@/components/Avatar";
 import { usePosts, type ExploreCreator } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useGroups } from "@/providers/GroupsProvider";
+import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { supabase } from "@/lib/supabase";
 
 function formatEngagement(n: number): string {
@@ -45,6 +46,7 @@ export default function ExploreScreen() {
   const [searchLoading, setSearchLoading] = useState<boolean>(false);
 
   const { myGroups, groupsLoading, refetchGroups } = useGroups();
+  const { blockedUserIds } = useUserBlocks();
 
   const isSearching = searchQuery.trim().length > 0;
 
@@ -126,6 +128,13 @@ export default function ExploreScreen() {
 
   const followingSet = useMemo(() => new Set(following), [following]);
 
+  // Blocked users are hidden from search results (read-side filter — updates
+  // instantly on block/unblock, same as Suggested Creators).
+  const visibleSearchResults = useMemo(
+    () => searchResults.filter((u) => !blockedUserIds.has(u.id)),
+    [searchResults, blockedUserIds],
+  );
+
   const navigateToProfile = useCallback(
     (userId: string) => {
       if (userId === user?.id) {
@@ -168,7 +177,7 @@ export default function ExploreScreen() {
             <View style={styles.loadingWrap}>
               <ActivityIndicator color={theme.accent} size="small" />
             </View>
-          ) : searchResults.length === 0 ? (
+          ) : visibleSearchResults.length === 0 ? (
             <View style={styles.empty}>
               <Search color={theme.textDim} size={28} strokeWidth={1.5} />
               <UiText style={styles.emptyTitle}>No users found</UiText>
@@ -178,7 +187,7 @@ export default function ExploreScreen() {
             </View>
           ) : (
             <FlatList
-              data={searchResults}
+              data={visibleSearchResults}
               keyExtractor={(u) => u.id}
               contentContainerStyle={styles.list}
               showsVerticalScrollIndicator={false}

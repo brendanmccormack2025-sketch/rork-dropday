@@ -2538,7 +2538,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   return useMemo(
     () => {
       return {
-      exploreCreators: exploreCreatorsQuery.data ?? [],
+      // Filter blocked users out of Suggested Creators (read-side, same
+      // pattern as filterBlocked — updates instantly on block/unblock).
+      exploreCreators: (exploreCreatorsQuery.data ?? []).filter(
+        (c) => !blockedUserIds.has(c.id),
+      ),
       exploreCreatorsLoading: exploreCreatorsQuery.isLoading,
       refetchExploreCreators: exploreCreatorsQuery.refetch,
       feed: filterBlocked(feedQuery.data ?? []),
@@ -2627,6 +2631,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       deleteReaction,
       filterBlocked,
       filterBlockedReactions,
+      blockedUserIds,
       myReportsQuery,
       reportedPostIds,
       reportedReactionIds,

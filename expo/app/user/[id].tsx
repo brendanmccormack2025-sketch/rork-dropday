@@ -119,6 +119,9 @@ export default function PublicProfileScreen() {
   });
 
   const drops = dropsQuery.data ?? [];
+  // Blocked user's content is hidden entirely — the grid renders empty and
+  // the ListEmptyComponent shows a blocked notice instead of their drops.
+  const visibleDrops = userProfileBlocked ? [] : drops;
 
   // ── Followers / following counts ─────────────────────────────────────
   const { data: followersCount = 0 } = useQuery({
@@ -214,7 +217,7 @@ export default function PublicProfileScreen() {
     <View style={styles.root}>
       <SafeAreaView edges={["top"]} style={styles.safe}>
         <FlatList
-          data={drops}
+          data={visibleDrops}
           keyExtractor={(p) => p.id}
           numColumns={2}
           columnWrapperStyle={drops.length > 0 ? styles.row : undefined}
@@ -341,7 +344,9 @@ export default function PublicProfileScreen() {
                   {/* Stats row */}
                   <View style={styles.statsRow}>
                     <View style={styles.stat}>
-                      <UiText style={styles.statNum}>{drops.length}</UiText>
+                      <UiText style={styles.statNum}>
+                        {userProfileBlocked ? 0 : drops.length}
+                      </UiText>
                       <UiText style={styles.statLabel}>Drops</UiText>
                     </View>
                     <View style={styles.statDivider} />
@@ -382,24 +387,38 @@ export default function PublicProfileScreen() {
                     </Pressable>
                   </View>
 
-                  {/* Section header */}
-                  <View style={styles.sectionHeader}>
-                    <Sparkles color={theme.accent} size={14} strokeWidth={2} />
-                    <UiText style={styles.sectionLabel}>Drops</UiText>
-                  </View>
+                  {/* Section header — hidden when this account is blocked */}
+                  {!userProfileBlocked && (
+                    <View style={styles.sectionHeader}>
+                      <Sparkles color={theme.accent} size={14} strokeWidth={2} />
+                      <UiText style={styles.sectionLabel}>Drops</UiText>
+                    </View>
+                  )}
                 </>
               )}
             </View>
           }
           ListEmptyComponent={
             !isLoading ? (
-              <View style={styles.empty}>
-                <Video color={theme.textDim} size={40} strokeWidth={1.5} />
-                <UiText style={styles.emptyTitle}>No drops yet</UiText>
-                <UiText style={styles.emptySub}>
-                  @{username} hasn't posted any drops yet.
-                </UiText>
-              </View>
+              userProfileBlocked ? (
+                <View style={styles.empty}>
+                  <Ban color={theme.textDim} size={40} strokeWidth={1.5} />
+                  <UiText style={styles.emptyTitle}>
+                    You've blocked this account
+                  </UiText>
+                  <UiText style={styles.emptySub}>
+                    Unblock @{username} to see their drops again.
+                  </UiText>
+                </View>
+              ) : (
+                <View style={styles.empty}>
+                  <Video color={theme.textDim} size={40} strokeWidth={1.5} />
+                  <UiText style={styles.emptyTitle}>No drops yet</UiText>
+                  <UiText style={styles.emptySub}>
+                    @{username} hasn't posted any drops yet.
+                  </UiText>
+                </View>
+              )
             ) : null
           }
           renderItem={({ item }) => (
