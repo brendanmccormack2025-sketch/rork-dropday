@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { ChevronLeft, FileText, LogOut, Shield, Trash2, User } from "lucide-react-native";
+import { Ban, ChevronLeft, FileText, LogOut, Shield, Trash2, User } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -93,6 +93,27 @@ export default function SettingsScreen() {
             >
               <User color={theme.textMuted} size={18} strokeWidth={2} />
               <UiText style={styles.rowText}>Edit Profile</UiText>
+              <ChevronLeft
+                color={theme.textDim}
+                size={18}
+                strokeWidth={2}
+                style={{ transform: [{ rotate: "180deg" }] }}
+              />
+            </Pressable>
+          </View>
+
+          {/* Safety section */}
+          <UiText style={styles.sectionLabel}>Safety</UiText>
+          <View style={styles.sectionCard}>
+            <Pressable
+              onPress={() => router.push("/settings/blocked-accounts")}
+              style={({ pressed }) => [
+                styles.row,
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Ban color={theme.textMuted} size={18} strokeWidth={2} />
+              <UiText style={styles.rowText}>Blocked Accounts</UiText>
               <ChevronLeft
                 color={theme.textDim}
                 size={18}
