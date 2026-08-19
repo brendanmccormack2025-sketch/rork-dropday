@@ -11,13 +11,12 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Search, Sparkles, UserPlus, UserCheck, X, Users, Plus } from "lucide-react-native";
+import { Search, Sparkles, UserPlus, UserCheck, X } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
 import { usePosts, type ExploreCreator } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
-import { useGroups } from "@/providers/GroupsProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { supabase } from "@/lib/supabase";
 
@@ -45,7 +44,6 @@ export default function ExploreScreen() {
   const [searchResults, setSearchResults] = useState<ExploreCreator[]>([]);
   const [searchLoading, setSearchLoading] = useState<boolean>(false);
 
-  const { myGroups, groupsLoading, refetchGroups } = useGroups();
   const { blockedUserIds } = useUserBlocks();
 
   const isSearching = searchQuery.trim().length > 0;
@@ -53,9 +51,8 @@ export default function ExploreScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetchExploreCreators();
-    refetchGroups();
     setRefreshing(false);
-  }, [refetchExploreCreators, refetchGroups]);
+  }, [refetchExploreCreators]);
 
   const handleToggleFollow = useCallback(
     async (targetId: string, currentlyFollowing: boolean) => {
@@ -221,73 +218,6 @@ export default function ExploreScreen() {
             }
             ListHeaderComponent={
               <View style={styles.sectionHeaderWrap}>
-                {/* Groups section */}
-                <View style={styles.groupsSection}>
-                  <View style={styles.sectionHeader}>
-                    <View style={styles.groupsBadge}>
-                      <Users color={theme.accent} size={14} strokeWidth={2} />
-                    </View>
-                    <UiText style={styles.sectionLabel}>Groups</UiText>
-                    <Pressable
-                      onPress={() => router.push("/group/new" as never)}
-                      style={({ pressed }) => [
-                        styles.newGroupBtn,
-                        pressed && styles.newGroupBtnPressed,
-                      ]}
-                      hitSlop={8}
-                    >
-                      <Plus color={theme.accent} size={18} strokeWidth={2.5} />
-                    </Pressable>
-                  </View>
-                  {groupsLoading && (
-                    <View style={styles.loadingWrap}>
-                      <ActivityIndicator color={theme.accent} size="small" />
-                    </View>
-                  )}
-                  {!groupsLoading && myGroups.length === 0 && (
-                    <Pressable
-                      onPress={() => router.push("/group/new" as never)}
-                      style={({ pressed }) => [
-                        styles.groupsEmpty,
-                        pressed && styles.groupsEmptyPressed,
-                      ]}
-                    >
-                      <Users color={theme.textDim} size={24} strokeWidth={1.5} />
-                      <UiText style={styles.groupsEmptyTitle}>Create your first group</UiText>
-                      <UiText style={styles.groupsEmptySub}>
-                        Groups let you share drops privately with friends.
-                      </UiText>
-                    </Pressable>
-                  )}
-                  {myGroups.map((g) => (
-                    <Pressable
-                      key={g.id}
-                      onPress={() =>
-                        router.push({
-                          pathname: "/group/[id]",
-                          params: { id: g.id },
-                        } as never)
-                      }
-                      style={({ pressed }) => [
-                        styles.groupRow,
-                        pressed && styles.groupRowPressed,
-                      ]}
-                    >
-                      <View style={styles.groupIcon}>
-                        <Users color="#fff" size={18} strokeWidth={2.5} />
-                      </View>
-                      <View style={styles.groupInfo}>
-                        <UiText style={styles.groupName} numberOfLines={1}>
-                          {g.name}
-                        </UiText>
-                        <UiText style={styles.groupMeta}>
-                          {g.member_count ?? 0} member{(g.member_count ?? 0) !== 1 ? "s" : ""}
-                        </UiText>
-                      </View>
-                    </Pressable>
-                  ))}
-                </View>
-
                 {/* Suggested Creators */}
                 <View style={styles.sectionHeader}>
                   <View style={styles.sectionBadge}>
