@@ -151,6 +151,8 @@ export type MyProfile = {
   current_streak: number;
   /** ISO date string of the last top-level Drop, or null. */
   last_post_date: string | null;
+  /** Demo/reviewer flag: skip the 8-10 PM Drop posting window. */
+  bypass_drop_window: boolean;
 };
 
 /** Age tier derived from a birthdate. "unknown" when birthdate is missing. */
@@ -1052,7 +1054,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (!user?.id) return null;
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, birthdate, current_streak, last_post_date")
+        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, birthdate, current_streak, last_post_date, bypass_drop_window")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -1079,6 +1081,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           birthdate: (data.birthdate as string | null) ?? null,
           current_streak: (data.current_streak as number | null) ?? 0,
           last_post_date: (data.last_post_date as string | null) ?? null,
+          bypass_drop_window: (data.bypass_drop_window as boolean | null) ?? false,
         };
       }
 
@@ -1546,7 +1549,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // server-side trigger reject it. The server-side trigger is the real
       // enforcement; this is just an optimisation to fail fast.
       // Reactions (parentPostId set) are never restricted.
-      if (!input.parentPostId) {
+      // Demo/reviewer accounts with bypass_drop_window skip the gate entirely.
+      if (
+        !input.parentPostId &&
+        myProfileQuery.data?.bypass_drop_window !== true
+      ) {
         const win = getDropWindowState(new Date());
         if (!win.isOpen) {
           throw new Error(

@@ -104,7 +104,7 @@ export default function EditScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, session } = useAuth();
-  const { createPost, saveDraftProject, deleteDraftProject, draftProjects, draftsLoaded, addOptimisticPost, updateOptimisticProgress } =
+  const { createPost, saveDraftProject, deleteDraftProject, draftProjects, draftsLoaded, addOptimisticPost, updateOptimisticProgress, myProfile } =
     usePosts();
   const {
     clips: clipsJson,
@@ -205,8 +205,12 @@ export default function EditScreen() {
   }, []);
 
   // Reactions (reactingTo set) are postable 24/7 — only root Drops are
-  // gated to the 8–10 PM window.
-  const isWindowBlocked = !reactingTo && !dropWindow.isOpen;
+  // gated to the 8–10 PM window. Demo/reviewer accounts with
+  // bypass_drop_window skip the gate entirely.
+  const isWindowBlocked =
+    !reactingTo &&
+    !dropWindow.isOpen &&
+    myProfile?.bypass_drop_window !== true;
 
   // ── Drag-to-trash tracking ───────────────────────────────────────────────
   const [dragOverlayInfo, setDragOverlayInfo] = useState<{
