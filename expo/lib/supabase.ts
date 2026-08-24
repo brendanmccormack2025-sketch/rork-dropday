@@ -5,7 +5,7 @@ import { Platform } from "react-native";
 
 const FALLBACK_SUPABASE_URL = "https://tfdjymogbtfavdzgfqas.supabase.co";
 const FALLBACK_SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRmbGp5bW9nYnRmYXZkemdmcWFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0MzAzODYsImV4cCI6MjA5NTAwNjM4Nn0.JNdaRgSptdNrY9gbmw6akewLescEF6snkuE8SQG8sos";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRmZGp5bW9nYnRmYXZkemdmcWFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxNjQ1NTEsImV4cCI6MjA5NTc0MDU1MX0.aBDG-nTpiw8B_i0HPmfGuwk9OIeultAjngQrX9EHCmk";
 
 const supabaseUrl =
   process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_URL.length > 0
