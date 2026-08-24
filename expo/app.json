@@ -14,12 +14,12 @@
       "backgroundColor": "#050505"
     },
     "ios": {
-  "supportsTablet": false,
-  "bundleIdentifier": "app.rork.fgum9ff0goqjv4vh7u4xf",
-  "infoPlist": {
-    "ITSAppUsesNonExemptEncryption": false,
-    "UIBackgroundModes": [
-      "remote-notification"
+      "supportsTablet": false,
+      "bundleIdentifier": "app.rork.fgum9ff0goqjv4vh7u4xf",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "remote-notification"
         ],
         "NSCameraUsageDescription": "DropDay uses your camera to capture tonight's drop — no uploads from your library.",
         "NSMicrophoneUsageDescription": "DropDay records audio with your video drops.",
@@ -27,7 +27,7 @@
         "NSPhotoLibraryAddUsageDescription": "DropDay saves your recorded drops to your photo library."
       },
       "usesAppleSignIn": true,
-      "buildNumber": "2"
+      "buildNumber": "3"
     },
     "android": {
       "adaptiveIcon": {
