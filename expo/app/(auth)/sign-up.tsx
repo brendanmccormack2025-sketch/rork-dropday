@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -20,139 +20,6 @@ import DropletLogo from "@/components/DropletLogo";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 
-/** Compute age in years from a YYYY-MM-DD string. Returns NaN on bad input. */
-function ageFromBirthdate(bd: string): number {
-  const d = new Date(bd);
-  if (Number.isNaN(d.getTime())) return Number.NaN;
-  const now = new Date();
-  let age = now.getFullYear() - d.getFullYear();
-  const hadBirthday =
-    now.getMonth() > d.getMonth() ||
-    (now.getMonth() === d.getMonth() && now.getDate() >= d.getDate());
-  if (!hadBirthday) age -= 1;
-  return age;
-}
-
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-function MonthPicker({
-  selected,
-  onSelect,
-}: {
-  selected: string;
-  onSelect: (m: number) => void;
-}) {
-  return (
-    <View style={styles.monthGrid}>
-      {MONTHS.map((name, i) => {
-        const active = selected === String(i + 1);
-        return (
-          <Pressable
-            key={name}
-            onPress={() => onSelect(i + 1)}
-            style={({ pressed }) => [
-              styles.monthChip,
-              active && styles.monthChipActive,
-              pressed && { opacity: 0.6 },
-            ]}
-          >
-            <UiText
-              style={active ? styles.monthChipTextActive : styles.monthChipText}
-            >
-              {name.slice(0, 3)}
-            </UiText>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-function DayPicker({
-  maxDay,
-  selected,
-  onSelect,
-}: {
-  maxDay: number;
-  selected: string;
-  onSelect: (d: number) => void;
-}) {
-  const days = Array.from({ length: maxDay }, (_, i) => i + 1);
-  return (
-    <View style={styles.monthGrid}>
-      {days.map((d) => {
-        const active = selected === String(d);
-        return (
-          <Pressable
-            key={d}
-            onPress={() => onSelect(d)}
-            style={({ pressed }) => [
-              styles.monthChip,
-              active && styles.monthChipActive,
-              pressed && { opacity: 0.6 },
-            ]}
-          >
-            <UiText
-              style={active ? styles.monthChipTextActive : styles.monthChipText}
-            >
-              {d}
-            </UiText>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-function YearPicker({
-  selected,
-  onSelect,
-}: {
-  selected: string;
-  onSelect: (y: number) => void;
-}) {
-  const currentYear = new Date().getFullYear();
-  const years: number[] = [];
-  for (let y = currentYear; y >= 1900; y--) years.push(y);
-  return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.yearScroll}
-    >
-      {years.map((y) => {
-        const active = selected === String(y);
-        return (
-          <Pressable
-            key={y}
-            onPress={() => onSelect(y)}
-            style={({ pressed }) => [
-              styles.yearChip,
-              active && styles.monthChipActive,
-              pressed && { opacity: 0.6 },
-            ]}
-          >
-            <UiText
-              style={active ? styles.monthChipTextActive : styles.monthChipText}
-            >
-              {y}
-            </UiText>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
-  );
-}
-
-/** Build the list of days for the selected month/year (1-based). */
-function daysInMonth(year: number, month1: number): number {
-  if (!year || !month1) return 31;
-  return new Date(year, month1, 0).getDate();
-}
-
 export default function SignUpScreen() {
   const { signUpWithEmail } = useAuth();
   const [username, setUsername] = useState<string>("");
@@ -162,22 +29,11 @@ export default function SignUpScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showCheckInbox, setShowCheckInbox] = useState<boolean>(false);
 
-  // Birthdate state (day/month/year)
-  const [bdYear, setBdYear] = useState<string>("");
-  const [bdMonth, setBdMonth] = useState<string>(""); // 1-12
-  const [bdDay, setBdDay] = useState<string>("");
-  // Which birthdate sub-field is currently open for chip picking.
-  const [activeBdField, setActiveBdField] = useState<"day" | "month" | "year" | null>(null);
+  // Self-reported 13+ age confirmation
+  const [ageConfirmed, setAgeConfirmed] = useState<boolean>(false);
 
   // Terms acceptance
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
-
-  // Clamp/clear day if the selected month/year no longer supports it.
-  useEffect(() => {
-    if (!bdDay) return;
-    const max = daysInMonth(parseInt(bdYear, 10) || 0, parseInt(bdMonth, 10) || 0);
-    if (parseInt(bdDay, 10) > max) setBdDay("");
-  }, [bdMonth, bdYear, bdDay]);
 
   const onSubmit = async () => {
     setError(null);
@@ -189,29 +45,8 @@ export default function SignUpScreen() {
       setError("Password must be at least 6 characters.");
       return;
     }
-    // Validate birthdate BEFORE any auth user is created.
-    const yNum = parseInt(bdYear, 10);
-    const mNum = parseInt(bdMonth, 10);
-    const dNum = parseInt(bdDay, 10);
-    if (
-      !bdYear || !bdMonth || !bdDay ||
-      Number.isNaN(yNum) || Number.isNaN(mNum) || Number.isNaN(dNum) ||
-      mNum < 1 || mNum > 12 || dNum < 1 || dNum > daysInMonth(yNum, mNum) ||
-      yNum < 1900 || yNum > new Date().getFullYear()
-    ) {
-      setError("Please enter your full birthdate (day, month, year).");
-      return;
-    }
-    const paddedMonth = String(mNum).padStart(2, "0");
-    const paddedDay = String(dNum).padStart(2, "0");
-    const birthdate = `${yNum}-${paddedMonth}-${paddedDay}`;
-    const age = ageFromBirthdate(birthdate);
-    if (Number.isNaN(age)) {
-      setError("That birthdate doesn't look right. Try again.");
-      return;
-    }
-    if (age < 13) {
-      setError("You must be at least 13 to use DropDay.");
+    if (!ageConfirmed) {
+      setError("You must confirm you are 13 or older to continue.");
       return;
     }
     if (!agreedToTerms) {
@@ -220,7 +55,7 @@ export default function SignUpScreen() {
     }
     setLoading(true);
     try {
-      await signUpWithEmail(email, password, username, birthdate, true);
+      await signUpWithEmail(email, password, username, undefined, agreedToTerms, ageConfirmed);
     } catch (e: any) {
       const msg: string = e?.message ?? "Sign-up failed.";
       const code: string = (e as any)?.code ?? "";
@@ -290,7 +125,7 @@ export default function SignUpScreen() {
             contentContainerStyle={styles.scrollContent}
           >
             <Pressable
-              onPress={() => { Keyboard.dismiss(); setActiveBdField(null); }}
+              onPress={() => { Keyboard.dismiss(); }}
               style={styles.innerDismiss}
             >
               <View style={styles.header}>
@@ -325,76 +160,24 @@ export default function SignUpScreen() {
               secureTextEntry
               autoComplete="password-new"
             />
-            <View style={styles.fieldWrap}>
-              <UiText style={styles.fieldLabel}>Birthdate</UiText>
-              <View style={styles.bdRow}>
-                <Pressable
-                  onPress={() => setActiveBdField((f) => (f === "day" ? null : "day"))}
-                  style={[
-                    styles.bdMonthPill,
-                    { flex: 0.7 },
-                    activeBdField === "day" && styles.bdPillActive,
-                  ]}
-                >
-                  <UiText style={bdDay ? styles.bdMonthText : styles.bdMonthPlaceholder}>
-                    {bdDay || "DD"}
-                  </UiText>
-                </Pressable>
-                <Pressable
-                  onPress={() => setActiveBdField((f) => (f === "month" ? null : "month"))}
-                  style={[
-                    styles.bdMonthPill,
-                    { flex: 1.6 },
-                    activeBdField === "month" && styles.bdPillActive,
-                  ]}
-                >
-                  <UiText style={bdMonth ? styles.bdMonthText : styles.bdMonthPlaceholder}>
-                    {bdMonth ? MONTHS[(parseInt(bdMonth, 10) || 1) - 1] : "Month"}
-                  </UiText>
-                </Pressable>
-                <Pressable
-                  onPress={() => setActiveBdField((f) => (f === "year" ? null : "year"))}
-                  style={[
-                    styles.bdMonthPill,
-                    { flex: 1 },
-                    activeBdField === "year" && styles.bdPillActive,
-                  ]}
-                >
-                  <UiText style={bdYear ? styles.bdMonthText : styles.bdMonthPlaceholder}>
-                    {bdYear || "YYYY"}
-                  </UiText>
-                </Pressable>
-              </View>
-              {activeBdField === "month" && (
-                <MonthPicker
-                  selected={bdMonth}
-                  onSelect={(m) => {
-                    setBdMonth(String(m));
-                    setActiveBdField("day");
-                  }}
-                />
-              )}
-              {activeBdField === "day" && (
-                <DayPicker
-                  maxDay={daysInMonth(parseInt(bdYear, 10) || 0, parseInt(bdMonth, 10) || 0)}
-                  selected={bdDay}
-                  onSelect={(d) => {
-                    setBdDay(String(d));
-                    setActiveBdField(bdYear ? null : "year");
-                  }}
-                />
-              )}
-              {activeBdField === "year" && (
-                <YearPicker
-                  selected={bdYear}
-                  onSelect={(y) => {
-                    setBdYear(String(y));
-                    setActiveBdField(null);
-                  }}
-                />
-              )}
-            </View>
             {error ? <UiText style={styles.error}>{error}</UiText> : null}
+            <Pressable
+              onPress={() => setAgeConfirmed((v) => !v)}
+              style={styles.termsRow}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: ageConfirmed }}
+            >
+              <View
+                style={[styles.checkbox, ageConfirmed && styles.checkboxChecked]}
+              >
+                {ageConfirmed ? (
+                  <Check color="#FFFFFF" size={16} strokeWidth={3} />
+                ) : null}
+              </View>
+              <UiText style={styles.termsText}>
+                I confirm that I am 13 years of age or older.
+              </UiText>
+            </Pressable>
             <Pressable
               onPress={() => setAgreedToTerms((v) => !v)}
               style={styles.termsRow}
@@ -439,7 +222,7 @@ export default function SignUpScreen() {
               label="Create account"
               onPress={onSubmit}
               loading={loading}
-              disabled={!agreedToTerms}
+              disabled={!agreedToTerms || !ageConfirmed}
             />
             <Pressable
               onPress={() => router.replace("/(auth)/sign-in")}
