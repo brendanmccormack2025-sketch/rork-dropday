@@ -153,6 +153,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       username: string,
       birthdate?: string,
       agreedToTerms?: boolean,
+      ageConfirmed13Plus?: boolean,
     ) => {
       if (inFlight.current.signUp) {
         return;
@@ -170,6 +171,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
               terms_accepted_at: agreedToTerms
                 ? new Date().toISOString()
                 : undefined,
+              age_confirmed_13_plus: ageConfirmed13Plus ?? undefined,
             },
           },
         });
@@ -179,12 +181,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         // doesn't currently copy birthdate — so we upsert it here as a
         // belt-and-braces step. This runs AFTER the auth user exists,
         // so for under-13 users we abort BEFORE this point (the caller
-        // gates on age before invoking this function).
+        // gates before invoking this function — on a self-reported
+        // 13+ confirmation checkbox on the sign-up screen, not a
+        // computed birthdate check).
         const uid = data.user?.id;
-        if (uid && (birthdate || agreedToTerms)) {
+        if (uid && (birthdate || agreedToTerms || ageConfirmed13Plus)) {
           const update: Record<string, unknown> = {};
           if (birthdate) update.birthdate = birthdate;
           if (agreedToTerms) update.terms_accepted_at = new Date().toISOString();
+          if (ageConfirmed13Plus) update.age_confirmed_13_plus = true;
           try {
             await supabase.from("profiles").update(update).eq("id", uid);
           } catch (e) {
