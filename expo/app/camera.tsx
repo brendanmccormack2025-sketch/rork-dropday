@@ -588,7 +588,7 @@ export default function CameraScreen() {
           />
         ) : (
           <PrimaryButton
-            label="Grant Permission"
+            label="Continue"
             onPress={async () => {
               await requestPermission();
               if (!micPermission?.granted) await requestMicPermission();
@@ -596,7 +596,12 @@ export default function CameraScreen() {
           />
         )}
         <Pressable
-          onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
+          // Triggers the same native permission request as the primary
+          // button — the real iOS dialog decides the outcome, not dismissal.
+          onPress={async () => {
+            await requestPermission();
+            if (!micPermission?.granted) await requestMicPermission();
+          }}
           style={{ marginTop: 12, padding: 12 }}
         >
           <UiText style={styles.permCancel}>Not now</UiText>
