@@ -587,25 +587,27 @@ export default function CameraScreen() {
             }}
           />
         ) : (
-          <PrimaryButton
-            label="Continue"
-            onPress={async () => {
-              await requestPermission();
-              if (!micPermission?.granted) await requestMicPermission();
-            }}
-          />
+          <>
+            <PrimaryButton
+              label="Continue"
+              onPress={async () => {
+                await requestPermission();
+                if (!micPermission?.granted) await requestMicPermission();
+              }}
+            />
+            <Pressable
+              // Triggers the same native permission request as the primary
+              // button — the real iOS dialog decides the outcome, not dismissal.
+              onPress={async () => {
+                await requestPermission();
+                if (!micPermission?.granted) await requestMicPermission();
+              }}
+              style={{ marginTop: 12, padding: 12 }}
+            >
+              <UiText style={styles.permCancel}>Not now</UiText>
+            </Pressable>
+          </>
         )}
-        <Pressable
-          // Triggers the same native permission request as the primary
-          // button — the real iOS dialog decides the outcome, not dismissal.
-          onPress={async () => {
-            await requestPermission();
-            if (!micPermission?.granted) await requestMicPermission();
-          }}
-          style={{ marginTop: 12, padding: 12 }}
-        >
-          <UiText style={styles.permCancel}>Not now</UiText>
-        </Pressable>
       </View>
     );
   }
