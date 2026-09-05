@@ -112,12 +112,14 @@ export default function EditScreen() {
     draftId,
     reactingTo,
     rootDropId,
+    groupId,
   } = useLocalSearchParams<{
     clips: string;
     videoUrl?: string;
     draftId?: string;
     reactingTo?: string;
     rootDropId?: string;
+    groupId?: string;
   }>();
 
   const _editMountT0 = useRef<number>(Date.now());
@@ -1966,6 +1968,7 @@ export default function EditScreen() {
         mediaType: stablePrimary.type,
         draftId: draftId ?? undefined,
         parentPostId: reactingTo || undefined,
+        groupId: groupId || undefined,
         segmentUris,
         trimData,
         textOverlays: overlaysForPost,

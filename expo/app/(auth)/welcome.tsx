@@ -88,7 +88,7 @@ export default function WelcomeScreen() {
           <Animated.View style={{ transform: [{ translateY }] }}>
             <DropletLogo size={120} />
           </Animated.View>
-          <UiText style={styles.brand}>DropDay</UiText>
+          <UiText style={styles.brand}>Trybe</UiText>
           <UiText style={styles.tagline}>The night belongs to the moment.</UiText>
         </View>
 

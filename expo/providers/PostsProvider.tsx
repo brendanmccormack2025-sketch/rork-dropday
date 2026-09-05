@@ -44,6 +44,14 @@ export type Post = {
   text_overlays: TextOverlay[] | null;
   thumbnail_url: string | null;
   created_at: string;
+  /** Trybe group this post belongs to — null for personal drops */
+  group_id?: string | null;
+  /** Joined group metadata (only populated on group-feed queries) */
+  group?: {
+    id: string;
+    name: string;
+    avatar_url: string | null;
+  } | null;
   like_count?: number;
   comment_count?: number;
   reaction_count?: number;
@@ -770,6 +778,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
             "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, is_mature, moderation_status, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
+          .is("group_id", null)
           .eq("moderation_status", "active")
           .order("created_at", { ascending: false })
           .limit(300);
@@ -844,6 +853,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
           .in("user_id", followingIds)
+          .is("group_id", null)
           .order("created_at", { ascending: false })
           .limit(200);
         if (hideMature) {
@@ -877,6 +887,86 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return rankFollowingFeed(raw, user.id);
       } catch (e) {
         logQueryError("following-feed", e);
+        return [];
+      }
+    },
+  });
+
+  // ── Trybe feed: group videos from ALL groups, ranked by likes ──
+  // Server-side ordering does the popularity ranking (like_count desc,
+  // then recency) — positions are NOT re-ranked client-side.
+  const trybeFeedQuery = useQuery({
+    queryKey: ["posts", "trybe", user?.id],
+    retry: 1,
+    staleTime: 30_000,
+    queryFn: async (): Promise<Post[]> => {
+      let viewerTier: AgeTier = "unknown";
+      if (user?.id) {
+        try {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("birthdate")
+            .eq("id", user.id)
+            .maybeSingle();
+          viewerTier = computeAgeTier(prof?.birthdate as string | null);
+        } catch {
+          // keep "unknown" — fail open
+        }
+      }
+      const hideMature = viewerTier === "teen";
+      try {
+        let q = supabase
+          .from("posts")
+          .select(
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, is_mature, moderation_status, created_at, like_count, comment_count, reaction_count, group_id, groups!posts_group_id_fkey(id, name, avatar_url), profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+          )
+          .is("parent_post_id", null)
+          .not("group_id", "is", null)
+          .eq("moderation_status", "active")
+          .order("like_count", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false })
+          .limit(100);
+        if (hideMature) {
+          q = q.neq("is_mature", true);
+        }
+        const res = await q;
+        if (res.error) {
+          logQueryError("trybe-feed", res.error);
+          return [];
+        }
+        return ((res.data ?? []) as Record<string, unknown>[]).map((row) => {
+          const g = row.groups as Record<string, unknown> | null;
+          return {
+            id: row.id as string,
+            user_id: row.user_id as string,
+            media_url: row.media_url as string,
+            media_type: row.media_type as "image" | "video",
+            caption: (row.caption as string | null) ?? null,
+            parent_post_id: (row.parent_post_id as string | null) ?? null,
+            segments: (row.segments as string[] | null) ?? null,
+            audio_url: (row.audio_url as string | null) ?? null,
+            trim_data: (row.trim_data as Post["trim_data"]) ?? null,
+            text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
+            thumbnail_url: (row.thumbnail_url as string | null) ?? null,
+            is_mature: (row.is_mature as boolean | null) ?? false,
+            moderation_status: (row.moderation_status as string | undefined) ?? "active",
+            created_at: row.created_at as string,
+            like_count: (row.like_count as number | undefined) ?? 0,
+            comment_count: (row.comment_count as number | undefined) ?? 0,
+            reaction_count: (row.reaction_count as number | undefined) ?? 0,
+            group_id: (row.group_id as string | null) ?? null,
+            group: g
+              ? {
+                  id: g.id as string,
+                  name: (g.name as string) ?? "Group",
+                  avatar_url: (g.avatar_url as string | null) ?? null,
+                }
+              : null,
+            profile: (row.profiles as Post["profile"]) ?? null,
+          };
+        });
+      } catch (e) {
+        logQueryError("trybe-feed", e);
         return [];
       }
     },
@@ -998,6 +1088,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       const prevFyp = qc.getQueryData<Post[]>(["posts", "fyp", user?.id]);
       const prevFollowing = qc.getQueryData<Post[]>(["posts", "following-feed", user?.id]);
       const prevMine = qc.getQueryData<Post[]>(["posts", "mine", user?.id]);
+      const prevTrybe = qc.getQueryData<Post[]>(["posts", "trybe", user?.id]);
 
       // Optimistically patch like_count in place — no refetch, no reorder
       const delta = liked ? 1 : -1;
@@ -1023,7 +1114,15 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         );
       }
 
-      return { prevFyp, prevFollowing, prevMine };
+      if (prevTrybe) {
+        qc.setQueryData<Post[]>(["posts", "trybe", user?.id], (old) =>
+          (old ?? []).map((p) =>
+            p.id === postId ? { ...p, like_count: (p.like_count ?? 0) + delta } : p
+          )
+        );
+      }
+
+      return { prevFyp, prevFollowing, prevMine, prevTrybe };
     },
     onError: (_error, _vars, context) => {
       // Rollback optimistic cache patches
@@ -1035,6 +1134,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       }
       if (context?.prevMine) {
         qc.setQueryData(["posts", "mine", user?.id], context.prevMine);
+      }
+      if (context?.prevTrybe) {
+        qc.setQueryData(["posts", "trybe", user?.id], context.prevTrybe);
       }
       // Re-sync likedPosts so FeedItem's likedOptimistic useEffect reverts
       qc.invalidateQueries({ queryKey: ["posts", "liked"] });
@@ -1530,6 +1632,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       caption?: string;
       draftId?: string;
       parentPostId?: string;
+      /** When set, the post is published into this Trybe group (skips the drop window) */
+      groupId?: string;
       segmentUris?: string[];
       trimData?: Array<{ trimStartMs: number; trimEndMs: number }>;
       textOverlays?: TextOverlay[];
@@ -1552,6 +1656,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // Demo/reviewer accounts with bypass_drop_window skip the gate entirely.
       if (
         !input.parentPostId &&
+        !input.groupId &&
         myProfileQuery.data?.bypass_drop_window !== true
       ) {
         const win = getDropWindowState(new Date());
@@ -1771,6 +1876,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         media_type: input.mediaType,
         caption: input.caption?.trim() || null,
         parent_post_id: input.parentPostId || null,
+        group_id: input.groupId || null,
         segments: segmentUrls,
         is_mature: !!input.isMature,
         poster_timezone: getDeviceTimezone(),
@@ -1843,6 +1949,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         media_type: input.mediaType,
         caption: (input.caption?.trim() || null),
         parent_post_id: input.parentPostId || null,
+        group_id: input.groupId || null,
         segments: segmentUrls,
         audio_url: null,
         trim_data: input.trimData ?? null,
@@ -1903,6 +2010,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         if (filtered.some((p) => p.id === newPost.id)) return filtered;
         return [newPost, ...filtered];
       });
+
+      // Group posts belong in the Trybe feed — invalidate so the
+      // popularity ranking picks the new post up on next read.
+      if (newPost.group_id) {
+        qc.invalidateQueries({ queryKey: ["posts", "trybe"] });
+      }
 
       // Invalidate all reaction and reply queries so the reaction-tree
       // screen refetches and shows the newly posted reaction immediately.
@@ -2394,6 +2507,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return old.filter((p) => p.id !== postId);
       });
 
+      // Remove from the Trybe feed cache
+      qc.setQueryData<Post[]>(["posts", "trybe", user?.id], (old) => {
+        if (!old) return [];
+        return old.filter((p) => p.id !== postId);
+      });
+
       // Invalidate reaction & reply queries (cascade may have removed children)
       qc.invalidateQueries({ queryKey: ["reactions"] });
       qc.invalidateQueries({ queryKey: ["replies"] });
@@ -2551,6 +2670,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       followingFeed: filterBlocked(followingFeedQuery.data ?? []),
       followingFeedLoading: followingFeedQuery.isLoading,
       refetchFollowingFeed: followingFeedQuery.refetch,
+      trybeFeed: filterBlocked(trybeFeedQuery.data ?? []),
+      trybeFeedLoading: trybeFeedQuery.isLoading,
+      refetchTrybeFeed: trybeFeedQuery.refetch,
       myPosts: myPostsQuery.data ?? [],
       refetchMyPosts: myPostsQuery.refetch,
       myProfile: myProfileQuery.data ?? null,
@@ -2602,6 +2724,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       exploreCreatorsQuery,
       feedQuery,
       followingFeedQuery,
+      trybeFeedQuery,
       myPostsQuery,
       myProfileQuery,
       updateProfile,
