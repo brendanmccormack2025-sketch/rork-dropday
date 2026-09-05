@@ -3,7 +3,7 @@ import Svg, { Defs, LinearGradient, Path, Stop, RadialGradient, Circle } from "r
 
 type Props = { size?: number };
 
-/** Electric-blue glowing droplet — the Trybe brand mark. */
+/** Electric-blue glowing droplet — the DropDay brand mark. */
 export default function DropletLogo({ size = 96 }: Props) {
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">

@@ -61,7 +61,7 @@ export default function CreateChoiceSheet({ visible, onClose }: Props) {
         if (!user) return;
         Alert.alert(
           "Media Library Access",
-          "Trybe needs access to your photo library to post a video to your group. You can grant this in Settings.",
+          "DropDay needs access to your photo library to post a video to your group. You can grant this in Settings.",
           [
             { text: "Cancel", style: "cancel" },
             {

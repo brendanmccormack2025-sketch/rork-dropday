@@ -40,7 +40,7 @@ type SuggestedUser = {
 };
 
 const SHARE_MESSAGE =
-  "Join me on Trybe — share one drop a night. It's addictive. 🚀";
+  "Join me on DropDay — share one drop a night. It's addictive. 🚀";
 const SHARE_URL = "https://dropday.app";
 
 /** Resolve a post thumbnail_url (storage path or full URL) into a displayable URI. */

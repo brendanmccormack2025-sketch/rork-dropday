@@ -572,7 +572,7 @@ export default function CameraScreen() {
         <CameraIcon color={theme.accent} size={48} />
         <UiText style={styles.permTitle}>Camera Access</UiText>
         <UiText style={styles.permSub}>
-          Trybe needs your camera to capture content. You can prep anytime and
+          DropDay needs your camera to capture content. You can prep anytime and
           post during The Drop.
         </UiText>
         {wasPrompted ? (

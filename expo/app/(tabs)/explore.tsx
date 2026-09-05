@@ -12,7 +12,7 @@ import { usePosts } from "@/providers/PostsProvider";
 import { useGroups, type GroupInvite } from "@/providers/GroupsProvider";
 
 /**
- * Trybe tab — vertical swipe feed of group videos from ALL groups,
+ * Groups tab — vertical swipe feed of group videos from ALL groups,
  * ranked by likes then recency. Pending group invites surface as
  * banners above the feed; each video links to its group page.
  */
@@ -132,7 +132,7 @@ export default function TrybeScreen() {
             <View style={styles.headerRow} pointerEvents="box-none">
               <View style={styles.brandRow}>
                 <DropletLogo size={22} />
-                <UiText style={styles.brand}>Trybe</UiText>
+                <UiText style={styles.brand}>Groups</UiText>
               </View>
               <Pressable
                 onPress={() => router.push("/group/new" as never)}

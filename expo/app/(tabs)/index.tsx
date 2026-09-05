@@ -68,7 +68,7 @@ export default function FeedScreen() {
 
   // Merged Home feed: friends' posts newest first (rankFollowingFeed), then
   // trending personal posts backfilled below. `feed` excludes group posts
-  // server-side — the Trybe tab covers those.
+  // server-side — the Groups tab covers those.
   const homePosts = useMemo(() => {
     const seen = new Set(followingFeed.map((p) => p.id));
     const backfill = feed.filter((p) => !seen.has(p.id));
@@ -134,7 +134,7 @@ export default function FeedScreen() {
             <View style={styles.headerRow} pointerEvents="box-none">
               <View style={styles.brandRow}>
                 <DropletLogo size={22} />
-                <UiText style={styles.brand}>Trybe</UiText>
+                <UiText style={styles.brand}>DropDay</UiText>
               </View>
               <View style={styles.headerActions} pointerEvents="box-none">
 
@@ -279,7 +279,7 @@ function ShareSheet({
   const handleNativeShare = async () => {
     try {
       await Share.share({
-        message: `Check out this drop on Trybe: ${post.media_url}`,
+        message: `Check out this DropDay: ${post.media_url}`,
       });
     } catch {}
   };

@@ -11,9 +11,9 @@ const DAILY_NOTIFICATION_ID = "dropday-going-live";
 
 /**
  * Schedules a daily local notification at 8:00 PM device-local time
- * framing Trybe as a live event starting, not a personal reminder.
+ * framing DropDay as a live event starting, not a personal reminder.
  *
- * "Trybe is live — join tonight's drop before 10PM"
+ * "DropDay is live — join tonight's drop before 10PM"
  *
  * Skips firing if the user has already posted a top-level Drop during
  * tonight's window (best-effort: cancels/removes the notification when
@@ -49,7 +49,7 @@ export function useLiveNotifications() {
         // Set up Android notification channel
         if (Platform.OS === "android") {
           await Notifications.setNotificationChannelAsync("dropday-live", {
-            name: "Trybe Live",
+            name: "DropDay Live",
             importance: Notifications.AndroidImportance.HIGH,
             vibrationPattern: [0, 250, 250, 250],
             lightColor: "#0A84FF",
@@ -65,7 +65,7 @@ export function useLiveNotifications() {
         await Notifications.scheduleNotificationAsync({
           identifier: DAILY_NOTIFICATION_ID,
           content: {
-            title: "Trybe is live",
+            title: "DropDay is live",
             body: "Join tonight's drop before 10PM",
             sound: true,
             ...(Platform.OS === "android" ? { channelId: "dropday-live" } : {}),

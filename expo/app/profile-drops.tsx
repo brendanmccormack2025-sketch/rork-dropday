@@ -110,7 +110,7 @@ export default function ProfileDropsScreen() {
     async (post: Post) => {
       try {
         await Share.share({
-          message: `Check out this drop on Trybe: ${post.media_url}`,
+          message: `Check out this DropDay: ${post.media_url}`,
         });
       } catch {}
     },

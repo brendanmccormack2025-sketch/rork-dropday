@@ -89,7 +89,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="explore"
           options={{
-            title: "Trybe",
+            title: "Groups",
             tabBarIcon: ({ color, size }) => (
               <UsersRound color={color} size={size} />
             ),
