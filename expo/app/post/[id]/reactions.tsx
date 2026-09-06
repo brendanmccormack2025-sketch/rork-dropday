@@ -488,7 +488,11 @@ const styles = StyleSheet.create({
 
   /* Media fallback */
   mediaFallback: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
@@ -517,7 +521,11 @@ const styles = StyleSheet.create({
 
   /* Stall / error recovery overlay */
   stallOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: "rgba(0,0,0,0.35)",
     alignItems: "center",
     justifyContent: "center",

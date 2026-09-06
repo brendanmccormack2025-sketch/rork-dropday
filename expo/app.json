@@ -85,7 +85,10 @@
         {
           "color": "#0A84FF"
         }
-      ]
+      ],
+      "expo-image",
+      "expo-splash-screen",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true
