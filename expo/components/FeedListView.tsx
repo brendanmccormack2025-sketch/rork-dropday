@@ -13,7 +13,6 @@ import { useVideoFocus } from "@/hooks/useVideoFocus";
 import { FeedItem } from "@/components/FeedItem";
 import { theme, getDropWindowState } from "@/constants/theme";
 import { usePosts, type Post } from "@/providers/PostsProvider";
-import { supabase } from "@/lib/supabase";
 
 const { height: SCREEN_H } = Dimensions.get("window");
 
@@ -93,28 +92,6 @@ export function FeedListView({
 
   const { retryOptimisticPost, removeOptimisticPost } = usePosts();
   const win = useMemo(() => getDropWindowState(new Date()), []);
-
-  // ── View counting ──────────────────────────────────────────────────────
-  // When a post becomes the focused item, bump its view_count via RPC.
-  // Each post is counted at most once per feed mount (per session-ish).
-  const countedViewIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const post = posts[activeIndex];
-    if (!post || !screenFocused) return;
-    if (post._optimistic) return;
-    if (countedViewIdsRef.current.has(post.id)) return;
-    countedViewIdsRef.current.add(post.id);
-    void (async () => {
-      try {
-        const { error } = await supabase.rpc("increment_post_view", {
-          p_post_id: post.id,
-        });
-        if (error) console.warn("[views] increment failed", error.message);
-      } catch {
-        // Non-fatal — view counting is best-effort
-      }
-    })();
-  }, [activeIndex, screenFocused, posts]);
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {

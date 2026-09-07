@@ -20,7 +20,6 @@ import {
   Sparkles,
   RotateCcw,
   Trash2,
-  Users,
   X,
   AlertCircle,
   Flag,
@@ -1123,17 +1122,6 @@ export const FeedItem = memo(function FeedItem({
             <UiText style={styles.liveTagText}>LIVE DROP</UiText>
           </View>
         )}
-        {post.group && (
-          <Pressable
-            onPress={() => router.push(`/group/${post.group!.id}` as never)}
-            style={styles.groupChip}
-          >
-            <Users color="#fff" size={11} strokeWidth={2.5} />
-            <UiText style={styles.groupChipText} numberOfLines={1}>
-              {post.group.name}
-            </UiText>
-          </Pressable>
-        )}
         <View style={styles.userRow}>
           <Pressable
             onPress={() => {
@@ -1233,24 +1221,6 @@ const styles = StyleSheet.create({
     fontWeight: "800" as const,
     letterSpacing: 0.8,
   },
-  groupChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(255,255,255,0.14)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 999,
-    maxWidth: 220,
-  },
-  groupChipText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "700" as const,
-  },
   userRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   userRowPressable: {
     flexDirection: "row",
@@ -1297,11 +1267,7 @@ const styles = StyleSheet.create({
 
   /* Stall / error recovery overlay */
   stallOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.35)",
     alignItems: "center",
     justifyContent: "center",
@@ -1331,11 +1297,7 @@ const styles = StyleSheet.create({
 
   /* Optimistic posting overlay */
   optOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
     zIndex: 10,
     alignItems: "center",
     justifyContent: "center",

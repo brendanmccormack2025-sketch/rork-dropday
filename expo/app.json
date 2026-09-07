@@ -27,7 +27,7 @@
         "NSPhotoLibraryAddUsageDescription": "DropDay saves your recorded drops to your photo library."
       },
       "usesAppleSignIn": true,
-      "buildNumber": "14"
+      "buildNumber": "9"
     },
     "android": {
       "adaptiveIcon": {
@@ -85,11 +85,7 @@
         {
           "color": "#0A84FF"
         }
-      ],
-      "expo-image",
-      "expo-splash-screen",
-      "expo-status-bar",
-      "./plugins/expo-av-compat-plugin"
+      ]
     ],
     "experiments": {
       "typedRoutes": true

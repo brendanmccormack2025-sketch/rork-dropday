@@ -112,14 +112,12 @@ export default function EditScreen() {
     draftId,
     reactingTo,
     rootDropId,
-    groupId,
   } = useLocalSearchParams<{
     clips: string;
     videoUrl?: string;
     draftId?: string;
     reactingTo?: string;
     rootDropId?: string;
-    groupId?: string;
   }>();
 
   const _editMountT0 = useRef<number>(Date.now());
@@ -1968,7 +1966,6 @@ export default function EditScreen() {
         mediaType: stablePrimary.type,
         draftId: draftId ?? undefined,
         parentPostId: reactingTo || undefined,
-        groupId: groupId || undefined,
         segmentUris,
         trimData,
         textOverlays: overlaysForPost,
@@ -2643,11 +2640,7 @@ const styles = StyleSheet.create({
 
   // ── Play overlay ──
   playOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2664,11 +2657,7 @@ const styles = StyleSheet.create({
 
   // ── Video error overlay ──
   videoErrorOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.85)",

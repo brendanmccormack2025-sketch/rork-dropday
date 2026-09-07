@@ -1,185 +1,205 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Linking,
   Pressable,
-  ScrollView,
   StyleSheet,
+  TextInput,
   View,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Image } from "expo-image";
 import { Video, ResizeMode } from "expo-av";
-import { ArrowLeft, Heart, LogOut, Trash2, Users } from "lucide-react-native";
+import {
+  ArrowLeft,
+  Heart,
+  ImagePlus,
+  Send,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react-native";
+import * as ImagePicker from "expo-image-picker";
 import { useQuery } from "@tanstack/react-query";
 
 import { theme } from "@/constants/theme";
 import { showAlert } from "@/lib/showAlert";
 import { useAuth } from "@/providers/AuthProvider";
-import { usePosts } from "@/providers/PostsProvider";
 import { useGroups, type GroupPost } from "@/providers/GroupsProvider";
 import { FeedAvatar } from "@/components/Avatar";
 import { supabase } from "@/lib/supabase";
 
-/**
- * Group page — name, accepted-member avatar row, and the group's post feed.
- * Group posts live in the main posts table (group_id set); posting happens
- * via the + button → Group Drop. Leaving sets membership to "left"; past
- * posts remain on the page.
- */
 export default function GroupFeedScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { id } = useLocalSearchParams<{ id: string }>();
   const groupId = Array.isArray(id) ? id[0] : id;
 
-  const { toggleLike, deletePost } = usePosts();
-  const { useGroupPosts, useGroupMembers, leaveGroup } = useGroups();
+  const {
+    useGroupPosts,
+    useGroupMembers,
+    createGroupPost,
+    toggleGroupReaction,
+    deleteGroupPost,
+  } = useGroups();
 
   const postsQuery = useGroupPosts(groupId);
   const membersQuery = useGroupMembers(groupId);
+
+  const [uploading, setUploading] = useState<boolean>(false);
+  const [uploadProgress, setUploadProgress] = useState<string>("");
+  const [captionModalVisible, setCaptionModalVisible] = useState<boolean>(false);
+  const [pendingUri, setPendingUri] = useState<string | null>(null);
+  const [pendingType, setPendingType] = useState<"photo" | "video">("photo");
+  const [caption, setCaption] = useState<string>("");
 
   const posts = postsQuery.data ?? [];
   const members = membersQuery.data ?? [];
   const memberCount = members.length;
 
-  // Group metadata (name + avatar)
-  const groupQuery = useQuery({
-    queryKey: ["group-meta", groupId],
+  // Fetch group name
+  const groupNameQuery = useQuery({
+    queryKey: ["group-name", groupId],
     enabled: !!groupId,
-    staleTime: 60_000,
-    queryFn: async (): Promise<{ id: string; name: string; avatar_url: string | null } | null> => {
-      if (!groupId) return null;
-      try {
-        const { data, error } = await supabase
-          .from("groups")
-          .select("id, name, avatar_url")
-          .eq("id", groupId)
-          .maybeSingle();
-        if (error) {
-          console.warn("[group-meta] error", error.message);
-          return null;
-        }
-        return (data as { id: string; name: string; avatar_url: string | null }) ?? null;
-      } catch (e) {
-        console.warn("[group-meta] fetch error", (e as Error)?.message ?? e);
-        return null;
-      }
+    staleTime: 30_000,
+    queryFn: async (): Promise<string> => {
+      if (!groupId) return "Group";
+      const { data, error } = await supabase
+        .from("groups")
+        .select("name")
+        .eq("id", groupId)
+        .single();
+      if (error || !data) return "Group";
+      return (data as Record<string, unknown>).name as string;
     },
   });
 
-  const isMember = useMemo(
-    () => !!user?.id && members.some((m) => m.user_id === user.id),
-    [members, user?.id],
-  );
+  const handlePickMedia = useCallback(async () => {
+    if (uploading) return;
 
-  // Local like overrides — toggleLike patches the main feed caches, not the
-  // group-posts cache, so the card keeps its own optimistic state.
-  const [likeOverrides, setLikeOverrides] = useState<
-    Record<string, { liked: boolean; count: number }>
-  >({});
+    // Request permissions
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert(
+        "Media Library Access",
+        "DropDay needs access to your photo library to post to the group. You can grant this in Settings.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Open Settings",
+            onPress: () => {
+              if (Platform.OS === "ios") {
+                Linking.openURL("app-settings:");
+              } else {
+                Linking.openSettings();
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
 
-  const likeStateFor = useCallback(
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images", "videos"],
+      allowsMultipleSelection: false,
+      quality: 1,
+      videoExportPreset: ImagePicker.VideoExportPreset.Passthrough,
+      exif: false,
+    });
+
+    if (result.canceled || !result.assets || result.assets.length === 0) return;
+
+    const asset = result.assets[0]!;
+    const isVideo =
+      (asset as { type?: string }).type === "video" ||
+      asset.uri.toLowerCase().endsWith(".mp4") ||
+      asset.uri.toLowerCase().endsWith(".mov");
+
+    setPendingUri(asset.uri);
+    setPendingType(isVideo ? "video" : "photo");
+    setCaption("");
+    setCaptionModalVisible(true);
+  }, [uploading]);
+
+  const handleConfirmPost = useCallback(async () => {
+    if (!pendingUri || !groupId) return;
+    setCaptionModalVisible(false);
+    setUploading(true);
+    setUploadProgress("Uploading…");
+    try {
+      await createGroupPost.mutateAsync({
+        groupId,
+        uri: pendingUri,
+        mediaType: pendingType,
+        caption,
+      });
+      setPendingUri(null);
+      setCaption("");
+    } catch (e) {
+      showAlert("Post failed", (e as Error)?.message ?? "Could not upload to group.");
+    } finally {
+      setUploading(false);
+      setUploadProgress("");
+    }
+  }, [pendingUri, groupId, pendingType, caption, createGroupPost]);
+
+  const handleToggleReaction = useCallback(
     (post: GroupPost) => {
-      const override = likeOverrides[post.id];
-      return {
-        liked: override ? override.liked : post.has_liked,
-        count: override ? override.count : post.like_count,
-      };
+      toggleGroupReaction.mutate({
+        groupPostId: post.id,
+        groupId: post.group_id,
+        reacted: post.has_reacted ?? false,
+      });
     },
-    [likeOverrides],
-  );
-
-  const handleToggleLike = useCallback(
-    (post: GroupPost) => {
-      const current = likeStateFor(post);
-      const next = {
-        liked: !current.liked,
-        count: Math.max(0, current.count + (current.liked ? -1 : 1)),
-      };
-      setLikeOverrides((prev) => ({ ...prev, [post.id]: next }));
-      toggleLike.mutate({ postId: post.id, liked: next.liked });
-    },
-    [likeStateFor, toggleLike],
+    [toggleGroupReaction],
   );
 
   const handleDeletePost = useCallback(
     (post: GroupPost) => {
-      Alert.alert("Delete post?", "This will remove your post from the group.", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deletePost.mutateAsync(post.id);
-              await postsQuery.refetch();
-            } catch (e) {
-              showAlert("Delete failed", (e as Error)?.message ?? "Could not delete post.");
-            }
+      Alert.alert(
+        "Delete post?",
+        "This will remove your post from the group.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await deleteGroupPost.mutateAsync({
+                  groupPostId: post.id,
+                  groupId: post.group_id,
+                  mediaUrl: post.media_url,
+                });
+              } catch (e) {
+                showAlert("Delete failed", (e as Error)?.message ?? "Could not delete post.");
+              }
+            },
           },
-        },
-      ]);
-    },
-    [deletePost, postsQuery],
-  );
-
-  const handleLeave = useCallback(() => {
-    if (!groupId) return;
-    Alert.alert(
-      "Leave this group?",
-      "Your past posts will remain on the group page.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Leave",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await leaveGroup.mutateAsync({ groupId });
-              router.back();
-            } catch (e) {
-              showAlert("Couldn't leave", (e as Error)?.message ?? "Something went wrong.");
-            }
-          },
-        },
-      ],
-    );
-  }, [groupId, leaveGroup, router]);
-
-  const navigateToProfile = useCallback(
-    (userId: string) => {
-      if (userId === user?.id) {
-        router.push("/(tabs)/profile" as never);
-      } else {
-        router.push({ pathname: "/user/[id]", params: { id: userId } } as never);
-      }
-    },
-    [router, user?.id],
-  );
-
-  const groupName = groupQuery.data?.name ?? "Group";
-  const groupAvatarUrl = groupQuery.data?.avatar_url ?? null;
-
-  const renderPost = useCallback(
-    ({ item }: { item: GroupPost }) => {
-      const likeState = likeStateFor(item);
-      return (
-        <GroupPostCard
-          post={item}
-          liked={likeState.liked}
-          likeCount={likeState.count}
-          isOwn={user?.id === item.user_id}
-          onToggleLike={() => handleToggleLike(item)}
-          onDelete={() => handleDeletePost(item)}
-          onPressProfile={() => navigateToProfile(item.user_id)}
-        />
+        ],
       );
     },
-    [likeStateFor, handleToggleLike, handleDeletePost, navigateToProfile, user?.id],
+    [deleteGroupPost],
+  );
+
+  const renderPost = useCallback(
+    ({ item }: { item: GroupPost }) => (
+      <GroupPostCard
+        post={item}
+        currentUserId={user?.id ?? null}
+        onToggleReaction={() => handleToggleReaction(item)}
+        onDelete={() => handleDeletePost(item)}
+      />
+    ),
+    [user?.id, handleToggleReaction, handleDeletePost],
   );
 
   return (
@@ -191,7 +211,7 @@ export default function GroupFeedScreen() {
         </Pressable>
         <View style={styles.headerCenter}>
           <UiText style={styles.headerTitle} numberOfLines={1}>
-            {groupName}
+            {groupNameQuery.data ?? "Group"}
           </UiText>
           <View style={styles.memberBadge}>
             <Users color={theme.textDim} size={11} strokeWidth={2.5} />
@@ -200,34 +220,7 @@ export default function GroupFeedScreen() {
             </UiText>
           </View>
         </View>
-        {isMember ? (
-          <Pressable onPress={handleLeave} style={styles.backBtn} hitSlop={8}>
-            <LogOut color={theme.danger} size={19} strokeWidth={2.2} />
-          </Pressable>
-        ) : (
-          <View style={styles.backBtn} />
-        )}
-      </View>
-
-      {/* Accepted members row */}
-      <View style={styles.membersBar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.membersRow}>
-          {members.map((m) => {
-            const name = m.profile?.display_name ?? m.profile?.username ?? "Member";
-            return (
-              <Pressable
-                key={m.user_id}
-                onPress={() => navigateToProfile(m.user_id)}
-                style={styles.memberItem}
-              >
-                <FeedAvatar profile={m.profile} name={name} />
-                <UiText style={styles.memberName} numberOfLines={1}>
-                  {name}
-                </UiText>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        <View style={styles.backBtn} />
       </View>
 
       {/* Posts list */}
@@ -247,12 +240,103 @@ export default function GroupFeedScreen() {
               <Users color={theme.textDim} size={48} strokeWidth={1.5} />
               <UiText style={styles.emptyTitle}>No posts yet</UiText>
               <UiText style={styles.emptySub}>
-                Use the + button → Group Drop to post a video from your camera roll here.
+                Be the first to share a photo or video with the group.
               </UiText>
             </View>
           )
         }
       />
+
+      {/* Camera-roll upload button */}
+      <View style={styles.bottomBar}>
+        <Pressable
+          onPress={handlePickMedia}
+          disabled={uploading}
+          style={({ pressed }) => [
+            styles.uploadBtn,
+            pressed && !uploading && styles.uploadBtnPressed,
+          ]}
+        >
+          {uploading ? (
+            <>
+              <ActivityIndicator color={theme.accent} size="small" />
+              <UiText style={styles.uploadBtnText}>{uploadProgress || "Uploading…"}</UiText>
+            </>
+          ) : (
+            <>
+              <ImagePlus color={theme.accent} size={22} strokeWidth={2.5} />
+              <UiText style={styles.uploadBtnText}>Add Photo or Video</UiText>
+            </>
+          )}
+        </Pressable>
+      </View>
+
+      {/* Caption modal */}
+      <Modal
+        visible={captionModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCaptionModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <UiText style={styles.modalTitle}>Add a caption</UiText>
+              <Pressable onPress={() => setCaptionModalVisible(false)} hitSlop={8}>
+                <X color={theme.textMuted} size={22} />
+              </Pressable>
+            </View>
+
+            {/* Preview */}
+            {pendingUri && (
+              <View style={styles.previewWrap}>
+                {pendingType === "video" ? (
+                  <Video
+                    source={{ uri: pendingUri }}
+                    style={styles.previewMedia}
+                    resizeMode={ResizeMode.COVER}
+                    shouldPlay={false}
+                    isLooping={false}
+                    useNativeControls
+                  />
+                ) : (
+                  <Image
+                    source={{ uri: pendingUri }}
+                    style={styles.previewMedia}
+                    contentFit="cover"
+                    transition={100}
+                  />
+                )}
+              </View>
+            )}
+
+            <TextInput
+              value={caption}
+              onChangeText={setCaption}
+              placeholder="Write a caption…"
+              placeholderTextColor={theme.textDim}
+              style={styles.captionInput}
+              multiline
+              maxLength={500}
+              autoFocus
+            />
+
+            <Pressable
+              onPress={handleConfirmPost}
+              style={({ pressed }) => [
+                styles.postBtn,
+                pressed && styles.postBtnPressed,
+              ]}
+            >
+              <Send color="#fff" size={18} strokeWidth={2.5} />
+              <UiText style={styles.postBtnText}>Post to Group</UiText>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -261,38 +345,33 @@ export default function GroupFeedScreen() {
 
 function GroupPostCard({
   post,
-  liked,
-  likeCount,
-  isOwn,
-  onToggleLike,
+  currentUserId,
+  onToggleReaction,
   onDelete,
-  onPressProfile,
 }: {
   post: GroupPost;
-  liked: boolean;
-  likeCount: number;
-  isOwn: boolean;
-  onToggleLike: () => void;
+  currentUserId: string | null;
+  onToggleReaction: () => void;
   onDelete: () => void;
-  onPressProfile: () => void;
 }) {
   const posterName = post.profile?.display_name ?? post.profile?.username ?? "User";
+  const isOwn = currentUserId === post.user_id;
+  const reacted = post.has_reacted ?? false;
+  const reactionCount = post.reaction_count ?? 0;
 
   return (
     <View style={styles.card}>
       {/* Poster info */}
       <View style={styles.cardHeader}>
-        <Pressable onPress={onPressProfile} style={styles.cardHeaderPressable}>
-          <FeedAvatar profile={post.profile} name={posterName} />
-          <View style={styles.posterInfo}>
-            <UiText style={styles.posterName} numberOfLines={1}>
-              {posterName}
-            </UiText>
-            <UiText style={styles.posterHandle} numberOfLines={1}>
-              @{post.profile?.username ?? "user"}
-            </UiText>
-          </View>
-        </Pressable>
+        <FeedAvatar profile={post.profile} name={posterName} />
+        <View style={styles.posterInfo}>
+          <UiText style={styles.posterName} numberOfLines={1}>
+            {posterName}
+          </UiText>
+          <UiText style={styles.posterHandle} numberOfLines={1}>
+            @{post.profile?.username ?? "user"}
+          </UiText>
+        </View>
         {isOwn && (
           <Pressable onPress={onDelete} hitSlop={8} style={styles.deleteBtn}>
             <Trash2 color={theme.textDim} size={18} strokeWidth={2} />
@@ -325,7 +404,7 @@ function GroupPostCard({
       {/* Actions */}
       <View style={styles.cardActions}>
         <Pressable
-          onPress={onToggleLike}
+          onPress={onToggleReaction}
           style={({ pressed }) => [
             styles.reactionBtn,
             pressed && styles.reactionBtnPressed,
@@ -333,14 +412,14 @@ function GroupPostCard({
           hitSlop={8}
         >
           <Heart
-            color={liked ? "#FF453A" : theme.textMuted}
+            color={reacted ? "#FF453A" : theme.textMuted}
             size={22}
-            strokeWidth={liked ? 0 : 2.5}
-            fill={liked ? "#FF453A" : "none"}
+            strokeWidth={reacted ? 0 : 2.5}
+            fill={reacted ? "#FF453A" : "none"}
           />
-          {likeCount > 0 && (
-            <UiText style={[styles.reactionCount, liked && styles.reactionCountActive]}>
-              {likeCount}
+          {reactionCount > 0 && (
+            <UiText style={[styles.reactionCount, reacted && styles.reactionCountActive]}>
+              {reactionCount}
             </UiText>
           )}
         </Pressable>
@@ -397,32 +476,11 @@ const styles = StyleSheet.create({
     fontWeight: "500" as const,
   },
 
-  /* Members bar */
-  membersBar: {
-    borderBottomWidth: 1,
-    borderBottomColor: theme.border,
-    paddingVertical: 10,
-  },
-  membersRow: {
-    paddingHorizontal: 12,
-    gap: 14,
-  },
-  memberItem: {
-    alignItems: "center",
-    gap: 4,
-    width: 52,
-  },
-  memberName: {
-    color: theme.textMuted,
-    fontSize: 10,
-    fontWeight: "600" as const,
-  },
-
   /* List */
   list: {
     paddingHorizontal: 12,
     paddingTop: 12,
-    paddingBottom: 40,
+    paddingBottom: 100,
     gap: 16,
   },
 
@@ -433,12 +491,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 1,
     borderColor: theme.border,
-  },
-  cardHeaderPressable: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
   },
   cardHeader: {
     flexDirection: "row",
@@ -546,5 +598,108 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
     lineHeight: 20,
+  },
+
+  /* Bottom bar */
+  bottomBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 24,
+    backgroundColor: theme.bg,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+  },
+  uploadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: "rgba(10,132,255,0.12)",
+    borderWidth: 1.5,
+    borderColor: theme.accent,
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  uploadBtnPressed: {
+    transform: [{ scale: 0.98 }],
+    backgroundColor: "rgba(10,132,255,0.18)",
+  },
+  uploadBtnText: {
+    color: theme.accent,
+    fontSize: 15,
+    fontWeight: "700" as const,
+  },
+
+  /* Caption modal */
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.6)",
+  },
+  modalCard: {
+    backgroundColor: theme.bgElevated,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 32,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: "800" as const,
+  },
+  previewWrap: {
+    width: "100%",
+    aspectRatio: 1,
+    borderRadius: 16,
+    overflow: "hidden",
+    marginBottom: 16,
+    backgroundColor: "#000",
+  },
+  previewMedia: {
+    width: "100%",
+    height: "100%",
+  },
+  captionInput: {
+    backgroundColor: theme.card,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: theme.text,
+    fontSize: 15,
+    minHeight: 60,
+    maxHeight: 120,
+    borderWidth: 1,
+    borderColor: theme.border,
+    marginBottom: 16,
+    textAlignVertical: "top",
+  },
+  postBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: theme.accent,
+    borderRadius: 14,
+    paddingVertical: 15,
+  },
+  postBtnPressed: {
+    transform: [{ scale: 0.98 }],
+  },
+  postBtnText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700" as const,
   },
 });

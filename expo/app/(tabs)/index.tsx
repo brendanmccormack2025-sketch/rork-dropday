@@ -35,6 +35,8 @@ import { useLiveDropCount, formatDropCount } from "@/hooks/useLiveDropCount";
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const FREE_VIEWS_BEFORE_GATE = 5;
 
+type FeedTab = "following" | "foryou";
+
 export default function FeedScreen() {
   const router = useRouter();
   const {
@@ -46,6 +48,7 @@ export default function FeedScreen() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
   const [sharePost, setSharePost] = useState<Post | null>(null);
+  const [activeTab, setActiveTab] = useState<FeedTab>("foryou");
   const isFirstFocusRef = useRef<boolean>(true);
 
   useEffect(() => {
@@ -66,22 +69,16 @@ export default function FeedScreen() {
   // Re-enable before launch by restoring: !hasPostedInWindow && viewedCount >= FREE_VIEWS_BEFORE_GATE
   const gateActive = false;
 
-  // Merged Home feed: friends' posts newest first (rankFollowingFeed), then
-  // trending personal posts backfilled below. `feed` excludes group posts
-  // server-side — the Groups tab covers those.
-  const homePosts = useMemo(() => {
-    const seen = new Set(followingFeed.map((p) => p.id));
-    const backfill = feed.filter((p) => !seen.has(p.id));
-    return [...followingFeed, ...backfill];
-  }, [followingFeed, feed]);
-  const homeLoading = feedLoading || followingFeedLoading;
+  const activePosts = activeTab === "following" ? followingFeed : feed;
+  const activeLoading = activeTab === "following" ? followingFeedLoading : feedLoading;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // Refetch both feeds + myPosts so hasPostedInWindow updates correctly.
-    await Promise.all([refetchFeed(), refetchFollowingFeed(), refetchMyPosts()]);
+    // Refetch the active feed + myPosts so hasPostedInWindow updates correctly.
+    const refetchActive = activeTab === "following" ? refetchFollowingFeed : refetchFeed;
+    await Promise.all([refetchActive(), refetchMyPosts()]);
     setRefreshing(false);
-  }, [refetchFeed, refetchFollowingFeed, refetchMyPosts]);
+  }, [activeTab, refetchFeed, refetchFollowingFeed, refetchMyPosts]);
 
   // Refetch on tab focus — ensures fresh data when returning from camera
   // or edit-profile without needing a manual pull-to-refresh.
@@ -119,11 +116,12 @@ export default function FeedScreen() {
   return (
     <View style={styles.root}>
       <FeedListView
-        posts={homePosts}
-        isLoading={homeLoading}
+        posts={activePosts}
+        isLoading={activeLoading}
         onRefresh={onRefresh}
         isRefreshing={refreshing}
         initialIndex={0}
+        resetToken={activeTab}
         showGate={gateActive}
         onSharePost={(post) => setSharePost(post)}
         onReactionsPost={(post) => {
@@ -163,9 +161,35 @@ export default function FeedScreen() {
                 </View>
               )}
             </View>
+
+            {/* Tab switcher */}
+            <View style={styles.tabBar} pointerEvents="box-none">
+              <Pressable
+                onPress={() => setActiveTab("following")}
+                style={[styles.tab, activeTab === "following" && styles.tabActive]}
+              >
+                <UiText style={[styles.tabText, activeTab === "following" && styles.tabTextActive]}>
+                  Following
+                </UiText>
+              </Pressable>
+              <Pressable
+                onPress={() => setActiveTab("foryou")}
+                style={[styles.tab, activeTab === "foryou" && styles.tabActive]}
+              >
+                <UiText style={[styles.tabText, activeTab === "foryou" && styles.tabTextActive]}>
+                  For You
+                </UiText>
+              </Pressable>
+            </View>
           </SafeAreaView>
         }
-        emptyComponent={<EmptyState />}
+        emptyComponent={
+          activeTab === "following" ? (
+            <FollowingEmptyState onExploreForYou={() => setActiveTab("foryou")} />
+          ) : (
+            <EmptyState />
+          )
+        }
         gateComponent={
           gateActive ? (
             <GateOverlay
@@ -199,6 +223,21 @@ function EmptyState() {
   );
 }
 
+function FollowingEmptyState({ onExploreForYou }: { onExploreForYou: () => void }) {
+  return (
+    <SafeAreaView style={styles.emptyWrap}>
+      <Users color={theme.textMuted} size={48} />
+      <UiText style={styles.emptyTitle}>No drops from your follows yet</UiText>
+      <UiText style={styles.emptySub}>
+        Follow people to see their drops here. Head to For You to discover creators.
+      </UiText>
+      <Pressable onPress={onExploreForYou} style={styles.emptyBtn}>
+        <UiText style={styles.emptyBtnText}>Explore For You</UiText>
+      </Pressable>
+    </SafeAreaView>
+  );
+}
+
 function GateOverlay({
   onDrop,
   viewed,
@@ -215,7 +254,7 @@ function GateOverlay({
         </View>
         <UiText style={styles.gateTitle}>Drop to unlock</UiText>
         <UiText style={styles.gateSub}>
-          You've watched {viewed} drops. Post your drop to keep watching
+          You've watched {viewed} drops. Post your DropDay to keep watching
           tonight's feed.
         </UiText>
         <Pressable onPress={onDrop} style={styles.gateBtn}>

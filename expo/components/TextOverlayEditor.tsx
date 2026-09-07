@@ -289,11 +289,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   backdrop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
   },
   backdropFill: {
     flex: 1,
