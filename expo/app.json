@@ -27,7 +27,7 @@
         "NSPhotoLibraryAddUsageDescription": "DropDay saves your recorded drops to your photo library."
       },
       "usesAppleSignIn": true,
-      "buildNumber": "9"
+      "buildNumber": "10"
     },
     "android": {
       "adaptiveIcon": {
