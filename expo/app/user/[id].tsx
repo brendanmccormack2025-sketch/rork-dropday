@@ -485,15 +485,15 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.08)",
     alignItems: "center",
     justifyContent: "center",
   },
   topBarTitle: {
     color: theme.text,
     fontSize: 16,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.2,
   },
 
@@ -513,7 +513,7 @@ const styles = StyleSheet.create({
   avatarWrap: {
     width: 72,
     height: 72,
-    borderRadius: 36,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -525,7 +525,7 @@ const styles = StyleSheet.create({
   displayName: {
     color: theme.text,
     fontSize: 22,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
   usernameText: {
@@ -557,7 +557,7 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: theme.accent,
     paddingVertical: 13,
-    borderRadius: 12,
+    borderRadius: 0,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
@@ -569,14 +569,14 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.97 }],
   },
   followBtnActive: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(10,10,10,0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(10,10,10,0.1)",
     shadowOpacity: 0,
     elevation: 0,
   },
   followBtnActivePressed: {
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(10,10,10,0.06)",
   },
   followBtnText: {
     color: "#fff",
@@ -595,16 +595,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(10,10,10,0.07)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(10,10,10,0.1)",
     paddingVertical: 13,
     paddingHorizontal: 20,
-    borderRadius: 12,
+    borderRadius: 0,
   },
   blockBtnActive: {
-    backgroundColor: "rgba(255,69,58,0.1)",
-    borderColor: "rgba(255,69,58,0.2)",
+    backgroundColor: "rgba(232,41,28,0.1)",
+    borderColor: "rgba(232,41,28,0.2)",
   },
   blockBtnPressed: {
     opacity: 0.7,
@@ -630,7 +630,7 @@ const styles = StyleSheet.create({
   statNum: {
     color: theme.text,
     fontSize: 22,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.4,
   },
   statLabel: {
@@ -643,7 +643,7 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     height: 30,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(10,10,10,0.07)",
   },
 
   /* Section header */
@@ -656,7 +656,7 @@ const styles = StyleSheet.create({
   sectionLabel: {
     color: theme.textMuted,
     fontSize: 13,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
     letterSpacing: 0.3,
     textTransform: "uppercase",
   },
@@ -671,7 +671,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: theme.text,
     fontSize: 17,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   emptySub: {
     color: theme.textMuted,
@@ -685,7 +685,7 @@ const styles = StyleSheet.create({
   tile: {
     flex: 1,
     aspectRatio: 0.85,
-    borderRadius: 10,
+    borderRadius: 0,
     overflow: "hidden",
     backgroundColor: theme.card,
   },
@@ -702,7 +702,7 @@ const styles = StyleSheet.create({
     right: 6,
     minWidth: 20,
     height: 20,
-    borderRadius: 10,
+    borderRadius: 0,
     backgroundColor: "rgba(0,0,0,0.55)",
     alignItems: "center",
     justifyContent: "center",
@@ -725,6 +725,6 @@ const styles = StyleSheet.create({
   tileStatText: {
     color: "#fff",
     fontSize: 11,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
 });

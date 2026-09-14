@@ -79,7 +79,7 @@ const styles = StyleSheet.create({
   avatarCircle: {
     width: 30,
     height: 30,
-    borderRadius: 15,
+    borderRadius: 0,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
@@ -89,13 +89,13 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: "#fff",
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     fontSize: 13,
   },
   profileCircle: {
     width: 72,
     height: 72,
-    borderRadius: 36,
+    borderRadius: 0,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
   },
   profileAvatarText: {
     color: "#fff",
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     fontSize: 28,
   },
 });

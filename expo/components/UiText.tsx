@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { Text, type TextProps, type TextStyle } from "react-native";
 
-export type FontWeight = 300 | 400 | 500 | 700 | 800;
+export type FontWeight = 300 | 400 | 500 | 700 | 800 | 900;
 
 const FONT_FAMILIES: Record<FontWeight, string> = {
   300: "PlusJakartaSans_300Light",
@@ -9,6 +9,9 @@ const FONT_FAMILIES: Record<FontWeight, string> = {
   500: "PlusJakartaSans_500Medium",
   700: "PlusJakartaSans_700Bold",
   800: "PlusJakartaSans_800ExtraBold",
+  // Plus Jakarta Sans ships no 900/Black cut — 900 resolves to the
+  // 800 ExtraBold file (heaviest available for the family).
+  900: "PlusJakartaSans_800ExtraBold",
 };
 
 type Props = TextProps & {
@@ -29,8 +32,8 @@ const FW_MAP: Record<string, FontWeight> = {
   bold: 700,
   "800": 800,
   extrabold: 800,
-  "900": 800,
-  black: 800,
+  "900": 900,
+  black: 900,
 };
 
 /** Resolve fontWeight from a flat or array style into a numeric weight. */
@@ -55,7 +58,7 @@ function resolveWeight(style: TextProps["style"]): FontWeight | null {
 /** Drop-in replacement for React Native `<Text>` that uses Plus Jakarta Sans
  *  as the default font family. Auto-detects `fontWeight` from the `style` prop
  *  and maps it to the correct font file. Use the `weight` prop for explicit
- *  control (300/400/500/700/800). Defaults to 400 (regular). */
+ *  control (300/400/500/700/800/900). Defaults to 400 (regular). */
 export default function UiText({ weight, style, ...rest }: Props) {
   const fontFamily = useMemo(() => {
     if (weight !== undefined) return FONT_FAMILIES[weight];

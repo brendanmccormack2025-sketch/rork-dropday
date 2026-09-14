@@ -452,14 +452,14 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
   headerUser: {
@@ -472,7 +472,7 @@ const styles = StyleSheet.create({
   headerAvatar: {
     width: 30,
     height: 30,
-    borderRadius: 15,
+    borderRadius: 0,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
@@ -481,7 +481,7 @@ const styles = StyleSheet.create({
   headerAvatarText: {
     color: "#fff",
     fontSize: 13,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   headerName: {
     color: theme.text,
@@ -527,7 +527,7 @@ const styles = StyleSheet.create({
   msgAvatarSm: {
     width: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: 0,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
@@ -537,12 +537,12 @@ const styles = StyleSheet.create({
   msgAvatarSmText: {
     color: "#fff",
     fontSize: 10,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   bubble: {
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 18,
+    borderRadius: 0,
     maxWidth: "100%" as unknown as number,
   },
   bubbleMine: {
@@ -565,7 +565,7 @@ const styles = StyleSheet.create({
   },
   dropCard: {
     backgroundColor: theme.card,
-    borderRadius: 14,
+    borderRadius: 0,
     borderWidth: 1,
     borderColor: theme.border,
     overflow: "hidden",
@@ -574,7 +574,7 @@ const styles = StyleSheet.create({
   dropCardMedia: {
     width: DM_CARD_W,
     height: DM_CARD_W * 0.7,
-    backgroundColor: "#0A0A14",
+    backgroundColor: "#F5F3EE",
   },
   playOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -617,7 +617,7 @@ const styles = StyleSheet.create({
   textInput: {
     flex: 1,
     backgroundColor: theme.card,
-    borderRadius: 20,
+    borderRadius: 0,
     paddingHorizontal: 16,
     paddingVertical: 10,
     color: theme.text,
@@ -627,7 +627,7 @@ const styles = StyleSheet.create({
   sendBtn: {
     width: 38,
     height: 38,
-    borderRadius: 19,
+    borderRadius: 0,
     backgroundColor: theme.accent,
     alignItems: "center",
     justifyContent: "center",

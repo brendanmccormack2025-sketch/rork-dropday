@@ -177,7 +177,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: theme.text,
     fontSize: 17,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
   headerSpacer: { width: 40 },
@@ -195,9 +195,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     backgroundColor: theme.card,
-    borderRadius: 14,
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(10,10,10,0.07)",
   },
   rowInfo: {
     flex: 1,
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
   rowName: {
     color: theme.text,
     fontSize: 15,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
   rowUsername: {
     color: theme.textDim,
@@ -217,10 +217,10 @@ const styles = StyleSheet.create({
   unblockBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 999,
+    borderRadius: 0,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: "rgba(10,10,10,0.05)",
     minWidth: 78,
     alignItems: "center",
     justifyContent: "center",
@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: theme.text,
     fontSize: 16,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
     textAlign: "center",
   },
   emptySub: {

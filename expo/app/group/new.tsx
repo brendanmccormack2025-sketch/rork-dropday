@@ -131,7 +131,7 @@ export default function CreateGroupScreen() {
             </UiText>
           </View>
           {isSelected ? (
-            <CheckCircle2 color={theme.accent} size={24} strokeWidth={2.5} fill="rgba(10,132,255,0.12)" />
+            <CheckCircle2 color={theme.accent} size={24} strokeWidth={2.5} fill="rgba(232,41,28,0.12)" />
           ) : (
             <View style={styles.circleEmpty} />
           )}
@@ -266,27 +266,27 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
   createBtn: {
     backgroundColor: theme.accent,
     paddingHorizontal: 18,
     paddingVertical: 9,
-    borderRadius: 10,
+    borderRadius: 0,
     minWidth: 70,
     alignItems: "center",
     justifyContent: "center",
   },
   createBtnDisabled: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(10,10,10,0.08)",
   },
   createBtnPressed: {
     transform: [{ scale: 0.96 }],
@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     backgroundColor: theme.card,
-    borderRadius: 14,
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 14,
     borderWidth: 1,
@@ -341,7 +341,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginVertical: 10,
     backgroundColor: theme.card,
-    borderRadius: 12,
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 11,
     borderWidth: 1,
@@ -366,12 +366,12 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.border,
   },
   userRowPressed: {
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: "rgba(10,10,10,0.04)",
   },
   avatar: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 0,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
@@ -380,7 +380,7 @@ const styles = StyleSheet.create({
   avatarText: {
     color: "#fff",
     fontSize: 17,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   userInfo: {
     flex: 1,
@@ -389,7 +389,7 @@ const styles = StyleSheet.create({
   userName: {
     color: theme.text,
     fontSize: 15,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
   userHandle: {
     color: theme.textMuted,
@@ -399,9 +399,9 @@ const styles = StyleSheet.create({
   circleEmpty: {
     width: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: 0,
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(10,10,10,0.15)",
   },
 
   /* Empty */
@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     textAlign: "center",
   },
   emptySub: {

@@ -203,14 +203,14 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
   searchBar: {
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginVertical: 12,
     backgroundColor: theme.card,
-    borderRadius: 12,
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1,
@@ -243,12 +243,12 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.border,
   },
   userRowPressed: {
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: "rgba(10,10,10,0.04)",
   },
   avatar: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 0,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
   avatarText: {
     color: "#fff",
     fontSize: 17,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   userInfo: {
     flex: 1,
@@ -266,7 +266,7 @@ const styles = StyleSheet.create({
   userName: {
     color: theme.text,
     fontSize: 15,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
   userHandle: {
     color: theme.textMuted,
@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     textAlign: "center",
   },
   emptySub: {

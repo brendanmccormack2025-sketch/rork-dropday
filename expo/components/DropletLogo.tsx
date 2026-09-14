@@ -9,18 +9,18 @@ export default function DropletLogo({ size = 96 }: Props) {
     <Svg width={size} height={size} viewBox="0 0 100 100">
       <Defs>
         <LinearGradient id="dg" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#4DA6FF" />
-          <Stop offset="0.45" stopColor="#0A84FF" />
-          <Stop offset="1" stopColor="#0044AA" />
+          <Stop offset="0" stopColor="#E8291C" />
+          <Stop offset="0.45" stopColor="#E8291C" />
+          <Stop offset="1" stopColor="#B71C12" />
         </LinearGradient>
         <LinearGradient id="dh" x1="0.2" y1="0" x2="0.8" y2="1">
           <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.55" />
           <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
         </LinearGradient>
         <RadialGradient id="gl" cx="50%" cy="50%" r="50%">
-          <Stop offset="0" stopColor="#0A84FF" stopOpacity="0.25" />
-          <Stop offset="0.6" stopColor="#0A84FF" stopOpacity="0.06" />
-          <Stop offset="1" stopColor="#0A84FF" stopOpacity="0" />
+          <Stop offset="0" stopColor="#E8291C" stopOpacity="0.25" />
+          <Stop offset="0.6" stopColor="#E8291C" stopOpacity="0.06" />
+          <Stop offset="1" stopColor="#E8291C" stopOpacity="0" />
         </RadialGradient>
       </Defs>
       <Circle cx="50" cy="50" r="48" fill="url(#gl)" />

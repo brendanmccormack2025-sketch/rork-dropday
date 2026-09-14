@@ -36,17 +36,17 @@ function resolveBgMeta(
 ): BgMeta {
   switch (style) {
     case "none-white":
-      return { bgColor: "transparent", textColor: "#FFFFFF", bgOpacity: 0, borderRadius: 8 };
+      return { bgColor: "transparent", textColor: "#FFFFFF", bgOpacity: 0, borderRadius: 0 };
     case "none-black":
-      return { bgColor: "transparent", textColor: "#000000", bgOpacity: 0, borderRadius: 8 };
+      return { bgColor: "transparent", textColor: "#000000", bgOpacity: 0, borderRadius: 0 };
     case "white-box":
-      return { bgColor: "#FFFFFF", textColor: "#000000", bgOpacity: 1, borderRadius: 8 };
+      return { bgColor: "#FFFFFF", textColor: "#000000", bgOpacity: 1, borderRadius: 0 };
     case "black-box":
-      return { bgColor: "#000000", textColor: "#FFFFFF", bgOpacity: 1, borderRadius: 8 };
+      return { bgColor: "#000000", textColor: "#FFFFFF", bgOpacity: 1, borderRadius: 0 };
     case "accent-box":
-      return { bgColor: accentColor, textColor: "#FFFFFF", bgOpacity: 1, borderRadius: 8 };
+      return { bgColor: accentColor, textColor: "#FFFFFF", bgOpacity: 1, borderRadius: 0 };
     case "translucent-box":
-      return { bgColor: "#000000", textColor: "#FFFFFF", bgOpacity: 0.55, borderRadius: 8 };
+      return { bgColor: "#000000", textColor: "#FFFFFF", bgOpacity: 0.55, borderRadius: 0 };
   }
 }
 
@@ -451,7 +451,7 @@ export default function DraggableTextOverlay({
         <Animated.View
           style={[
             styles.selectionOutline,
-            { borderColor: "#0A84FF" },
+            { borderColor: "#E8291C" },
           ]}
           pointerEvents="none"
         />
@@ -517,12 +517,12 @@ const styles = StyleSheet.create({
   selectionOutline: {
     ...StyleSheet.absoluteFillObject,
     borderWidth: 2,
-    borderRadius: 8,
+    borderRadius: 0,
     margin: -4,
-    borderColor: "#0A84FF",
+    borderColor: "#E8291C",
   },
   text: {
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     textAlign: "center",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
@@ -531,7 +531,7 @@ const styles = StyleSheet.create({
   // ── Snap guides ──
   snapGuide: {
     position: "absolute",
-    backgroundColor: "rgba(10,132,255,0.25)",
+    backgroundColor: "rgba(232,41,28,0.25)",
   },
   snapGuideH: {
     height: 1,

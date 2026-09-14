@@ -27,13 +27,13 @@ export default function TabLayout() {
         tabBarBackground: () =>
           Platform.OS === "ios" ? (
             <BlurView
-              tint="dark"
-              intensity={90}
+              tint="light"
+              intensity={60}
               style={StyleSheet.absoluteFill}
             />
           ) : (
             <View
-              style={[StyleSheet.absoluteFill, { backgroundColor: "#0A0A14" }]}
+              style={[StyleSheet.absoluteFill, { backgroundColor: theme.bg }]}
             />
           ),
         tabBarLabelStyle: styles.label,
@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
   tabBar: {
     position: "absolute",
     borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.04)",
+    borderTopColor: theme.border,
     backgroundColor: "transparent",
     height: 88,
     paddingTop: 6,
@@ -127,17 +127,17 @@ const styles = StyleSheet.create({
     right: -10,
     minWidth: 18,
     height: 18,
-    borderRadius: 9,
+    borderRadius: 0,
     backgroundColor: theme.danger,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 4,
     borderWidth: 2,
-    borderColor: "#0A0A14",
+    borderColor: theme.bg,
   },
   tabBadgeText: {
     color: "#fff",
     fontSize: 10,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
 });

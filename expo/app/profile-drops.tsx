@@ -204,15 +204,15 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 0,
     backgroundColor: "rgba(0,0,0,0.4)",
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
-    color: "#fff",
+    color: theme.text,
     fontSize: 15,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     flexShrink: 1,
     textAlign: "center",
   },
@@ -231,7 +231,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   emptySub: {
     color: theme.textMuted,

@@ -50,7 +50,7 @@ export default function PrimaryButton({
         ]}
       >
         <LinearGradient
-          colors={["#3B9EFF", "#0A84FF", "#0055CC"]}
+          colors={["#E8291C", "#E8291C", "#B71C12"]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
           style={styles.gradient}
@@ -95,7 +95,7 @@ export default function PrimaryButton({
 
 const styles = StyleSheet.create({
   wrap: {
-    borderRadius: 14,
+    borderRadius: 0,
     overflow: "hidden",
   },
   gradient: {

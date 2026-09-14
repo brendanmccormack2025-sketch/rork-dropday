@@ -52,7 +52,7 @@ export function useLiveNotifications() {
             name: "DropDay Live",
             importance: Notifications.AndroidImportance.HIGH,
             vibrationPattern: [0, 250, 250, 250],
-            lightColor: "#0A84FF",
+            lightColor: "#E8291C",
           });
         }
 

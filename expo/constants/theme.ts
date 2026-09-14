@@ -1,19 +1,21 @@
-/** Deep indigo-night aesthetic — electric blue accent. */
+/** Warm cream editorial aesthetic — signal red accent. */
 export const theme = {
-  bg: "#0A0A14",
-  bgElevated: "#13131F",
-  card: "#1C1C2E",
-  border: "#1C1C1E",
-  text: "#F5F5F5",
-  textMuted: "#999999",
-  textDim: "#555555",
-  primary: "#0A84FF",
-  primaryDeep: "#0055CC",
-  accent: "#0A84FF",
-  accentGlow: "#3B82F6",
-  violet: "#8B5CF6",
-  danger: "#FF453A",
-  success: "#30D158",
+  bg: "#F5F3EE",
+  bgElevated: "#FFFFFF",
+  card: "#FFFFFF",
+  border: "#D8D3C4",
+  text: "#0A0A0A",
+  textMuted: "#6E6862",
+  textDim: "#A29B92",
+  primary: "#E8291C",
+  primaryDeep: "#B71C12",
+  accent: "#E8291C",
+  accentGlow: "#FF6B5E",
+  violet: "#B71C12",
+  danger: "#E8291C",
+  success: "#1FA84D",
+  /** Secondary accent — near-threshold / trending states ONLY. */
+  trending: "#FFD400",
 } as const;
 
 export const DROP_WINDOW = {

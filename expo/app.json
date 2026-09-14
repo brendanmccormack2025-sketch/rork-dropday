@@ -6,12 +6,12 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rork-fgum9ff0goqjv4vh7u4xf",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#050505"
+      "backgroundColor": "#F5F3EE"
     },
     "ios": {
       "supportsTablet": false,
@@ -32,7 +32,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#050505"
+        "backgroundColor": "#F5F3EE"
       },
       "package": "app.rork.fgum9ff0goqjv4vh7u4xf",
       "permissions": [
@@ -83,7 +83,7 @@
       [
         "expo-notifications",
         {
-          "color": "#0A84FF"
+          "color": "#E8291C"
         }
       ]
     ],

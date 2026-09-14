@@ -137,19 +137,19 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 20,
+    borderRadius: 0,
     backgroundColor: theme.card,
   },
   tabSwitcher: {
     flexDirection: "row",
     backgroundColor: theme.card,
-    borderRadius: 12,
+    borderRadius: 0,
     padding: 3,
   },
   tab: {
     paddingVertical: 7,
     paddingHorizontal: 14,
-    borderRadius: 9,
+    borderRadius: 0,
   },
   tabActive: {
     backgroundColor: theme.accent,
@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
   docTitle: {
     color: theme.text,
     fontSize: 24,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     marginTop: 8,
   },
   updated: {
@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
   sectionHeading: {
     color: theme.text,
     fontSize: 16,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
     marginBottom: 8,
   },
   paragraph: {

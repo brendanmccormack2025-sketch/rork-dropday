@@ -2434,7 +2434,7 @@ export default function EditScreen() {
                 onPress={() => handleDeleteOverlay()}
                 style={[styles.textActionBtn, styles.textActionBtnDanger]}
               >
-                <Trash2 size={14} color="#FF453A" />
+                <Trash2 size={14} color="#E8291C" />
                 <UiText
                   style={[
                     styles.textActionLabel,
@@ -2532,7 +2532,7 @@ export default function EditScreen() {
               size={20}
               color={
                 dragOverlayInfo.centerY > 0.88
-                  ? "#FF453A"
+                  ? "#E8291C"
                   : "rgba(255,255,255,0.4)"
               }
             />
@@ -2570,7 +2570,7 @@ export default function EditScreen() {
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#08080B" },
+  screen: { flex: 1, backgroundColor: "#F5F3EE" },
   centered: {
     flex: 1,
     alignItems: "center",
@@ -2587,7 +2587,7 @@ const styles = StyleSheet.create({
   emptyBtn: {
     paddingHorizontal: 20,
     paddingVertical: 10,
-    borderRadius: 999,
+    borderRadius: 0,
     backgroundColor: theme.accent,
   },
   emptyBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" as const },
@@ -2599,13 +2599,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 14,
     paddingBottom: 6,
-    backgroundColor: "#08080B",
+    backgroundColor: "#F5F3EE",
   },
   topBtn: {
     width: 38,
     height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.07)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2633,9 +2633,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   previewFrame: {
-    borderRadius: 16,
+    borderRadius: 0,
     overflow: "hidden",
-    backgroundColor: "#0D0D12",
+    backgroundColor: "#F5F3EE",
   },
 
   // ── Play overlay ──
@@ -2647,12 +2647,12 @@ const styles = StyleSheet.create({
   playCircle: {
     width: 64,
     height: 64,
-    borderRadius: 32,
+    borderRadius: 0,
     backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(10,10,10,0.12)",
   },
 
   // ── Video error overlay ──
@@ -2674,10 +2674,10 @@ const styles = StyleSheet.create({
   videoErrorBackBtn: {
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.1)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(10,10,10,0.15)",
   },
   videoErrorBackBtnText: {
     color: "rgba(255,255,255,0.8)",
@@ -2694,18 +2694,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.06)",
+    borderTopColor: "rgba(10,10,10,0.07)",
   },
   toolBtn: {
     alignItems: "center",
     gap: 4,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 12,
+    borderRadius: 0,
     minWidth: 60,
   },
   toolBtnActive: {
-    backgroundColor: "rgba(10,132,255,0.1)",
+    backgroundColor: "rgba(232,41,28,0.1)",
   },
   toolBtnOff: {
     opacity: 0.3,
@@ -2726,23 +2726,23 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     gap: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.04)",
-    backgroundColor: "#08080B",
+    borderTopColor: "rgba(10,10,10,0.05)",
+    backgroundColor: "#F5F3EE",
   },
   bannerError: {
-    backgroundColor: "rgba(255,69,58,0.12)",
-    borderRadius: 10,
+    backgroundColor: "rgba(232,41,28,0.12)",
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: "rgba(255,69,58,0.25)",
+    borderColor: "rgba(232,41,28,0.25)",
   },
   matureRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: theme.card,
-    borderRadius: 12,
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1,
@@ -2768,7 +2768,7 @@ const styles = StyleSheet.create({
   },
   bannerSuccess: {
     backgroundColor: "rgba(48,209,88,0.12)",
-    borderRadius: 10,
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1,
@@ -2787,13 +2787,13 @@ const styles = StyleSheet.create({
   },
   uploadProgressTrack: {
     height: 6,
-    borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.08)",
     overflow: "hidden",
   },
   uploadProgressFill: {
     height: "100%" as unknown as number,
-    borderRadius: 3,
+    borderRadius: 0,
     backgroundColor: theme.accent,
   },
   uploadProgressText: {
@@ -2809,7 +2809,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 14,
     minHeight: 48,
-    borderRadius: 14,
+    borderRadius: 0,
     backgroundColor: theme.accent,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 0 },
@@ -2820,7 +2820,7 @@ const styles = StyleSheet.create({
   postBtnText: {
     color: "#fff",
     fontSize: 15,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: 0.3,
   },
   postBtnSubtext: {
@@ -2830,11 +2830,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   postBtnDisabled: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(10,10,10,0.08)",
     shadowOpacity: 0,
     elevation: 0,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(10,10,10,0.07)",
   },
   actionRow: {
     flexDirection: "row",
@@ -2846,10 +2846,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 14,
     minHeight: 48,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.07)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(10,10,10,0.1)",
   },
   draftBtnText: {
     color: "rgba(255,255,255,0.7)",
@@ -2861,7 +2861,7 @@ const styles = StyleSheet.create({
   // ── Text editing toolbar ──
   textToolbarWrap: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.06)",
+    borderTopColor: "rgba(10,10,10,0.07)",
     paddingHorizontal: 12,
     paddingVertical: 12,
     gap: 10,
@@ -2879,12 +2879,12 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.07)",
     justifyContent: "center",
   },
   textActionBtnDanger: {
-    backgroundColor: "rgba(255,69,58,0.08)",
+    backgroundColor: "rgba(232,41,28,0.08)",
   },
   textActionLabel: {
     color: "rgba(255,255,255,0.8)",
@@ -2893,7 +2893,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   textActionLabelDanger: {
-    color: "#FF453A",
+    color: "#E8291C",
   },
 
   // ── Drag-to-trash zone ──
@@ -2908,12 +2908,12 @@ const styles = StyleSheet.create({
     gap: 6,
     backgroundColor: "rgba(0,0,0,0.5)",
     borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.08)",
+    borderTopColor: "rgba(10,10,10,0.08)",
     zIndex: 300,
   },
   trashZoneActive: {
-    backgroundColor: "rgba(255,69,58,0.15)",
-    borderTopColor: "rgba(255,69,58,0.35)",
+    backgroundColor: "rgba(232,41,28,0.15)",
+    borderTopColor: "rgba(232,41,28,0.35)",
   },
   trashLabel: {
     color: "rgba(255,255,255,0.4)",
@@ -2921,6 +2921,6 @@ const styles = StyleSheet.create({
     fontWeight: "700" as const,
   },
   trashLabelActive: {
-    color: "#FF453A",
+    color: "#E8291C",
   },
 });

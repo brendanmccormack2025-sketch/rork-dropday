@@ -183,28 +183,28 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
   },
   composeBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(10,132,255,0.1)",
+    backgroundColor: "rgba(232,41,28,0.1)",
     borderWidth: 1,
-    borderColor: "rgba(10,132,255,0.2)",
+    borderColor: "rgba(232,41,28,0.2)",
   },
   composeBtnPressed: {
-    backgroundColor: "rgba(10,132,255,0.2)",
+    backgroundColor: "rgba(232,41,28,0.2)",
     transform: [{ scale: 0.93 }],
   },
   headerTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
   convoRow: {
@@ -217,12 +217,12 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.border,
   },
   convoRowPressed: {
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: "rgba(10,10,10,0.04)",
   },
   avatar: {
     width: 48,
     height: 48,
-    borderRadius: 24,
+    borderRadius: 0,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
@@ -231,7 +231,7 @@ const styles = StyleSheet.create({
   avatarText: {
     color: "#fff",
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   convoInfo: {
     flex: 1,
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   emptySub: {
     color: theme.textMuted,

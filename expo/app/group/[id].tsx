@@ -412,10 +412,10 @@ function GroupPostCard({
           hitSlop={8}
         >
           <Heart
-            color={reacted ? "#FF453A" : theme.textMuted}
+            color={reacted ? "#E8291C" : theme.textMuted}
             size={22}
             strokeWidth={reacted ? 0 : 2.5}
-            fill={reacted ? "#FF453A" : "none"}
+            fill={reacted ? "#E8291C" : "none"}
           />
           {reactionCount > 0 && (
             <UiText style={[styles.reactionCount, reacted && styles.reactionCountActive]}>
@@ -450,7 +450,7 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -462,7 +462,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: theme.text,
     fontSize: 17,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
   memberBadge: {
@@ -487,7 +487,7 @@ const styles = StyleSheet.create({
   /* Card */
   card: {
     backgroundColor: theme.card,
-    borderRadius: 16,
+    borderRadius: 0,
     overflow: "hidden",
     borderWidth: 1,
     borderColor: theme.border,
@@ -506,7 +506,7 @@ const styles = StyleSheet.create({
   posterName: {
     color: theme.text,
     fontSize: 14,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
   posterHandle: {
     color: theme.textMuted,
@@ -516,7 +516,7 @@ const styles = StyleSheet.create({
   deleteBtn: {
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -555,7 +555,7 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
   },
   reactionCountActive: {
-    color: "#FF453A",
+    color: "#E8291C",
   },
 
   /* Caption */
@@ -569,7 +569,7 @@ const styles = StyleSheet.create({
   posterNameInline: {
     color: theme.text,
     fontSize: 13,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
   captionText: {
     color: theme.text,
@@ -590,7 +590,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     textAlign: "center",
   },
   emptySub: {
@@ -618,15 +618,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
-    backgroundColor: "rgba(10,132,255,0.12)",
+    backgroundColor: "rgba(232,41,28,0.12)",
     borderWidth: 1.5,
     borderColor: theme.accent,
-    borderRadius: 14,
+    borderRadius: 0,
     paddingVertical: 14,
   },
   uploadBtnPressed: {
     transform: [{ scale: 0.98 }],
-    backgroundColor: "rgba(10,132,255,0.18)",
+    backgroundColor: "rgba(232,41,28,0.18)",
   },
   uploadBtnText: {
     color: theme.accent,
@@ -642,8 +642,8 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     backgroundColor: theme.bgElevated,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 32,
@@ -657,12 +657,12 @@ const styles = StyleSheet.create({
   modalTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   previewWrap: {
     width: "100%",
     aspectRatio: 1,
-    borderRadius: 16,
+    borderRadius: 0,
     overflow: "hidden",
     marginBottom: 16,
     backgroundColor: "#000",
@@ -673,7 +673,7 @@ const styles = StyleSheet.create({
   },
   captionInput: {
     backgroundColor: theme.card,
-    borderRadius: 12,
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: theme.text,
@@ -691,7 +691,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     backgroundColor: theme.accent,
-    borderRadius: 14,
+    borderRadius: 0,
     paddingVertical: 15,
   },
   postBtnPressed: {

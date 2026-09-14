@@ -202,7 +202,7 @@ export default function FriendsScreen() {
       let icon = <Bell color={theme.textMuted} size={15} strokeWidth={2} />;
       let actionText = "";
       if (notif.type === "like") {
-        icon = <Heart color="#FF4D6D" size={15} strokeWidth={2} fill="#FF4D6D" />;
+        icon = <Heart color="#E8291C" size={15} strokeWidth={2} fill="#E8291C" />;
         actionText = "liked your drop";
       } else if (notif.type === "reaction") {
         icon = <Zap color={theme.accent} size={15} strokeWidth={2} fill={theme.accent} />;
@@ -433,13 +433,13 @@ const styles = StyleSheet.create({
   screenTitle: {
     color: theme.text,
     fontSize: 26,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.4,
   },
   headerBadge: {
     minWidth: 22,
     height: 22,
-    borderRadius: 11,
+    borderRadius: 0,
     backgroundColor: theme.danger,
     alignItems: "center",
     justifyContent: "center",
@@ -448,7 +448,7 @@ const styles = StyleSheet.create({
   headerBadgeText: {
     color: "#fff",
     fontSize: 12,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
 
   /* Compact invite banner */
@@ -456,24 +456,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: "rgba(10,132,255,0.08)",
-    borderRadius: 12,
+    backgroundColor: "rgba(232,41,28,0.08)",
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: "rgba(10,132,255,0.15)",
+    borderColor: "rgba(232,41,28,0.15)",
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginTop: 16,
     marginBottom: 20,
   },
   inviteBannerPressed: {
-    backgroundColor: "rgba(10,132,255,0.12)",
+    backgroundColor: "rgba(232,41,28,0.12)",
     transform: [{ scale: 0.99 }],
   },
   inviteBannerIcon: {
     width: 32,
     height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(10,132,255,0.14)",
+    borderRadius: 0,
+    backgroundColor: "rgba(232,41,28,0.14)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -508,15 +508,15 @@ const styles = StyleSheet.create({
   sectionBadge: {
     width: 28,
     height: 28,
-    borderRadius: 8,
-    backgroundColor: "rgba(10,132,255,0.12)",
+    borderRadius: 0,
+    backgroundColor: "rgba(232,41,28,0.12)",
     alignItems: "center",
     justifyContent: "center",
   },
   sectionLabel: {
     color: theme.text,
     fontSize: 15,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.1,
   },
 
@@ -543,7 +543,7 @@ const styles = StyleSheet.create({
   /* Separator */
   separator: {
     height: 1,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: "rgba(10,10,10,0.05)",
     marginHorizontal: 16,
   },
 
@@ -556,7 +556,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   notifRowPressed: {
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: "rgba(10,10,10,0.05)",
   },
   notifLeft: {
     width: 8,
@@ -566,7 +566,7 @@ const styles = StyleSheet.create({
   unreadDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: 0,
     backgroundColor: theme.accent,
   },
   notifAvatarWrap: {
@@ -582,7 +582,7 @@ const styles = StyleSheet.create({
     right: -4,
     width: 20,
     height: 20,
-    borderRadius: 10,
+    borderRadius: 0,
     backgroundColor: theme.bgElevated,
     alignItems: "center",
     justifyContent: "center",
@@ -601,7 +601,7 @@ const styles = StyleSheet.create({
   notifActorName: {
     color: theme.text,
     fontSize: 14,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   notifAction: {
     color: theme.textMuted,
@@ -616,7 +616,7 @@ const styles = StyleSheet.create({
   notifThumbWrap: {
     width: 44,
     height: 44,
-    borderRadius: 8,
+    borderRadius: 0,
     overflow: "hidden",
     backgroundColor: theme.card,
   },
@@ -634,12 +634,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   userRowPressed: {
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: "rgba(10,10,10,0.05)",
   },
   avatar: {
     width: 46,
     height: 46,
-    borderRadius: 23,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -650,7 +650,7 @@ const styles = StyleSheet.create({
   userName: {
     color: theme.text,
     fontSize: 15,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
   userHandle: {
     color: theme.textMuted,
@@ -664,7 +664,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
     paddingHorizontal: 16,
     paddingVertical: 9,
-    borderRadius: 10,
+    borderRadius: 0,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
@@ -676,14 +676,14 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.96 }],
   },
   followBtnActive: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(10,10,10,0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(10,10,10,0.1)",
     shadowOpacity: 0,
     elevation: 0,
   },
   followBtnActivePressed: {
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(10,10,10,0.06)",
   },
   followBtnText: {
     color: "#fff",

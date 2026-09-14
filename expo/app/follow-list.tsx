@@ -239,20 +239,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
+    borderBottomColor: "rgba(10,10,10,0.07)",
   },
   backBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.07)",
     alignItems: "center",
     justifyContent: "center",
   },
   title: {
     color: theme.text,
     fontSize: 16,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
 
   /* List */
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 46,
     height: 46,
-    borderRadius: 23,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
   userName: {
     color: theme.text,
     fontSize: 15,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
   userHandle: {
     color: theme.textMuted,
@@ -318,7 +318,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
     paddingHorizontal: 16,
     paddingVertical: 9,
-    borderRadius: 10,
+    borderRadius: 0,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
@@ -330,14 +330,14 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.96 }],
   },
   followBtnActive: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(10,10,10,0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(10,10,10,0.1)",
     shadowOpacity: 0,
     elevation: 0,
   },
   followBtnActivePressed: {
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(10,10,10,0.06)",
   },
   followBtnText: {
     color: "#fff",

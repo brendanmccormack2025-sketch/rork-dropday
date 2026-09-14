@@ -141,7 +141,7 @@ export default function FeedScreen() {
                   pointerEvents="none"
                 >
                   {win.isOpen ? (
-                    <Zap color="#050505" size={10} fill="#050505" />
+                    <Zap color="#F5F3EE" size={10} fill="#F5F3EE" />
                   ) : (
                     <View style={styles.dot} />
                   )}
@@ -474,11 +474,11 @@ const styles = StyleSheet.create({
   tab: {
     paddingHorizontal: 16,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: 0,
     backgroundColor: "transparent",
   },
   tabActive: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(10,10,10,0.08)",
   },
   tabText: {
     color: theme.textMuted,
@@ -488,12 +488,12 @@ const styles = StyleSheet.create({
   },
   tabTextActive: {
     color: theme.text,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   dmBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -503,7 +503,7 @@ const styles = StyleSheet.create({
     right: -2,
     minWidth: 16,
     height: 16,
-    borderRadius: 8,
+    borderRadius: 0,
     backgroundColor: theme.danger,
     alignItems: "center",
     justifyContent: "center",
@@ -512,12 +512,12 @@ const styles = StyleSheet.create({
   dmBadgeText: {
     color: "#fff",
     fontSize: 10,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   brand: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
   pill: {
@@ -526,24 +526,24 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(10,10,10,0.1)",
   },
   pillLive: { backgroundColor: theme.success, borderColor: theme.success },
   pillText: {
     color: theme.text,
     fontSize: 11,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: 0.5,
     fontVariant: ["tabular-nums"],
   },
-  pillTextLive: { color: "#050505" },
+  pillTextLive: { color: "#F5F3EE" },
   dot: {
     width: 6,
     height: 6,
-    borderRadius: 3,
+    borderRadius: 0,
     backgroundColor: theme.textMuted,
   },
 
@@ -554,7 +554,7 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 999,
+    borderRadius: 0,
     backgroundColor: "rgba(48,209,88,0.12)",
     borderWidth: 1,
     borderColor: "rgba(48,209,88,0.3)",
@@ -563,13 +563,13 @@ const styles = StyleSheet.create({
   liveCountDot: {
     width: 6,
     height: 6,
-    borderRadius: 3,
+    borderRadius: 0,
     backgroundColor: theme.success,
   },
   liveCountText: {
     color: theme.success,
     fontSize: 11,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
     letterSpacing: 0.3,
   },
 
@@ -589,7 +589,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   emptySub: {
     color: theme.textMuted,
@@ -600,7 +600,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingHorizontal: 22,
     paddingVertical: 12,
-    borderRadius: 999,
+    borderRadius: 0,
     backgroundColor: theme.accent,
   },
   emptyBtnText: {
@@ -624,25 +624,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     padding: 28,
-    borderRadius: 24,
+    borderRadius: 0,
     backgroundColor: "rgba(15,15,15,0.85)",
     borderWidth: 1,
-    borderColor: "rgba(10,132,255,0.4)",
+    borderColor: "rgba(232,41,28,0.4)",
   },
   gateIcon: {
     width: 78,
     height: 78,
-    borderRadius: 39,
-    backgroundColor: "rgba(10,132,255,0.12)",
+    borderRadius: 0,
+    backgroundColor: "rgba(232,41,28,0.12)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(10,132,255,0.3)",
+    borderColor: "rgba(232,41,28,0.3)",
   },
   gateTitle: {
     color: theme.text,
     fontSize: 22,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
     marginTop: 4,
   },
@@ -660,7 +660,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
     paddingHorizontal: 22,
     paddingVertical: 13,
-    borderRadius: 999,
+    borderRadius: 0,
     marginTop: 8,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 0 },
@@ -671,7 +671,7 @@ const styles = StyleSheet.create({
   gateBtnText: {
     color: "#fff",
     fontSize: 15,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: 0.3,
   },
   gateFootnote: {
@@ -691,26 +691,26 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: theme.bgElevated,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
     paddingHorizontal: 20,
     paddingTop: 10,
     paddingBottom: 32,
     borderTopWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(10,10,10,0.07)",
   },
   sheetHandle: {
     alignSelf: "center",
     width: 36,
     height: 4,
-    borderRadius: 2,
+    borderRadius: 0,
     backgroundColor: "rgba(255,255,255,0.2)",
     marginBottom: 14,
   },
   sheetTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.2,
   },
   sheetSub: {
@@ -738,7 +738,7 @@ const styles = StyleSheet.create({
   friendAvatar: {
     width: 38,
     height: 38,
-    borderRadius: 19,
+    borderRadius: 0,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
@@ -747,7 +747,7 @@ const styles = StyleSheet.create({
   friendAvatarText: {
     color: "#fff",
     fontSize: 15,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   friendInfo: {
     flex: 1,
@@ -767,12 +767,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 999,
+    borderRadius: 0,
     minWidth: 60,
     alignItems: "center",
   },
   sendBtnDone: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(10,10,10,0.08)",
   },
   sendBtnPressed: {
     backgroundColor: theme.primaryDeep,
@@ -792,10 +792,10 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 14,
     paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: "rgba(10,132,255,0.1)",
+    borderRadius: 0,
+    backgroundColor: "rgba(232,41,28,0.1)",
     borderWidth: 1,
-    borderColor: "rgba(10,132,255,0.25)",
+    borderColor: "rgba(232,41,28,0.25)",
   },
   shareMoreText: {
     color: theme.accent,

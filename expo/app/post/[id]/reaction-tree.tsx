@@ -801,8 +801,8 @@ const styles = StyleSheet.create({
   headerBtn: {
     width: 38,
     height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.08)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -814,7 +814,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: theme.text,
     fontSize: 17,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.2,
   },
   headerCount: {
@@ -836,7 +836,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: theme.text,
     fontSize: 18,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   emptySub: {
     color: theme.textMuted,
@@ -853,7 +853,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 14,
     minHeight: 50,
-    borderRadius: 14,
+    borderRadius: 0,
     backgroundColor: theme.accent,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 0 },
@@ -867,7 +867,7 @@ const styles = StyleSheet.create({
   emptyReactBtnText: {
     color: "#fff",
     fontSize: 15,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: 0.2,
   },
 
@@ -875,7 +875,7 @@ const styles = StyleSheet.create({
   item: {
     width: SCREEN_W,
     height: SCREEN_H,
-    backgroundColor: "#0A0A14",
+    backgroundColor: "#F5F3EE",
   },
 
   /* Video — explicit wrapper + fill so the native player always gets
@@ -929,10 +929,10 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: 0,
     backgroundColor: "rgba(0,0,0,0.6)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(10,10,10,0.15)",
     zIndex: 5,
   },
   replyBadgeText: {
@@ -954,7 +954,7 @@ const styles = StyleSheet.create({
   actionLabel: {
     color: "#fff",
     fontSize: 11,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
     textShadowColor: "rgba(0,0,0,0.6)",
     textShadowRadius: 4,
   },
@@ -976,14 +976,14 @@ const styles = StyleSheet.create({
   avatar: {
     width: 30,
     height: 30,
-    borderRadius: 15,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
   username: {
     color: "#fff",
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     fontSize: 15,
   },
   caption: {
@@ -1001,7 +1001,7 @@ const styles = StyleSheet.create({
     marginTop: -16,
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: 0,
     backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center",
     justifyContent: "center",
@@ -1026,8 +1026,8 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 20,
     paddingVertical: 12,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.12)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
   },
@@ -1054,7 +1054,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 14,
     minHeight: 50,
-    borderRadius: 14,
+    borderRadius: 0,
     backgroundColor: theme.accent,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 0 },
@@ -1071,7 +1071,7 @@ const styles = StyleSheet.create({
   reactBtnText: {
     color: "#fff",
     fontSize: 15,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: 0.2,
   },
 
@@ -1082,7 +1082,7 @@ const styles = StyleSheet.create({
     right: 16,
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 0,
     backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center" as const,
     justifyContent: "center" as const,

@@ -869,7 +869,7 @@ export default function TimelineEditor({
       {/* ── Drag overlay (captures touch after long-press) ── */}
       {dragState && (
         <View
-          style={[styles.dragOverlay, { backgroundColor: "rgba(255,0,0,0.3)", borderWidth: 2, borderColor: "red" }]}
+          style={[styles.dragOverlay, { backgroundColor: "rgba(232,41,28,0.3)", borderWidth: 2, borderColor: "red" }]}
           {...dragPan.panHandlers}
         />
       )}
@@ -1118,7 +1118,7 @@ const styles = StyleSheet.create({
     top: CLIP_TOP - 4,
     width: 3,
     height: CLIP_H + 8,
-    borderRadius: 1.5,
+    borderRadius: 0,
     backgroundColor: theme.accent,
     zIndex: 45,
     shadowColor: theme.accent,
@@ -1133,10 +1133,10 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: CLIP_TOP,
     height: CLIP_H,
-    borderRadius: 8,
+    borderRadius: 0,
     overflow: "hidden",
     zIndex: 46,
-    backgroundColor: "#2A2A35",
+    backgroundColor: "#FFFFFF",
     borderWidth: 2,
     borderColor: theme.accent,
     shadowColor: "#000",
@@ -1152,14 +1152,14 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: CLIP_TOP,
     height: CLIP_H,
-    borderRadius: 8,
+    borderRadius: 0,
     overflow: "hidden",
-    backgroundColor: "#1C1C22",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.05)",
+    borderColor: "rgba(10,10,10,0.06)",
   },
   clipBarSelected: {
-    backgroundColor: "#25252D",
+    backgroundColor: "#FFFFFF",
   },
   clipBarGhost: {
     opacity: 0.25,
@@ -1171,7 +1171,7 @@ const styles = StyleSheet.create({
   },
   clipPlaceholder: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#1C1C22",
+    backgroundColor: "#FFFFFF",
   },
   clipLabelWrap: {
     ...StyleSheet.absoluteFillObject,
@@ -1182,7 +1182,7 @@ const styles = StyleSheet.create({
   clipLabel: {
     color: "rgba(255,255,255,0.85)",
     fontSize: 10,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     fontVariant: ["tabular-nums"],
     letterSpacing: 0.2,
   },
@@ -1192,7 +1192,7 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     width: 5,
     height: 5,
-    borderRadius: 2.5,
+    borderRadius: 0,
     backgroundColor: "rgba(255,255,255,0.5)",
   },
 
@@ -1201,10 +1201,10 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: CLIP_TOP,
     height: CLIP_H,
-    borderRadius: 8,
+    borderRadius: 0,
     backgroundColor: "rgba(20, 20, 26, 0.55)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(10,10,10,0.07)",
     borderStyle: "dashed" as const,
   },
 
@@ -1224,7 +1224,7 @@ const styles = StyleSheet.create({
   trimHandleBar: {
     width: 4,
     height: "70%",
-    borderRadius: 2,
+    borderRadius: 0,
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
@@ -1238,7 +1238,7 @@ const styles = StyleSheet.create({
   trimHandleGrip: {
     width: 2,
     height: 10,
-    borderRadius: 1,
+    borderRadius: 0,
     backgroundColor: "rgba(0,0,0,0.3)",
   },
 
@@ -1248,7 +1248,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 1,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(10,10,10,0.08)",
   },
   playheadOverlay: {
     position: "absolute",
@@ -1275,7 +1275,7 @@ const styles = StyleSheet.create({
     top: 2,
     width: 14,
     height: 14,
-    borderRadius: 7,
+    borderRadius: 0,
     backgroundColor: theme.accent,
     left: PLAYHEAD_ZONE / 2 - 7,
     borderWidth: 2,

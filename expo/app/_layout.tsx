@@ -80,7 +80,7 @@ function RootLayoutNav() {
             presentation: "fullScreenModal",
             animation: "slide_from_bottom",
             gestureEnabled: false,
-            contentStyle: { backgroundColor: "#0A0A14" },
+            contentStyle: { backgroundColor: theme.bg },
           }}
         />
         <Stack.Screen
@@ -89,7 +89,7 @@ function RootLayoutNav() {
             presentation: "fullScreenModal",
             animation: "slide_from_right",
             gestureEnabled: false,
-            contentStyle: { backgroundColor: "#0A0A14" },
+            contentStyle: { backgroundColor: theme.bg },
           }}
         />
         <Stack.Screen
@@ -161,7 +161,7 @@ function RootLayoutNav() {
             presentation: "fullScreenModal",
             animation: "slide_from_bottom",
             headerShown: false,
-            contentStyle: { backgroundColor: "#0A0A14" },
+            contentStyle: { backgroundColor: theme.bg },
           }}
         />
         <Stack.Screen
@@ -229,7 +229,7 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <SafeAreaProvider>
           <View style={{ flex: 1, backgroundColor: theme.bg }}>
-            <StatusBar style="light" />
+            <StatusBar style="dark" />
             <AuthProvider>
               <UserBlocksProvider>
                 <PostsProvider>

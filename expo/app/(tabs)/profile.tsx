@@ -196,7 +196,7 @@ function ProfileHeader({
                 ).catch(() => {});
               }}
             >
-              <Instagram color="#E1306C" size={12} strokeWidth={2} />
+              <Instagram color="#E8291C" size={12} strokeWidth={2} />
               <UiText style={styles.linkText} numberOfLines={1}>
                 {myProfile.instagram_handle}
               </UiText>
@@ -223,7 +223,7 @@ function ProfileHeader({
       {/* Streak badge — secondary, sits above stats */}
       {myProfile && myProfile.current_streak > 0 && (
         <View style={styles.streakBadge}>
-          <Flame color="#FF9500" size={14} fill="#FF9500" />
+          <Flame color="#FFD400" size={14} fill="#FFD400" />
           <UiText style={styles.streakText}>
             {myProfile.current_streak} day streak
           </UiText>
@@ -602,7 +602,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 64,
     height: 64,
-    borderRadius: 32,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -610,7 +610,7 @@ const styles = StyleSheet.create({
   avatarText: {
     color: "#fff",
     fontSize: 24,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   profileInfo: {
     flex: 1,
@@ -619,7 +619,7 @@ const styles = StyleSheet.create({
   displayName: {
     color: theme.text,
     fontSize: 20,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
   username: {
@@ -633,10 +633,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: "rgba(10,132,255,0.1)",
+    borderRadius: 0,
+    backgroundColor: "rgba(232,41,28,0.1)",
     borderWidth: 1,
-    borderColor: "rgba(10,132,255,0.25)",
+    borderColor: "rgba(232,41,28,0.25)",
     marginBottom: 16,
   },
   editProfileBtnText: {
@@ -647,12 +647,12 @@ const styles = StyleSheet.create({
   signOutBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.07)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(10,10,10,0.08)",
   },
 
   /* Bio */
@@ -675,12 +675,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(10,10,10,0.07)",
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(10,10,10,0.08)",
   },
   linkText: {
     color: theme.accent,
@@ -704,7 +704,7 @@ const styles = StyleSheet.create({
   statNum: {
     color: theme.text,
     fontSize: 22,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.4,
   },
   statLabel: {
@@ -717,7 +717,7 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     height: 30,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(10,10,10,0.07)",
   },
 
   /* Streak badge */
@@ -728,16 +728,16 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,149,0,0.12)",
+    borderRadius: 0,
+    backgroundColor: "rgba(255,212,0,0.12)",
     borderWidth: 1,
-    borderColor: "rgba(255,149,0,0.25)",
+    borderColor: "rgba(255,212,0,0.25)",
     marginBottom: 16,
   },
   streakText: {
-    color: "#FF9500",
+    color: "#FFD400",
     fontSize: 13,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
     letterSpacing: 0.2,
   },
 
@@ -754,14 +754,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
     paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.05)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(10,10,10,0.07)",
   },
   tabActive: {
-    backgroundColor: "rgba(10,132,255,0.1)",
-    borderColor: "rgba(10,132,255,0.25)",
+    backgroundColor: "rgba(232,41,28,0.1)",
+    borderColor: "rgba(232,41,28,0.25)",
   },
   tabLabel: {
     color: theme.textDim,
@@ -782,7 +782,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: theme.text,
     fontSize: 17,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   emptySub: {
     color: theme.textMuted,
@@ -796,7 +796,7 @@ const styles = StyleSheet.create({
   tile: {
     flex: 1,
     aspectRatio: 0.85,
-    borderRadius: 10,
+    borderRadius: 0,
     overflow: "hidden",
     backgroundColor: theme.card,
   },
@@ -813,7 +813,7 @@ const styles = StyleSheet.create({
     right: 6,
     minWidth: 20,
     height: 20,
-    borderRadius: 10,
+    borderRadius: 0,
     backgroundColor: "rgba(0,0,0,0.55)",
     alignItems: "center",
     justifyContent: "center",
@@ -822,7 +822,7 @@ const styles = StyleSheet.create({
   videoBadgeText: {
     color: "#fff",
     fontSize: 9,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
   },
   tileBottom: {
     position: "absolute",
@@ -841,16 +841,16 @@ const styles = StyleSheet.create({
   tileStatText: {
     color: "#fff",
     fontSize: 11,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
   reactionTag: {
     flexDirection: "row",
     alignItems: "center",
     gap: 3,
-    backgroundColor: "rgba(10,132,255,0.15)",
+    backgroundColor: "rgba(232,41,28,0.15)",
     paddingHorizontal: 6,
     paddingVertical: 3,
-    borderRadius: 4,
+    borderRadius: 0,
   },
   reactionTagText: {
     color: theme.accent,
@@ -870,12 +870,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 4,
     paddingVertical: 5,
-    backgroundColor: "rgba(139,92,246,0.85)",
+    backgroundColor: "rgba(183,28,18,0.85)",
   },
   draftBadgeText: {
     color: "#fff",
     fontSize: 10,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: 0.6,
   },
 });

@@ -230,7 +230,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: theme.text,
     fontSize: 17,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
   headerSpacer: { width: 40 },
@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
   sectionLabel: {
     color: theme.textDim,
     fontSize: 11,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: 8,
@@ -254,9 +254,9 @@ const styles = StyleSheet.create({
 
   sectionCard: {
     backgroundColor: theme.card,
-    borderRadius: 14,
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(10,10,10,0.07)",
     overflow: "hidden",
   },
 
@@ -276,15 +276,15 @@ const styles = StyleSheet.create({
 
   dangerDivider: {
     height: 1,
-    backgroundColor: "rgba(255,69,58,0.15)",
+    backgroundColor: "rgba(232,41,28,0.15)",
     marginVertical: 28,
   },
 
   dangerCard: {
-    backgroundColor: "rgba(255,69,58,0.06)",
-    borderRadius: 14,
+    backgroundColor: "rgba(232,41,28,0.06)",
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: "rgba(255,69,58,0.15)",
+    borderColor: "rgba(232,41,28,0.15)",
     overflow: "hidden",
   },
   dangerText: {
@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
 
   rowDivider: {
     height: 1,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: "rgba(10,10,10,0.05)",
     marginLeft: 46,
   },
 

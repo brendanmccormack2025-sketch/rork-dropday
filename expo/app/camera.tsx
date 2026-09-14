@@ -414,7 +414,7 @@ export default function CameraScreen() {
   /** Flip cover — an opaque overlay that hides the native CameraView
    *  session rebuild during a camera flip. The native session goes blank
    *  for ~150-250ms when swapping devices, showing the app's dark background
-   *  (#0A0A14, brightness ~15) through the transparent CameraView.
+   *  (#F5F3EE, brightness ~15) through the transparent CameraView.
    *
    *  Previous approach: a simple 300ms fade with Easing.out(cubic) — but
    *  the cubic easing dropped opacity to ~0.12 by 150ms, so the dark
@@ -947,7 +947,7 @@ export default function CameraScreen() {
 }
 
 const styles = StyleSheet.create({
-  fullscreen: { flex: 1, backgroundColor: "#0A0A14" },
+  fullscreen: { flex: 1, backgroundColor: "#F5F3EE" },
 
   centered: {
     flex: 1,
@@ -960,7 +960,7 @@ const styles = StyleSheet.create({
   permTitle: {
     color: theme.text,
     fontSize: 20,
-    fontWeight: "700" as const,
+    fontWeight: "900" as const,
   },
   permSub: {
     color: theme.textMuted,
@@ -997,12 +997,12 @@ const styles = StyleSheet.create({
   camIconBtn: {
     width: 38,
     height: 38,
-    borderRadius: 19,
+    borderRadius: 0,
     backgroundColor: "rgba(10,10,10,0.5)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(10,10,10,0.07)",
   },
 
   nextBtn: {
@@ -1011,7 +1011,7 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: 14,
     paddingVertical: 9,
-    borderRadius: 999,
+    borderRadius: 0,
     backgroundColor: theme.accent,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 0 },
@@ -1021,7 +1021,7 @@ const styles = StyleSheet.create({
   nextBtnText: {
     color: "#fff",
     fontSize: 13,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: 0.3,
   },
   countdownPill: {
@@ -1030,10 +1030,10 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 7,
-    borderRadius: 999,
+    borderRadius: 0,
     backgroundColor: "rgba(10,10,10,0.5)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(10,10,10,0.07)",
   },
   countdownPillText: {
     color: "#fff",
@@ -1045,13 +1045,13 @@ const styles = StyleSheet.create({
   countdownPillTextLive: {
     color: "#fff",
     fontSize: 10,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: 1.1,
   },
   liveDot: {
     width: 6,
     height: 6,
-    borderRadius: 3,
+    borderRadius: 0,
     backgroundColor: "#fff",
   },
 
@@ -1076,13 +1076,13 @@ const styles = StyleSheet.create({
   recDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: 0,
     backgroundColor: theme.danger,
   },
   recTimerText: {
     color: "#fff",
     fontSize: 12,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: 1.2,
   },
 
@@ -1121,16 +1121,16 @@ const styles = StyleSheet.create({
   captureBtn: {
     width: RING_SIZE - 12,
     height: RING_SIZE - 12,
-    borderRadius: (RING_SIZE - 12) / 2,
+    borderRadius: 0,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(10,10,10,0.08)",
     borderWidth: 3,
     borderColor: "#fff",
   },
   captureBtnRecording: {
     borderColor: theme.accent,
-    backgroundColor: "rgba(10,132,255,0.22)",
+    backgroundColor: "rgba(232,41,28,0.22)",
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
@@ -1143,13 +1143,13 @@ const styles = StyleSheet.create({
   captureInner: {
     width: RING_SIZE - 30,
     height: RING_SIZE - 30,
-    borderRadius: (RING_SIZE - 30) / 2,
+    borderRadius: 0,
     backgroundColor: "#fff",
   },
   captureInnerRecording: {
     width: 28,
     height: 28,
-    borderRadius: 6,
+    borderRadius: 0,
     backgroundColor: theme.accent,
   },
 
@@ -1179,7 +1179,7 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 7,
-    borderRadius: 999,
+    borderRadius: 0,
     backgroundColor: "rgba(10,10,10,0.6)",
     borderWidth: 1,
     borderColor: theme.accent,
@@ -1188,7 +1188,7 @@ const styles = StyleSheet.create({
   lockedPillText: {
     color: "#fff",
     fontSize: 10,
-    fontWeight: "800" as const,
+    fontWeight: "900" as const,
     letterSpacing: 1,
   },
 
@@ -1213,7 +1213,7 @@ const styles = StyleSheet.create({
   zoomBarTrack: {
     width: 4,
     height: 132,
-    borderRadius: 2,
+    borderRadius: 0,
     backgroundColor: "rgba(255,255,255,0.18)",
     overflow: "hidden",
   },
@@ -1223,7 +1223,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: theme.accent,
-    borderRadius: 2,
+    borderRadius: 0,
   },
   zoomBarLabel: {
     color: "#fff",
