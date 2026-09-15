@@ -1267,7 +1267,7 @@ const styles = StyleSheet.create({
 
   /* Stall / error recovery overlay */
   stallOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.35)",
     alignItems: "center",
     justifyContent: "center",
@@ -1297,7 +1297,7 @@ const styles = StyleSheet.create({
 
   /* Optimistic posting overlay */
   optOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 10,
     alignItems: "center",
     justifyContent: "center",

@@ -7,12 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "rork-fgum9ff0goqjv4vh7u4xf",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F5F3EE"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "app.rork.fgum9ff0goqjv4vh7u4xf",
@@ -85,7 +79,17 @@
         {
           "color": "#E8291C"
         }
-      ]
+      ],
+      "expo-image",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#F5F3EE"
+        }
+      ],
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true

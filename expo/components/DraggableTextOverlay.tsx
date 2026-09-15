@@ -515,7 +515,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   selectionOutline: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderWidth: 2,
     borderRadius: 0,
     margin: -4,

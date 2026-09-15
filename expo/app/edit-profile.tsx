@@ -473,7 +473,7 @@ const styles = StyleSheet.create({
     fontWeight: "900" as const,
   },
   avatarOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: 0,
     backgroundColor: "rgba(0,0,0,0.35)",
     alignItems: "center",

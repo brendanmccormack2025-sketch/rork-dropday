@@ -2640,7 +2640,7 @@ const styles = StyleSheet.create({
 
   // ── Play overlay ──
   playOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2657,7 +2657,7 @@ const styles = StyleSheet.create({
 
   // ── Video error overlay ──
   videoErrorOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.85)",
