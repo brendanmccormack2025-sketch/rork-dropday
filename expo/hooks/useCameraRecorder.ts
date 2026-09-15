@@ -5,7 +5,10 @@ import {
   useCameraPermissions,
   useMicrophonePermissions,
 } from "expo-camera";
-import * as MediaLibrary from "expo-media-library";
+import {
+  saveToLibraryAsync,
+  useMediaLibraryPermissions,
+} from "@/lib/mediaLibraryCompat";
 import { cacheDirectory, documentDirectory, getInfoAsync } from "@/lib/fileSystemCompat";
 import * as Haptics from "expo-haptics";
 
@@ -52,7 +55,7 @@ export function useCameraRecorder() {
   const [permission, requestPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const [mediaPermission, requestMediaPermission] =
-    MediaLibrary.usePermissions();
+    useMediaLibraryPermissions();
 
   const [facing, setFacing] = useState<"back" | "front">("back");
   /** Stable ref mirror of `facing` — gesture & async callbacks read this, never the state */
@@ -198,7 +201,7 @@ export function useCameraRecorder() {
         if (!result.granted) return;
       }
       const _saveStart = Date.now();
-      await MediaLibrary.saveToLibraryAsync(uri);
+      await saveToLibraryAsync(uri);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown save error";
       console.warn("[camera] gallery save failed:", msg);
