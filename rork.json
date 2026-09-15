@@ -2,9 +2,12 @@
   "$schema": "https://rork.com/schema/rork.json",
   "apps": [
     {
-      "name": "DropDay",
+      "name": "Trial",
       "path": "expo",
-      "framework": "react-native"
+      "framework": "react-native",
+      "settings": {
+        "displayName": "Trial"
+      }
     },
     {
       "name": "Functions",
