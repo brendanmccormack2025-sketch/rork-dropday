@@ -31,7 +31,7 @@ export function useMediaPicker() {
       if (!perm.granted) {
         Alert.alert(
           "Media Library Access",
-          "DropDay needs access to your photo library to import media. You can grant this in Settings.",
+          "Trial needs access to your photo library to import media. You can grant this in Settings.",
           [
             { text: "Cancel", style: "cancel" },
             {

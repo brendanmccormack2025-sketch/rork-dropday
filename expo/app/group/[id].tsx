@@ -89,7 +89,7 @@ export default function GroupFeedScreen() {
     if (!perm.granted) {
       Alert.alert(
         "Media Library Access",
-        "DropDay needs access to your photo library to post to the group. You can grant this in Settings.",
+        "Trial needs access to your photo library to post to the group. You can grant this in Settings.",
         [
           { text: "Cancel", style: "cancel" },
           {

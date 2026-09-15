@@ -1,5 +1,5 @@
 /**
- * Legal text content for DropDay.
+ * Legal text content for Trial.
  *
  * Each document is an ordered list of sections. A section has a heading and a
  * body (one or more paragraphs separated by a blank line). The legal screen
@@ -29,12 +29,12 @@ export const TERMS_OF_USE: LegalDocument = {
   title: "Terms of Use",
   lastUpdated: "July 15, 2026",
   intro:
-    "Welcome to DropDay. These Terms of Use (\"Terms\") govern your access to and use of the DropDay mobile application (the \"App\"), operated by DropDay (\"we,\" \"us,\" or \"our\"). By creating an account or using the App, you agree to these Terms.",
+    "Welcome to Trial. These Terms of Use (\"Terms\") govern your access to and use of the Trial mobile application (the \"App\"), operated by Trial (\"we,\" \"us,\" or \"our\"). By creating an account or using the App, you agree to these Terms.",
   sections: [
     {
       heading: "1. Eligibility",
       paragraphs: [
-        "You must be at least 13 years old to use DropDay. By using the App, you represent that you meet this requirement and that the birth date you provide is accurate.",
+        "You must be at least 13 years old to use Trial. By using the App, you represent that you meet this requirement and that the birth date you provide is accurate.",
       ],
     },
     {
@@ -46,7 +46,7 @@ export const TERMS_OF_USE: LegalDocument = {
     {
       heading: "3. Content Ownership and License",
       paragraphs: [
-        "You retain ownership of all content you create and post on DropDay (\"User Content\"). By posting User Content, you grant DropDay a non-exclusive, worldwide, royalty-free license to host, store, display, reproduce, and distribute your User Content solely for the purpose of operating and providing the App's features to you and other users. This license ends when you delete your content or your account, except to the extent your content has been shared with or saved by other users through normal use of the App prior to deletion.",
+        "You retain ownership of all content you create and post on Trial (\"User Content\"). By posting User Content, you grant Trial a non-exclusive, worldwide, royalty-free license to host, store, display, reproduce, and distribute your User Content solely for the purpose of operating and providing the App's features to you and other users. This license ends when you delete your content or your account, except to the extent your content has been shared with or saved by other users through normal use of the App prior to deletion.",
       ],
     },
     {
@@ -64,7 +64,7 @@ export const TERMS_OF_USE: LegalDocument = {
     {
       heading: "5. Reporting and Moderation",
       paragraphs: [
-        "DropDay provides tools for users to report content or block other users. We review reports and may remove content or restrict accounts found to violate these Terms. Content that receives multiple reports may be automatically hidden pending review.",
+        "Trial provides tools for users to report content or block other users. We review reports and may remove content or restrict accounts found to violate these Terms. Content that receives multiple reports may be automatically hidden pending review.",
       ],
     },
     {
@@ -88,7 +88,7 @@ export const TERMS_OF_USE: LegalDocument = {
     {
       heading: "9. Limitation of Liability",
       paragraphs: [
-        "To the maximum extent permitted by law, DropDay shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of the App.",
+        "To the maximum extent permitted by law, Trial shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of the App.",
       ],
     },
     {
@@ -112,7 +112,7 @@ export const TERMS_OF_USE: LegalDocument = {
     {
       heading: "13. DMCA / Copyright Complaints",
       paragraphs: [
-        "If you believe content on DropDay infringes your copyright, contact us at DropDayApp@yahoo.com with a description of the material and your contact information.",
+        "If you believe content on Trial infringes your copyright, contact us at DropDayApp@yahoo.com with a description of the material and your contact information.",
       ],
     },
     {
@@ -128,7 +128,7 @@ export const PRIVACY_POLICY: LegalDocument = {
   title: "Privacy Policy",
   lastUpdated: "July 15, 2026",
   intro:
-    "DropDay (\"we,\" \"us,\" or \"our\") operates the DropDay mobile application (the \"App\"). This Privacy Policy explains what information we collect, how we use it, and your rights regarding that information.",
+    "Trial (\"we,\" \"us,\" or \"our\") operates the Trial mobile application (the \"App\"). This Privacy Policy explains what information we collect, how we use it, and your rights regarding that information.",
   sections: [
     {
       heading: "1. Information We Collect",
@@ -137,7 +137,7 @@ export const PRIVACY_POLICY: LegalDocument = {
         "• Content you create: videos, images, captions, and reactions you post to the App.",
         "• Usage data: basic app interaction data (e.g., likes, follows, views) needed to operate core features.",
         "• Device information: general device and app version information for crash reporting and compatibility.",
-        "We do not collect more personal information than is necessary to operate DropDay's core features.",
+        "We do not collect more personal information than is necessary to operate Trial's core features.",
       ],
     },
     {
@@ -154,7 +154,7 @@ export const PRIVACY_POLICY: LegalDocument = {
     {
       heading: "3. Teen Users (Ages 13–17)",
       paragraphs: [
-        "DropDay requires all users to be at least 13 years old. Users who indicate they are between 13 and 17 years old have additional protections:",
+        "Trial requires all users to be at least 13 years old. Users who indicate they are between 13 and 17 years old have additional protections:",
         "• Content marked as \"mature\" by its creator is automatically filtered out of their feed and is not shown to them.",
         "• We do not knowingly allow targeted advertising based on the personal information of users under 18.",
       ],
@@ -162,7 +162,7 @@ export const PRIVACY_POLICY: LegalDocument = {
     {
       heading: "4. Third-Party Services",
       paragraphs: [
-        "DropDay uses the following third-party services to operate:",
+        "Trial uses the following third-party services to operate:",
         "• Supabase (database, authentication, and file storage) — your account data, posted content, and media files are stored on Supabase's infrastructure.",
         "These providers only process your data to the extent necessary to provide their services to us and are not permitted to use your data for their own purposes.",
       ],
@@ -185,7 +185,7 @@ export const PRIVACY_POLICY: LegalDocument = {
     {
       heading: "7. Children's Privacy",
       paragraphs: [
-        "DropDay is not directed at children under 13, and we do not knowingly collect personal information from anyone under 13. If we learn that we have collected personal information from a child under 13, we will delete it promptly.",
+        "Trial is not directed at children under 13, and we do not knowingly collect personal information from anyone under 13. If we learn that we have collected personal information from a child under 13, we will delete it promptly.",
       ],
     },
     {

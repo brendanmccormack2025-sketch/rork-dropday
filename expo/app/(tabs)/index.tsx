@@ -132,7 +132,7 @@ export default function FeedScreen() {
             <View style={styles.headerRow} pointerEvents="box-none">
               <View style={styles.brandRow}>
                 <DropletLogo size={22} />
-                <UiText style={styles.brand}>DropDay</UiText>
+                <UiText style={styles.brand}>Trial</UiText>
               </View>
               <View style={styles.headerActions} pointerEvents="box-none">
 
@@ -254,7 +254,7 @@ function GateOverlay({
         </View>
         <UiText style={styles.gateTitle}>Drop to unlock</UiText>
         <UiText style={styles.gateSub}>
-          You've watched {viewed} drops. Post your DropDay to keep watching
+          You've watched {viewed} drops. Post your Trial to keep watching
           tonight's feed.
         </UiText>
         <Pressable onPress={onDrop} style={styles.gateBtn}>
@@ -318,7 +318,7 @@ function ShareSheet({
   const handleNativeShare = async () => {
     try {
       await Share.share({
-        message: `Check out this DropDay: ${post.media_url}`,
+        message: `Check out this Trial: ${post.media_url}`,
       });
     } catch {}
   };

@@ -230,7 +230,7 @@ export function useCameraRecorder() {
         // an actual path forward via Settings instead of a dead-end error.
         Alert.alert(
           "Microphone Access",
-          "DropDay needs microphone access to record video with sound. You can grant this in Settings.",
+          "Trial needs microphone access to record video with sound. You can grant this in Settings.",
           [
             { text: "Cancel", style: "cancel" },
             {

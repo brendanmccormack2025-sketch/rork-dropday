@@ -15,10 +15,10 @@
         "UIBackgroundModes": [
           "remote-notification"
         ],
-        "NSCameraUsageDescription": "DropDay uses your camera to capture tonight's drop — no uploads from your library.",
-        "NSMicrophoneUsageDescription": "DropDay records audio with your video drops.",
-        "NSPhotoLibraryUsageDescription": "DropDay needs access to your photo library so you can import media for your drops.",
-        "NSPhotoLibraryAddUsageDescription": "DropDay saves your recorded drops to your photo library."
+        "NSCameraUsageDescription": "Trial uses your camera to capture tonight's drop — no uploads from your library.",
+        "NSMicrophoneUsageDescription": "Trial records audio with your video drops.",
+        "NSPhotoLibraryUsageDescription": "Trial needs access to your photo library so you can import media for your drops.",
+        "NSPhotoLibraryAddUsageDescription": "Trial saves your recorded drops to your photo library."
       },
       "usesAppleSignIn": true,
       "buildNumber": "10"
@@ -56,22 +56,22 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "DropDay needs access to your photos so you can pick a drop.",
-          "cameraPermission": "DropDay uses your camera so you can capture tonight's drop."
+          "photosPermission": "Trial needs access to your photos so you can pick a drop.",
+          "cameraPermission": "Trial uses your camera so you can capture tonight's drop."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "DropDay uses your camera so you can capture tonight's drop.",
-          "microphonePermission": "DropDay records audio with your video drops."
+          "cameraPermission": "Trial uses your camera so you can capture tonight's drop.",
+          "microphonePermission": "Trial records audio with your video drops."
         }
       ],
       [
         "expo-media-library",
         {
-          "photosPermission": "DropDay saves your drops to your photo library.",
-          "savePhotosPermission": "DropDay saves your recorded drops to your photo library."
+          "photosPermission": "Trial saves your drops to your photo library.",
+          "savePhotosPermission": "Trial saves your recorded drops to your photo library."
         }
       ],
       [
