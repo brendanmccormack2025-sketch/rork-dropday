@@ -115,8 +115,11 @@ export default function FeedScreen() {
           <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.headerWrap}>
             <View style={styles.headerRow} pointerEvents="box-none">
               <View style={styles.brandRow}>
-                <DropletLogo size={22} />
-                <UiText style={styles.brand}>Trial</UiText>
+                <Image
+                  source={require("@/assets/images/trial-wordmark.png")}
+                  style={styles.brandLogo}
+                  contentFit="contain"
+                />
               </View>
             </View>
 
@@ -414,6 +417,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  brandLogo: { width: 72, height: 22 },
 
   /* Tab switcher */
   tabBar: {
