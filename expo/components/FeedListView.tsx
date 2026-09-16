@@ -11,7 +11,7 @@ import {
 import { useFocusEffect } from "expo-router";
 import { useVideoFocus } from "@/hooks/useVideoFocus";
 import { FeedItem } from "@/components/FeedItem";
-import { theme, getDropWindowState } from "@/constants/theme";
+import { theme } from "@/constants/theme";
 import { usePosts, type Post } from "@/providers/PostsProvider";
 
 const { height: SCREEN_H } = Dimensions.get("window");
@@ -91,7 +91,6 @@ export function FeedListView({
   const listRef = useRef<FlatList<Post>>(null);
 
   const { retryOptimisticPost, removeOptimisticPost } = usePosts();
-  const win = useMemo(() => getDropWindowState(new Date()), []);
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -124,7 +123,6 @@ export function FeedListView({
       <FeedItem
         post={item}
         active={index === activeIndex && screenFocused}
-        live={win.isOpen}
         bottomInset={bottomInset}
         onShare={() => onSharePost?.(item)}
         onReactions={() => onReactionsPost?.(item)}
@@ -132,7 +130,7 @@ export function FeedListView({
         onDismiss={() => removeOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),
-    [activeIndex, screenFocused, win.isOpen, retryOptimisticPost, removeOptimisticPost, bottomInset, onSharePost, onReactionsPost],
+    [activeIndex, screenFocused, retryOptimisticPost, removeOptimisticPost, bottomInset, onSharePost, onReactionsPost],
   );
 
   const safeInitialIndex = Math.max(0, Math.min(initialIndex, posts.length - 1));

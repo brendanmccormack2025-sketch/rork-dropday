@@ -37,7 +37,7 @@ import {
 
 import PrimaryButton from "@/components/PrimaryButton";
 import { supabase } from "@/lib/supabase";
-import { theme, getDropWindowState } from "@/constants/theme";
+import { theme } from "@/constants/theme";
 import { useCameraRecorder, type Clip, MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
 
 const LOCK_DRAG_DISTANCE = 70;
@@ -118,8 +118,6 @@ export default function CameraScreen() {
     handleCameraReady,
   } = useCameraRecorder();
 
-  const [now, setNow] = useState<Date>(new Date());
-
   // Recording progress — driven by real elapsed time, NOT an independent timer
   const progress = useRef(new Animated.Value(0)).current;
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -173,12 +171,6 @@ export default function CameraScreen() {
     }, 1000);
   }, [clearPanZoomTimeout]);
 
-  // Clock
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
   // ─── Audio session: allow recording while camera is mounted ──────────
   useEffect(() => {
     Audio.setAudioModeAsync({
@@ -207,8 +199,6 @@ export default function CameraScreen() {
       teardown();
     };
   }, [setZoom, teardown]);
-
-  const win = useMemo(() => getDropWindowState(now), [now]);
 
   // ─── Recording progress — driven by real elapsed time ───────────
   useEffect(() => {
@@ -618,17 +608,6 @@ export default function CameraScreen() {
 
 
 
-  const shortCountdown = (ms: number): string => {
-    if (ms < 0) ms = 0;
-    const totalMin = Math.floor(ms / 60000);
-    const h = Math.floor(totalMin / 60);
-    const m = totalMin % 60;
-    if (h > 0) return `${h}h ${m}m`;
-    if (m > 0) return `${m}m`;
-    const s = Math.floor((ms % 60000) / 1000);
-    return `${s}s`;
-  };
-
   /** Convert zoom (0–1) to a human-readable label like "2.5×" */
   const zoomToLabel = (z: number): string => {
     // Map 0–1 to roughly 1×–10× (common smartphone max zoom range)
@@ -725,23 +704,6 @@ export default function CameraScreen() {
           >
             <X color="#fff" size={20} />
           </Pressable>
-        </View>
-
-        {/* ── Center pill: countdown for regular drops ── */}
-        <View style={styles.countdownPill}>
-          {win.isOpen ? (
-            <>
-              <View style={styles.liveDot} />
-              <UiText style={styles.countdownPillTextLive}>LIVE</UiText>
-            </>
-          ) : (
-            <>
-              <Clock color={theme.accent} size={11} />
-              <UiText style={styles.countdownPillText}>
-                Drop opens in {shortCountdown(win.msUntilOpen)}
-              </UiText>
-            </>
-          )}
         </View>
 
         <View style={styles.topSideRight}>
@@ -1024,37 +986,6 @@ const styles = StyleSheet.create({
     fontWeight: "900" as const,
     letterSpacing: 0.3,
   },
-  countdownPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 0,
-    backgroundColor: "rgba(10,10,10,0.5)",
-    borderWidth: 1,
-    borderColor: "rgba(10,10,10,0.07)",
-  },
-  countdownPillText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "600" as const,
-    fontVariant: ["tabular-nums"],
-    letterSpacing: 0.2,
-  },
-  countdownPillTextLive: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "900" as const,
-    letterSpacing: 1.1,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 0,
-    backgroundColor: "#fff",
-  },
-
   nextBtnRow: {
     position: "absolute",
     left: 0,

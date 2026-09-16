@@ -94,12 +94,6 @@ export default function WelcomeScreen() {
 
         {/* Actions */}
         <View style={styles.actions}>
-          {/* Drop window badge */}
-          <View style={styles.windowBadge}>
-            <View style={styles.dot} />
-            <UiText style={styles.windowText}>8 PM – 10 PM nightly</UiText>
-          </View>
-
           <PrimaryButton
             label="Continue with Email"
             icon={<Mail color="#fff" size={18} />}
@@ -153,31 +147,6 @@ const styles = StyleSheet.create({
     fontWeight: "500" as const,
   },
   actions: { gap: 12, paddingBottom: 8 },
-  windowBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "center",
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 0,
-    backgroundColor: "rgba(232,41,28,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(232,41,28,0.2)",
-    marginBottom: 4,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 0,
-    backgroundColor: theme.accent,
-  },
-  windowText: {
-    color: theme.accent,
-    fontSize: 13,
-    fontWeight: "600" as const,
-    letterSpacing: 0.3,
-  },
   legal: {
     color: theme.textDim,
     fontSize: 11,

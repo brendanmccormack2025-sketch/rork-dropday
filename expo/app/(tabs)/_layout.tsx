@@ -1,5 +1,5 @@
 import { Tabs, useRouter } from "expo-router";
-import { Compass, Droplet, User, Users } from "lucide-react-native";
+import { Compass, Home, User, Users } from "lucide-react-native";
 import React, { useCallback } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
 import { BlurView } from "expo-blur";
@@ -42,9 +42,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Drop",
+          title: "Feed",
           tabBarIcon: ({ color, size }) => (
-            <Droplet color={color} size={size} fill={color} />
+            <Home color={color} size={size} />
           ),
         }}
       />

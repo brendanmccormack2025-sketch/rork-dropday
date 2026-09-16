@@ -27,7 +27,6 @@ function getDeviceTimezone(): string {
 
 import { useAuth, ensureProfileById } from "@/providers/AuthProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
-import { getDropWindowState } from "@/constants/theme";
 
 export type OptimisticStatus = "uploading" | "failed";
 
@@ -512,7 +511,6 @@ function rankFeed(posts: Post[], followingIds: string[], currentUserId?: string)
   if (posts.length === 0) return posts;
   const follows = new Set(followingIds);
   const now = Date.now();
-  const win = getDropWindowState(new Date(now));
 
   const scored = posts.map((p) => {
     const ageMs = now - new Date(p.created_at).getTime();
@@ -520,17 +518,13 @@ function rankFeed(posts: Post[], followingIds: string[], currentUserId?: string)
     const freshness = Math.exp(-ageHours / 12);
     const engagement = Math.log1p((p.like_count ?? 0) + 2 * (p.comment_count ?? 0));
     const followBoost = follows.has(p.user_id) ? 3.5 : 0;
-    const created = new Date(p.created_at);
-    const inLiveWindow =
-      win.isOpen && created >= win.windowStart && created < win.windowEnd;
-    const liveBoost = inLiveWindow ? 1.8 : 0;
     const jitter = Math.random() * 0.15;
     // Brief self-boost: guarantee the user's own just-posted drop stays at
     // the top for ~90s, then normal ranking resumes. Uses ageMs (ms) vs
     // 90_000 ms — NOT ageHours, which is in HOURS.
     const isOwn = currentUserId != null && p.user_id === currentUserId;
     const selfBoost = isOwn && ageMs < 90_000 ? 10 : 0;
-    const score = followBoost + engagement * 1.2 + freshness * 2.5 + liveBoost + jitter + selfBoost;
+    const score = followBoost + engagement * 1.2 + freshness * 2.5 + jitter + selfBoost;
     return { p, score };
   });
 
@@ -551,28 +545,23 @@ function rankFeed(posts: Post[], followingIds: string[], currentUserId?: string)
 
 /**
  * Rank the "Following" feed: chronological (newest first) with a
- * live-window sort override (the "trending sprinkle") and a brief
- * self-boost so the user's own just-posted drop stays at the top.
+ * brief self-boost so the user's own just-posted drop stays at the top.
  *
  * Tiers (highest surfaces first):
  *   2 — own post created < 90s ago (self-boost)
- *   1 — post within the current drop window (live boost)
  *   0 — everything else
  * Within each tier, posts are ordered by created_at descending.
  */
 function rankFollowingFeed(posts: Post[], currentUserId?: string): Post[] {
   if (posts.length === 0) return posts;
   const now = Date.now();
-  const win = getDropWindowState(new Date(now));
 
   const annotated = posts.map((p) => {
     const created = new Date(p.created_at);
     const ageMs = now - created.getTime();
     const isOwn = currentUserId != null && p.user_id === currentUserId;
     const selfBoost = isOwn && ageMs < 90_000;
-    const inLiveWindow =
-      win.isOpen && created >= win.windowStart && created < win.windowEnd;
-    const tier = selfBoost ? 2 : inLiveWindow ? 1 : 0;
+    const tier = selfBoost ? 2 : 0;
     return { p, tier, createdMs: created.getTime() };
   });
 
@@ -1305,19 +1294,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     setLastQueryError(entry);
   };
 
-  // Track current time so hasPostedInWindow re-evaluates when the window opens/closes.
-  // Previously the memo only depended on myPostsQuery.data, so the Drop icon
-  // would not reappear after the window opened unless data was refetched.
-  const [nowForWindow, setNowForWindow] = useState<Date>(new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNowForWindow(new Date()), 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  // MVP: time-window filter disabled — check if the user has ANY post at all.
-  // Before launch, restore the per-window check:
-  //   const win = getDropWindowState(nowForWindow);
-  //   (myPostsQuery.data ?? []).some((p) => { const t = new Date(p.created_at); return t >= win.windowStart && t < win.windowEnd; });
+  // MVP: posting-participation gate stub — currently checks if the user has
+  // ANY post at all. (Previously gated on having posted during the current
+  // drop window; the window no longer exists.)
   const hasPostedInWindow = useMemo(() => {
     return (myPostsQuery.data ?? []).length > 0;
   }, [myPostsQuery.data]);
@@ -1542,24 +1521,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (!user?.id) {
         console.error("[createPost] mutationFn ABORT — no user.id");
         throw new Error("Not signed in.");
-      }
-
-      // ── Client-side pre-check: reject top-level Drops outside the 8-10 PM window ──
-      // This prevents wasting time uploading a large video file only to have the
-      // server-side trigger reject it. The server-side trigger is the real
-      // enforcement; this is just an optimisation to fail fast.
-      // Reactions (parentPostId set) are never restricted.
-      // Demo/reviewer accounts with bypass_drop_window skip the gate entirely.
-      if (
-        !input.parentPostId &&
-        myProfileQuery.data?.bypass_drop_window !== true
-      ) {
-        const win = getDropWindowState(new Date());
-        if (!win.isOpen) {
-          throw new Error(
-            "Drops can only be posted between 8 PM and 10 PM your time. Save as draft and try again during tonight's drop window!",
-          );
-        }
       }
 
       const baseTs = Date.now();

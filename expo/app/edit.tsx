@@ -40,12 +40,7 @@ import {
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
-import {
-  theme,
-  getDropWindowState,
-  formatCountdown,
-  type DropWindowState,
-} from "@/constants/theme";
+import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
   usePosts,
@@ -104,7 +99,7 @@ export default function EditScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, session } = useAuth();
-  const { createPost, saveDraftProject, deleteDraftProject, draftProjects, draftsLoaded, addOptimisticPost, updateOptimisticProgress, myProfile } =
+  const { createPost, saveDraftProject, deleteDraftProject, draftProjects, draftsLoaded, addOptimisticPost, updateOptimisticProgress } =
     usePosts();
   const {
     clips: clipsJson,
@@ -190,27 +185,6 @@ export default function EditScreen() {
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [isMature, setIsMature] = useState<boolean>(false);
-
-  // ── Drop window state (live-updating) ────────────────────────────────────
-  // Re-checks every second so the Post button enables/disables automatically
-  // if the user is editing around 8 PM or 10 PM.
-  const [dropWindow, setDropWindow] = useState<DropWindowState>(() =>
-    getDropWindowState(),
-  );
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setDropWindow(getDropWindowState());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Reactions (reactingTo set) are postable 24/7 — only root Drops are
-  // gated to the 8–10 PM window. Demo/reviewer accounts with
-  // bypass_drop_window skip the gate entirely.
-  const isWindowBlocked =
-    !reactingTo &&
-    !dropWindow.isOpen &&
-    myProfile?.bypass_drop_window !== true;
 
   // ── Drag-to-trash tracking ───────────────────────────────────────────────
   const [dragOverlayInfo, setDragOverlayInfo] = useState<{
@@ -2492,25 +2466,17 @@ export default function EditScreen() {
             </Pressable>
             <Pressable
               onPress={handlePostPress}
-              disabled={clips.length === 0 || uploading || isWindowBlocked}
+              disabled={clips.length === 0 || uploading}
               style={({ pressed }) => [
                 styles.postBtn,
-                isWindowBlocked && styles.postBtnDisabled,
                 (clips.length === 0 || uploading) && { opacity: 0.35 },
-                pressed && !uploading && !isWindowBlocked && { opacity: 0.8 },
+                pressed && !uploading && { opacity: 0.8 },
               ]}
             >
               {uploading ? (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <ActivityIndicator size="small" color="#fff" />
                   <UiText style={styles.postBtnText}>Preparing...</UiText>
-                </View>
-              ) : isWindowBlocked ? (
-                <View style={{ alignItems: "center", gap: 2 }}>
-                  <UiText style={styles.postBtnText}>Drops open at 8 PM</UiText>
-                  <UiText style={styles.postBtnSubtext}>
-                    in {formatCountdown(dropWindow.msUntilOpen)}
-                  </UiText>
                 </View>
               ) : (
                 <UiText style={styles.postBtnText}>{reactingTo ? "Post Reaction" : "Post Drop"}</UiText>
@@ -2822,19 +2788,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "900" as const,
     letterSpacing: 0.3,
-  },
-  postBtnSubtext: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 11,
-    fontWeight: "600" as const,
-    letterSpacing: 0.2,
-  },
-  postBtnDisabled: {
-    backgroundColor: "rgba(10,10,10,0.08)",
-    shadowOpacity: 0,
-    elevation: 0,
-    borderWidth: 1,
-    borderColor: "rgba(10,10,10,0.07)",
   },
   actionRow: {
     flexDirection: "row",

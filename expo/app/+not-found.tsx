@@ -16,7 +16,7 @@ export default function NotFoundScreen() {
           <UiText style={styles.title}>This drop slipped away</UiText>
           <UiText style={styles.sub}>That screen doesn&apos;t exist.</UiText>
           <Link href="/(tabs)" style={styles.link}>
-            <UiText style={styles.linkText}>Back to tonight</UiText>
+            <UiText style={styles.linkText}>Back to the feed</UiText>
           </Link>
         </View>
       </ScreenBackground>

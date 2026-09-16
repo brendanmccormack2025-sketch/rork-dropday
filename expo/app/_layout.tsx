@@ -25,7 +25,6 @@ import { GroupsProvider } from "@/providers/GroupsProvider";
 import { NotificationsProvider } from "@/providers/NotificationsProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { theme } from "@/constants/theme";
-import { useLiveNotifications } from "@/hooks/useLiveNotifications";
 
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -36,10 +35,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
-
-  // Schedule the daily 8PM "going live" notification for authenticated users.
-  // Must be inside AuthGate so it only runs when the user is signed in.
-  useLiveNotifications();
 
   useEffect(() => {
     if (loading) return;

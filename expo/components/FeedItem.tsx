@@ -28,7 +28,7 @@ import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
 
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
-import { theme, getDropWindowState } from "@/constants/theme";
+import { theme } from "@/constants/theme";
 import { usePosts, type Post, type TextOverlay, type TextBackgroundStyle } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
@@ -225,7 +225,6 @@ function timeAgo(d: Date): string {
 export const FeedItem = memo(function FeedItem({
   post,
   active,
-  live,
   onShare,
   onReactions,
   onRetry,
@@ -234,7 +233,6 @@ export const FeedItem = memo(function FeedItem({
 }: {
   post: Post;
   active: boolean;
-  live: boolean;
   onShare: () => void;
   onReactions: () => void;
   onRetry: () => void;
@@ -441,13 +439,6 @@ export const FeedItem = memo(function FeedItem({
     post.profile?.display_name || post.profile?.username || "dropper";
   const createdAt = useMemo(() => new Date(post.created_at), [post.created_at]);
   const ago = useMemo(() => timeAgo(createdAt), [createdAt]);
-
-  const isLiveDrop = useMemo(() => {
-    const win = getDropWindowState(new Date());
-    return (
-      win.isOpen && createdAt >= win.windowStart && createdAt < win.windowEnd
-    );
-  }, [createdAt]);
 
   // Reset segment index and dual-player state when post changes
   useEffect(() => {
@@ -1116,12 +1107,6 @@ export const FeedItem = memo(function FeedItem({
         ]}
         pointerEvents="box-none"
       >
-        {isLiveDrop && (
-          <View style={styles.liveTag}>
-            <View style={styles.livePulse} />
-            <UiText style={styles.liveTagText}>LIVE DROP</UiText>
-          </View>
-        )}
         <View style={styles.userRow}>
           <Pressable
             onPress={() => {
@@ -1152,7 +1137,7 @@ export const FeedItem = memo(function FeedItem({
         <View style={styles.musicRow}>
           <Music2 color={theme.textMuted} size={12} />
           <UiText style={styles.musicText}>
-            {live ? "Original drop · tonight" : "Original sound"}
+            Original sound
           </UiText>
         </View>
       </View>
@@ -1161,8 +1146,7 @@ export const FeedItem = memo(function FeedItem({
 },
 (prev, next) =>
   prev.post === next.post &&
-  prev.active === next.active &&
-  prev.live === next.live);
+  prev.active === next.active);
 
 const styles = StyleSheet.create({
   /* Feed item */
@@ -1198,28 +1182,6 @@ const styles = StyleSheet.create({
     right: 80,
     gap: 8,
     zIndex: 999,
-  },
-  liveTag: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    alignSelf: "flex-start",
-    backgroundColor: theme.accent,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 0,
-  },
-  livePulse: {
-    width: 6,
-    height: 6,
-    borderRadius: 0,
-    backgroundColor: "#fff",
-  },
-  liveTagText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "900" as const,
-    letterSpacing: 0.8,
   },
   userRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   userRowPressable: {

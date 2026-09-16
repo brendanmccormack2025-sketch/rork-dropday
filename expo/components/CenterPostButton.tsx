@@ -1,33 +1,25 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
 import { Plus } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { Platform } from "react-native";
-import { theme, getDropWindowState } from "@/constants/theme";
+import { theme } from "@/constants/theme";
 
 type Props = {
   onPress?: () => void;
 };
 
 /**
- * Floating center "+" button — a compact outlined circle that
- * pulses during the drop window. Visually distinct from the other
- * tab icons while still reading as the primary action.
+ * Floating center "+" button — a compact outlined circle with a
+ * gentle constant pulse. Visually distinct from the other tab icons
+ * while still reading as the primary action.
  */
 export default function CenterPostButton({ onPress }: Props) {
-  const [now, setNow] = useState<Date>(new Date());
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1500);
-    return () => clearInterval(id);
-  }, []);
-
-  const isOpen = useMemo(() => getDropWindowState(now).isOpen, [now]);
-
-  useEffect(() => {
-    const to = isOpen ? 1.12 : 1.05;
-    const dur = isOpen ? 1000 : 2800;
+    const to = 1.08;
+    const dur = 1800;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
@@ -49,11 +41,11 @@ export default function CenterPostButton({ onPress }: Props) {
       loop.stop();
       pulseAnim.setValue(1);
     };
-  }, [isOpen, pulseAnim]);
+  }, [pulseAnim]);
 
   const ringOpacity = pulseAnim.interpolate({
-    inputRange: [1, isOpen ? 1.12 : 1.05],
-    outputRange: [0.25, isOpen ? 0.6 : 0.35],
+    inputRange: [1, 1.08],
+    outputRange: [0.25, 0.45],
   });
 
   const handlePress = () => {

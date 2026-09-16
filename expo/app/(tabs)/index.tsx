@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import type { RefObject } from "react";
 import {
   ActivityIndicator,
@@ -19,7 +19,6 @@ import { useFocusEffect, useRouter } from "expo-router";
 import {
   Music2,
   Send,
-  Zap,
   X,
   Users,
   Sparkles,
@@ -27,10 +26,9 @@ import {
 
 import DropletLogo from "@/components/DropletLogo";
 import { FeedListView } from "@/components/FeedListView";
-import { theme, getDropWindowState, formatCountdown } from "@/constants/theme";
+import { theme } from "@/constants/theme";
 import { usePosts, type Post, resolveAvatarUrl } from "@/providers/PostsProvider";
 import { supabase } from "@/lib/supabase";
-import { useLiveDropCount, formatDropCount } from "@/hooks/useLiveDropCount";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const FREE_VIEWS_BEFORE_GATE = 5;
@@ -44,25 +42,11 @@ export default function FeedScreen() {
     followingFeed, followingFeedLoading, refetchFollowingFeed,
     refetchMyPosts, optimisticPosts, lastPostCreatedAtRef,
   } = usePosts();
-  const [now, setNow] = useState<Date>(new Date());
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
   const [sharePost, setSharePost] = useState<Post | null>(null);
   const [activeTab, setActiveTab] = useState<FeedTab>("foryou");
   const isFirstFocusRef = useRef<boolean>(true);
-
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const win = useMemo(() => getDropWindowState(now), [now]);
-  const countdown = useMemo(
-    () => formatCountdown(win.isOpen ? win.msUntilClose : win.msUntilOpen),
-    [win]
-  );
-
-  const liveDropCount = useLiveDropCount();
 
   const viewedCount = viewedIds.size;
   // MVP: participation gate disabled — all users can scroll the full feed.
@@ -134,32 +118,6 @@ export default function FeedScreen() {
                 <DropletLogo size={22} />
                 <UiText style={styles.brand}>Trial</UiText>
               </View>
-              <View style={styles.headerActions} pointerEvents="box-none">
-
-                <View
-                  style={[styles.pill, win.isOpen && styles.pillLive]}
-                  pointerEvents="none"
-                >
-                  {win.isOpen ? (
-                    <Zap color="#F5F3EE" size={10} fill="#F5F3EE" />
-                  ) : (
-                    <View style={styles.dot} />
-                  )}
-                  <UiText style={[styles.pillText, win.isOpen && styles.pillTextLive]}>
-                    {win.isOpen ? "LIVE" : countdown}
-                  </UiText>
-                </View>
-              </View>
-
-              {/* Live participant counter — only during 8-10PM window */}
-              {liveDropCount !== null && liveDropCount > 0 && (
-                <View style={styles.liveCountPill} pointerEvents="none">
-                  <View style={styles.liveCountDot} />
-                  <UiText style={styles.liveCountText}>
-                    {formatDropCount(liveDropCount)}
-                  </UiText>
-                </View>
-              )}
             </View>
 
             {/* Tab switcher */}
@@ -456,11 +414,6 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
 
   /* Tab switcher */
   tabBar: {
@@ -520,59 +473,6 @@ const styles = StyleSheet.create({
     fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
-  pill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 0,
-    backgroundColor: "rgba(10,10,10,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(10,10,10,0.1)",
-  },
-  pillLive: { backgroundColor: theme.success, borderColor: theme.success },
-  pillText: {
-    color: theme.text,
-    fontSize: 11,
-    fontWeight: "900" as const,
-    letterSpacing: 0.5,
-    fontVariant: ["tabular-nums"],
-  },
-  pillTextLive: { color: "#F5F3EE" },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 0,
-    backgroundColor: theme.textMuted,
-  },
-
-  /* Live participant counter */
-  liveCountPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 0,
-    backgroundColor: "rgba(48,209,88,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(48,209,88,0.3)",
-    marginTop: 4,
-  },
-  liveCountDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 0,
-    backgroundColor: theme.success,
-  },
-  liveCountText: {
-    color: theme.success,
-    fontSize: 11,
-    fontWeight: "900" as const,
-    letterSpacing: 0.3,
-  },
-
   /* Empty */
   emptyContainer: {
     flexGrow: 1,

@@ -455,7 +455,7 @@ export default function ProfileScreen() {
                     />
                     <UiText style={styles.emptyTitle}>No drops yet</UiText>
                     <UiText style={styles.emptySub}>
-                      Your drops from tonight will appear here.
+                      Your drops will appear here.
                     </UiText>
                   </View>
                 )}
