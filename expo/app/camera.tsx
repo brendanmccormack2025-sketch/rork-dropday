@@ -14,7 +14,7 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
 import { CameraView } from "expo-camera";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
@@ -82,6 +82,7 @@ const triggerHaptic = (style: Haptics.ImpactFeedbackStyle) => {
 
 export default function CameraScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { reactingTo, rootDropId } = useLocalSearchParams<{ reactingTo?: string; rootDropId?: string }>();
 
   const insets = useSafeAreaInsets();
@@ -507,7 +508,7 @@ export default function CameraScreen() {
 
   const closeCamera = useCallback(() => {
     teardown();
-    if (router.canGoBack()) {
+    if (navigation.canGoBack()) {
       router.back();
     } else {
       router.replace("/(tabs)");

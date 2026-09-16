@@ -15,7 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Video, ResizeMode } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { ArrowLeft, EllipsisVertical, Flag, Heart, Reply, RotateCcw, Sparkles, X } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
@@ -29,6 +29,7 @@ const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
 export default function PostReactionsScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { reactionsByParent, reactionsLoading, refetchReactions } = usePosts();
   const [activeIndex, setActiveIndex] = useState<number>(0);
@@ -77,14 +78,14 @@ export default function PostReactionsScreen() {
       {/* Header */}
       <SafeAreaView edges={["top"]} style={styles.headerSafe}>
         <View style={styles.headerRow}>
-          <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.headerBtn} hitSlop={8}>
+          <Pressable onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.headerBtn} hitSlop={8}>
             <ArrowLeft color={theme.text} size={22} strokeWidth={2} />
           </Pressable>
           <View style={styles.headerCenter}>
             <Sparkles color={theme.accent} size={16} />
             <UiText style={styles.headerTitle}>Last Night</UiText>
           </View>
-          <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.headerBtn} hitSlop={8}>
+          <Pressable onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.headerBtn} hitSlop={8}>
             <X color={theme.textMuted} size={20} strokeWidth={2} />
           </Pressable>
         </View>

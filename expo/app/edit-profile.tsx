@@ -16,7 +16,7 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { EncodingType, readAsStringAsync } from "@/lib/fileSystemCompat";
 import { decode } from "base64-arraybuffer";
-import { useRouter } from "expo-router";
+import { useNavigation, useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -54,6 +54,7 @@ async function uriToBlob(uri: string): Promise<Uint8Array> {
 
 export default function EditProfileScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const qc = useQueryClient();
   const { user } = useAuth();
   const { myProfile, updateProfile, refetchProfile } = usePosts();
@@ -174,7 +175,7 @@ export default function EditProfileScreen() {
         refetchProfile(),
       ]);
 
-      if (router.canGoBack()) {
+      if (navigation.canGoBack()) {
         router.back();
       } else {
         router.replace("/(tabs)");
@@ -208,7 +209,7 @@ export default function EditProfileScreen() {
         {/* Top bar */}
         <View style={[styles.topBar, { marginTop: 8 }]}>
           <Pressable
-            onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
+            onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
             style={styles.topBtn}
             hitSlop={8}
           >

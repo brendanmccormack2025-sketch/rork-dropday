@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { router, useNavigation } from "expo-router";
 import { ArrowLeft, FileText } from "lucide-react-native";
 import * as Linking from "expo-linking";
 
@@ -20,6 +20,7 @@ import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 
 export default function SignInScreen() {
+  const navigation = useNavigation();
   const { signInWithEmail } = useAuth();
   const [email, setEmail] = useState<string>("");
   const [password, setPassword] = useState<string>("");
@@ -54,7 +55,7 @@ export default function SignInScreen() {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={styles.kb}
         >
-          <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.back}>
+          <Pressable onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.back}>
             <ArrowLeft color={theme.text} size={22} />
           </Pressable>
 

@@ -12,7 +12,7 @@ import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -38,6 +38,7 @@ const COL_WIDTH = (SCREEN_W - 32 - GAP) / 2;
 
 export default function PublicProfileScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const { followUser, unfollowUser } = usePosts();
@@ -86,7 +87,7 @@ export default function PublicProfileScreen() {
       const { data, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, moderation_status, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, moderation_status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("user_id", id)
         .is("parent_post_id", null)
@@ -110,7 +111,7 @@ export default function PublicProfileScreen() {
         text_overlays: null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         created_at: row.created_at as string,
-        like_count: (row.like_count as number | undefined) ?? 0,
+        like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
         reaction_count: (row.reaction_count as number | undefined) ?? 0,
         profile: (row.profiles as Post["profile"]) ?? null,
@@ -237,7 +238,7 @@ export default function PublicProfileScreen() {
               <View style={styles.topBar}>
                 <Pressable
                   onPress={() => {
-                    if (router.canGoBack()) router.back();
+                    if (navigation.canGoBack()) router.back();
                     else router.replace("/(tabs)");
                   }}
                   style={styles.backBtn}

@@ -7,7 +7,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useNavigation, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { Ban, ChevronLeft } from "lucide-react-native";
 
@@ -34,6 +34,7 @@ type BlockedProfile = {
  */
 export default function BlockedAccountsScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { blockedUserIds, unblockUser, blockPending } = useUserBlocks();
 
   const blockedIds = useMemo(
@@ -117,7 +118,7 @@ export default function BlockedAccountsScreen() {
         <View style={styles.header}>
           <Pressable
             onPress={() => {
-              if (router.canGoBack()) router.back();
+              if (navigation.canGoBack()) router.back();
               else router.replace("/settings");
             }}
             style={styles.backBtn}

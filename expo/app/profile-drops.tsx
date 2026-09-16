@@ -44,7 +44,7 @@ export default function ProfileDropsScreen() {
       const { data, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, moderation_status, created_at, like_count, comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, moderation_status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("user_id", userId)
         .is("parent_post_id", null)
@@ -68,7 +68,7 @@ export default function ProfileDropsScreen() {
         text_overlays: null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         created_at: row.created_at as string,
-        like_count: (row.like_count as number | undefined) ?? 0,
+        like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
         reaction_count: (row.reaction_count as number | undefined) ?? 0,
         profile: (row.profiles as Post["profile"]) ?? null,

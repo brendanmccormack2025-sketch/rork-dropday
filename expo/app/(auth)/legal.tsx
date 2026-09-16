@@ -6,7 +6,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
 
 import ScreenBackground from "@/components/ScreenBackground";
@@ -37,6 +37,7 @@ function formatDate(iso: string): string {
 }
 
 export default function LegalScreen() {
+  const navigation = useNavigation();
   const params = useLocalSearchParams<{ tab?: LegalTab }>();
   const [tab, setTab] = useState<LegalTab>(
     params.tab === "privacy" ? "privacy" : "terms",
@@ -49,7 +50,7 @@ export default function LegalScreen() {
         <View style={styles.topBar}>
           <Pressable
             onPress={() => {
-              if (router.canGoBack()) router.back();
+              if (navigation.canGoBack()) router.back();
               else router.replace("/(auth)/sign-up");
             }}
             style={styles.back}

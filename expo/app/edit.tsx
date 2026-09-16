@@ -21,7 +21,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
 import { Video, Audio, ResizeMode, type AVPlaybackStatus } from "expo-av";
 import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync } from "@/lib/fileSystemCompat";
 import * as Haptics from "expo-haptics";
@@ -97,6 +97,7 @@ function calcFrameDims(areaW: number, areaH: number, aspect: number) {
 
 export default function EditScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { user, session } = useAuth();
   const { createPost, saveDraftProject, deleteDraftProject, draftProjects, draftsLoaded, addOptimisticPost, updateOptimisticProgress } =
@@ -1445,7 +1446,7 @@ export default function EditScreen() {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     const next = clips.filter((c) => c.id !== selectedClipId);
     if (next.length === 0) {
-      if (router.canGoBack()) {
+      if (navigation.canGoBack()) {
         router.back();
       } else {
         router.replace("/(tabs)");
@@ -1805,7 +1806,7 @@ export default function EditScreen() {
         if (!draftId) {
           // New draft: dismiss all modals to return to the feed
           router.dismissAll();
-        } else if (router.canGoBack()) {
+        } else if (navigation.canGoBack()) {
           router.back();
         } else {
           router.replace("/(tabs)");
@@ -1960,7 +1961,7 @@ export default function EditScreen() {
         try {
           router.dismissAll();
         } catch {
-          if (router.canGoBack()) router.back();
+          if (navigation.canGoBack()) router.back();
         }
         if (reactionTreeId) {
           router.replace(`/post/${reactionTreeId}/reaction-tree` as never);
@@ -2064,7 +2065,7 @@ export default function EditScreen() {
       <View style={[styles.screen, styles.centered]}>
         <StatusBar style="light" />
         <UiText style={styles.emptyText}>Nothing to preview</UiText>
-        <Pressable onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.emptyBtn}>
+        <Pressable onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.emptyBtn}>
           <UiText style={styles.emptyBtnText}>Go back</UiText>
         </Pressable>
       </View>
@@ -2086,7 +2087,7 @@ export default function EditScreen() {
         {/* ── Top bar ────────────────────────────────────────────────── */}
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity
-            onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
+            onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
             style={styles.topBtn}
           >
             <ArrowLeft size={20} color="#fff" strokeWidth={2.5} />
@@ -2196,7 +2197,7 @@ export default function EditScreen() {
                   <View style={styles.videoErrorOverlay}>
                     <UiText style={styles.videoErrorText}>{videoLoadError}</UiText>
                     <Pressable
-                      onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
+                      onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
                       style={styles.videoErrorBackBtn}
                     >
                       <UiText style={styles.videoErrorBackBtnText}>Go Back</UiText>

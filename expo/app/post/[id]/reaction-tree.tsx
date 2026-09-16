@@ -16,7 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Video, ResizeMode, Audio, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Flag, Heart, Sparkles, Reply, RotateCcw, ShieldCheck, Trash2 } from "lucide-react-native";
 
@@ -42,6 +42,7 @@ type FeedItem =
 
 export default function ReactionTreeScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const { blockedUserIds } = useUserBlocks();
@@ -82,7 +83,7 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("parent_post_id", id)
         .eq("moderation_status", "active")
@@ -108,7 +109,7 @@ export default function ReactionTreeScreen() {
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         moderation_status: (row.moderation_status as string | undefined) ?? "active",
         created_at: row.created_at as string,
-        like_count: (row.like_count as number | undefined) ?? 0,
+        like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
         profile: (row.profiles as Post["profile"]) ?? null,
       }));
@@ -163,7 +164,7 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, created_at, like_count, comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .in("parent_post_id", tier1Ids)
         .eq("moderation_status", "active")
@@ -189,7 +190,7 @@ export default function ReactionTreeScreen() {
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         moderation_status: (row.moderation_status as string | undefined) ?? "active",
         created_at: row.created_at as string,
-        like_count: (row.like_count as number | undefined) ?? 0,
+        like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
         profile: (row.profiles as Post["profile"]) ?? null,
       }));
@@ -303,7 +304,7 @@ export default function ReactionTreeScreen() {
       <SafeAreaView edges={["top"]} style={styles.headerSafe}>
         <View style={styles.headerRow}>
           <Pressable
-            onPress={() => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
+            onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
             style={styles.headerBtn}
             hitSlop={8}
           >
