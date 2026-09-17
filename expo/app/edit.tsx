@@ -418,7 +418,9 @@ export default function EditScreen() {
 
     // Data URIs (data:image/png;base64,...) contain inline data — they're always valid,
     // and expo-file-system can't stat them on web. Skip the disk check entirely.
-    if (uri.startsWith("data:")) {
+    // Blob URIs (blob:https://...) are the web picker's output — in-memory data,
+    // also unstat-able. Skip them too.
+    if (uri.startsWith("data:") || uri.startsWith("blob:")) {
       return;
     }
 
@@ -1846,7 +1848,9 @@ export default function EditScreen() {
 
       const copiedClips = await Promise.all(
         clips.map(async (c, i) => {
-          if (isWeb && c.uri.startsWith("data:")) {
+          // On web there is no real filesystem — data:/blob: URIs hold the
+          // bytes in memory and are uploaded directly by createPost.
+          if (isWeb && (c.uri.startsWith("data:") || c.uri.startsWith("blob:"))) {
             return c;
           }
 

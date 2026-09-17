@@ -379,12 +379,12 @@ async function uploadToStorage(
 
       let body: Blob | { uri: string; type: string; name: string };
 
-      if (fileUri.startsWith("data:")) {
+      if (fileUri.startsWith("data:") || fileUri.startsWith("blob:")) {
         const blobStart = Date.now();
         try {
           body = await fetch(fileUri).then((r) => r.blob());
         } catch (blobErr) {
-          console.error("[uploadToStorage] WEB — FAILED to create Blob from data URI:", {
+          console.error("[uploadToStorage] WEB — FAILED to create Blob from data/blob URI:", {
             message: (blobErr as Error)?.message,
             name: (blobErr as Error)?.name,
             fileUriStart: fileUri.slice(0, 60),
