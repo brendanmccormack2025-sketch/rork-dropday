@@ -1,10 +1,11 @@
 import { Tabs, useRouter } from "expo-router";
 import { Compass, Home, User, Users } from "lucide-react-native";
-import React, { useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
 import { BlurView } from "expo-blur";
 
 import CenterPostButton from "@/components/CenterPostButton";
+import PostChoiceSheet from "@/components/PostChoiceSheet";
 import { theme } from "@/constants/theme";
 import { useNotifications } from "@/providers/NotificationsProvider";
 import UiText from "@/components/UiText";
@@ -13,11 +14,14 @@ export default function TabLayout() {
   const router = useRouter();
   const { unreadCount } = useNotifications();
 
-  const openCamera = useCallback(() => {
-    router.push("/camera");
-  }, [router]);
+  const [chooserOpen, setChooserOpen] = useState<boolean>(false);
+
+  const openChooser = useCallback(() => {
+    setChooserOpen(true);
+  }, []);
 
   return (
+    <>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -61,12 +65,12 @@ export default function TabLayout() {
           title: "",
           tabBarButton: () => (
             <Pressable
-              onPress={openCamera}
+              onPress={openChooser}
               style={styles.centerSlot}
               android_ripple={null}
               hitSlop={12}
             >
-              <CenterPostButton onPress={openCamera} />
+              <CenterPostButton onPress={openChooser} />
             </Pressable>
           ),
         }}
@@ -97,6 +101,8 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    <PostChoiceSheet visible={chooserOpen} onClose={() => setChooserOpen(false)} />
+    </>
   );
 }
 
