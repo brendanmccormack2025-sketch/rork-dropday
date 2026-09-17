@@ -760,6 +760,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           )
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
+          .neq("status", "archived")
           .order("created_at", { ascending: false })
           .limit(300);
         if (hideMature) {
@@ -832,6 +833,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           )
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
+          .neq("status", "archived")
           .in("user_id", followingIds)
           .order("created_at", { ascending: false })
           .limit(200);
