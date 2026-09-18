@@ -7,6 +7,7 @@
     "icon": "./assets/images/trial-icon-mark.png",
     "scheme": "rork-fgum9ff0goqjv4vh7u4xf",
     "userInterfaceStyle": "light",
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "app.rork.fgum9ff0goqjv4vh7u4xf",
