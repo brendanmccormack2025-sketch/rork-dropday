@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { Platform } from "react-native";
 import { useFocusEffect } from "expo-router";
-import { Audio } from "expo-av";
+import { setAudioModeAsync } from "expo-audio";
 
 /**
  * Tracks whether the screen is currently focused.
@@ -25,11 +25,11 @@ export function useVideoFocus(): boolean {
 
       // Restore playback-only audio mode whenever the feed/reactions tabs gain focus.
       // expo-camera switches the iOS AVAudioSession to PlayAndRecord mode during
-      // recording; if it isn't reset, expo-av Video players may render video but
+      // recording; if it isn't reset, video players may render video but
       // produce no audio (intermittent bug reported on real devices).
-      Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
+      setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
       }).catch(() => {});
 
       return () => {

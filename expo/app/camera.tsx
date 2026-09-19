@@ -20,7 +20,7 @@ import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-g
 import { runOnJS } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 import * as Haptics from "expo-haptics";
-import { Audio } from "expo-av";
+import { setAudioModeAsync } from "expo-audio";
 import {
   Camera as CameraIcon,
   Clock,
@@ -174,14 +174,14 @@ export default function CameraScreen() {
 
   // ─── Audio session: allow recording while camera is mounted ──────────
   useEffect(() => {
-    Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
+    setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
     }).catch(() => {});
     return () => {
-      Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
+      setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
       }).catch(() => {});
     };
   }, []);

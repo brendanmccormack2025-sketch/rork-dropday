@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,7 +16,7 @@ import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Image } from "expo-image";
-import { Video, ResizeMode } from "expo-av";
+import { VideoView, useVideoPlayer } from "expo-video";
 import {
   ArrowLeft,
   Heart,
@@ -58,6 +58,20 @@ export default function GroupFeedScreen() {
   const [captionModalVisible, setCaptionModalVisible] = useState<boolean>(false);
   const [pendingUri, setPendingUri] = useState<string | null>(null);
   const [pendingType, setPendingType] = useState<"photo" | "video">("photo");
+
+  // expo-video player for the caption modal's video preview. Sources are
+  // swapped via replace() — useVideoPlayer only reads its initial argument.
+  const previewPlayer = useVideoPlayer(null);
+  const previewLoadedUriRef = useRef<string | null>(null);
+  useEffect(() => {
+    const target =
+      pendingType === "video" && pendingUri ? { uri: pendingUri } : null;
+    const targetUri = target?.uri ?? null;
+    if (previewLoadedUriRef.current !== targetUri) {
+      previewLoadedUriRef.current = targetUri;
+      previewPlayer.replace(target);
+    }
+  }, [pendingUri, pendingType, previewPlayer]);
   const [caption, setCaption] = useState<string>("");
 
   const posts = postsQuery.data ?? [];
@@ -294,13 +308,11 @@ export default function GroupFeedScreen() {
             {pendingUri && (
               <View style={styles.previewWrap}>
                 {pendingType === "video" ? (
-                  <Video
-                    source={{ uri: pendingUri }}
+                  <VideoView
+                    player={previewPlayer}
                     style={styles.previewMedia}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay={false}
-                    isLooping={false}
-                    useNativeControls
+                    contentFit="cover"
+                    nativeControls
                   />
                 ) : (
                   <Image
@@ -359,6 +371,14 @@ function GroupPostCard({
   const reacted = post.has_reacted ?? false;
   const reactionCount = post.reaction_count ?? 0;
 
+  // Static paused preview with native controls — the user taps play to watch.
+  const cardPlayer = useVideoPlayer(
+    post.media_type === "video" ? { uri: post.media_url } : null,
+    (p) => {
+      p.loop = true;
+    },
+  );
+
   return (
     <View style={styles.card}>
       {/* Poster info */}
@@ -382,13 +402,11 @@ function GroupPostCard({
       {/* Media */}
       <View style={styles.mediaWrap}>
         {post.media_type === "video" ? (
-          <Video
-            source={{ uri: post.media_url }}
+          <VideoView
+            player={cardPlayer}
             style={styles.media}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={false}
-            isLooping
-            useNativeControls
+            contentFit="cover"
+            nativeControls
           />
         ) : (
           <Image
