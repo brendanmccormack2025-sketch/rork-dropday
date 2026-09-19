@@ -78,6 +78,9 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         allowsMultipleSelection: false,
         quality: 1,
         videoMaxDuration: MAX_VIDEO_SECONDS,
+        // Without this, iCloud-hosted assets fail with PHPhotosErrorDomain 3164
+        // (NETWORK_ACCESS_REQUIRED) — the native default is false.
+        shouldDownloadFromNetwork: true,
       });
       if (result.canceled || result.assets.length === 0) return;
 

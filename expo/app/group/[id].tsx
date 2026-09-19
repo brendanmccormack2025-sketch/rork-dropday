@@ -127,6 +127,9 @@ export default function GroupFeedScreen() {
       quality: 1,
       videoExportPreset: ImagePicker.VideoExportPreset.Passthrough,
       exif: false,
+      // Native default is false — iCloud-hosted assets then fail with
+      // PHPhotosErrorDomain 3164 (NETWORK_ACCESS_REQUIRED).
+      shouldDownloadFromNetwork: true,
     });
 
     if (result.canceled || !result.assets || result.assets.length === 0) return;

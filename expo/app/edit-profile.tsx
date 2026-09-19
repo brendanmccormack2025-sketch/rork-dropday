@@ -109,6 +109,9 @@ export default function EditProfileScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.9,
+      // Native default is false — iCloud-hosted assets then fail with
+      // PHPhotosErrorDomain 3164 (NETWORK_ACCESS_REQUIRED).
+      shouldDownloadFromNetwork: true,
     });
     if (!result.canceled && result.assets.length > 0) {
       setAvatarUri(result.assets[0]!.uri);
