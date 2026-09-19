@@ -477,6 +477,10 @@ const styles = StyleSheet.create({
     fontWeight: "900" as const,
     letterSpacing: -0.3,
   },
+  brandLogo: {
+  height: 22,
+  width: 72,
+},
   /* Empty */
   emptyContainer: {
     flexGrow: 1,
