@@ -50,6 +50,8 @@ export type Post = {
   is_mature?: boolean;
   /** Moderation status: 'active' (visible), 'hidden' (auto/flagged), 'removed' (confirmed violation). */
   moderation_status?: string;
+  /** Survival status: 'trial' (live, awaiting verdict), 'survived', 'archived' (hidden from public surfaces). */
+  status?: "trial" | "survived" | "archived";
   profile?: {
     username: string;
     display_name: string | null;
@@ -146,10 +148,6 @@ export type MyProfile = {
   tiktok_handle: string | null;
   /** ISO date string (YYYY-MM-DD) or null if not set. */
   birthdate: string | null;
-  /** Consecutive nightly drop streak count. */
-  current_streak: number;
-  /** ISO date string of the last top-level Drop, or null. */
-  last_post_date: string | null;
   /** Demo/reviewer flag: skip the 8-10 PM Drop posting window. */
   bypass_drop_window: boolean;
 };
@@ -756,7 +754,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         let q = supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, is_mature, moderation_status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, is_mature, moderation_status, status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
@@ -790,6 +788,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         is_mature: (row.is_mature as boolean | null) ?? false,
         moderation_status: (row.moderation_status as string | undefined) ?? "active",
+        status: (row.status as Post["status"]) ?? "trial",
         created_at: row.created_at as string,
         like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -829,7 +828,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         let q = supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, is_mature, moderation_status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, is_mature, moderation_status, status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
@@ -859,6 +858,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           is_mature: (row.is_mature as boolean | null) ?? false,
           moderation_status: (row.moderation_status as string | undefined) ?? "active",
+          status: (row.status as Post["status"]) ?? "trial",
           created_at: row.created_at as string,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -883,7 +883,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       try {
         const { data, error } = await supabase
           .from("posts")
-          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, moderation_status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
+          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, moderation_status, status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
           .eq("user_id", user.id)
           .eq("moderation_status", "active")
           .order("created_at", { ascending: false })
@@ -905,6 +905,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           moderation_status: (row.moderation_status as string | undefined) ?? "active",
+          status: (row.status as Post["status"]) ?? "trial",
           created_at: row.created_at as string,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -939,7 +940,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data: postRows, error: postErr } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, moderation_status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, moderation_status, status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .in("id", postIds)
           .eq("moderation_status", "active");
@@ -959,6 +960,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           moderation_status: (row.moderation_status as string | undefined) ?? "active",
+          status: (row.status as Post["status"]) ?? "trial",
           created_at: row.created_at as string,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -1045,7 +1047,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (!user?.id) return null;
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, birthdate, current_streak, last_post_date, bypass_drop_window")
+        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, birthdate, bypass_drop_window")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -1070,8 +1072,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           instagram_handle: (data.instagram_handle as string | null) ?? null,
           tiktok_handle: (data.tiktok_handle as string | null) ?? null,
           birthdate: (data.birthdate as string | null) ?? null,
-          current_streak: (data.current_streak as number | null) ?? 0,
-          last_post_date: (data.last_post_date as string | null) ?? null,
           bypass_drop_window: (data.bypass_drop_window as boolean | null) ?? false,
         };
       }
@@ -1225,7 +1225,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, moderation_status, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, moderation_status, status, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .not("parent_post_id", "is", null)
           .eq("moderation_status", "active")
@@ -1248,6 +1248,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           moderation_status: (row.moderation_status as string | undefined) ?? "active",
+          status: (row.status as Post["status"]) ?? "trial",
           created_at: row.created_at as string,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,

@@ -12,7 +12,7 @@ import { router } from "expo-router";
 import { Mail } from "lucide-react-native";
 
 import ScreenBackground from "@/components/ScreenBackground";
-import DropletLogo from "@/components/DropletLogo";
+import TrialLogo from "@/components/TrialLogo";
 import PrimaryButton from "@/components/PrimaryButton";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -86,7 +86,7 @@ export default function WelcomeScreen() {
           />
           {/* Logo */}
           <Animated.View style={{ transform: [{ translateY }] }}>
-            <DropletLogo size={120} />
+            <TrialLogo size={120} />
           </Animated.View>
           <UiText style={styles.brand}>Trial</UiText>
           <UiText style={styles.tagline}>The night belongs to the moment.</UiText>

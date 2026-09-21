@@ -49,6 +49,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
 
   const openLibrary = useCallback(async () => {
     if (isPicking) return;
+    setIsPicking(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -90,7 +91,9 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
       // Keep the editing pipeline identical to camera content: videos longer
       // than the camera's hard cap can't be produced by the recorder, so
       // reject them here instead of feeding /edit something new.
-      if (isVideo && (asset.duration ?? 0) > MAX_VIDEO_SECONDS) {
+      // expo-image-picker returns duration in MILLISECONDS — compare against
+      // the cap converted to ms, not the raw seconds value.
+      if (isVideo && (asset.duration ?? 0) > MAX_VIDEO_SECONDS * 1000) {
         Alert.alert(
           "Video too long",
           `Clips can be up to ${MAX_VIDEO_SECONDS / 60} minutes. Trim the video in your photo library and try again.`,
@@ -103,7 +106,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         uri: asset.uri,
         type: isVideo ? "video" : "image",
         ...(isVideo && asset.duration
-          ? { durationMs: Math.round(asset.duration * 1000) }
+          ? { durationMs: Math.round(asset.duration) } // already milliseconds
           : {}),
       };
 

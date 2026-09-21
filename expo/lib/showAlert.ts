@@ -13,11 +13,11 @@ export function showAlert(title: string, message: string): void {
   if (Platform.OS === "web") {
     // ── DOM overlay — impossible to miss ──────────────────────────
     try {
-      const existing = document.getElementById("__dropday_error_overlay");
+      const existing = document.getElementById("__trial_error_overlay");
       if (existing) existing.remove();
 
       const overlay = document.createElement("div");
-      overlay.id = "__dropday_error_overlay";
+      overlay.id = "__trial_error_overlay";
       overlay.style.cssText =
         "position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,0.85);" +
         "display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;";

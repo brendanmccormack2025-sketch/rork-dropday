@@ -1,4 +1,4 @@
--- DropDay: Terms-of-use acceptance timestamp
+-- Trial: Terms-of-use acceptance timestamp
 -- Run this in the Supabase SQL editor.
 
 -- ============================================================================

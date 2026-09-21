@@ -1,4 +1,4 @@
--- DropDay: honor profiles.bypass_drop_window in the Drop posting window trigger
+-- Trial: honor profiles.bypass_drop_window in the Drop posting window trigger
 --
 -- Replaces enforce_drop_window() with a version that skips the 8-10 PM gate
 -- for demo/reviewer accounts whose profiles.bypass_drop_window is true.

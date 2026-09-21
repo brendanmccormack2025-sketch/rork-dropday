@@ -1,4 +1,4 @@
--- DropDay: Manual media deletion script for removed content
+-- Trial: Manual media deletion script for removed content
 --
 -- Run this in the Supabase SQL Editor when you want to permanently delete
 -- the actual media files from Supabase Storage for posts marked as 'removed'.

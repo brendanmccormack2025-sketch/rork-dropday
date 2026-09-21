@@ -25,7 +25,6 @@ import {
   Sparkles,
   Video,
   Save,
-  Flame,
 } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
@@ -220,15 +219,6 @@ function ProfileHeader({
         </View>
       ) : null}
 
-      {/* Streak badge — secondary, sits above stats */}
-      {myProfile && myProfile.current_streak > 0 && (
-        <View style={styles.streakBadge}>
-          <Flame color="#FFD400" size={14} fill="#FFD400" />
-          <UiText style={styles.streakText}>
-            {myProfile.current_streak} day streak
-          </UiText>
-        </View>
-      )}
 
       {/* Stats row */}
       <View style={styles.statsRow}>
@@ -720,26 +710,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(10,10,10,0.07)",
   },
 
-  /* Streak badge */
-  streakBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    alignSelf: "flex-start",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 0,
-    backgroundColor: "rgba(255,212,0,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255,212,0,0.25)",
-    marginBottom: 16,
-  },
-  streakText: {
-    color: "#FFD400",
-    fontSize: 13,
-    fontWeight: "900" as const,
-    letterSpacing: 0.2,
-  },
 
   /* Tab switcher */
   tabRow: {

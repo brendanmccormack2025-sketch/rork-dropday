@@ -1,4 +1,4 @@
--- DropDay: Friend Groups — Phase 1 (private groups only)
+-- Trial: Friend Groups — Phase 1 (private groups only)
 --
 -- New tables:
 --   groups             — group metadata

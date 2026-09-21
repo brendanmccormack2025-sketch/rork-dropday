@@ -20,7 +20,7 @@
       "framework": "supabase"
     },
     {
-      "name": "DropDay Camera",
+      "name": "Trial Camera",
       "path": "ios-dropday-camera",
       "framework": "swift"
     }

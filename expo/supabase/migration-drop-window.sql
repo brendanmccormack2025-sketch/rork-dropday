@@ -1,4 +1,4 @@
--- DropDay: Server-side enforcement of the Drop posting window
+-- Trial: Server-side enforcement of the Drop posting window
 -- Original Drops (parent_post_id IS NULL) may only be created between 8 PM and 10 PM
 -- in the poster's local timezone. Reactions (parent_post_id IS NOT NULL) are unrestricted.
 

@@ -16,7 +16,7 @@ import { ArrowLeft, Check, Mail } from "lucide-react-native";
 
 import ScreenBackground from "@/components/ScreenBackground";
 import PrimaryButton from "@/components/PrimaryButton";
-import DropletLogo from "@/components/DropletLogo";
+import TrialLogo from "@/components/TrialLogo";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -130,7 +130,7 @@ export default function SignUpScreen() {
               style={styles.innerDismiss}
             >
               <View style={styles.header}>
-            <DropletLogo size={48} />
+            <TrialLogo size={48} />
             <UiText style={styles.title}>Join the drop</UiText>
             <UiText style={styles.sub}>Create your account in seconds.</UiText>
           </View>
@@ -148,7 +148,7 @@ export default function SignUpScreen() {
               label="Email"
               value={email}
               onChangeText={setEmail}
-              placeholder="you@dropday.app"
+              placeholder="you@email.com"
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"
