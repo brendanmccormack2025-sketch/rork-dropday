@@ -5,7 +5,7 @@
 --   A post can't receive a verdict (survived/archived) until it has actually
 --   been SEEN enough to judge fairly.
 --   Qualified view = a viewer watching the post for >= 3 seconds.
---   Gate: qualified_view_count >= 25 at the 24hr checkpoint, else 'incomplete'.
+--   Gate: at the 24hr checkpoint, qualified_view_count >= 100 else 'incomplete'.
 --   'incomplete' posts are re-checked on every 15-min cron run (indefinitely)
 --   until the gate passes; then the existing engagement math issues the
 --   real verdict.
@@ -110,6 +110,10 @@ begin
     from public.posts p
     where p.status in ('trial', 'incomplete')
       and p.checkpoint_at is not null
+      -- checkpoint_at <= now() applies to BOTH statuses: a post that reaches
+      -- the view minimum before its 24h mark stays 'trial' and untouched
+      -- until checkpoint_at passes. The gate only ever extends the window
+      -- (via 'incomplete' re-checks); it never shortens it.
       and p.checkpoint_at <= now()
   ),
   scored as (
@@ -123,9 +127,11 @@ begin
   )
   update public.posts p
   set status = case
-    -- Exposure gate: below 25 qualified views the engagement signal can't be
+    -- Exposure gate: below 100 qualified views the engagement signal can't be
     -- judged fairly — park as 'incomplete' and re-check on the next run.
-    when s.qualified_view_count < 25
+    -- Only reached for candidates that already passed checkpoint_at <= now(),
+    -- so a real verdict requires BOTH checkpoint_at <= now() AND views >= 100.
+    when s.qualified_view_count < 100
       then 'incomplete'
     -- Unchanged engagement math: video_reactions * 5 + likes
     -- vs follower-scaled expected value.
