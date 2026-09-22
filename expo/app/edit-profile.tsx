@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Linking,
@@ -14,6 +15,7 @@ import UiText from "@/components/UiText";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import { launchLibraryWithRetry } from "@/lib/pickerRetry";
 import { EncodingType, readAsStringAsync } from "@/lib/fileSystemCompat";
 import { decode } from "base64-arraybuffer";
 import { useNavigation, useRouter } from "expo-router";
@@ -71,6 +73,7 @@ export default function EditProfileScreen() {
   );
   const [tiktok, setTiktok] = useState(myProfile?.tiktok_handle ?? "");
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [isPickingAvatar, setPickingAvatar] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
 
   const dirty = useMemo(() => {
@@ -85,8 +88,11 @@ export default function EditProfileScreen() {
   }, [myProfile, displayName, username, bio, website, instagram, tiktok, avatarUri]);
 
   const pickAvatar = useCallback(async () => {
+    if (isPickingAvatar) return;
+    setPickingAvatar(true);
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
+      setPickingAvatar(false);
       Alert.alert(
         "Photo Access",
         "Grant photo library access in Settings to change your profile photo.",
@@ -104,19 +110,30 @@ export default function EditProfileScreen() {
       );
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.9,
-      // Native default is false — iCloud-hosted assets then fail with
-      // PHPhotosErrorDomain 3164 (NETWORK_ACCESS_REQUIRED).
-      shouldDownloadFromNetwork: true,
-    });
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      result = await launchLibraryWithRetry({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.9,
+        // Native default is false — iCloud-hosted assets then fail with
+        // PHPhotosErrorDomain 3164 (NETWORK_ACCESS_REQUIRED).
+        shouldDownloadFromNetwork: true,
+      });
+    } catch (e) {
+      Alert.alert(
+        "Photo",
+        e instanceof Error ? e.message : "Could not open your library.",
+      );
+      return;
+    } finally {
+      setPickingAvatar(false);
+    }
     if (!result.canceled && result.assets.length > 0) {
       setAvatarUri(result.assets[0]!.uri);
     }
-  }, []);
+  }, [isPickingAvatar]);
 
   const avatarSource = useMemo(() => {
     if (avatarUri) return { uri: avatarUri };
@@ -251,7 +268,11 @@ export default function EditProfileScreen() {
             showsVerticalScrollIndicator={false}
           >
             {/* Avatar */}
-            <Pressable onPress={pickAvatar} style={styles.avatarWrap}>
+            <Pressable
+              onPress={pickAvatar}
+              disabled={isPickingAvatar}
+              style={styles.avatarWrap}
+            >
               <View style={styles.avatar}>
                 {avatarSource ? (
                   <Image
@@ -264,7 +285,11 @@ export default function EditProfileScreen() {
                   <UiText style={styles.avatarText}>{avatarInitial}</UiText>
                 )}
                 <View style={styles.avatarOverlay}>
-                  <Camera color="#fff" size={16} strokeWidth={2} />
+                  {isPickingAvatar ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Camera color="#fff" size={16} strokeWidth={2} />
+                  )}
                 </View>
               </View>
               <UiText style={styles.avatarHint}>Change photo</UiText>

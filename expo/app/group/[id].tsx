@@ -31,6 +31,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { theme } from "@/constants/theme";
 import { showAlert } from "@/lib/showAlert";
+import { launchLibraryWithRetry } from "@/lib/pickerRetry";
 import { useAuth } from "@/providers/AuthProvider";
 import { useGroups, type GroupPost } from "@/providers/GroupsProvider";
 import { FeedAvatar } from "@/components/Avatar";
@@ -58,6 +59,7 @@ export default function GroupFeedScreen() {
   const [captionModalVisible, setCaptionModalVisible] = useState<boolean>(false);
   const [pendingUri, setPendingUri] = useState<string | null>(null);
   const [pendingType, setPendingType] = useState<"photo" | "video">("photo");
+  const [picking, setPicking] = useState<boolean>(false);
 
   // expo-video player for the caption modal's video preview. Sources are
   // swapped via replace() — useVideoPlayer only reads its initial argument.
@@ -96,7 +98,8 @@ export default function GroupFeedScreen() {
   });
 
   const handlePickMedia = useCallback(async () => {
-    if (uploading) return;
+    if (uploading || picking) return;
+    setPicking(true);
 
     // Request permissions
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -118,19 +121,31 @@ export default function GroupFeedScreen() {
           },
         ],
       );
+      setPicking(false);
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images", "videos"],
-      allowsMultipleSelection: false,
-      quality: 1,
-      videoExportPreset: ImagePicker.VideoExportPreset.Passthrough,
-      exif: false,
-      // Native default is false — iCloud-hosted assets then fail with
-      // PHPhotosErrorDomain 3164 (NETWORK_ACCESS_REQUIRED).
-      shouldDownloadFromNetwork: true,
-    });
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      result = await launchLibraryWithRetry({
+        mediaTypes: ["images", "videos"],
+        allowsMultipleSelection: false,
+        quality: 1,
+        videoExportPreset: ImagePicker.VideoExportPreset.Passthrough,
+        exif: false,
+        // Native default is false — iCloud-hosted assets then fail with
+        // PHPhotosErrorDomain 3164 (NETWORK_ACCESS_REQUIRED).
+        shouldDownloadFromNetwork: true,
+      });
+    } catch (e) {
+      showAlert(
+        "Library",
+        e instanceof Error ? e.message : "Could not open your library.",
+      );
+      return;
+    } finally {
+      setPicking(false);
+    }
 
     if (result.canceled || !result.assets || result.assets.length === 0) return;
 
@@ -144,7 +159,7 @@ export default function GroupFeedScreen() {
     setPendingType(isVideo ? "video" : "photo");
     setCaption("");
     setCaptionModalVisible(true);
-  }, [uploading]);
+  }, [uploading, picking]);
 
   const handleConfirmPost = useCallback(async () => {
     if (!pendingUri || !groupId) return;
@@ -268,16 +283,18 @@ export default function GroupFeedScreen() {
       <View style={styles.bottomBar}>
         <Pressable
           onPress={handlePickMedia}
-          disabled={uploading}
+          disabled={uploading || picking}
           style={({ pressed }) => [
             styles.uploadBtn,
-            pressed && !uploading && styles.uploadBtnPressed,
+            pressed && !uploading && !picking && styles.uploadBtnPressed,
           ]}
         >
-          {uploading ? (
+          {uploading || picking ? (
             <>
               <ActivityIndicator color={theme.accent} size="small" />
-              <UiText style={styles.uploadBtnText}>{uploadProgress || "Uploading…"}</UiText>
+              <UiText style={styles.uploadBtnText}>
+                {uploading ? uploadProgress || "Uploading…" : "Loading…"}
+              </UiText>
             </>
           ) : (
             <>

@@ -17,6 +17,7 @@ import * as Haptics from "expo-haptics";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
+import { launchLibraryWithRetry } from "@/lib/pickerRetry";
 
 /** Mirrors the Clip shape the camera flow hands to /edit — same pipeline. */
 type PickedClip = {
@@ -74,7 +75,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         return;
       }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
+      const result = await launchLibraryWithRetry({
         mediaTypes: ["images", "videos"],
         allowsMultipleSelection: false,
         quality: 1,
