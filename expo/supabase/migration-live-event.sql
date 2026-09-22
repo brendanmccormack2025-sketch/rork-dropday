@@ -1,4 +1,4 @@
--- DropDay: Live-event features — streak tracking + tonight's drop count
+-- Trial: Live-event features — streak tracking + tonight's drop count
 -- 1. Add current_streak and last_post_date to profiles
 -- 2. Trigger to increment/reset streak on top-level Drop insert
 -- 3. RPC to count distinct users who posted a top-level Drop since a given timestamp

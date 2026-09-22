@@ -1,5 +1,5 @@
 /**
- * Handles deep links coming back from the native DropDay Camera app.
+ * Handles deep links coming back from the native Trial Camera app.
  *
  * The native camera uploads the recorded video to Supabase storage,
  * then opens a URL like:

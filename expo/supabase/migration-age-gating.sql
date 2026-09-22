@@ -1,4 +1,4 @@
--- DropDay: Age-gating & mature-content filtering
+-- Trial: Age-gating & mature-content filtering
 -- Run this in the Supabase SQL editor.
 
 -- ============================================================================

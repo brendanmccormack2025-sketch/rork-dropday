@@ -165,7 +165,7 @@ struct PreviewScreen: View {
             ]
 
             guard let returnURL = components.url else {
-                uploadError = "Could not open DropDay app."
+                uploadError = "Could not open Trial app."
                 isUploading = false
                 return
             }

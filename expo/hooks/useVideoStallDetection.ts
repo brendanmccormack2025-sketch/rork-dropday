@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, AppStateStatus, Platform } from "react-native";
-import type { Video } from "expo-av";
-import type { AVPlaybackStatus } from "expo-av";
+import { AppState, AppStateStatus } from "react-native";
+import type { VideoPlayer } from "expo-video";
+import type { VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
 
 const STALL_TIMEOUT_MS = 4000; // position must advance within this window
 const MAX_RETRIES = 3;
@@ -31,11 +31,11 @@ export interface StallDetectionState {
 }
 
 /**
- * Detects playback stalls and auto-recovers expo-av Video players.
+ * Detects playback stalls and auto-recovers expo-video players.
  *
  * A stall is when the player reports `isPlaying: true` but
  * `positionMillis` hasn't advanced for STALL_TIMEOUT_MS.
- * Recovery: playAsync() first, then reload source on repeated failures.
+ * Recovery: play() first, then replace the source on repeated failures.
  *
  * Also handles AppState changes — resuming a video from background
  * can leave the native player in a broken state.
@@ -45,9 +45,9 @@ export function useVideoStallDetection(
   active: boolean,
   sourceUri: string,
   onLog: (event: VideoEvent) => void,
-  externalVideoRef?: React.MutableRefObject<Video | null>,
+  externalVideoRef?: React.RefObject<VideoPlayer | null>,
 ) {
-  const internalVideoRef = useRef<Video>(null);
+  const internalVideoRef = useRef<VideoPlayer | null>(null);
   const videoRef = externalVideoRef ?? internalVideoRef;
   const lastPositionRef = useRef<number>(0);
   const lastPositionTimeRef = useRef<number>(Date.now());
@@ -87,9 +87,9 @@ export function useVideoStallDetection(
       if (!isPlaying || !active) return;
 
       stallTimerRef.current = setTimeout(() => {
-        // Guard: only fire if still active and video ref is live.
+        // Guard: only fire if still active and player ref is live.
         // The user may have scrolled away during the 4s window, making
-        // videoRef.current null and causing undefined.then() crashes.
+        // videoRef.current null and causing undefined crashes.
         if (!activeRef.current || !videoRef.current) return;
         // Check if position has advanced since we started the timer
         const elapsed = Date.now() - lastPositionTimeRef.current;
@@ -131,69 +131,62 @@ export function useVideoStallDetection(
     setStallState((s) => ({ ...s, recovering: true }));
 
     const attempt = retryCountRef.current + 1;
-    onLog({ type: "stall_recovery_attempt", postId, attempt, method: "playAsync" });
+    onLog({ type: "stall_recovery_attempt", postId, attempt, method: "play" });
 
     // Safety: guard against null ref (component unmounted during stall window)
-    if (!videoRef.current) {
+    const player = videoRef.current;
+    if (!player) {
       recoveringRef.current = false;
       setStallState((s) => ({ ...s, recovering: false }));
       return;
     }
-    videoRef.current
-      .playAsync()
-      .then(() => {
-        lastReloadTimeRef.current = now;
-        onLog({ type: "stall_recovered", postId, afterMs: 0 });
+    try {
+      player.play();
+      lastReloadTimeRef.current = now;
+      onLog({ type: "stall_recovered", postId, afterMs: 0 });
+      recoveringRef.current = false;
+      retryCountRef.current = 0;
+      setStallState((s) => ({ ...s, recovering: false }));
+    } catch {
+      // play() failed — try reloading the source
+      retryCountRef.current = attempt;
+      if (attempt > MAX_RETRIES) {
+        onLog({ type: "stall_recovery_failed", postId, attempts: attempt });
         recoveringRef.current = false;
-        retryCountRef.current = 0;
         setStallState((s) => ({ ...s, recovering: false }));
-      })
-      .catch(() => {
-        // playAsync failed — try reloading the source
-        retryCountRef.current = attempt;
-        if (attempt > MAX_RETRIES) {
-          onLog({ type: "stall_recovery_failed", postId, attempts: attempt });
+        return;
+      }
+
+      const nextMethod = attempt <= MAX_RETRIES ? "replace_source" : "exhausted";
+      onLog({ type: "stall_recovery_attempt", postId, attempt, method: nextMethod });
+
+      if (attempt <= MAX_RETRIES) {
+        const reloadPlayer = videoRef.current;
+        if (!reloadPlayer) {
           recoveringRef.current = false;
           setStallState((s) => ({ ...s, recovering: false }));
           return;
         }
-
-        const nextMethod = attempt <= MAX_RETRIES ? "reload_source" : "exhausted";
-        onLog({ type: "stall_recovery_attempt", postId, attempt, method: nextMethod });
-
-        if (attempt <= MAX_RETRIES) {
-          if (!videoRef.current) {
-            recoveringRef.current = false;
-            setStallState((s) => ({ ...s, recovering: false }));
-            return;
-          }
-          videoRef.current
-            .unloadAsync()
-            .then(() =>
-              videoRef.current!.loadAsync(
-                { uri: sourceUri },
-                { shouldPlay: true, isLooping: true },
-                false,
-              ),
-            )
-            .then(() => {
-              lastReloadTimeRef.current = Date.now();
-              onLog({ type: "stall_recovered", postId, afterMs: 0 });
-              recoveringRef.current = false;
-              retryCountRef.current = 0;
-              setStallState((s) => ({ ...s, recovering: false }));
-            })
-            .catch(() => {
-              recoveringRef.current = false;
-              setStallState((s) => ({ ...s, recovering: false }));
-            });
+        try {
+          reloadPlayer.replace({ uri: sourceUri });
+          reloadPlayer.loop = true;
+          reloadPlayer.play();
+          lastReloadTimeRef.current = Date.now();
+          onLog({ type: "stall_recovered", postId, afterMs: 0 });
+          recoveringRef.current = false;
+          retryCountRef.current = 0;
+          setStallState((s) => ({ ...s, recovering: false }));
+        } catch {
+          recoveringRef.current = false;
+          setStallState((s) => ({ ...s, recovering: false }));
         }
-      });
+      }
+    }
   }, [postId, sourceUri, onLog]);
 
-  // ── Exposed onPlaybackStatusUpdate handler ──────────────────────────
+  // ── Exposed playback status handler ─────────────────────────────────
   const handlePlaybackStatus = useCallback(
-    (status: AVPlaybackStatus) => {
+    (status: VideoPlaybackStatus) => {
       if (!status.isLoaded) return;
 
       const now = Date.now();
@@ -264,24 +257,23 @@ export function useVideoStallDetection(
         // Returning from background — many native players are in a bad state.
         // Attempt recovery after a short delay for the native player to settle.
         const t = setTimeout(() => {
-          if (!videoRef.current) return;
+          const player = videoRef.current;
+          if (!player) return;
           onLog({ type: "stall_recovery_attempt", postId, attempt: 0, method: "app_foreground_resume" });
-          videoRef.current
-            .playAsync()
-            .catch(() => {
-              // If playAsync fails, try a full reload
-              if (!videoRef.current) return;
-              videoRef.current
-                .unloadAsync()
-                .then(() =>
-                  videoRef.current!.loadAsync(
-                    { uri: sourceUri },
-                    { shouldPlay: true, isLooping: true },
-                    false,
-                  ),
-                )
-                .catch(() => {});
-            });
+          try {
+            player.play();
+          } catch {
+            // If play() fails, try a full source reload
+            const reloadPlayer = videoRef.current;
+            if (!reloadPlayer) return;
+            try {
+              reloadPlayer.replace({ uri: sourceUri });
+              reloadPlayer.loop = true;
+              reloadPlayer.play();
+            } catch {
+              // Give up silently — the stall timer will retry if needed
+            }
+          }
         }, 300);
         return () => clearTimeout(t);
       }

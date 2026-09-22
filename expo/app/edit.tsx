@@ -22,7 +22,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
-import { Video, Audio, ResizeMode, type AVPlaybackStatus } from "expo-av";
+import { VideoView, useVideoPlayer, createVideoPlayer, type VideoPlayer } from "expo-video";
+import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
 import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync } from "@/lib/fileSystemCompat";
 import * as Haptics from "expo-haptics";
 import {
@@ -207,9 +208,26 @@ export default function EditScreen() {
   // ── Playback ──────────────────────────────────────────────────────────────
   // Dual-player preload: two Video instances swap roles so the next clip is
   // already loaded when the current one ends, avoiding a cold-load stall.
-  const videoRefA = useRef<Video>(null);
-  const videoRefB = useRef<Video>(null);
-  const videoRef = useRef<Video | null>(null);
+  // expo-video players: slot A holds the active clip, slot B preloads the
+  // next one. Sources are swapped via replace() — useVideoPlayer only reads
+  // its initial argument.
+  const playerA = useVideoPlayer(null, (p) => {
+    p.timeUpdateEventInterval = 0.2;
+  });
+  const playerB = useVideoPlayer(null, (p) => {
+    p.timeUpdateEventInterval = 0.2;
+  });
+  const videoRefA = useRef<VideoPlayer | null>(null);
+  const videoRefB = useRef<VideoPlayer | null>(null);
+  const videoRef = useRef<VideoPlayer | null>(null);
+  // URIs the players were last asked to load (replace() dedupe)
+  const loadedAUriRef = useRef<string | null>(null);
+  const loadedBUriRef = useRef<string | null>(null);
+  // Keep imperative player refs in sync with the player instances
+  useEffect(() => {
+    videoRefA.current = playerA;
+    videoRefB.current = playerB;
+  }, [playerA, playerB]);
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
   const activeSlotRef = useRef<0 | 1>(0);
   const hotSwapRef = useRef<boolean>(false);
@@ -303,27 +321,39 @@ export default function EditScreen() {
     );
     if (clipsToProbe.length === 0) return;
 
-    // Use Audio.Sound.createAsync to load video metadata without rendering a
-    // player. It returns AVPlaybackStatus with durationMillis, then we unload.
-    // Audio is imported statically from expo-av (top of file) — a dynamic
-    // import("expo-av") here caused a fetchThenEvalJs SyntaxError on Hermes.
+    // Use detached expo-video players to load video metadata without
+    // rendering a view. Each waits for readyToPlay, reads the duration,
+    // then releases the player.
     (async () => {
       try {
         const results = await Promise.all(
           clipsToProbe.map(async (clip) => {
+            let player: VideoPlayer | null = null;
             try {
-              const { sound, status } = await Audio.Sound.createAsync(
-                { uri: clip.uri },
-                { shouldPlay: false, isMuted: true },
-              );
-              const dur = status.isLoaded && typeof status.durationMillis === "number"
-                ? status.durationMillis
-                : 0;
-              await sound.unloadAsync();
+              player = createVideoPlayer({ uri: clip.uri });
+              const status = await new Promise<"readyToPlay" | "error" | "timeout">((resolve) => {
+                const timeout = setTimeout(() => {
+                  sub.remove();
+                  resolve("timeout");
+                }, 8000);
+                const sub = player!.addListener("statusChange", ({ status: s }) => {
+                  if (s === "readyToPlay" || s === "error") {
+                    clearTimeout(timeout);
+                    sub.remove();
+                    resolve(s);
+                  }
+                });
+              });
+              const dur =
+                status === "readyToPlay" && player.status === "readyToPlay"
+                  ? Math.round((player.duration || 0) * 1000)
+                  : 0;
               return { id: clip.id, durationMs: dur };
             } catch (e) {
               console.warn(`[edit] Duration probe failed for clip ${clip.id.slice(-8)}:`, (e as Error)?.message);
               return { id: clip.id, durationMs: 0 };
+            } finally {
+              player?.release();
             }
           }),
         );
@@ -484,6 +514,41 @@ export default function EditScreen() {
   const preloadReadyRef = useRef<boolean>(false);
   const preloadExpectedUriRef = useRef<string | null>(null);
 
+  // Replace player sources when the active/preload clip changes
+  useEffect(() => {
+    const target = activeSlot === 0 ? videoSource : preloadSource;
+    const targetUri = target?.uri ?? null;
+    if (loadedAUriRef.current !== targetUri) {
+      loadedAUriRef.current = targetUri;
+      playerA.replace(target ? { uri: target.uri } : null);
+    }
+  }, [activeSlot, videoSource, preloadSource, playerA]);
+
+  useEffect(() => {
+    const target = activeSlot === 1 ? videoSource : preloadSource;
+    const targetUri = target?.uri ?? null;
+    if (loadedBUriRef.current !== targetUri) {
+      loadedBUriRef.current = targetUri;
+      playerB.replace(target ? { uri: target.uri } : null);
+    }
+  }, [activeSlot, videoSource, preloadSource, playerB]);
+
+  // Playback control (mirrors the old shouldPlay/isMuted props)
+  useEffect(() => {
+    playerA.muted = activeSlot !== 0;
+    if (activeSlot === 0 && isPlaying && videoReady) {
+      playerA.play();
+    } else {
+      playerA.pause();
+    }
+    playerB.muted = activeSlot !== 1;
+    if (activeSlot === 1 && isPlaying && videoReady) {
+      playerB.play();
+    } else {
+      playerB.pause();
+    }
+  }, [playerA, playerB, activeSlot, isPlaying, videoReady]);
+
   // Reset playback state whenever the Video component remounts due to an edit
   // (videoKey bump or activeClip.uri change) — prevents auto-play stutter on load.
   const activeClipUri = activeClip?.uri ?? null;
@@ -524,10 +589,10 @@ export default function EditScreen() {
   }, []);
 
   // ── Playback status handler ───────────────────────────────────────────────
-  const onVideoStatus = useCallback((status: AVPlaybackStatus) => {
+  const onVideoStatus = useCallback((status: VideoPlaybackStatus) => {
     // Error variant has isLoaded=false and an optional error field.
     // Check this BEFORE the isLoaded guard so errors aren't silently swallowed.
-    if (!status.isLoaded && "error" in status && status.error) {
+    if (!status.isLoaded && status.error) {
       console.error("[edit] Video playback error:", status.error);
       handleVideoLoadError(status.error);
       return;
@@ -601,7 +666,7 @@ export default function EditScreen() {
         const sp = pendingSeekRef.current;
         pendingSeekRef.current = null;
         trimSeekDoneRef.current = true;
-        videoRef.current?.setPositionAsync(sp).catch(() => {});
+        if (videoRef.current) videoRef.current.currentTime = sp / 1000;
         return;
       }
     }
@@ -613,43 +678,32 @@ export default function EditScreen() {
         trimSeekDoneRef.current = true;
         if (!safeSeekActiveRef.current) {
           safeSeekActiveRef.current = true;
-          videoRef.current
-            ?.setPositionAsync(tStart)
-            .then(() => { safeSeekActiveRef.current = false; })
-            .catch(() => { safeSeekActiveRef.current = false; });
+          if (videoRef.current) {
+            videoRef.current.currentTime = tStart / 1000;
+          }
+          safeSeekActiveRef.current = false;
         }
         return;
       }
       if (!safeSeekActiveRef.current && trimSeekDoneRef.current && tStart > 0 && posMillis < tStart - 100) {
         safeSeekActiveRef.current = true;
-        videoRef.current
-          ?.setPositionAsync(tStart)
-          .then(() => { safeSeekActiveRef.current = false; })
-          .catch(() => { safeSeekActiveRef.current = false; });
+        if (videoRef.current) {
+          videoRef.current.currentTime = tStart / 1000;
+        }
+        safeSeekActiveRef.current = false;
         return;
       }
       const tEndClamped = tEnd > 0 ? Math.min(tEnd, sourceDur > 0 ? sourceDur : tEnd) : (sourceDur > 0 ? sourceDur : 0);
       if (!safeSeekActiveRef.current && trimSeekDoneRef.current && tEndClamped > 0 && posMillis > tEndClamped + 150) {
         safeSeekActiveRef.current = true;
         trimEndHandledRef.current = true;
-        const gen = trimGenerationRef.current;
-        videoRef.current?.setIsMutedAsync(true);
-        videoRef.current
-          ?.setPositionAsync(tStart)
-          .then(() => {
-            safeSeekActiveRef.current = false;
-            trimEndHandledRef.current = false;
-            if (trimGenerationRef.current !== gen) {
-              videoRef.current?.setIsMutedAsync(false).catch(() => {});
-              return;
-            }
-            videoRef.current?.setIsMutedAsync(false);
-          })
-          .catch(() => {
-            safeSeekActiveRef.current = false;
-            trimEndHandledRef.current = false;
-            videoRef.current?.setIsMutedAsync(false);
-          });
+        if (videoRef.current) {
+          videoRef.current.muted = true;
+          videoRef.current.currentTime = tStart / 1000;
+          videoRef.current.muted = false;
+        }
+        safeSeekActiveRef.current = false;
+        trimEndHandledRef.current = false;
         return;
       }
     }
@@ -675,39 +729,19 @@ export default function EditScreen() {
     ) {
       trimEndHandledRef.current = true;
       if (isIsolatedRef.current) {
-        const gen = trimGenerationRef.current;
-        videoRef.current?.setIsMutedAsync(true);
-        videoRef.current
-          ?.setPositionAsync(trimStartRef.current)
-          .then(() => {
-            trimEndHandledRef.current = false;
-            if (trimGenerationRef.current !== gen) {
-              videoRef.current?.setIsMutedAsync(false).catch(() => {});
-              return;
-            }
-            videoRef.current?.setIsMutedAsync(false);
-          })
-          .catch(() => {
-            trimEndHandledRef.current = false;
-            videoRef.current?.setIsMutedAsync(false);
-          });
+        if (videoRef.current) {
+          videoRef.current.muted = true;
+          videoRef.current.currentTime = trimStartRef.current / 1000;
+          videoRef.current.muted = false;
+        }
+        trimEndHandledRef.current = false;
       } else if (clipsRef.current.length === 1) {
-        const gen = trimGenerationRef.current;
-        videoRef.current?.setIsMutedAsync(true);
-        videoRef.current
-          ?.setPositionAsync(trimStartRef.current)
-          .then(() => {
-            trimEndHandledRef.current = false;
-            if (trimGenerationRef.current !== gen) {
-              videoRef.current?.setIsMutedAsync(false).catch(() => {});
-              return;
-            }
-            videoRef.current?.setIsMutedAsync(false);
-          })
-          .catch(() => {
-            trimEndHandledRef.current = false;
-            videoRef.current?.setIsMutedAsync(false);
-          });
+        if (videoRef.current) {
+          videoRef.current.muted = true;
+          videoRef.current.currentTime = trimStartRef.current / 1000;
+          videoRef.current.muted = false;
+        }
+        trimEndHandledRef.current = false;
       } else {
         advanceToNextClip();
       }
@@ -729,12 +763,10 @@ export default function EditScreen() {
       const tStart = trimStartRef.current;
       if (isIsolatedRef.current) {
         // Isolated mode: loop the selected clip
-        videoRef.current
-          ?.setPositionAsync(tStart)
-          .then(() => {
-            videoRef.current?.playAsync().catch(() => {});
-          })
-          .catch(() => {});
+        if (videoRef.current) {
+          videoRef.current.currentTime = tStart / 1000;
+          videoRef.current.play();
+        }
       } else {
         // Multi-clip or single: advance loops automatically
         advanceToNextClip();
@@ -746,8 +778,8 @@ export default function EditScreen() {
   // ── Preload slot handlers ──────────────────────────────────────────────────
   // The inactive slot tracks readiness AND positions itself at the upcoming
   // clip's trimStart so the hot-swap lands at the correct playback position.
-  const onPreloadLoad = useCallback((status: AVPlaybackStatus, slot: 0 | 1) => {
-    if (status.isLoaded) {
+  const onPreloadLoad = useCallback((slot: 0 | 1, loaded: boolean, hadError: boolean) => {
+    if (loaded) {
       const expectedUri = preloadExpectedUriRef.current;
       if (!expectedUri) {
         preloadReadyRef.current = true;
@@ -762,14 +794,12 @@ export default function EditScreen() {
       // to start near its end instead of from the beginning.
       if (vRef) {
         preloadReadyRef.current = false;
-        vRef
-          .setPositionAsync(trimStart)
-          .then(() => { preloadReadyRef.current = true; })
-          .catch(() => { preloadReadyRef.current = true; });
+        vRef.currentTime = trimStart / 1000;
+        preloadReadyRef.current = true;
       } else {
         preloadReadyRef.current = true;
       }
-    } else if (!status.isLoaded && "error" in status && status.error) {
+    } else if (hadError) {
       preloadReadyRef.current = false;
     }
   }, []);
@@ -777,11 +807,11 @@ export default function EditScreen() {
   // Per-slot dispatch: only the active slot runs the full playback logic; the
   // inactive slot just updates preload readiness.
   const onStatusSlot0 = useCallback(
-    (s: AVPlaybackStatus) => { if (activeSlotRef.current === 0) onVideoStatus(s); },
+    (s: VideoPlaybackStatus) => { if (activeSlotRef.current === 0) onVideoStatus(s); },
     [onVideoStatus],
   );
   const onStatusSlot1 = useCallback(
-    (s: AVPlaybackStatus) => { if (activeSlotRef.current === 1) onVideoStatus(s); },
+    (s: VideoPlaybackStatus) => { if (activeSlotRef.current === 1) onVideoStatus(s); },
     [onVideoStatus],
   );
 
@@ -795,26 +825,22 @@ export default function EditScreen() {
     if (activeSlotRef.current === 1) setVideoReady(true);
   }, []);
 
-  const onLoadSlot0 = useCallback((status: AVPlaybackStatus) => {
+  const onLoadSlot0 = useCallback((_info: { durationMillis: number }) => {
     if (activeSlotRef.current === 0) {
-      if (status.isLoaded) {
-        videoRetryCountRef.current = 0;
-        setVideoLoadError(null);
-        setVideoReady(true);
-      }
+      videoRetryCountRef.current = 0;
+      setVideoLoadError(null);
+      setVideoReady(true);
     } else {
-      onPreloadLoad(status, 0);
+      onPreloadLoad(0, true, false);
     }
   }, [onPreloadLoad]);
-  const onLoadSlot1 = useCallback((status: AVPlaybackStatus) => {
+  const onLoadSlot1 = useCallback((_info: { durationMillis: number }) => {
     if (activeSlotRef.current === 1) {
-      if (status.isLoaded) {
-        videoRetryCountRef.current = 0;
-        setVideoLoadError(null);
-        setVideoReady(true);
-      }
+      videoRetryCountRef.current = 0;
+      setVideoLoadError(null);
+      setVideoReady(true);
     } else {
-      onPreloadLoad(status, 1);
+      onPreloadLoad(1, true, false);
     }
   }, [onPreloadLoad]);
 
@@ -826,6 +852,18 @@ export default function EditScreen() {
     if (activeSlotRef.current === 1) handleVideoLoadError(err);
     else preloadReadyRef.current = false;
   }, [handleVideoLoadError]);
+
+  // expo-video player event feeds → per-slot status handlers
+  useVideoStatusFeed(playerA, {
+    onStatus: onStatusSlot0,
+    onLoad: onLoadSlot0,
+    onError: onErrorSlot0,
+  });
+  useVideoStatusFeed(playerB, {
+    onStatus: onStatusSlot1,
+    onLoad: onLoadSlot1,
+    onError: onErrorSlot1,
+  });
 
   // Re-entrancy guard: prevents advanceToNextClip from being called again
   // before the new clip has started playing. The old player can fire stale
@@ -854,12 +892,10 @@ export default function EditScreen() {
       setIsPlaying(true);
       const clip = clipsRef.current[selIdx];
       const tStart = clip?.trimStartMs ?? 0;
-      videoRef.current
-        ?.setPositionAsync(tStart)
-        .then(() => {
-          videoRef.current?.playAsync().catch(() => {});
-        })
-        .catch(() => {});
+      if (videoRef.current) {
+        videoRef.current.currentTime = tStart / 1000;
+        videoRef.current.play();
+      }
       setPositionMs(segmentOffsetRef.current);
       return;
     }
@@ -929,24 +965,19 @@ export default function EditScreen() {
         setVideoReady(true);
         setIsPlaying(true);
 
-        incomingVideo?.setIsMutedAsync(false).catch(() => {});
+        if (incomingVideo) incomingVideo.muted = false;
         // ALWAYS seek to trimStart (or 0) before playing — the preload slot may
         // have inherited a stale position from a previous clip. Without this
         // seek, the new clip can start near its end and freeze.
         const seekTarget = trimStartRef.current;
-        incomingVideo
-          ?.setPositionAsync(seekTarget)
-          .then(() => {
-            incomingVideo?.playAsync().catch(() => {});
-            // Reset trimEndHandledRef AFTER the seek completes so the
-            // end-of-segment check can fire for the new clip. It was set to
-            // true above to block stale didJustFinish from the old player.
-            trimEndHandledRef.current = false;
-          })
-          .catch(() => {
-            incomingVideo?.playAsync().catch(() => {});
-            trimEndHandledRef.current = false;
-          });
+        if (incomingVideo) {
+          incomingVideo.currentTime = seekTarget / 1000;
+          incomingVideo.play();
+        }
+        // Reset trimEndHandledRef after the seek so the
+        // end-of-segment check can fire for the new clip. It was set to
+        // true above to block stale didJustFinish from the old player.
+        trimEndHandledRef.current = false;
         return;
       }
 
@@ -970,10 +1001,10 @@ export default function EditScreen() {
         if (arrivingTrimStart > leavingTrimEnd) {
           trimSeekDoneRef.current = true;
           safeSeekActiveRef.current = true;
-          videoRef.current
-            ?.setPositionAsync(arrivingTrimStart)
-            .then(() => { safeSeekActiveRef.current = false; })
-            .catch(() => { safeSeekActiveRef.current = false; });
+          if (videoRef.current) {
+            videoRef.current.currentTime = arrivingTrimStart / 1000;
+          }
+          safeSeekActiveRef.current = false;
         } else {
           trimSeekDoneRef.current = true;
         }
@@ -1058,20 +1089,15 @@ export default function EditScreen() {
         setVideoReady(true);
         setIsPlaying(true);
 
-        incomingVideo?.setIsMutedAsync(false).catch(() => {});
+        if (incomingVideo) incomingVideo.muted = false;
         // ALWAYS seek to trimStart (or 0) before playing — same reason as
         // forward hot-swap: preload slot may have a stale position.
         const wrapSeekTarget = trimStartRef.current;
-        incomingVideo
-          ?.setPositionAsync(wrapSeekTarget)
-          .then(() => {
-            incomingVideo?.playAsync().catch(() => {});
-            trimEndHandledRef.current = false;
-          })
-          .catch(() => {
-            incomingVideo?.playAsync().catch(() => {});
-            trimEndHandledRef.current = false;
-          });
+        if (incomingVideo) {
+          incomingVideo.currentTime = wrapSeekTarget / 1000;
+          incomingVideo.play();
+        }
+        trimEndHandledRef.current = false;
         return;
       }
 
@@ -1093,12 +1119,10 @@ export default function EditScreen() {
         pendingSeekRef.current = null;
         lastPositionUpdate.current = 0;
         trimSeekDoneRef.current = true;
-        videoRef.current
-          ?.setPositionAsync(seekTarget)
-          .then(() => {
-            videoRef.current?.playAsync().catch(() => {});
-          })
-          .catch(() => {});
+        if (videoRef.current) {
+          videoRef.current.currentTime = seekTarget / 1000;
+          videoRef.current.play();
+        }
       } else {
         // Different URI: set a pending seek so onVideoStatus seeks to
         // trimStart (or 0) once the new source loads.
@@ -1176,7 +1200,7 @@ export default function EditScreen() {
       setIsPlaying(false);
       setPositionMs(targetMs);
     } else {
-      videoRef.current?.setPositionAsync(sourcePos).catch(() => {});
+      if (videoRef.current) videoRef.current.currentTime = sourcePos / 1000;
       setIsPlaying(false);
       setPositionMs(targetMs);
     }
@@ -1236,10 +1260,8 @@ export default function EditScreen() {
             inactiveSlot === 0 ? videoRefA.current : videoRefB.current;
           if (vRef) {
             preloadReadyRef.current = false; // block hot-swap until seek done
-            vRef
-              .setPositionAsync(newTrimStart)
-              .then(() => { preloadReadyRef.current = true; })
-              .catch(() => { preloadReadyRef.current = true; });
+            vRef.currentTime = newTrimStart / 1000;
+            preloadReadyRef.current = true;
           }
         }
 
@@ -1833,7 +1855,7 @@ export default function EditScreen() {
       // ── Pause the video IMMEDIATELY before any upload work begins ───
       setIsPlaying(false);
       try {
-        videoRef.current?.pauseAsync();
+        videoRef.current?.pause();
       } catch {
         // Best-effort — continue with upload regardless
       }
@@ -2141,10 +2163,8 @@ export default function EditScreen() {
               <>
                 {/* Slot A — active when activeSlot === 0, else preloading next clip */}
                 {(activeSlot === 0 || preloadSource !== undefined) && (
-                  <Video
-                    key={`slotA-${videoKey}`}
-                    ref={videoRefA}
-                    source={activeSlot === 0 ? videoSource : preloadSource}
+                  <VideoView
+                    player={playerA}
                     style={{
                       width: "100%",
                       height: "100%",
@@ -2153,27 +2173,16 @@ export default function EditScreen() {
                       left: 0,
                       opacity: activeSlot === 0 ? 1 : 0,
                     }}
-                    resizeMode={ResizeMode.CONTAIN}
-                    shouldPlay={activeSlot === 0 ? isPlaying && videoReady : false}
-                    isLooping={false}
-                    isMuted={activeSlot === 0 ? false : true}
-                    onReadyForDisplay={onReadySlot0}
-                    onPlaybackStatusUpdate={onStatusSlot0}
-                    onError={(err: string) => {
-                      console.error("[edit] Video slotA onError:", err);
-                      onErrorSlot0(err);
-                    }}
-                    onLoad={onLoadSlot0}
-                    progressUpdateIntervalMillis={200}
+                    contentFit="contain"
+                    nativeControls={false}
+                    onFirstFrameRender={onReadySlot0}
                     pointerEvents="none"
                   />
                 )}
                 {/* Slot B — active when activeSlot === 1, else preloading next clip */}
                 {(activeSlot === 1 || preloadSource !== undefined) && (
-                  <Video
-                    key={`slotB-${videoKey}`}
-                    ref={videoRefB}
-                    source={activeSlot === 1 ? videoSource : preloadSource}
+                  <VideoView
+                    player={playerB}
                     style={{
                       width: "100%",
                       height: "100%",
@@ -2182,18 +2191,9 @@ export default function EditScreen() {
                       left: 0,
                       opacity: activeSlot === 1 ? 1 : 0,
                     }}
-                    resizeMode={ResizeMode.CONTAIN}
-                    shouldPlay={activeSlot === 1 ? isPlaying && videoReady : false}
-                    isLooping={false}
-                    isMuted={activeSlot === 1 ? false : true}
-                    onReadyForDisplay={onReadySlot1}
-                    onPlaybackStatusUpdate={onStatusSlot1}
-                    onError={(err: string) => {
-                      console.error("[edit] Video slotB onError:", err);
-                      onErrorSlot1(err);
-                    }}
-                    onLoad={onLoadSlot1}
-                    progressUpdateIntervalMillis={200}
+                    contentFit="contain"
+                    nativeControls={false}
+                    onFirstFrameRender={onReadySlot1}
                     pointerEvents="none"
                   />
                 )}

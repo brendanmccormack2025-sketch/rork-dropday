@@ -15,7 +15,7 @@ import * as Linking from "expo-linking";
 
 import ScreenBackground from "@/components/ScreenBackground";
 import PrimaryButton from "@/components/PrimaryButton";
-import DropletLogo from "@/components/DropletLogo";
+import TrialLogo from "@/components/TrialLogo";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -60,7 +60,7 @@ export default function SignInScreen() {
           </Pressable>
 
           <View style={styles.header}>
-            <DropletLogo size={48} />
+            <TrialLogo size={48} />
             <UiText style={styles.title}>Welcome back</UiText>
             <UiText style={styles.sub}>Sign in to join the drop.</UiText>
           </View>
@@ -70,7 +70,7 @@ export default function SignInScreen() {
               label="Email"
               value={email}
               onChangeText={setEmail}
-              placeholder="you@dropday.app"
+              placeholder="you@email.com"
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"

@@ -90,7 +90,10 @@
           "backgroundColor": "#F5F3EE"
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-video",
+      "expo-audio",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true

@@ -3,7 +3,7 @@ import { StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
 
 import ScreenBackground from "@/components/ScreenBackground";
-import DropletLogo from "@/components/DropletLogo";
+import TrialLogo from "@/components/TrialLogo";
 import { theme } from "@/constants/theme";
 
 export default function NotFoundScreen() {
@@ -12,7 +12,7 @@ export default function NotFoundScreen() {
       <Stack.Screen options={{ title: "Lost drop", headerShown: false }} />
       <ScreenBackground>
         <View style={styles.container}>
-          <DropletLogo size={80} />
+          <TrialLogo size={80} />
           <UiText style={styles.title}>This drop slipped away</UiText>
           <UiText style={styles.sub}>That screen doesn&apos;t exist.</UiText>
           <Link href="/(tabs)" style={styles.link}>

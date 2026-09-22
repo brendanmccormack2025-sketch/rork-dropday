@@ -3,7 +3,7 @@
 //  DropDayCamera
 //
 //  Lightweight sign-in / sign-up sheet so creators can publish to the same
-//  DropDay backend the Expo app uses.
+//  Trial backend the Expo app uses.
 //
 
 import SwiftUI
@@ -29,10 +29,10 @@ struct AuthSheet: View {
                         Image(systemName: "drop.fill")
                             .font(.system(size: 40))
                             .foregroundStyle(Theme.accent)
-                        Text(mode == .signIn ? "Welcome back" : "Join DropDay")
+                        Text(mode == .signIn ? "Welcome back" : "Join Trial")
                             .font(.title2.bold())
                             .foregroundStyle(Theme.text)
-                        Text("Sign in to post your Drop")
+                        Text("Sign in to post your Trial")
                             .font(.subheadline)
                             .foregroundStyle(Theme.textMuted)
                     }

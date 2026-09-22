@@ -13,7 +13,8 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
-import { Video, ResizeMode } from "expo-av";
+import { VideoView, useVideoPlayer, type VideoPlayer } from "expo-video";
+import { useVideoStatusFeed } from "@/hooks/useVideoStatusFeed";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { ArrowLeft, EllipsisVertical, Flag, Heart, Reply, RotateCcw, Sparkles, X } from "lucide-react-native";
@@ -198,6 +199,32 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
 
   const hasValidMediaUrl = typeof post.media_url === "string" && post.media_url.length > 0;
 
+  // ── expo-video player ──
+  const player = useVideoPlayer(
+    hasValidMediaUrl ? { uri: post.media_url } : null,
+    (p) => {
+      p.loop = true;
+      p.muted = true;
+      p.timeUpdateEventInterval = 0.25;
+    },
+  );
+
+  // Share the player instance with the stall-detection hook via a ref
+  const playerRef = useRef<VideoPlayer | null>(null);
+  React.useEffect(() => {
+    playerRef.current = player;
+  }, [player]);
+
+  // ── Playback control (mirrors the old shouldPlay/isMuted props) ──
+  React.useEffect(() => {
+    player.muted = !active;
+    if (active) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [player, active]);
+
   // ── Stall detection + auto-recovery ───────────────────────────────
   const videoLog = useCallback((e: VideoEvent) => {
   }, []);
@@ -206,28 +233,31 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
     videoRef,
     stallState,
     handlePlaybackStatus,
-  } = useVideoStallDetection(post.id, active, post.media_url, videoLog);
+  } = useVideoStallDetection(post.id, active, post.media_url, videoLog, playerRef);
 
-  // Release native player on unmount to avoid memory leaks
-  React.useEffect(() => {
-    return () => {
-      videoRef.current?.unloadAsync().catch(() => {});
-    };
-  }, [videoRef]);
+  // ── Player status → stall detection + error handling ──
+  useVideoStatusFeed(player, {
+    onStatus: handlePlaybackStatus,
+    onError: (error) => {
+      errorCountRef.current += 1;
+      setVideoError(error);
+      videoLog({ type: "load_error", postId: post.id, error });
+      console.error("[reactions] Video error", {
+        postId: post.id.slice(0, 8),
+        error,
+        errorCount: errorCountRef.current,
+      });
+    },
+  });
 
   // ── Error recovery ────────────────────────────────────────────────
   const handleRetryVideo = useCallback(() => {
     setVideoError(null);
-    videoRef.current
-      ?.unloadAsync()
-      .then(() =>
-        videoRef.current?.loadAsync(
-          { uri: post.media_url },
-          { shouldPlay: active, isLooping: true },
-          false,
-        ),
-      )
-      .catch(() => {});
+    const p = videoRef.current;
+    if (!p) return;
+    p.replace({ uri: post.media_url });
+    p.loop = true;
+    if (active) p.play();
   }, [post.media_url, active, videoRef]);
 
   return (
@@ -242,38 +272,12 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
               contentFit="cover"
             />
           ) : null}
-          <Video
-            key={post.id}
-            ref={videoRef}
-            source={{ uri: post.media_url }}
+          <VideoView
+            player={player}
             style={styles.videoFill}
-            resizeMode={ResizeMode.COVER}
-            isLooping
-            shouldPlay={active}
-            isMuted={!active}
-            useNativeControls={false}
-            posterSource={
-              post.thumbnail_url ? { uri: post.thumbnail_url } : undefined
-            }
-            progressUpdateIntervalMillis={250}
-            onPlaybackStatusUpdate={handlePlaybackStatus}
-            onError={(error: string) => {
-              errorCountRef.current += 1;
-              setVideoError(error);
-              videoLog({ type: "load_error", postId: post.id, error });
-              console.error("[reactions] Video onError", {
-                postId: post.id.slice(0, 8),
-                error,
-                errorCount: errorCountRef.current,
-              });
-            }}
-            onLoad={(status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
-              videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
-            }}
-            onLoadStart={() => {
-              videoLog({ type: "load_start", postId: post.id, uri: post.media_url });
-            }}
-            onReadyForDisplay={() => {
+            contentFit="cover"
+            nativeControls={false}
+            onFirstFrameRender={() => {
               videoLog({ type: "ready_for_display", postId: post.id });
               setVideoError(null);
             }}

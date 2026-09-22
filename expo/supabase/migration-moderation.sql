@@ -1,4 +1,4 @@
--- DropDay: Content reporting & moderation
+-- Trial: Content reporting & moderation
 -- Run this in the Supabase SQL editor.
 -- Required for App Store Guideline 1.2 (user-generated content moderation).
 

@@ -2,7 +2,7 @@
 //  Theme.swift
 //  DropDayCamera
 //
-//  Shared design tokens mirroring the DropDay brand:
+//  Shared design tokens mirroring the Trial brand:
 //  near-black backdrop with an electric-blue accent.
 //
 

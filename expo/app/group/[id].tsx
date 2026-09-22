@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,7 +16,7 @@ import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Image } from "expo-image";
-import { Video, ResizeMode } from "expo-av";
+import { VideoView, useVideoPlayer } from "expo-video";
 import {
   ArrowLeft,
   Heart,
@@ -31,6 +31,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { theme } from "@/constants/theme";
 import { showAlert } from "@/lib/showAlert";
+import { launchLibraryWithRetry } from "@/lib/pickerRetry";
 import { useAuth } from "@/providers/AuthProvider";
 import { useGroups, type GroupPost } from "@/providers/GroupsProvider";
 import { FeedAvatar } from "@/components/Avatar";
@@ -58,6 +59,21 @@ export default function GroupFeedScreen() {
   const [captionModalVisible, setCaptionModalVisible] = useState<boolean>(false);
   const [pendingUri, setPendingUri] = useState<string | null>(null);
   const [pendingType, setPendingType] = useState<"photo" | "video">("photo");
+  const [picking, setPicking] = useState<boolean>(false);
+
+  // expo-video player for the caption modal's video preview. Sources are
+  // swapped via replace() — useVideoPlayer only reads its initial argument.
+  const previewPlayer = useVideoPlayer(null);
+  const previewLoadedUriRef = useRef<string | null>(null);
+  useEffect(() => {
+    const target =
+      pendingType === "video" && pendingUri ? { uri: pendingUri } : null;
+    const targetUri = target?.uri ?? null;
+    if (previewLoadedUriRef.current !== targetUri) {
+      previewLoadedUriRef.current = targetUri;
+      previewPlayer.replace(target);
+    }
+  }, [pendingUri, pendingType, previewPlayer]);
   const [caption, setCaption] = useState<string>("");
 
   const posts = postsQuery.data ?? [];
@@ -82,7 +98,8 @@ export default function GroupFeedScreen() {
   });
 
   const handlePickMedia = useCallback(async () => {
-    if (uploading) return;
+    if (uploading || picking) return;
+    setPicking(true);
 
     // Request permissions
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -104,16 +121,31 @@ export default function GroupFeedScreen() {
           },
         ],
       );
+      setPicking(false);
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images", "videos"],
-      allowsMultipleSelection: false,
-      quality: 1,
-      videoExportPreset: ImagePicker.VideoExportPreset.Passthrough,
-      exif: false,
-    });
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      result = await launchLibraryWithRetry({
+        mediaTypes: ["images", "videos"],
+        allowsMultipleSelection: false,
+        quality: 1,
+        videoExportPreset: ImagePicker.VideoExportPreset.Passthrough,
+        exif: false,
+        // Native default is false — iCloud-hosted assets then fail with
+        // PHPhotosErrorDomain 3164 (NETWORK_ACCESS_REQUIRED).
+        shouldDownloadFromNetwork: true,
+      });
+    } catch (e) {
+      showAlert(
+        "Library",
+        e instanceof Error ? e.message : "Could not open your library.",
+      );
+      return;
+    } finally {
+      setPicking(false);
+    }
 
     if (result.canceled || !result.assets || result.assets.length === 0) return;
 
@@ -127,7 +159,7 @@ export default function GroupFeedScreen() {
     setPendingType(isVideo ? "video" : "photo");
     setCaption("");
     setCaptionModalVisible(true);
-  }, [uploading]);
+  }, [uploading, picking]);
 
   const handleConfirmPost = useCallback(async () => {
     if (!pendingUri || !groupId) return;
@@ -251,16 +283,18 @@ export default function GroupFeedScreen() {
       <View style={styles.bottomBar}>
         <Pressable
           onPress={handlePickMedia}
-          disabled={uploading}
+          disabled={uploading || picking}
           style={({ pressed }) => [
             styles.uploadBtn,
-            pressed && !uploading && styles.uploadBtnPressed,
+            pressed && !uploading && !picking && styles.uploadBtnPressed,
           ]}
         >
-          {uploading ? (
+          {uploading || picking ? (
             <>
               <ActivityIndicator color={theme.accent} size="small" />
-              <UiText style={styles.uploadBtnText}>{uploadProgress || "Uploading…"}</UiText>
+              <UiText style={styles.uploadBtnText}>
+                {uploading ? uploadProgress || "Uploading…" : "Loading…"}
+              </UiText>
             </>
           ) : (
             <>
@@ -294,13 +328,11 @@ export default function GroupFeedScreen() {
             {pendingUri && (
               <View style={styles.previewWrap}>
                 {pendingType === "video" ? (
-                  <Video
-                    source={{ uri: pendingUri }}
+                  <VideoView
+                    player={previewPlayer}
                     style={styles.previewMedia}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay={false}
-                    isLooping={false}
-                    useNativeControls
+                    contentFit="cover"
+                    nativeControls
                   />
                 ) : (
                   <Image
@@ -359,6 +391,14 @@ function GroupPostCard({
   const reacted = post.has_reacted ?? false;
   const reactionCount = post.reaction_count ?? 0;
 
+  // Static paused preview with native controls — the user taps play to watch.
+  const cardPlayer = useVideoPlayer(
+    post.media_type === "video" ? { uri: post.media_url } : null,
+    (p) => {
+      p.loop = true;
+    },
+  );
+
   return (
     <View style={styles.card}>
       {/* Poster info */}
@@ -382,13 +422,11 @@ function GroupPostCard({
       {/* Media */}
       <View style={styles.mediaWrap}>
         {post.media_type === "video" ? (
-          <Video
-            source={{ uri: post.media_url }}
+          <VideoView
+            player={cardPlayer}
             style={styles.media}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={false}
-            isLooping
-            useNativeControls
+            contentFit="cover"
+            nativeControls
           />
         ) : (
           <Image

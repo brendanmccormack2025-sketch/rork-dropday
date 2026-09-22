@@ -17,6 +17,7 @@ import * as Haptics from "expo-haptics";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
+import { launchLibraryWithRetry } from "@/lib/pickerRetry";
 
 /** Mirrors the Clip shape the camera flow hands to /edit — same pipeline. */
 type PickedClip = {
@@ -49,6 +50,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
 
   const openLibrary = useCallback(async () => {
     if (isPicking) return;
+    setIsPicking(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -73,11 +75,14 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         return;
       }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
+      const result = await launchLibraryWithRetry({
         mediaTypes: ["images", "videos"],
         allowsMultipleSelection: false,
         quality: 1,
         videoMaxDuration: MAX_VIDEO_SECONDS,
+        // Without this, iCloud-hosted assets fail with PHPhotosErrorDomain 3164
+        // (NETWORK_ACCESS_REQUIRED) — the native default is false.
+        shouldDownloadFromNetwork: true,
       });
       if (result.canceled || result.assets.length === 0) return;
 
@@ -87,7 +92,9 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
       // Keep the editing pipeline identical to camera content: videos longer
       // than the camera's hard cap can't be produced by the recorder, so
       // reject them here instead of feeding /edit something new.
-      if (isVideo && (asset.duration ?? 0) > MAX_VIDEO_SECONDS) {
+      // expo-image-picker returns duration in MILLISECONDS — compare against
+      // the cap converted to ms, not the raw seconds value.
+      if (isVideo && (asset.duration ?? 0) > MAX_VIDEO_SECONDS * 1000) {
         Alert.alert(
           "Video too long",
           `Clips can be up to ${MAX_VIDEO_SECONDS / 60} minutes. Trim the video in your photo library and try again.`,
@@ -100,7 +107,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         uri: asset.uri,
         type: isVideo ? "video" : "image",
         ...(isVideo && asset.duration
-          ? { durationMs: Math.round(asset.duration * 1000) }
+          ? { durationMs: Math.round(asset.duration) } // already milliseconds
           : {}),
       };
 

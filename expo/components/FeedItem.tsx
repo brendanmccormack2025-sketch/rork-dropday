@@ -24,7 +24,8 @@ import {
   AlertCircle,
   Flag,
 } from "lucide-react-native";
-import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
+import { VideoView, useVideoPlayer, type VideoPlayer } from "expo-video";
+import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
 
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
@@ -269,9 +270,26 @@ export const FeedItem = memo(function FeedItem({
   // Two Video instances swap roles so the next segment is already loaded
   // when the current one ends, avoiding a cold-load stall between segments.
   // Matches the editor's videoRefA/videoRefB pattern in edit.tsx.
-  const videoRefA = useRef<Video>(null);
-  const videoRefB = useRef<Video>(null);
-  const activeVideoRef = useRef<Video | null>(null);
+  // expo-video players: slot A holds the active segment, slot B preloads the
+  // next one. Sources are swapped via replace() (useVideoPlayer only reads
+  // its initial argument), mirroring the old per-slot `source` props.
+  const playerA = useVideoPlayer(
+    post.media_type === "video" ? { uri: allSegments[0] ?? post.media_url } : null,
+    (p) => {
+      p.timeUpdateEventInterval = 0.25;
+    },
+  );
+  const playerB = useVideoPlayer(null, (p) => {
+    p.timeUpdateEventInterval = 0.25;
+  });
+  const videoRefA = useRef<VideoPlayer | null>(null);
+  const videoRefB = useRef<VideoPlayer | null>(null);
+  const activeVideoRef = useRef<VideoPlayer | null>(null);
+  // URIs the players were last asked to load (replace() dedupe)
+  const loadedAUriRef = useRef<string | null>(
+    post.media_type === "video" ? allSegments[0] ?? post.media_url : null,
+  );
+  const loadedBUriRef = useRef<string | null>(null);
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
   const activeSlotRef = useRef<0 | 1>(0);
   const preloadReadyRef = useRef<boolean>(false);
@@ -305,11 +323,38 @@ export const FeedItem = memo(function FeedItem({
   // item is active/visible — off-screen items must not double up players.
   const shouldMountPreload = active && allSegments.length > 1;
 
-  // Keep activeVideoRef in sync with the active slot
+  // Keep player refs + activeVideoRef in sync with the active slot
   useEffect(() => {
+    videoRefA.current = playerA;
+    videoRefB.current = playerB;
     activeSlotRef.current = activeSlot;
-    activeVideoRef.current = activeSlot === 0 ? videoRefA.current : videoRefB.current;
-  }, [activeSlot]);
+    activeVideoRef.current = activeSlot === 0 ? playerA : playerB;
+  }, [activeSlot, playerA, playerB]);
+
+  // Per-slot source URIs (matches the old per-slot `source` props)
+  const slotAUri = activeSlot === 0 ? currentUri : preloadUri;
+  const slotBUri = activeSlot === 1 ? currentUri : preloadUri;
+
+  // Replace player sources when the active/preload segment changes
+  useEffect(() => {
+    if (post.media_type !== "video") return;
+    if (loadedAUriRef.current !== slotAUri) {
+      loadedAUriRef.current = slotAUri;
+      playerA.replace({ uri: slotAUri });
+    }
+  }, [slotAUri, playerA, post.media_type]);
+
+  useEffect(() => {
+    if (shouldMountPreload) {
+      if (loadedBUriRef.current !== slotBUri) {
+        loadedBUriRef.current = slotBUri;
+        playerB.replace({ uri: slotBUri });
+      }
+    } else if (loadedBUriRef.current !== null) {
+      loadedBUriRef.current = null;
+      playerB.replace(null);
+    }
+  }, [shouldMountPreload, slotBUri, playerB]);
 
   // Reset to slot A when the preload player unmounts (item became inactive)
   useEffect(() => {
@@ -337,6 +382,26 @@ export const FeedItem = memo(function FeedItem({
   const prebufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialMountRef = useRef<boolean>(true);
 
+  // Playback control (mirrors the old shouldPlay/isLooping/isMuted props)
+  useEffect(() => {
+    if (post.media_type !== "video") return;
+    const canPlay = active && playbackReady && !isPaused && post._optimistic?.status !== "failed";
+    playerA.muted = activeSlot === 0 ? !active : true;
+    playerA.loop = allSegments.length === 1 && activeSlot === 0;
+    if (activeSlot === 0 && canPlay) {
+      playerA.play();
+    } else {
+      playerA.pause();
+    }
+    playerB.muted = activeSlot === 1 ? !active : true;
+    playerB.loop = false;
+    if (activeSlot === 1 && canPlay && shouldMountPreload) {
+      playerB.play();
+    } else {
+      playerB.pause();
+    }
+  }, [playerA, playerB, activeSlot, active, playbackReady, isPaused, shouldMountPreload, allSegments.length, post.media_type, post._optimistic?.status]);
+
   // Reset pre-buffer gate & pause state when the post changes
   // (segIdx changes are handled by advanceSegment's hot-swap logic)
   useEffect(() => {
@@ -351,15 +416,14 @@ export const FeedItem = memo(function FeedItem({
   }, [post.id]);
 
   // Auto-unpause and ensure playback when scrolling back to this video.
-  // expo-av can miss the shouldPlay transition from false→true when the
-  // component re-renders with a new shouldPlay value after mount (e.g.
+  // Prop-driven playback can miss a false→true transition after mount (e.g.
   // when initialScrollIndex causes a brief inactive→active transition).
-  // Explicit playAsync() guarantees playback regardless.
+  // Explicit play() guarantees playback regardless.
   useEffect(() => {
     if (active) {
       setIsPaused(false);
       if (playbackReady) {
-        videoRef.current?.playAsync().catch(() => {});
+        videoRef.current?.play();
       }
     }
   }, [active, playbackReady]);
@@ -394,7 +458,7 @@ export const FeedItem = memo(function FeedItem({
             : null;
         const seekTo = trim?.trimStartMs ?? 0;
         const ref = activeSlotRef.current === 0 ? videoRefA.current : videoRefB.current;
-        ref?.setPositionAsync(seekTo).catch(() => {});
+        if (ref) ref.currentTime = seekTo / 1000;
       }
     }, 3000);
 
@@ -535,19 +599,11 @@ export const FeedItem = memo(function FeedItem({
       readyForDisplayRef.current = true;
       setPlaybackReady(true);
       pendingCrossfadeRef.current = null;
-      const seekPromise = newActiveRef?.setPositionAsync(seekTo);
-      if (seekPromise) {
-        seekPromise
-          .then(() => {
-            runCrossfade();
-          })
-          .catch(() => {
-            // Seek failed — crossfade anyway so we don't freeze
-            runCrossfade();
-          });
-      } else {
-        runCrossfade();
+      // expo-video seeks via the currentTime setter (synchronous) — crossfade right after.
+      if (newActiveRef) {
+        newActiveRef.currentTime = seekTo / 1000;
       }
+      runCrossfade();
     } else {
       // Preload wasn't ready and the slot has a different URI loaded.
       // onReadyForDisplay WILL fire when the fresh load completes.
@@ -563,7 +619,7 @@ export const FeedItem = memo(function FeedItem({
 
   // When video finishes, advance to next segment or loop
   const onSegmentStatus = useCallback(
-    (status: AVPlaybackStatus) => {
+    (status: VideoPlaybackStatus) => {
       handleStallDetection(status);
 
       if (!status.isLoaded) return;
@@ -589,9 +645,9 @@ export const FeedItem = memo(function FeedItem({
       if (!durationSetRef.current && sourceDur > 0) {
         durationSetRef.current = true;
         if (trimStartRef.current > 0) {
-          videoRef.current
-            ?.setPositionAsync(trimStartRef.current)
-            .catch(() => {});
+          if (videoRef.current) {
+            videoRef.current.currentTime = trimStartRef.current / 1000;
+          }
           return;
         }
       }
@@ -615,12 +671,10 @@ export const FeedItem = memo(function FeedItem({
         if (status.positionMillis >= effectiveTrimEnd - 120) {
           trimEndHandledRef.current = true;
           if (allSegments.length === 1) {
-            videoRef.current
-              ?.setPositionAsync(trimStartRef.current)
-              .then(() => {
-                trimEndHandledRef.current = false;
-              })
-              .catch(() => {});
+            if (videoRef.current) {
+              videoRef.current.currentTime = trimStartRef.current / 1000;
+              trimEndHandledRef.current = false;
+            }
           } else {
             advanceSegment();
           }
@@ -639,17 +693,13 @@ export const FeedItem = memo(function FeedItem({
   // ── Error recovery: retry loading ──────────────────────────────────
   const handleRetryVideo = useCallback(() => {
     setVideoError(null);
-    videoRef.current
-      ?.unloadAsync()
-      .then(() =>
-        videoRef.current?.loadAsync(
-          { uri: currentUri },
-          { shouldPlay: active, isLooping: allSegments.length === 1 },
-          false,
-        ),
-      )
-      .catch(() => {});
-  }, [currentUri, active, videoRef]);
+    const p = videoRef.current;
+    if (!p) return;
+    p.replace({ uri: currentUri });
+    p.loop = allSegments.length === 1;
+    p.muted = !active;
+    if (active) p.play();
+  }, [currentUri, active, videoRef, allSegments.length]);
 
   // ── Delete this Drop (owner only) ──────────────────────────────────
   const handleDelete = useCallback(() => {
@@ -671,7 +721,7 @@ export const FeedItem = memo(function FeedItem({
   // Only the active slot runs the full playback/stall logic; the inactive
   // slot just tracks preload readiness via onReadyForDisplay.
   const onStatusSlotA = useCallback(
-    (status: AVPlaybackStatus) => {
+    (status: VideoPlaybackStatus) => {
       if (activeSlotRef.current === 0) {
         onSegmentStatus(status);
       }
@@ -679,7 +729,7 @@ export const FeedItem = memo(function FeedItem({
     [onSegmentStatus],
   );
   const onStatusSlotB = useCallback(
-    (status: AVPlaybackStatus) => {
+    (status: VideoPlaybackStatus) => {
       if (activeSlotRef.current === 1) {
         onSegmentStatus(status);
       }
@@ -705,27 +755,13 @@ export const FeedItem = memo(function FeedItem({
             ? post.trim_data[segIdxRef.current]
             : null;
         const seekTo = trim?.trimStartMs ?? 0;
-        const seekPromise = videoRefA.current?.setPositionAsync(seekTo);
-        if (seekPromise) {
-          seekPromise
-            .then(() => {
-              Animated.parallel([
-                Animated.timing(slotBOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-                Animated.timing(slotAOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-              ]).start();
-            })
-            .catch(() => {
-              Animated.parallel([
-                Animated.timing(slotBOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-                Animated.timing(slotAOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-              ]).start();
-            });
-        } else {
-          Animated.parallel([
-            Animated.timing(slotBOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-            Animated.timing(slotAOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-          ]).start();
+        if (videoRefA.current) {
+          videoRefA.current.currentTime = seekTo / 1000;
         }
+        Animated.parallel([
+          Animated.timing(slotBOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          Animated.timing(slotAOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        ]).start();
       }
       if (!playbackReadyRef.current) {
         playbackReadyRef.current = true;
@@ -739,7 +775,9 @@ export const FeedItem = memo(function FeedItem({
         const seekTo = trim?.trimStartMs ?? 0;
         if (!pendingCrossfadeRef.current) {
           // Only seek here if the deferred crossfade path didn't already seek
-          videoRefA.current?.setPositionAsync(seekTo).catch(() => {});
+          if (videoRefA.current) {
+            videoRefA.current.currentTime = seekTo / 1000;
+          }
         }
         if (prebufferTimerRef.current) {
           clearTimeout(prebufferTimerRef.current);
@@ -770,27 +808,13 @@ export const FeedItem = memo(function FeedItem({
             ? post.trim_data[segIdxRef.current]
             : null;
         const seekTo = trim?.trimStartMs ?? 0;
-        const seekPromise = videoRefB.current?.setPositionAsync(seekTo);
-        if (seekPromise) {
-          seekPromise
-            .then(() => {
-              Animated.parallel([
-                Animated.timing(slotAOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-                Animated.timing(slotBOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-              ]).start();
-            })
-            .catch(() => {
-              Animated.parallel([
-                Animated.timing(slotAOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-                Animated.timing(slotBOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-              ]).start();
-            });
-        } else {
-          Animated.parallel([
-            Animated.timing(slotAOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-            Animated.timing(slotBOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-          ]).start();
+        if (videoRefB.current) {
+          videoRefB.current.currentTime = seekTo / 1000;
         }
+        Animated.parallel([
+          Animated.timing(slotAOpacity, { toValue: 0, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          Animated.timing(slotBOpacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        ]).start();
       }
       if (!playbackReadyRef.current) {
         playbackReadyRef.current = true;
@@ -803,7 +827,9 @@ export const FeedItem = memo(function FeedItem({
         const seekTo = trim?.trimStartMs ?? 0;
         if (!pendingCrossfadeRef.current) {
           // Only seek here if the deferred crossfade path didn't already seek
-          videoRefB.current?.setPositionAsync(seekTo).catch(() => {});
+          if (videoRefB.current) {
+            videoRefB.current.currentTime = seekTo / 1000;
+          }
         }
         if (prebufferTimerRef.current) {
           clearTimeout(prebufferTimerRef.current);
@@ -815,21 +841,17 @@ export const FeedItem = memo(function FeedItem({
     }
   }, [post.id, post.trim_data, currentUri, preloadUri, slotAOpacity, slotBOpacity]);
 
-  const onLoadSlotA = useCallback((status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
-    if (status.isLoaded) {
-      // Track loaded URI on load (fires before onReadyForDisplay) as a fallback
-      const slotAUri = activeSlotRef.current === 0 ? currentUri : preloadUri;
-      slotALoadedUriRef.current = slotAUri;
-      videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
-    }
+  const onLoadSlotA = useCallback((info: { durationMillis: number }) => {
+    // Track loaded URI on load (fires before onReadyForDisplay) as a fallback
+    const loadedUri = activeSlotRef.current === 0 ? currentUri : preloadUri;
+    slotALoadedUriRef.current = loadedUri;
+    videoLog({ type: "load_success", postId: post.id, durationMs: info.durationMillis });
   }, [post.id, videoLog, currentUri, preloadUri]);
 
-  const onLoadSlotB = useCallback((status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
-    if (status.isLoaded) {
-      const slotBUri = activeSlotRef.current === 1 ? currentUri : preloadUri;
-      slotBLoadedUriRef.current = slotBUri;
-      videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
-    }
+  const onLoadSlotB = useCallback((info: { durationMillis: number }) => {
+    const loadedUri = activeSlotRef.current === 1 ? currentUri : preloadUri;
+    slotBLoadedUriRef.current = loadedUri;
+    videoLog({ type: "load_success", postId: post.id, durationMs: info.durationMillis });
   }, [post.id, videoLog, currentUri, preloadUri]);
 
   const onErrorSlotA = useCallback((error: string) => {
@@ -851,6 +873,18 @@ export const FeedItem = memo(function FeedItem({
     }
   }, [post.id, videoLog]);
 
+  // expo-video player event feeds → per-slot status handlers
+  useVideoStatusFeed(playerA, {
+    onStatus: onStatusSlotA,
+    onLoad: onLoadSlotA,
+    onError: onErrorSlotA,
+  });
+  useVideoStatusFeed(playerB, {
+    onStatus: onStatusSlotB,
+    onLoad: onLoadSlotB,
+    onError: onErrorSlotB,
+  });
+
   return (
     <View
       style={styles.item}
@@ -870,27 +904,15 @@ export const FeedItem = memo(function FeedItem({
               { opacity: slotAOpacity },
             ]}
           >
-            <Video
-              key={`slotA-${post.id}`}
-              ref={videoRefA}
-              source={{ uri: activeSlot === 0 ? currentUri : preloadUri }}
+            <VideoView
+              player={playerA}
               style={[
                 StyleSheet.absoluteFill,
                 post._optimistic?.status === "failed" && { opacity: 0.3 },
               ]}
-              resizeMode={ResizeMode.COVER}
-              isLooping={allSegments.length === 1 && activeSlot === 0}
-              shouldPlay={activeSlot === 0 && active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
-              isMuted={activeSlot === 0 ? !active : true}
-              useNativeControls={false}
-              progressUpdateIntervalMillis={250}
-              onPlaybackStatusUpdate={onStatusSlotA}
-              onError={onErrorSlotA}
-              onLoad={onLoadSlotA}
-              onLoadStart={() => {
-                videoLog({ type: "load_start", postId: post.id, uri: activeSlot === 0 ? currentUri : preloadUri });
-              }}
-              onReadyForDisplay={onReadySlotA}
+              contentFit="cover"
+              nativeControls={false}
+              onFirstFrameRender={onReadySlotA}
             />
           </Animated.View>
 
@@ -902,24 +924,12 @@ export const FeedItem = memo(function FeedItem({
                 { opacity: slotBOpacity },
               ]}
             >
-              <Video
-                key={`slotB-${post.id}`}
-                ref={videoRefB}
-                source={{ uri: activeSlot === 1 ? currentUri : preloadUri }}
+              <VideoView
+                player={playerB}
                 style={StyleSheet.absoluteFill}
-                resizeMode={ResizeMode.COVER}
-                isLooping={false}
-                shouldPlay={activeSlot === 1 && active && playbackReady && !isPaused && post._optimistic?.status !== "failed"}
-                isMuted={activeSlot === 1 ? !active : true}
-                useNativeControls={false}
-                progressUpdateIntervalMillis={250}
-                onPlaybackStatusUpdate={onStatusSlotB}
-                onError={onErrorSlotB}
-                onLoad={onLoadSlotB}
-                onLoadStart={() => {
-                  videoLog({ type: "load_start", postId: post.id, uri: activeSlot === 1 ? currentUri : preloadUri });
-                }}
-                onReadyForDisplay={onReadySlotB}
+                contentFit="cover"
+                nativeControls={false}
+                onFirstFrameRender={onReadySlotB}
               />
             </Animated.View>
           )}

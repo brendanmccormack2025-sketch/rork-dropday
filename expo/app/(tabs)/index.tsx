@@ -24,7 +24,7 @@ import {
   Sparkles,
 } from "lucide-react-native";
 
-import DropletLogo from "@/components/DropletLogo";
+import TrialLogo from "@/components/TrialLogo";
 import { FeedListView } from "@/components/FeedListView";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post, resolveAvatarUrl } from "@/providers/PostsProvider";
@@ -177,7 +177,7 @@ export default function FeedScreen() {
 function EmptyState() {
   return (
     <SafeAreaView style={styles.emptyWrap}>
-      <DropletLogo size={56} />
+      <TrialLogo size={56} />
       <UiText style={styles.emptyTitle}>No drops yet</UiText>
       <UiText style={styles.emptySub}>Be the first to drop.</UiText>
     </SafeAreaView>
@@ -211,7 +211,7 @@ function GateOverlay({
       <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
       <View style={styles.gateInner}>
         <View style={styles.gateIcon}>
-          <DropletLogo size={42} />
+          <TrialLogo size={42} />
         </View>
         <UiText style={styles.gateTitle}>Drop to unlock</UiText>
         <UiText style={styles.gateSub}>

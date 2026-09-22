@@ -1,4 +1,4 @@
--- DropDay: Explore tab — Suggested Creators ranked by total engagement
+-- Trial: Explore tab — Suggested Creators ranked by total engagement
 -- Run this in the Supabase SQL editor.
 
 -- ============================================================================

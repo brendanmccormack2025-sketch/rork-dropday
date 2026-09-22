@@ -14,7 +14,9 @@ import {
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
-import { Video, ResizeMode, Audio, type AVPlaybackStatus } from "expo-av";
+import { VideoView, useVideoPlayer, type VideoPlayer } from "expo-video";
+import { setAudioModeAsync } from "expo-audio";
+import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -241,9 +243,9 @@ export default function ReactionTreeScreen() {
     useCallback(() => {
       const task = InteractionManager.runAfterInteractions(() => {
         setScreenFocused(true);
-        Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
+        setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
         }).catch(() => {});
       });
       return () => {
@@ -505,6 +507,24 @@ function ReactionItem({
   const [videoError, setVideoError] = useState<string | null>(null);
   const errorCountRef = useRef<number>(0);
 
+  // ── expo-video player ──
+  const player = useVideoPlayer(
+    typeof post.media_url === "string" && post.media_url.length > 0
+      ? { uri: post.media_url }
+      : null,
+    (p) => {
+      p.loop = true;
+      p.muted = true;
+      p.timeUpdateEventInterval = 0.25;
+    },
+  );
+
+  // Share the player instance with the stall-detection hook via a ref
+  const playerRef = useRef<VideoPlayer | null>(null);
+  useEffect(() => {
+    playerRef.current = player;
+  }, [player]);
+
   // ── Stall detection + recovery ─────────────────────────────────────
   const videoLog = useCallback((e: VideoEvent) => {
   }, []);
@@ -513,12 +533,22 @@ function ReactionItem({
     videoRef,
     stallState,
     handlePlaybackStatus: handleStallDetection,
-  } = useVideoStallDetection(post.id, active, post.media_url, videoLog);
+  } = useVideoStallDetection(post.id, active, post.media_url, videoLog, playerRef);
+
+  // ── Playback control (mirrors the old shouldPlay/isMuted props) ──
+  useEffect(() => {
+    player.muted = !active;
+    if (active && playbackReady && !isPaused) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [player, active, playbackReady, isPaused]);
 
   // ── Combined onPlaybackStatusUpdate: stall detection first, then
   //    pre-buffer gate fallback (mirrors the feed's onSegmentStatus pattern).
   const onPlaybackStatus = useCallback(
-    (status: AVPlaybackStatus) => {
+    (status: VideoPlaybackStatus) => {
       // Forward to stall detection handler first
       handleStallDetection(status);
 
@@ -543,26 +573,29 @@ function ReactionItem({
     [handleStallDetection, post.id],
   );
 
-  // Release native player resources on unmount
-  useEffect(() => {
-    return () => {
-      videoRef.current?.unloadAsync().catch(() => {});
-    };
-  }, [videoRef]);
+  // ── Player status → error handling ──
+  useVideoStatusFeed(player, {
+    onStatus: onPlaybackStatus,
+    onError: (error) => {
+      errorCountRef.current += 1;
+      setVideoError(error);
+      videoLog({ type: "load_error", postId: post.id, error });
+      console.error("[reaction-tree] Video error", {
+        postId: post.id.slice(0, 8),
+        error,
+        errorCount: errorCountRef.current,
+      });
+    },
+  });
 
   // ── Error recovery ──────────────────────────────────────────────────
   const handleRetryVideo = useCallback(() => {
     setVideoError(null);
-    videoRef.current
-      ?.unloadAsync()
-      .then(() =>
-        videoRef.current?.loadAsync(
-          { uri: post.media_url },
-          { shouldPlay: active, isLooping: true },
-          false,
-        ),
-      )
-      .catch(() => {});
+    const p = videoRef.current;
+    if (!p) return;
+    p.replace({ uri: post.media_url });
+    p.loop = true;
+    if (active) p.play();
   }, [post.media_url, active, videoRef]);
 
   // ── Guard: missing or empty media_url → show thumbnail fallback ──
@@ -580,38 +613,12 @@ function ReactionItem({
               contentFit="cover"
             />
           ) : null}
-          <Video
-            key={post.id}
-            ref={videoRef}
-            source={{ uri: post.media_url }}
+          <VideoView
+            player={player}
             style={styles.videoFill}
-            resizeMode={ResizeMode.COVER}
-            isLooping
-            shouldPlay={active && playbackReady && !isPaused}
-            isMuted={!active}
-            useNativeControls={false}
-            posterSource={
-              post.thumbnail_url ? { uri: post.thumbnail_url } : undefined
-            }
-            progressUpdateIntervalMillis={250}
-            onPlaybackStatusUpdate={onPlaybackStatus}
-            onError={(error: string) => {
-              errorCountRef.current += 1;
-              setVideoError(error);
-              videoLog({ type: "load_error", postId: post.id, error });
-              console.error("[reaction-tree] Video onError", {
-                postId: post.id.slice(0, 8),
-                error,
-                errorCount: errorCountRef.current,
-              });
-            }}
-            onLoad={(status: { isLoaded: boolean; uri?: string; durationMillis?: number }) => {
-              videoLog({ type: "load_success", postId: post.id, durationMs: status.durationMillis });
-            }}
-            onLoadStart={() => {
-              videoLog({ type: "load_start", postId: post.id, uri: post.media_url });
-            }}
-            onReadyForDisplay={() => {
+            contentFit="cover"
+            nativeControls={false}
+            onFirstFrameRender={() => {
               videoLog({ type: "ready_for_display", postId: post.id });
               setVideoError(null);
               readyForDisplayRef.current = true;
