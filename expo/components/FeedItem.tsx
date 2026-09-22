@@ -34,9 +34,14 @@ import { usePosts, type Post, type TextOverlay, type TextBackgroundStyle } from 
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 import { useReportContent } from "@/hooks/useReportContent";
+import { supabase } from "@/lib/supabase";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
+/** Watch duration that qualifies a view for the exposure gate (posts.qualified_view_count). */
+const QUALIFIED_VIEW_MS = 3000;
+/** Session-level dedupe so scrolling back to a post doesn't re-record the same viewer. */
+const qualifiedViewRecorded = new Set<string>();
 /** Height reserved for the action buttons + username row at the bottom of each feed item. */
 const BOTTOM_OVERLAY_HEIGHT = 130;
 
@@ -427,6 +432,26 @@ export const FeedItem = memo(function FeedItem({
       }
     }
   }, [active, playbackReady]);
+
+  // Qualified view: the viewer watched this post for >= 3 seconds while it was
+  // the active (60%-visible, focused) feed item. Feeds the exposure gate on the
+  // verdict checkpoint (posts.qualified_view_count). Dedupe per viewer/post is
+  // enforced server-side by post_qualified_views; the Set avoids repeat RPCs
+  // when scrolling back to a post.
+  useEffect(() => {
+    if (!active) return;
+    const timer = setTimeout(() => {
+      if (qualifiedViewRecorded.has(post.id)) return;
+      qualifiedViewRecorded.add(post.id);
+      supabase
+        .rpc("record_qualified_view", { p_post_id: post.id })
+        .then(null, () => {
+          // Recording failed — clear the dedupe so a later activation retries.
+          qualifiedViewRecorded.delete(post.id);
+        });
+    }, QUALIFIED_VIEW_MS);
+    return () => clearTimeout(timer);
+  }, [active, post.id]);
 
   // Clear prebuffer safety timer on unmount or when post changes
   useEffect(() => {

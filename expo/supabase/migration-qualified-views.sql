@@ -1,0 +1,145 @@
+-- ============================================================================
+-- Qualified views / exposure gate for the survival checkpoint
+-- ============================================================================
+-- Adds an exposure gate on top of migration-survival-checkpoint.sql:
+--   A post can't receive a verdict (survived/archived) until it has actually
+--   been SEEN enough to judge fairly.
+--   Qualified view = a viewer watching the post for >= 3 seconds.
+--   Gate: qualified_view_count >= 25 at the 24hr checkpoint, else 'incomplete'.
+--   'incomplete' posts are re-checked on every 15-min cron run (indefinitely)
+--   until the gate passes; then the existing engagement math issues the
+--   real verdict.
+-- Separate from view_count (raw impressions) — qualified views are a stricter,
+-- deduplicated-per-viewer subset.
+-- Idempotent: safe to re-run.
+-- ============================================================================
+
+-- 1. Column -------------------------------------------------------------------
+alter table public.posts
+  add column if not exists qualified_view_count integer not null default 0;
+
+-- 2. Extend the status constraint to include 'incomplete' -----------------------
+do $$
+begin
+  alter table public.posts drop constraint if exists posts_status_check;
+  alter table public.posts
+    add constraint posts_status_check
+    check (status in ('trial', 'survived', 'archived', 'incomplete'));
+exception
+  when duplicate_object then null; -- constraint already exists (re-run)
+end $$;
+
+-- 3. Per-viewer dedupe table -----------------------------------------------------
+create table if not exists public.post_qualified_views (
+  post_id    uuid not null references public.posts(id) on delete cascade,
+  viewer_id  uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (post_id, viewer_id)
+);
+
+alter table public.post_qualified_views enable row level security;
+
+drop policy if exists pv_qualified_views_insert on public.post_qualified_views;
+create policy pv_qualified_views_insert
+  on public.post_qualified_views
+  for insert to authenticated
+  with check (viewer_id = auth.uid());
+
+-- 4. Denormalized counter maintenance ---------------------------------------------
+-- Fires only on real inserts; 'on conflict do nothing' never triggers it,
+-- so a viewer can never double-count.
+create or replace function public.sync_qualified_view_count()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.posts
+  set qualified_view_count = qualified_view_count + 1
+  where id = new.post_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_sync_qualified_view_count on public.post_qualified_views;
+create trigger trg_sync_qualified_view_count
+  after insert on public.post_qualified_views
+  for each row
+  execute function public.sync_qualified_view_count();
+
+-- 5. RPC called by the client when a viewer crosses the 3-second threshold --------
+create or replace function public.record_qualified_view(p_post_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then return; end if;
+  -- The author's own watches don't count toward exposure.
+  if exists (
+    select 1 from public.posts
+    where id = p_post_id and user_id = auth.uid()
+  ) then
+    return;
+  end if;
+  insert into public.post_qualified_views (post_id, viewer_id)
+  values (p_post_id, auth.uid())
+  on conflict (post_id, viewer_id) do nothing;
+end;
+$$;
+
+grant execute on function public.record_qualified_view(uuid) to authenticated;
+
+-- 6. Checkpoint function: exposure gate + incomplete re-check -----------------------
+-- Candidate selection now picks up 'incomplete' posts too (re-checked every
+-- run, indefinitely, until they qualify). Engagement math is unchanged and
+-- only evaluated once the exposure gate passes.
+create or replace function public.run_survival_checkpoint()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  processed integer;
+begin
+  with candidates as (
+    select p.id, p.user_id, p.qualified_view_count
+    from public.posts p
+    where p.status in ('trial', 'incomplete')
+      and p.checkpoint_at is not null
+      and p.checkpoint_at <= now()
+  ),
+  scored as (
+    select
+      c.id,
+      c.qualified_view_count,
+      (select count(*) from public.posts   r where r.parent_post_id = c.id)                               as video_reactions,
+      (select count(*) from public.likes   l where l.post_id = c.id)                                     as likes,
+      (select count(*) from public.follows f where f.followee_id = c.user_id and f.status = 'accepted')  as followers
+    from candidates c
+  )
+  update public.posts p
+  set status = case
+    -- Exposure gate: below 25 qualified views the engagement signal can't be
+    -- judged fairly — park as 'incomplete' and re-check on the next run.
+    when s.qualified_view_count < 25
+      then 'incomplete'
+    -- Unchanged engagement math: video_reactions * 5 + likes
+    -- vs follower-scaled expected value.
+    when (s.video_reactions * 5) + s.likes >= greatest(3, power(s.followers, 1.3) * 0.02)
+      then 'survived'
+    else 'archived'
+  end
+  from scored s
+  where p.id = s.id;
+
+  get diagnostics processed = row_count;
+  return processed;
+end;
+$$;
+
+-- No cron changes needed: the existing 'survival-checkpoint' job (*/15 min)
+-- calls run_survival_checkpoint(), which is replaced in place above.

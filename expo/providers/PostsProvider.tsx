@@ -50,8 +50,8 @@ export type Post = {
   is_mature?: boolean;
   /** Moderation status: 'active' (visible), 'hidden' (auto/flagged), 'removed' (confirmed violation). */
   moderation_status?: string;
-  /** Survival status: 'trial' (live, awaiting verdict), 'survived', 'archived' (hidden from public surfaces). */
-  status?: "trial" | "survived" | "archived";
+  /** Survival status: 'trial' (live, awaiting verdict), 'incomplete' (awaiting enough exposure to judge), 'survived', 'archived' (hidden from public surfaces). */
+  status?: "trial" | "incomplete" | "survived" | "archived";
   profile?: {
     username: string;
     display_name: string | null;
