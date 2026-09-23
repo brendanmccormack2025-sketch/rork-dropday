@@ -25,6 +25,7 @@ import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
 import { VideoView, useVideoPlayer, createVideoPlayer, type VideoPlayer } from "expo-video";
 import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
 import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync } from "@/lib/fileSystemCompat";
+import { waitForFileReady } from "@/lib/waitForFileReady";
 import * as Haptics from "expo-haptics";
 import {
   Play,
@@ -505,6 +506,8 @@ export default function EditScreen() {
   const maxVideoRetries = 2;
   const videoRetryCountRef = useRef<number>(0);
   const [videoKey, setVideoKey] = useState<number>(0);
+  // Bumped on retry so the replace() effects re-fire — see handleVideoLoadError.
+  const [videoLoadNonce, setVideoLoadNonce] = useState<number>(0);
   const [videoReady, setVideoReady] = useState<boolean>(false);
 
   // Preload slot state — the inactive Video loads the upcoming clip so the
@@ -520,18 +523,36 @@ export default function EditScreen() {
     const targetUri = target?.uri ?? null;
     if (loadedAUriRef.current !== targetUri) {
       loadedAUriRef.current = targetUri;
-      playerA.replace(target ? { uri: target.uri } : null);
+      let cancelled = false;
+      // Wait for the file to be fully written before handing it to the player —
+      // recordAsync/picker URIs can still be finalizing at navigation time.
+      void (async () => {
+        const ready = targetUri ? await waitForFileReady(targetUri) : true;
+        if (cancelled) return;
+        playerA.replace(ready && target ? { uri: target.uri } : null);
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [activeSlot, videoSource, preloadSource, playerA]);
+  }, [activeSlot, videoSource, preloadSource, playerA, videoLoadNonce]);
 
   useEffect(() => {
     const target = activeSlot === 1 ? videoSource : preloadSource;
     const targetUri = target?.uri ?? null;
     if (loadedBUriRef.current !== targetUri) {
       loadedBUriRef.current = targetUri;
-      playerB.replace(target ? { uri: target.uri } : null);
+      let cancelled = false;
+      void (async () => {
+        const ready = targetUri ? await waitForFileReady(targetUri) : true;
+        if (cancelled) return;
+        playerB.replace(ready && target ? { uri: target.uri } : null);
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [activeSlot, videoSource, preloadSource, playerB]);
+  }, [activeSlot, videoSource, preloadSource, playerB, videoLoadNonce]);
 
   // Playback control (mirrors the old shouldPlay/isMuted props)
   useEffect(() => {
@@ -569,7 +590,11 @@ export default function EditScreen() {
     const isAssetError =
       errorMsg.includes("isPlayable") ||
       errorMsg.includes("AVAsset") ||
-      errorMsg.includes("not supported");
+      errorMsg.includes("not supported") ||
+      // expo-video's native loader error — the old expo-av classifier didn't
+      // match this string, so every player-open failure skipped the retry.
+      errorMsg.includes("Cannot Open") ||
+      errorMsg.includes("Failed to load the player item");
     if (isAssetError && videoRetryCountRef.current < maxVideoRetries) {
       videoRetryCountRef.current += 1;
       console.warn(
@@ -577,7 +602,13 @@ export default function EditScreen() {
       );
       setVideoReady(false);
       setTimeout(() => {
+        // Reset the replace() dedupe refs so the swap effects re-fire — under
+        // expo-video the persistent player owns the media item, so remounting
+        // the Video view (videoKey) alone never re-attempts the load.
+        loadedAUriRef.current = null;
+        loadedBUriRef.current = null;
         setVideoKey((k) => k + 1);
+        setVideoLoadNonce((n) => n + 1);
       }, 500);
       return;
     }

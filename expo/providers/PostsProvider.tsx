@@ -321,6 +321,16 @@ async function uploadToStorage(
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
         xhr.setRequestHeader("x-upsert", "false");
 
+        // Explicit generous timeout — without one the network stack applies its
+        // own short default (Android/OkHttp: 10s), which kills large video
+        // uploads mid-stream and surfaces as a ~10s timeout failure.
+        // Scale by file size: 30s per MB, min 60s, cap 10 min.
+        const sizeNum = Number(sizeMB) || 0;
+        xhr.timeout = Math.min(
+          Math.max(60_000, Math.round(sizeNum * 30_000)),
+          600_000,
+        );
+
         // Fire progress events so the UI can show "Uploading... 45%"
         xhr.upload.onprogress = (event: ProgressEvent) => {
           if (event.lengthComputable && onProgress) {
@@ -483,7 +493,10 @@ async function uploadToStorage(
       },
     );
 
-    if (attempt < maxRetries && isTimeout) {
+    // Retry timeouts AND generic network drops — a plain "Network request
+    // failed" used to skip the retry entirely.
+    const isNetworkError = /network|connection|failed to connect/i.test(errMsg);
+    if (attempt < maxRetries && (isTimeout || isNetworkError)) {
       // Wait so any lingering broken session fully closes before retrying
       await new Promise((r) => setTimeout(r, 2000));
       return uploadToStorage(
