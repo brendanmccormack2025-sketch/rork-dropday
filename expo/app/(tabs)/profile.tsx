@@ -31,6 +31,7 @@ import { theme } from "@/constants/theme";
 import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
 import { usePosts, type MyProfile, type Post, type DraftProject } from "@/providers/PostsProvider";
+import { TrialStatusBadge } from "@/components/TrialStatusBadge";
 import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_W } = Dimensions.get("window");
@@ -472,11 +473,14 @@ export default function ProfileScreen() {
 
 function ProfileTile({ post, onPress }: { post: Post; onPress: () => void }) {
   const coverUri = post.thumbnail_url ?? post.media_url;
+  // Failed trials stay visible on the creator's own profile but read as
+  // faded — the content didn't earn its place.
+  const isArchived = post.status === "archived";
   return (
     <Pressable onPress={onPress} style={styles.tile}>
       <Image
         source={{ uri: coverUri }}
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, isArchived && styles.tileArchived]}
         contentFit="cover"
         transition={100}
       />
@@ -489,6 +493,9 @@ function ProfileTile({ post, onPress }: { post: Post; onPress: () => void }) {
         colors={["transparent", "rgba(0,0,0,0.7)"]}
         style={styles.tileGrad}
       />
+      <View style={styles.statusBadgeWrap}>
+        <TrialStatusBadge status={post.status} />
+      </View>
       <View style={styles.tileBottom}>
         <View style={styles.tileStats}>
           <Heart color={theme.danger} size={10} fill={theme.danger} />
@@ -793,6 +800,14 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 9,
     fontWeight: "900" as const,
+  },
+  statusBadgeWrap: {
+    position: "absolute",
+    top: 6,
+    left: 6,
+  },
+  tileArchived: {
+    opacity: 0.4,
   },
   tileBottom: {
     position: "absolute",

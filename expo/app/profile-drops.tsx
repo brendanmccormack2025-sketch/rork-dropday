@@ -44,11 +44,14 @@ export default function ProfileDropsScreen() {
       const { data, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, moderation_status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, moderation_status, status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("user_id", userId)
         .is("parent_post_id", null)
         .eq("moderation_status", "active")
+        // Same rule as user/[id].tsx: another user's failed trials are
+        // hidden from public views.
+        .neq("status", "archived")
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) {
@@ -67,6 +70,7 @@ export default function ProfileDropsScreen() {
         trim_data: null,
         text_overlays: null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
+        status: (row.status as Post["status"]) ?? "trial",
         created_at: row.created_at as string,
         like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
