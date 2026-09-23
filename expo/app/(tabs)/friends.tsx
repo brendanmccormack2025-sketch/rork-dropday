@@ -13,9 +13,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Image as ExpoImage } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
+  Archive,
   Bell,
   Heart,
   Send,
+  Trophy,
   UserPlus,
   UserCheck,
   Users,
@@ -198,6 +200,8 @@ export default function FriendsScreen() {
         avatar_url: notif.actor?.avatar_url ?? null,
       };
       const thumbUri = resolveThumbUrl(notif.post?.thumbnail_url ?? null);
+      const isVerdict =
+        notif.type === "verdict_survived" || notif.type === "verdict_archived";
 
       let icon = <Bell color={theme.textMuted} size={15} strokeWidth={2} />;
       let actionText = "";
@@ -210,6 +214,12 @@ export default function FriendsScreen() {
       } else if (notif.type === "follow") {
         icon = <UserPlus color={theme.success} size={15} strokeWidth={2} />;
         actionText = "started following you";
+      } else if (notif.type === "verdict_survived") {
+        icon = <Trophy color={theme.success} size={15} strokeWidth={2} />;
+        actionText = "Your post survived Trial 🏆";
+      } else if (notif.type === "verdict_archived") {
+        icon = <Archive color={theme.textDim} size={15} strokeWidth={2} />;
+        actionText = "Your post didn't survive Trial";
       }
 
       return (
@@ -234,9 +244,17 @@ export default function FriendsScreen() {
           {/* Text */}
           <View style={styles.notifTextWrap}>
             <UiText style={styles.notifText} numberOfLines={2}>
-              <UiText style={styles.notifActorName}>{actorName}</UiText>
-              {" "}
-              <UiText style={styles.notifAction}>{actionText}</UiText>
+              {/* Verdict notifications are system verdicts, not another
+                  user's action — render without the actor-name prefix */}
+              {isVerdict ? (
+                <UiText style={styles.notifAction}>{actionText}</UiText>
+              ) : (
+                <>
+                  <UiText style={styles.notifActorName}>{actorName}</UiText>
+                  {" "}
+                  <UiText style={styles.notifAction}>{actionText}</UiText>
+                </>
+              )}
             </UiText>
             <UiText style={styles.notifTime}>{formatRelativeTime(notif.created_at)}</UiText>
           </View>

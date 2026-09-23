@@ -96,6 +96,9 @@ grant execute on function public.record_qualified_view(uuid) to authenticated;
 -- Candidate selection now picks up 'incomplete' posts too (re-checked every
 -- run, indefinitely, until they qualify). Engagement math is unchanged and
 -- only evaluated once the exposure gate passes.
+-- The checkpoint also writes a verdict_survived / verdict_archived
+-- notification row for the post's creator whenever a real verdict is
+-- issued; 'incomplete' is a parked state, not a verdict, and stays silent.
 create or replace function public.run_survival_checkpoint()
 returns integer
 language plpgsql
@@ -104,6 +107,10 @@ set search_path = public
 as $$
 declare
   processed integer;
+  survived_ids uuid[];
+  survived_users uuid[];
+  archived_ids uuid[];
+  archived_users uuid[];
 begin
   with candidates as (
     select p.id, p.user_id, p.qualified_view_count
@@ -124,25 +131,48 @@ begin
       (select count(*) from public.likes   l where l.post_id = c.id)                                     as likes,
       (select count(*) from public.follows f where f.followee_id = c.user_id and f.status = 'accepted')  as followers
     from candidates c
+  ),
+  updated as (
+    update public.posts p
+    set status = case
+      -- Exposure gate: below 100 qualified views the engagement signal can't be
+      -- judged fairly — park as 'incomplete' and re-check on the next run.
+      -- Only reached for candidates that already passed checkpoint_at <= now(),
+      -- so a real verdict requires BOTH checkpoint_at <= now() AND views >= 100.
+      when s.qualified_view_count < 100
+        then 'incomplete'
+      -- Unchanged engagement math: video_reactions * 5 + likes
+      -- vs follower-scaled expected value.
+      when (s.video_reactions * 5) + s.likes >= greatest(3, power(s.followers, 1.3) * 0.02)
+        then 'survived'
+      else 'archived'
+    end
+    from scored s
+    where p.id = s.id
+    returning p.id, p.user_id, p.status as final_status
   )
-  update public.posts p
-  set status = case
-    -- Exposure gate: below 100 qualified views the engagement signal can't be
-    -- judged fairly — park as 'incomplete' and re-check on the next run.
-    -- Only reached for candidates that already passed checkpoint_at <= now(),
-    -- so a real verdict requires BOTH checkpoint_at <= now() AND views >= 100.
-    when s.qualified_view_count < 100
-      then 'incomplete'
-    -- Unchanged engagement math: video_reactions * 5 + likes
-    -- vs follower-scaled expected value.
-    when (s.video_reactions * 5) + s.likes >= greatest(3, power(s.followers, 1.3) * 0.02)
-      then 'survived'
-    else 'archived'
-  end
-  from scored s
-  where p.id = s.id;
+  select
+    count(*),
+    coalesce(array_agg(u.id)      filter (where u.final_status = 'survived'), '{}'),
+    coalesce(array_agg(u.user_id) filter (where u.final_status = 'survived'), '{}'),
+    coalesce(array_agg(u.id)      filter (where u.final_status = 'archived'), '{}'),
+    coalesce(array_agg(u.user_id) filter (where u.final_status = 'archived'), '{}')
+  into processed, survived_ids, survived_users, archived_ids, archived_users
+  from updated u;
 
-  get diagnostics processed = row_count;
+  -- Verdict notifications: one row per transitioned post, delivered to the
+  -- post's creator (actor = creator — a system verdict, not another user's
+  -- action). No duplicate risk: the UPDATE above only touches trial/incomplete
+  -- posts, so each transition happens at most once and is captured in this
+  -- same call; the function is security definer, bypassing notifications RLS.
+  insert into public.notifications (recipient_id, actor_id, type, post_id)
+  select u.uid, u.uid, 'verdict_survived', u.pid
+  from unnest(survived_ids, survived_users) as u(pid, uid);
+
+  insert into public.notifications (recipient_id, actor_id, type, post_id)
+  select u.uid, u.uid, 'verdict_archived', u.pid
+  from unnest(archived_ids, archived_users) as u(pid, uid);
+
   return processed;
 end;
 $$;
