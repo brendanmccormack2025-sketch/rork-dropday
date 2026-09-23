@@ -60,6 +60,7 @@ export default function GroupFeedScreen() {
   const [pendingUri, setPendingUri] = useState<string | null>(null);
   const [pendingType, setPendingType] = useState<"photo" | "video">("photo");
   const [picking, setPicking] = useState<boolean>(false);
+  const [isRetrying, setIsRetrying] = useState<boolean>(false);
 
   // expo-video player for the caption modal's video preview. Sources are
   // swapped via replace() — useVideoPlayer only reads its initial argument.
@@ -100,6 +101,7 @@ export default function GroupFeedScreen() {
   const handlePickMedia = useCallback(async () => {
     if (uploading || picking) return;
     setPicking(true);
+    setIsRetrying(false);
 
     // Request permissions
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -136,7 +138,7 @@ export default function GroupFeedScreen() {
         // Native default is false — iCloud-hosted assets then fail with
         // PHPhotosErrorDomain 3164 (NETWORK_ACCESS_REQUIRED).
         shouldDownloadFromNetwork: true,
-      });
+      }, () => setIsRetrying(true));
     } catch (e) {
       showAlert(
         "Library",
@@ -145,6 +147,7 @@ export default function GroupFeedScreen() {
       return;
     } finally {
       setPicking(false);
+      setIsRetrying(false);
     }
 
     if (result.canceled || !result.assets || result.assets.length === 0) return;
@@ -293,7 +296,11 @@ export default function GroupFeedScreen() {
             <>
               <ActivityIndicator color={theme.accent} size="small" />
               <UiText style={styles.uploadBtnText}>
-                {uploading ? uploadProgress || "Uploading…" : "Loading…"}
+                {uploading
+                  ? uploadProgress || "Uploading…"
+                  : isRetrying
+                  ? "Still downloading, trying again…"
+                  : "Downloading from iCloud…"}
               </UiText>
             </>
           ) : (

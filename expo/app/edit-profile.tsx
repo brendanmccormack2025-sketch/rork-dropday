@@ -74,6 +74,7 @@ export default function EditProfileScreen() {
   const [tiktok, setTiktok] = useState(myProfile?.tiktok_handle ?? "");
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [isPickingAvatar, setPickingAvatar] = useState<boolean>(false);
+  const [isAvatarRetrying, setAvatarRetrying] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
 
   const dirty = useMemo(() => {
@@ -90,6 +91,7 @@ export default function EditProfileScreen() {
   const pickAvatar = useCallback(async () => {
     if (isPickingAvatar) return;
     setPickingAvatar(true);
+    setAvatarRetrying(false);
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
       setPickingAvatar(false);
@@ -120,7 +122,7 @@ export default function EditProfileScreen() {
         // Native default is false — iCloud-hosted assets then fail with
         // PHPhotosErrorDomain 3164 (NETWORK_ACCESS_REQUIRED).
         shouldDownloadFromNetwork: true,
-      });
+      }, () => setAvatarRetrying(true));
     } catch (e) {
       Alert.alert(
         "Photo",
@@ -129,6 +131,7 @@ export default function EditProfileScreen() {
       return;
     } finally {
       setPickingAvatar(false);
+      setAvatarRetrying(false);
     }
     if (!result.canceled && result.assets.length > 0) {
       setAvatarUri(result.assets[0]!.uri);
@@ -292,7 +295,13 @@ export default function EditProfileScreen() {
                   )}
                 </View>
               </View>
-              <UiText style={styles.avatarHint}>Change photo</UiText>
+              <UiText style={styles.avatarHint}>
+                {isPickingAvatar
+                  ? isAvatarRetrying
+                    ? "Still downloading, trying again…"
+                    : "Downloading from iCloud…"
+                  : "Change photo"}
+              </UiText>
             </Pressable>
 
             {/* Display Name */}

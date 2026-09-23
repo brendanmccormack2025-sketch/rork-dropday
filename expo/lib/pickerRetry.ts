@@ -17,15 +17,21 @@ function isNetworkDownloadError(e: unknown): boolean {
  * PHPhotosErrorDomain 3169 partway through the download; a single retry
  * after a short pause usually succeeds. Any other error (or a second
  * consecutive network failure) is rethrown to the caller.
+ *
+ * `onRetry` fires just before the second attempt starts so callers can
+ * switch their loading copy to a "trying again" message. Purely cosmetic —
+ * it does not affect the retry logic or timing.
  */
 export async function launchLibraryWithRetry(
   options: ImagePicker.ImagePickerOptions,
+  onRetry?: () => void,
 ): Promise<ImagePicker.ImagePickerResult> {
   try {
     return await ImagePicker.launchImageLibraryAsync(options);
   } catch (e) {
     if (!isNetworkDownloadError(e)) throw e;
     await new Promise((resolve) => setTimeout(resolve, 800));
+    onRetry?.();
     try {
       return await ImagePicker.launchImageLibraryAsync(options);
     } catch {

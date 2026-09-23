@@ -41,6 +41,7 @@ type PostChoiceSheetProps = {
 export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetProps) {
   const router = useRouter();
   const [isPicking, setIsPicking] = useState<boolean>(false);
+  const [isRetrying, setIsRetrying] = useState<boolean>(false);
 
   const openCamera = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -51,6 +52,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
   const openLibrary = useCallback(async () => {
     if (isPicking) return;
     setIsPicking(true);
+    setIsRetrying(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -83,7 +85,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         // Without this, iCloud-hosted assets fail with PHPhotosErrorDomain 3164
         // (NETWORK_ACCESS_REQUIRED) — the native default is false.
         shouldDownloadFromNetwork: true,
-      });
+      }, () => setIsRetrying(true));
       if (result.canceled || result.assets.length === 0) return;
 
       const asset = result.assets[0];
@@ -121,6 +123,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
       Alert.alert("Library", msg);
     } finally {
       setIsPicking(false);
+      setIsRetrying(false);
     }
   }, [isPicking, onClose, router]);
 
@@ -178,7 +181,11 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
                 Camera Roll
               </UiText>
               <UiText style={styles.optionSubtitle}>
-                Choose a photo or video from your library
+                {isPicking
+                  ? isRetrying
+                    ? "Still downloading, trying again…"
+                    : "Downloading from iCloud…"
+                  : "Choose a photo or video from your library"}
               </UiText>
             </View>
           </Pressable>
