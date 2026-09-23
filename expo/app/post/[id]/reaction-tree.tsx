@@ -335,7 +335,7 @@ export default function ReactionTreeScreen() {
           <Sparkles color={theme.textDim} size={48} strokeWidth={1.5} />
           <UiText style={styles.emptyTitle}>No reactions yet</UiText>
           <UiText style={styles.emptySub}>
-            Be the first to react to this drop.
+            Be the first to react to this post.
           </UiText>
           <Pressable
             onPress={() => {

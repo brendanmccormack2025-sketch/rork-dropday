@@ -59,7 +59,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
       if (!permission.granted) {
         Alert.alert(
           "Photo library access needed",
-          "Allow access to your photo library to import a photo or video for your drop.",
+          "Allow access to your photo library to import a photo or video for your post.",
           [
             { text: "Cancel", style: "cancel" },
             {
@@ -155,7 +155,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
               <UiText weight={700} style={styles.optionTitle}>
                 Camera
               </UiText>
-              <UiText style={styles.optionSubtitle}>Record a new drop</UiText>
+              <UiText style={styles.optionSubtitle}>Record a new post</UiText>
             </View>
           </Pressable>
 

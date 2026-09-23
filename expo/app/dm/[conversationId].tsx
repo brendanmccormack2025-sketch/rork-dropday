@@ -167,7 +167,7 @@ function DropCard({
             {post.caption}
           </UiText>
         ) : null}
-        <UiText style={styles.dropCardLabel}>Shared Drop</UiText>
+        <UiText style={styles.dropCardLabel}>Shared Post</UiText>
       </View>
     </Pressable>
   );

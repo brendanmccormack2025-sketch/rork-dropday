@@ -59,7 +59,7 @@ function useUserBlocksInternal() {
 
       Alert.alert(
         "Block this user?",
-        "They won't be able to see your drops or react to them. Their content will be hidden from your feed.",
+        "They won't be able to see your posts or react to them. Their content will be hidden from your feed.",
         [
           { text: "Cancel", style: "cancel" as const },
           {

@@ -235,7 +235,7 @@ export default function ExploreScreen() {
                     <Sparkles color={theme.textDim} size={28} strokeWidth={1.5} />
                     <UiText style={styles.emptyTitle}>No creators yet</UiText>
                     <UiText style={styles.emptySub}>
-                      Be the first to drop and build your audience.
+                      Be the first to post and build your audience.
                     </UiText>
                   </View>
                 )}

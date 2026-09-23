@@ -25,7 +25,7 @@ nonisolated enum SupabaseError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured: return "Backend is not configured."
-        case .notAuthenticated: return "Please sign in to post your Drop."
+        case .notAuthenticated: return "Please sign in to post."
         case .auth(let m): return m
         case .upload(let m): return m
         case .post(let m): return m
@@ -218,7 +218,7 @@ nonisolated final class SupabaseService: @unchecked Sendable {
         let (postData, postResponse) = try await URLSession.shared.data(for: postRequest)
         guard let postHTTP = postResponse as? HTTPURLResponse,
               (200..<300).contains(postHTTP.statusCode) else {
-            throw SupabaseError.post(Self.message(from: postData) ?? "Could not publish Drop.")
+            throw SupabaseError.post(Self.message(from: postData) ?? "Could not publish your post.")
         }
 
         return publicURL

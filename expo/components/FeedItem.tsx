@@ -729,7 +729,7 @@ export const FeedItem = memo(function FeedItem({
   // ── Delete this Drop (owner only) ──────────────────────────────────
   const handleDelete = useCallback(() => {
     Alert.alert(
-      "Delete this Drop?",
+      "Delete this post?",
       "This can't be undone.",
       [
         { text: "Cancel", style: "cancel" },
@@ -1031,7 +1031,7 @@ export const FeedItem = memo(function FeedItem({
             style={StyleSheet.absoluteFill}
           />
           <View style={styles.optInner}>
-            <UiText style={styles.optTitle}>Posting your drop</UiText>
+            <UiText style={styles.optTitle}>Posting your post</UiText>
             <View style={styles.optProgressTrack}>
               <View
                 style={[

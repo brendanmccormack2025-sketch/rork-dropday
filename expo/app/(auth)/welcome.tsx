@@ -101,7 +101,7 @@ export default function WelcomeScreen() {
           />
 
           <UiText style={styles.legal}>
-            By continuing you agree to be part of the nightly drop.
+            By continuing you agree to be part of the nightly Trial.
           </UiText>
           <Pressable
             onPress={() => router.push("/(auth)/sign-in")}

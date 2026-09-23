@@ -9,11 +9,11 @@ import { theme } from "@/constants/theme";
 export default function NotFoundScreen() {
   return (
     <>
-      <Stack.Screen options={{ title: "Lost drop", headerShown: false }} />
+      <Stack.Screen options={{ title: "Lost post", headerShown: false }} />
       <ScreenBackground>
         <View style={styles.container}>
           <TrialLogo size={80} />
-          <UiText style={styles.title}>This drop slipped away</UiText>
+          <UiText style={styles.title}>This post slipped away</UiText>
           <UiText style={styles.sub}>That screen doesn&apos;t exist.</UiText>
           <Link href="/(tabs)" style={styles.link}>
             <UiText style={styles.linkText}>Back to the feed</UiText>

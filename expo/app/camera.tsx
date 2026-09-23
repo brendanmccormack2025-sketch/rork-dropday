@@ -563,8 +563,7 @@ export default function CameraScreen() {
         <CameraIcon color={theme.accent} size={48} />
         <UiText style={styles.permTitle}>Camera Access</UiText>
         <UiText style={styles.permSub}>
-          Trial needs your camera to capture content. You can prep anytime and
-          post during The Drop.
+          Trial needs your camera to capture content.
         </UiText>
         {wasPrompted ? (
           <PrimaryButton

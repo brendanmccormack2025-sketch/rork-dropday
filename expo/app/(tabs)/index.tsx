@@ -178,8 +178,8 @@ function EmptyState() {
   return (
     <SafeAreaView style={styles.emptyWrap}>
       <TrialLogo size={56} />
-      <UiText style={styles.emptyTitle}>No drops yet</UiText>
-      <UiText style={styles.emptySub}>Be the first to drop.</UiText>
+      <UiText style={styles.emptyTitle}>No posts yet</UiText>
+      <UiText style={styles.emptySub}>Be the first to post.</UiText>
     </SafeAreaView>
   );
 }
@@ -188,9 +188,9 @@ function FollowingEmptyState({ onExploreForYou }: { onExploreForYou: () => void 
   return (
     <SafeAreaView style={styles.emptyWrap}>
       <Users color={theme.textMuted} size={48} />
-      <UiText style={styles.emptyTitle}>No drops from your follows yet</UiText>
+      <UiText style={styles.emptyTitle}>No posts from your follows yet</UiText>
       <UiText style={styles.emptySub}>
-        Follow people to see their drops here. Head to For You to discover creators.
+        Follow people to see their posts here. Head to For You to discover creators.
       </UiText>
       <Pressable onPress={onExploreForYou} style={styles.emptyBtn}>
         <UiText style={styles.emptyBtnText}>Explore For You</UiText>
@@ -213,14 +213,14 @@ function GateOverlay({
         <View style={styles.gateIcon}>
           <TrialLogo size={42} />
         </View>
-        <UiText style={styles.gateTitle}>Drop to unlock</UiText>
+        <UiText style={styles.gateTitle}>Post to unlock</UiText>
         <UiText style={styles.gateSub}>
-          You've watched {viewed} drops. Post your Trial to keep watching
+          You've watched {viewed} posts. Post your Trial to keep watching
           tonight's feed.
         </UiText>
         <Pressable onPress={onDrop} style={styles.gateBtn}>
           <Sparkles color="#fff" size={16} />
-          <UiText style={styles.gateBtnText}>Drop now</UiText>
+          <UiText style={styles.gateBtnText}>Post now</UiText>
         </Pressable>
         <UiText style={styles.gateFootnote}>
           Unlimited access for the night once you post.
@@ -306,14 +306,14 @@ function ShareSheet({
         <View style={styles.sheetHandle} />
         <UiText style={styles.sheetTitle}>Send to a friend</UiText>
         <UiText style={styles.sheetSub}>
-          Share this drop privately in a DM.
+          Share this post privately in a DM.
         </UiText>
 
         {following.length === 0 ? (
           <View style={styles.sheetEmpty}>
             <Users color={theme.textMuted} size={20} />
             <UiText style={styles.sheetEmptyText}>
-              Follow friends to send drops directly.
+              Follow friends to send posts directly.
             </UiText>
           </View>
         ) : (

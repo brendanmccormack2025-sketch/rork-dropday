@@ -55,7 +55,7 @@ function TabBar({ tab, onTab, isOwnProfile }: { tab: TabKey; onTab: (t: TabKey) 
         <UiText
           style={[styles.tabLabel, tab === "drops" && styles.tabLabelActive]}
         >
-          Drops
+          Posts
         </UiText>
       </Pressable>
       {isOwnProfile && (
@@ -225,7 +225,7 @@ function ProfileHeader({
       <View style={styles.statsRow}>
         <View style={styles.stat}>
           <UiText style={styles.statNum}>{drops.length}</UiText>
-          <UiText style={styles.statLabel}>Drops</UiText>
+          <UiText style={styles.statLabel}>Posts</UiText>
         </View>
         <View style={styles.statDivider} />
         <Pressable style={styles.stat} onPress={onFollowersTap}>
@@ -444,9 +444,9 @@ export default function ProfileScreen() {
                       size={40}
                       strokeWidth={1.5}
                     />
-                    <UiText style={styles.emptyTitle}>No drops yet</UiText>
+                    <UiText style={styles.emptyTitle}>No posts yet</UiText>
                     <UiText style={styles.emptySub}>
-                      Your drops will appear here.
+                      Your posts will appear here.
                     </UiText>
                   </View>
                 )}

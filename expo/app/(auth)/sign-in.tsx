@@ -62,7 +62,7 @@ export default function SignInScreen() {
           <View style={styles.header}>
             <TrialLogo size={48} />
             <UiText style={styles.title}>Welcome back</UiText>
-            <UiText style={styles.sub}>Sign in to join the drop.</UiText>
+            <UiText style={styles.sub}>Sign in to start posting.</UiText>
           </View>
 
           <View style={styles.form}>

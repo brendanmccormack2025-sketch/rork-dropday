@@ -40,7 +40,7 @@ type SuggestedUser = {
 };
 
 const SHARE_MESSAGE =
-  "Join me on Trial — share one drop a night. It's addictive. 🚀";
+  "Join me on Trial — share one post a night. It's addictive. 🚀";
 const SHARE_URL = "https://dropday.app";
 
 /** Resolve a post thumbnail_url (storage path or full URL) into a displayable URI. */
@@ -203,10 +203,10 @@ export default function FriendsScreen() {
       let actionText = "";
       if (notif.type === "like") {
         icon = <Heart color="#E8291C" size={15} strokeWidth={2} fill="#E8291C" />;
-        actionText = "liked your drop";
+        actionText = "liked your post";
       } else if (notif.type === "reaction") {
         icon = <Zap color={theme.accent} size={15} strokeWidth={2} fill={theme.accent} />;
-        actionText = "reacted to your drop";
+        actionText = "reacted to your post";
       } else if (notif.type === "follow") {
         icon = <UserPlus color={theme.success} size={15} strokeWidth={2} />;
         actionText = "started following you";
@@ -387,7 +387,7 @@ export default function FriendsScreen() {
                 <View style={styles.empty}>
                   <Bell color={theme.textDim} size={28} strokeWidth={1.5} />
                   <UiText style={styles.emptyText}>
-                    No notifications yet. When someone likes your drop or follows you, it'll show up here.
+                    No notifications yet. When someone likes your post or follows you, it'll show up here.
                   </UiText>
                 </View>
               )}

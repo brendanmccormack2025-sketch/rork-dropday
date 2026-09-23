@@ -131,7 +131,7 @@ export default function SignUpScreen() {
             >
               <View style={styles.header}>
             <TrialLogo size={48} />
-            <UiText style={styles.title}>Join the drop</UiText>
+            <UiText style={styles.title}>Start posting</UiText>
             <UiText style={styles.sub}>Create your account in seconds.</UiText>
           </View>
 

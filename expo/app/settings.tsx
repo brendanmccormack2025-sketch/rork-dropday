@@ -39,7 +39,7 @@ export default function SettingsScreen() {
   const handleDeleteAccount = useCallback(() => {
     Alert.alert(
       "Delete Account",
-      "Are you sure? This cannot be undone. All your drops, reactions, and profile will be permanently deleted.",
+      "Are you sure? This cannot be undone. All your posts, reactions, and profile will be permanently deleted.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -201,7 +201,7 @@ export default function SettingsScreen() {
           </View>
 
           <UiText style={styles.footerText}>
-            Deleting your account permanently removes all your drops,
+            Deleting your account permanently removes all your posts,
             reactions, and profile data. This action cannot be undone.
           </UiText>
         </ScrollView>

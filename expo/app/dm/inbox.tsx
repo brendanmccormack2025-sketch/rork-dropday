@@ -32,7 +32,7 @@ function timeAgoStr(d: string): string {
 function lastMsgPreview(msg: Conversation["lastMessage"]): string {
   if (!msg) return "";
   if (msg.text) return msg.text;
-  if (msg.post_id) return "Shared a Drop";
+  if (msg.post_id) return "Shared a post";
   return "";
 }
 
@@ -148,7 +148,7 @@ export default function InboxScreen() {
                 />
                 <UiText style={styles.emptyTitle}>No messages yet</UiText>
                 <UiText style={styles.emptySub}>
-                  Share a Drop with a friend to start a conversation.
+                  Share a post with a friend to start a conversation.
                 </UiText>
               </View>
             )

@@ -107,7 +107,7 @@ export default function PostReactionsScreen() {
           <Sparkles color={theme.textDim} size={48} strokeWidth={1.5} />
           <UiText style={styles.emptyTitle}>No reactions yet</UiText>
           <UiText style={styles.emptySub}>
-            Be the first to react to this drop.
+            Be the first to react to this post.
           </UiText>
           <Pressable
             onPress={() => {
@@ -392,7 +392,7 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
         {/* Show what they're reacting to */}
         <View style={styles.reactingToRow}>
           <Sparkles color={theme.accent} size={11} />
-          <UiText style={styles.reactingToText}>Reacted to this drop</UiText>
+          <UiText style={styles.reactingToText}>Reacted to this post</UiText>
         </View>
       </View>
     </View>

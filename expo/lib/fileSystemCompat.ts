@@ -95,7 +95,7 @@ export async function copyAsync(_options: {
   if (Platform.OS === "web") {
     throw new Error(
       "File copy is not available in the web preview. " +
-        "Use the iOS or Android app to post drops.",
+        "Use the iOS or Android app to post.",
     );
   }
   return NativeFS.copyAsync(_options);

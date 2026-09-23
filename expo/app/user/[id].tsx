@@ -353,7 +353,7 @@ export default function PublicProfileScreen() {
                       <UiText style={styles.statNum}>
                         {userProfileBlocked ? 0 : drops.length}
                       </UiText>
-                      <UiText style={styles.statLabel}>Drops</UiText>
+                      <UiText style={styles.statLabel}>Posts</UiText>
                     </View>
                     <View style={styles.statDivider} />
                     <Pressable
@@ -397,7 +397,7 @@ export default function PublicProfileScreen() {
                   {!userProfileBlocked && (
                     <View style={styles.sectionHeader}>
                       <Sparkles color={theme.accent} size={14} strokeWidth={2} />
-                      <UiText style={styles.sectionLabel}>Drops</UiText>
+                      <UiText style={styles.sectionLabel}>Posts</UiText>
                     </View>
                   )}
                 </>
@@ -413,15 +413,15 @@ export default function PublicProfileScreen() {
                     You've blocked this account
                   </UiText>
                   <UiText style={styles.emptySub}>
-                    Unblock @{username} to see their drops again.
+                    Unblock @{username} to see their posts again.
                   </UiText>
                 </View>
               ) : (
                 <View style={styles.empty}>
                   <Video color={theme.textDim} size={40} strokeWidth={1.5} />
-                  <UiText style={styles.emptyTitle}>No drops yet</UiText>
+                  <UiText style={styles.emptyTitle}>No posts yet</UiText>
                   <UiText style={styles.emptySub}>
-                    @{username} hasn't posted any drops yet.
+                    @{username} hasn't posted any posts yet.
                   </UiText>
                 </View>
               )

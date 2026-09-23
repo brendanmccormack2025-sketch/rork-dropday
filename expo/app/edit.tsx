@@ -2001,7 +2001,7 @@ export default function EditScreen() {
 
       setSuccess("Posted!");
     } catch (postErr) {
-      const errMsg = postErr instanceof Error ? postErr.message : "Could not post your drop. Please try again.";
+      const errMsg = postErr instanceof Error ? postErr.message : "Could not post. Please try again.";
       const errAny = postErr as unknown as Record<string, unknown> | undefined;
       console.error("[edit] executePost: FAILED —", errMsg);
       console.error("[edit] executePost: FULL ERROR DUMP:", {
@@ -2058,7 +2058,7 @@ export default function EditScreen() {
       postPromise.catch((e: any) => {
         console.error("[edit] handlePostPress: executePost FAILED (fallback)", (e as Error)?.message ?? e);
         // executePost already showed Alert.alert() — just set banner as fallback
-        setError(e instanceof Error ? e.message : "Could not post your drop.");
+        setError(e instanceof Error ? e.message : "Could not post.");
       });
     } catch (err) {
       console.error("[edit] handlePostPress: CRASH in handler", (err as Error)?.message ?? err);
@@ -2119,7 +2119,7 @@ export default function EditScreen() {
             <ArrowLeft size={20} color="#fff" strokeWidth={2.5} />
           </TouchableOpacity>
           <UiText style={styles.topTitle}>
-            {draftId ? "Edit Draft" : "Edit Drop"}
+            {draftId ? "Edit Draft" : "Edit Post"}
           </UiText>
           <View style={styles.topBtnRow}>
             <TouchableOpacity
@@ -2230,8 +2230,8 @@ export default function EditScreen() {
               </View>
             )}
 
-            {/* Play overlay */}
-            {!isPlaying && (
+            {/* Play overlay — video only; photos render as a static image */}
+            {isVideo && !isPlaying && (
               <Pressable onPress={togglePlay} style={styles.playOverlay}>
                 <View style={styles.playCircle}>
                   <Play
@@ -2265,23 +2265,26 @@ export default function EditScreen() {
         </Pressable>
 
         {/* ── Timeline editor ────────────────────────────────────────── */}
-        <TimelineEditor
-          clips={clips}
-          totalDurationMs={totalDurationMs}
-          positionMs={displayPosition}
-          activeClipIndex={activeIndex}
-          selectedClipId={selectedClipId}
-          onSeek={handleSeek}
-          onSelectClip={handleSelectClip}
-          onClipUpdate={handleClipUpdate}
-          onTrimRelease={handleTrimRelease}
-          onDeselectAndPreview={() => handleDeselectAndPreview()}
-          onReorderClips={handleReorderClips}
-        />
+        {isVideo && (
+          <TimelineEditor
+            clips={clips}
+            totalDurationMs={totalDurationMs}
+            positionMs={displayPosition}
+            activeClipIndex={activeIndex}
+            selectedClipId={selectedClipId}
+            onSeek={handleSeek}
+            onSelectClip={handleSelectClip}
+            onClipUpdate={handleClipUpdate}
+            onTrimRelease={handleTrimRelease}
+            onDeselectAndPreview={() => handleDeselectAndPreview()}
+            onReorderClips={handleReorderClips}
+          />
+        )}
 
         {/* ── Toolbar ────────────────────────────────────────────────── */}
         <View style={styles.toolbar}>
-          {/* Trim */}
+          {/* Trim — video only */}
+          {isVideo && (
           <Pressable
             onPress={handleTrim}
             style={[
@@ -2302,6 +2305,7 @@ export default function EditScreen() {
               Trim
             </UiText>
           </Pressable>
+          )}
 
           {/* Split */}
           <Pressable
@@ -2484,7 +2488,7 @@ export default function EditScreen() {
                   <UiText style={styles.postBtnText}>Preparing...</UiText>
                 </View>
               ) : (
-                <UiText style={styles.postBtnText}>{reactingTo ? "Post Reaction" : "Post Drop"}</UiText>
+                <UiText style={styles.postBtnText}>{reactingTo ? "Post Reaction" : "Post"}</UiText>
               )}
             </Pressable>
           </View>
