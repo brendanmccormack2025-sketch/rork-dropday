@@ -6,13 +6,13 @@ import {
   StyleSheet,
   View,
 } from "react-native";
+import { Image } from "expo-image";
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { Mail } from "lucide-react-native";
 
 import ScreenBackground from "@/components/ScreenBackground";
-import TrialLogo from "@/components/TrialLogo";
 import PrimaryButton from "@/components/PrimaryButton";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -86,10 +86,13 @@ export default function WelcomeScreen() {
           />
           {/* Logo */}
           <Animated.View style={{ transform: [{ translateY }] }}>
-            <TrialLogo size={120} />
+            <Image
+              source={require("@/assets/images/trial-wordmark.png")}
+              style={styles.brandLogo}
+              contentFit="contain"
+            />
           </Animated.View>
-          <UiText style={styles.brand}>Trial</UiText>
-          <UiText style={styles.tagline}>The night belongs to the moment.</UiText>
+          <UiText style={styles.tagline}>Just try.</UiText>
         </View>
 
         {/* Actions */}
@@ -101,7 +104,7 @@ export default function WelcomeScreen() {
           />
 
           <UiText style={styles.legal}>
-            By continuing you agree to be part of the nightly Trial.
+            By continuing you agree to just try.
           </UiText>
           <Pressable
             onPress={() => router.push("/(auth)/sign-in")}
@@ -134,13 +137,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: theme.accent,
   },
-  brand: {
-    color: theme.text,
-    fontSize: 38,
-    fontWeight: "900" as const,
-    letterSpacing: -1,
-    marginTop: 4,
-  },
+  brandLogo: { width: 190, height: 68 },
   tagline: {
     color: theme.textMuted,
     fontSize: 15,

@@ -7,6 +7,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Image } from "expo-image";
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useNavigation } from "expo-router";
@@ -15,7 +16,6 @@ import * as Linking from "expo-linking";
 
 import ScreenBackground from "@/components/ScreenBackground";
 import PrimaryButton from "@/components/PrimaryButton";
-import TrialLogo from "@/components/TrialLogo";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -60,7 +60,11 @@ export default function SignInScreen() {
           </Pressable>
 
           <View style={styles.header}>
-            <TrialLogo size={48} />
+            <Image
+              source={require("@/assets/images/trial-wordmark.png")}
+              style={styles.brandLogo}
+              contentFit="contain"
+            />
             <UiText style={styles.title}>Welcome back</UiText>
             <UiText style={styles.sub}>Sign in to start posting.</UiText>
           </View>
@@ -135,6 +139,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   header: { alignItems: "center", gap: 8, marginTop: 20, marginBottom: 28 },
+  brandLogo: { width: 96, height: 34 },
   title: {
     color: theme.text,
     fontSize: 26,

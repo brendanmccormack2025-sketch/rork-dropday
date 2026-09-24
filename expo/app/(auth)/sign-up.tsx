@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Image } from "expo-image";
 import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useNavigation } from "expo-router";
@@ -16,7 +17,6 @@ import { ArrowLeft, Check, Mail } from "lucide-react-native";
 
 import ScreenBackground from "@/components/ScreenBackground";
 import PrimaryButton from "@/components/PrimaryButton";
-import TrialLogo from "@/components/TrialLogo";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -130,7 +130,11 @@ export default function SignUpScreen() {
               style={styles.innerDismiss}
             >
               <View style={styles.header}>
-            <TrialLogo size={48} />
+            <Image
+              source={require("@/assets/images/trial-wordmark.png")}
+              style={styles.brandLogo}
+              contentFit="contain"
+            />
             <UiText style={styles.title}>Start posting</UiText>
             <UiText style={styles.sub}>Create your account in seconds.</UiText>
           </View>
@@ -274,6 +278,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   header: { alignItems: "center", gap: 8, marginTop: 14, marginBottom: 22 },
+  brandLogo: { width: 96, height: 34 },
   title: { color: theme.text, fontSize: 26, fontWeight: "900" as const },
   sub: { color: theme.textMuted, fontSize: 15 },
   form: { gap: 14 },
