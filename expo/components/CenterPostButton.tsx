@@ -48,15 +48,38 @@ export default function CenterPostButton({ onPress }: Props) {
     outputRange: [0.25, 0.45],
   });
 
-  const handlePress = () => {
+  const pressScale = useRef(new Animated.Value(1)).current;
+
+  // Press feedback: haptic + squash on press-in for a snappy feel, springy
+  // release on press-out. Runs alongside the idle pulse.
+  const handlePressIn = () => {
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     }
-    onPress?.();
+    Animated.spring(pressScale, {
+      toValue: 0.85,
+      speed: 60,
+      bounciness: 4,
+      useNativeDriver: true,
+    }).start();
+  };
+  const handlePressOut = () => {
+    Animated.spring(pressScale, {
+      toValue: 1,
+      speed: 40,
+      bounciness: 8,
+      useNativeDriver: true,
+    }).start();
   };
 
   return (
-    <Pressable onPress={handlePress} style={styles.container} hitSlop={12}>
+    <Pressable
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={styles.container}
+      hitSlop={12}
+    >
       {/* Pulsing outline ring */}
       <Animated.View
         style={[
@@ -68,11 +91,13 @@ export default function CenterPostButton({ onPress }: Props) {
         ]}
       />
       {/* Button body — outlined circle */}
-      <View style={styles.btnOuter}>
+      <Animated.View
+        style={[styles.btnOuter, { transform: [{ scale: pressScale }] }]}
+      >
         <View style={styles.btn}>
           <Plus color={theme.accent} size={20} strokeWidth={2.5} />
         </View>
-      </View>
+      </Animated.View>
     </Pressable>
   );
 }

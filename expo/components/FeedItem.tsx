@@ -5,6 +5,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  Platform,
   Pressable,
   StyleSheet,
   View,
@@ -12,6 +13,7 @@ import {
 import UiText from "@/components/UiText";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import {
   Heart,
@@ -22,6 +24,7 @@ import {
   Trash2,
   X,
   AlertCircle,
+  Eye,
   Flag,
 } from "lucide-react-native";
 import { VideoView, useVideoPlayer, type VideoPlayer } from "expo-video";
@@ -91,10 +94,43 @@ function ActionButton({
   label: string;
   onPress?: () => void;
 }) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  // Press feedback: quick squash on press-in, springy release on press-out.
+  // Display-only stats (no onPress) stay static.
+  const handlePressIn = () => {
+    if (!onPress) return;
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+    Animated.spring(scale, {
+      toValue: 0.82,
+      speed: 60,
+      bounciness: 4,
+      useNativeDriver: true,
+    }).start();
+  };
+  const handlePressOut = () => {
+    if (!onPress) return;
+    Animated.spring(scale, {
+      toValue: 1,
+      speed: 40,
+      bounciness: 8,
+      useNativeDriver: true,
+    }).start();
+  };
+
   return (
-    <Pressable onPress={onPress} style={styles.actionBtn} hitSlop={8}>
-      {icon}
-      <UiText style={styles.actionLabel}>{label}</UiText>
+    <Pressable
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      hitSlop={8}
+    >
+      <Animated.View style={[styles.actionBtn, { transform: [{ scale }] }]}>
+        {icon}
+        <UiText style={styles.actionLabel}>{label}</UiText>
+      </Animated.View>
     </Pressable>
   );
 }
@@ -1113,6 +1149,10 @@ export const FeedItem = memo(function FeedItem({
           icon={<Sparkles color="#fff" size={28} strokeWidth={1.8} />}
           label={String(reactionCount)}
           onPress={onReactions}
+        />
+        <ActionButton
+          icon={<Eye color="#fff" size={26} strokeWidth={2} />}
+          label={String(post.view_count ?? 0)}
         />
         <ActionButton
           icon={<Send color="#fff" size={24} strokeWidth={2} />}

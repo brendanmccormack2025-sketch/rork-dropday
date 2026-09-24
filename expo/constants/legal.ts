@@ -27,7 +27,7 @@ export interface LegalDocument {
 
 export const TERMS_OF_USE: LegalDocument = {
   title: "Terms of Use",
-  lastUpdated: "July 15, 2026",
+  lastUpdated: "September 24, 2026",
   intro:
     "Welcome to Trial. These Terms of Use (\"Terms\") govern your access to and use of the Trial mobile application (the \"App\"), operated by Trial (\"we,\" \"us,\" or \"our\"). By creating an account or using the App, you agree to these Terms.",
   sections: [
@@ -106,19 +106,19 @@ export const TERMS_OF_USE: LegalDocument = {
     {
       heading: "12. Dispute Resolution",
       paragraphs: [
-        "Any dispute arising from these Terms or your use of the App will first be attempted to be resolved informally by contacting us at DropDayApp@yahoo.com. If a dispute cannot be resolved informally, it will be resolved through binding arbitration on an individual basis, and you waive any right to participate in a class action.",
+        "Any dispute arising from these Terms or your use of the App will first be attempted to be resolved informally by contacting us at brendanmccormack2025@gmail.com. If a dispute cannot be resolved informally, it will be resolved through binding arbitration on an individual basis, and you waive any right to participate in a class action.",
       ],
     },
     {
       heading: "13. DMCA / Copyright Complaints",
       paragraphs: [
-        "If you believe content on Trial infringes your copyright, contact us at DropDayApp@yahoo.com with a description of the material and your contact information.",
+        "If you believe content on Trial infringes your copyright, contact us at brendanmccormack2025@gmail.com with a description of the material and your contact information.",
       ],
     },
     {
       heading: "14. Contact Us",
       paragraphs: [
-        "Questions about these Terms? Contact us at DropDayApp@yahoo.com",
+        "Questions about these Terms? Contact us at brendanmccormack2025@gmail.com",
       ],
     },
   ],
@@ -126,7 +126,7 @@ export const TERMS_OF_USE: LegalDocument = {
 
 export const PRIVACY_POLICY: LegalDocument = {
   title: "Privacy Policy",
-  lastUpdated: "July 15, 2026",
+  lastUpdated: "September 24, 2026",
   intro:
     "Trial (\"we,\" \"us,\" or \"our\") operates the Trial mobile application (the \"App\"). This Privacy Policy explains what information we collect, how we use it, and your rights regarding that information.",
   sections: [
@@ -179,7 +179,7 @@ export const PRIVACY_POLICY: LegalDocument = {
     {
       heading: "6. Your Rights",
       paragraphs: [
-        "Depending on your location, you may have the right to access, correct, or request deletion of your personal information. To exercise these rights, contact us at DropDayApp@yahoo.com.",
+        "Depending on your location, you may have the right to access, correct, or request deletion of your personal information. To exercise these rights, contact us at brendanmccormack2025@gmail.com.",
       ],
     },
     {
@@ -197,7 +197,7 @@ export const PRIVACY_POLICY: LegalDocument = {
     {
       heading: "9. Contact Us",
       paragraphs: [
-        "If you have questions about this Privacy Policy, contact us at: DropDayApp@yahoo.com",
+        "If you have questions about this Privacy Policy, contact us at: brendanmccormack2025@gmail.com",
       ],
     },
   ],
