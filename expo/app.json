@@ -22,7 +22,7 @@
         "NSPhotoLibraryAddUsageDescription": "Trial saves your recorded drops to your photo library."
       },
       "usesAppleSignIn": true,
-      "buildNumber": "10"
+      "buildNumber": "11"
     },
     "android": {
       "adaptiveIcon": {
