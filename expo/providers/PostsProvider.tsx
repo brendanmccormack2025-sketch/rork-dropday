@@ -54,6 +54,8 @@ export type Post = {
   moderation_status?: string;
   /** Survival status: 'trial' (live, awaiting verdict), 'incomplete' (awaiting enough exposure to judge), 'survived', 'archived' (hidden from public surfaces). */
   status?: "trial" | "incomplete" | "survived" | "archived";
+  /** When false, this post is never shown to the creator's followers (even after it survives Trial). Non-followers are unaffected. */
+  follower_visibility?: boolean;
   profile?: {
     username: string;
     display_name: string | null;
@@ -769,7 +771,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         let q = supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
@@ -809,8 +811,22 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         comment_count: (row.comment_count as number | undefined) ?? 0,
         reaction_count: (row.reaction_count as number | undefined) ?? 0,
         profile: (row.profiles as Post["profile"]) ?? null,
+        follower_visibility: (row.follower_visibility as boolean | null) ?? true,
       }));
-      return rankFeed(raw, followingQuery.data ?? [], user?.id);
+      // ── Follower-visibility eligibility ──────────────────────────────
+      // The viewer's own posts and posts from creators they do NOT follow
+      // always pass (the "outside audience"). Posts from followed creators
+      // are eligible only when the post has survived Trial AND the creator
+      // allowed follower visibility — followers never see trial/incomplete
+      // posts, and never see follower_visibility = false posts.
+      const followingIds = followingQuery.data ?? [];
+      const followingSet = new Set(followingIds);
+      const eligible = raw.filter((p) => {
+        if (p.user_id === user?.id) return true;
+        if (!followingSet.has(p.user_id)) return true;
+        return p.status === "survived" && p.follower_visibility !== false;
+      });
+      return rankFeed(eligible, followingIds, user?.id);
     },
   });
 
@@ -843,7 +859,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         let q = supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
@@ -879,8 +895,15 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           comment_count: (row.comment_count as number | undefined) ?? 0,
           reaction_count: (row.reaction_count as number | undefined) ?? 0,
           profile: (row.profiles as Post["profile"]) ?? null,
+          follower_visibility: (row.follower_visibility as boolean | null) ?? true,
         }));
-        return rankFollowingFeed(raw, user.id);
+        // Same eligibility rule as the fyp feed: everything in this query is
+        // from a followed creator, so only survived + follower-allowed posts
+        // are eligible.
+        const eligible = raw.filter(
+          (p) => p.status === "survived" && p.follower_visibility !== false,
+        );
+        return rankFollowingFeed(eligible, user.id);
       } catch (e) {
         logQueryError("following-feed", e);
         return [];
@@ -1532,6 +1555,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       textOverlays?: TextOverlay[];
       thumbnailUri?: string;
       isMature?: boolean;
+      /** Per-post follower-visibility override. Undefined → use the creator's profile default. */
+      followerVisibility?: boolean;
       optimisticTempId?: string;
       onProgress?: (percent: number) => void;
     }) => {
@@ -1743,6 +1768,25 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         }
       }
 
+      // Follower visibility: per-post override wins, otherwise fall back to
+      // the creator's global default (profiles.default_follower_visibility).
+      let followerVisibility = true;
+      if (typeof input.followerVisibility === "boolean") {
+        followerVisibility = input.followerVisibility;
+      } else {
+        try {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("default_follower_visibility")
+            .eq("id", user.id)
+            .maybeSingle();
+          followerVisibility =
+            (prof as { default_follower_visibility?: boolean } | null)?.default_follower_visibility ?? true;
+        } catch {
+          followerVisibility = true;
+        }
+      }
+
       // Build row with only columns that have actual values.
       const row: Record<string, unknown> = {
         user_id: user.id,
@@ -1752,6 +1796,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         parent_post_id: input.parentPostId || null,
         segments: segmentUrls,
         is_mature: !!input.isMature,
+        follower_visibility: followerVisibility,
         poster_timezone: getDeviceTimezone(),
       };
       if (input.trimData && input.trimData.length > 0) {
@@ -1828,6 +1873,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         text_overlays: input.textOverlays ?? null,
         thumbnail_url: thumbnailUrl,
         is_mature: !!input.isMature,
+        follower_visibility: followerVisibility,
         created_at: insData.created_at as string,
         like_count: 0,
         comment_count: 0,

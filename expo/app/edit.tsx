@@ -42,6 +42,7 @@ import {
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
+import { supabase } from "@/lib/supabase";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -188,6 +189,31 @@ export default function EditScreen() {
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [isMature, setIsMature] = useState<boolean>(false);
+  // Follower visibility for this post — initialized from the creator's
+  // global default (Settings → Privacy), overridable per post.
+  const [followerVisibility, setFollowerVisibility] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("profiles")
+          .select("default_follower_visibility")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (!cancelled && data) {
+          setFollowerVisibility(
+            (data as { default_follower_visibility: boolean | null }).default_follower_visibility ?? true,
+          );
+        }
+      } catch {
+        // Keep the default (true) on any fetch failure.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
 
   // ── Drag-to-trash tracking ───────────────────────────────────────────────
   const [dragOverlayInfo, setDragOverlayInfo] = useState<{
@@ -2003,6 +2029,7 @@ export default function EditScreen() {
         textOverlays: overlaysForPost,
         thumbnailUri: thumbnailUri ?? undefined,
         isMature,
+        followerVisibility,
         optimisticTempId: tempId,
         onProgress: (percent: number) => {
           updateOptimisticProgress(tempId, percent);
@@ -2052,7 +2079,7 @@ export default function EditScreen() {
       // DO NOT re-throw and DO NOT navigate. Stay on the edit screen
       // so the user can retry or save as draft.
     }
-  }, [clips, draftId, textOverlays, isMature, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId]);
+  }, [clips, draftId, textOverlays, isMature, followerVisibility, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
 
@@ -2492,6 +2519,21 @@ export default function EditScreen() {
               ios_backgroundColor={theme.border}
             />
           </View>
+          {!reactingTo && (
+            <View style={styles.matureRow}>
+              <View style={styles.matureLabelWrap}>
+                <UiText style={styles.matureLabel}>Show to followers if it survives</UiText>
+                <UiText style={styles.matureHint}>Followers see this post only after it survives Trial.</UiText>
+              </View>
+              <Switch
+                value={followerVisibility}
+                onValueChange={setFollowerVisibility}
+                trackColor={{ false: theme.border, true: theme.accent }}
+                thumbColor="#fff"
+                ios_backgroundColor={theme.border}
+              />
+            </View>
+          )}
           <View style={styles.actionRow}>
             <Pressable
               onPress={handleSaveDraftPress}

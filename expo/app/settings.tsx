@@ -1,25 +1,69 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   Alert,
   Linking,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   View,
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ban, ChevronLeft, FileText, LogOut, Shield, Trash2, User } from "lucide-react-native";
+import { Ban, ChevronLeft, FileText, LogOut, Shield, Trash2, User, Users } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
+import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 import UiText from "@/components/UiText";
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { signOut, deleteAccount } = useAuth();
+  const { user, signOut, deleteAccount } = useAuth();
   const [deleting, setDeleting] = useState<boolean>(false);
+  // Global default for whether new posts are shown to the creator's followers
+  // after they survive Trial (posts.default_follower_visibility).
+  const [showToFollowers, setShowToFollowers] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("profiles")
+          .select("default_follower_visibility")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (!cancelled && data) {
+          setShowToFollowers(
+            (data as { default_follower_visibility: boolean | null }).default_follower_visibility ?? true,
+          );
+        }
+      } catch {
+        // Keep default (true) on fetch failure.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  const handleToggleFollowerVisibility = useCallback(
+    async (value: boolean) => {
+      if (!user?.id) return;
+      const prev = showToFollowers;
+      setShowToFollowers(value);
+      const { error } = await supabase
+        .from("profiles")
+        .update({ default_follower_visibility: value })
+        .eq("id", user.id);
+      if (error) {
+        setShowToFollowers(prev);
+        console.warn("[settings] follower visibility update failed", error.message);
+      }
+    },
+    [user?.id, showToFollowers],
+  );
 
   const handleSignOut = useCallback(() => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -121,6 +165,28 @@ export default function SettingsScreen() {
                 style={{ transform: [{ rotate: "180deg" }] }}
               />
             </Pressable>
+          </View>
+
+          {/* Privacy section */}
+          <UiText style={styles.sectionLabel}>Privacy</UiText>
+          <View style={styles.sectionCard}>
+            <View style={styles.row}>
+              <Users color={theme.textMuted} size={18} strokeWidth={2} />
+              <View style={styles.privacyTextWrap}>
+                <UiText style={styles.rowText}>Show survived posts to followers</UiText>
+                <UiText style={styles.privacyHint}>
+                  When on, your posts appear to your followers once they survive
+                  Trial. You can override this per post when creating.
+                </UiText>
+              </View>
+              <Switch
+                value={showToFollowers}
+                onValueChange={handleToggleFollowerVisibility}
+                trackColor={{ false: theme.border, true: theme.accent }}
+                thumbColor="#fff"
+                ios_backgroundColor={theme.border}
+              />
+            </View>
           </View>
 
           {/* Legal section */}
@@ -272,6 +338,16 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 15,
     fontWeight: "600" as const,
+  },
+
+  privacyTextWrap: {
+    flex: 1,
+  },
+  privacyHint: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
   },
 
   dangerDivider: {
