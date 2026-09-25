@@ -21,7 +21,7 @@ import { ArrowLeft, EllipsisVertical, Flag, Heart, Reply, RotateCcw, Sparkles, X
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
-import { usePosts, type Post } from "@/providers/PostsProvider";
+import { usePosts, isFollowerEligible, type Post } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 import { useReportContent } from "@/hooks/useReportContent";
@@ -32,7 +32,8 @@ export default function PostReactionsScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { reactionsByParent, reactionsLoading, refetchReactions } = usePosts();
+  const { user } = useAuth();
+  const { reactionsByParent, reactionsLoading, refetchReactions, following } = usePosts();
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
@@ -42,9 +43,18 @@ export default function PostReactionsScreen() {
     setRefreshing(false);
   }, [refetchReactions]);
 
+  // Follower-visibility: reactions from followed creators are only visible
+  // when they survived Trial with follower visibility allowed (same shared
+  // rule as the feed). Own + non-followed reactions always pass. Filtered
+  // here (not in the provider) so FeedItem's reaction counts stay unchanged.
   const reactions = useMemo<Post[]>(
-    () => (id ? reactionsByParent[id] ?? [] : []),
-    [id, reactionsByParent],
+    () =>
+      id
+        ? (reactionsByParent[id] ?? []).filter((p) =>
+            isFollowerEligible(p, user?.id, following),
+          )
+        : [],
+    [id, reactionsByParent, user?.id, following],
   );
 
   const onViewableItemsChanged = React.useRef(

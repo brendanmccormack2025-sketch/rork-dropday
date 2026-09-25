@@ -76,6 +76,30 @@ export type Post = {
   };
 };
 
+/**
+ * Follower-visibility eligibility — the single source of truth for whether
+ * the current viewer may see a post/reaction created by someone they follow.
+ *
+ * - The viewer's own posts always pass.
+ * - Posts from creators the viewer does NOT follow always pass (the
+ *   "outside audience" — unaffected by follower visibility).
+ * - Posts from followed creators pass only when the post survived Trial
+ *   AND the creator allowed follower visibility.
+ *
+ * Consumers: fyp feed, following feed, public profile (user/[id] +
+ * profile-drops), and reaction surfaces (reaction-tree + reactions).
+ * Keep all call sites in sync when the rule changes.
+ */
+export function isFollowerEligible(
+  post: Pick<Post, "user_id" | "status" | "follower_visibility">,
+  viewerId: string | null | undefined,
+  followingIds: readonly string[],
+): boolean {
+  if (post.user_id === viewerId) return true;
+  if (!followingIds.includes(post.user_id)) return true;
+  return post.status === "survived" && post.follower_visibility !== false;
+}
+
 export type SuggestedUser = {
   id: string;
   username: string;
@@ -820,12 +844,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // allowed follower visibility — followers never see trial/incomplete
       // posts, and never see follower_visibility = false posts.
       const followingIds = followingQuery.data ?? [];
-      const followingSet = new Set(followingIds);
-      const eligible = raw.filter((p) => {
-        if (p.user_id === user?.id) return true;
-        if (!followingSet.has(p.user_id)) return true;
-        return p.status === "survived" && p.follower_visibility !== false;
-      });
+      const eligible = raw.filter((p) => isFollowerEligible(p, user?.id, followingIds));
       return rankFeed(eligible, followingIds, user?.id);
     },
   });
@@ -897,12 +916,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           profile: (row.profiles as Post["profile"]) ?? null,
           follower_visibility: (row.follower_visibility as boolean | null) ?? true,
         }));
-        // Same eligibility rule as the fyp feed: everything in this query is
-        // from a followed creator, so only survived + follower-allowed posts
-        // are eligible.
-        const eligible = raw.filter(
-          (p) => p.status === "survived" && p.follower_visibility !== false,
-        );
+        // Same shared eligibility rule as the fyp feed. Everything in this
+        // query is from a followed creator (so only survived + follower-allowed
+        // posts pass); the viewer's own optimistic posts also pass via the
+        // self-check inside isFollowerEligible.
+        const eligible = raw.filter((p) => isFollowerEligible(p, user.id, followingIds));
         return rankFollowingFeed(eligible, user.id);
       } catch (e) {
         logQueryError("following-feed", e);
@@ -1263,7 +1281,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, moderation_status, status, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .not("parent_post_id", "is", null)
           .eq("moderation_status", "active")
@@ -1287,6 +1305,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           moderation_status: (row.moderation_status as string | undefined) ?? "active",
           status: (row.status as Post["status"]) ?? "trial",
+          follower_visibility: (row.follower_visibility as boolean | null) ?? true,
           created_at: row.created_at as string,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,

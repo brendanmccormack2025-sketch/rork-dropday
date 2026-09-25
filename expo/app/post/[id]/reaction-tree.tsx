@@ -28,7 +28,7 @@ import { FeedAvatar } from "@/components/Avatar";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
-import { usePosts, type Post } from "@/providers/PostsProvider";
+import { usePosts, isFollowerEligible, type Post } from "@/providers/PostsProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { useReportContent } from "@/hooks/useReportContent";
 
@@ -85,7 +85,7 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("parent_post_id", id)
         .eq("moderation_status", "active")
@@ -110,6 +110,8 @@ export default function ReactionTreeScreen() {
         text_overlays: null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         moderation_status: (row.moderation_status as string | undefined) ?? "active",
+        status: (row.status as Post["status"]) ?? "trial",
+        follower_visibility: (row.follower_visibility as boolean | null) ?? true,
         created_at: row.created_at as string,
         like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -132,12 +134,17 @@ export default function ReactionTreeScreen() {
   // likes before it drops below. Tiebreaker: created_at descending (newer
   // first). Tier 2 creator replies stay anchored under their parent
   // tier 1 reaction regardless of score — the ranking only applies here.
+  //
+  // Follower-visibility: reactions from followed creators are only visible
+  // when they survived Trial with follower visibility allowed (same shared
+  // rule as the feed). Own + non-followed reactions always pass.
   const rankedTier1Posts = useMemo(() => {
-    // Filter out blocked users' reactions and reported reactions before ranking
-    const visible = (blockedUserIds.size > 0 || reportedReactionIds.size > 0)
-      ? tier1Posts.filter((p) =>
-          !blockedUserIds.has(p.user_id) && !reportedReactionIds.has(p.id))
-      : tier1Posts;
+    const visible = tier1Posts.filter(
+      (p) =>
+        !blockedUserIds.has(p.user_id) &&
+        !reportedReactionIds.has(p.id) &&
+        isFollowerEligible(p, user?.id, following),
+    );
     if (visible.length === 0) return visible;
     const follows = new Set(following);
     const scored = visible.map((p) => ({
@@ -150,7 +157,7 @@ export default function ReactionTreeScreen() {
       return b.createdMs - a.createdMs;
     });
     return scored.map((s) => s.p);
-  }, [tier1Posts, following, blockedUserIds, reportedReactionIds]);
+  }, [tier1Posts, following, blockedUserIds, reportedReactionIds, user?.id]);
 
   // ── Query 3: tier 2 replies (parent_post_id IN tier 1 IDs) ────────────
   // Only the creator needs tier 2 data, but we fetch for everyone — the
@@ -166,7 +173,7 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .in("parent_post_id", tier1Ids)
         .eq("moderation_status", "active")
@@ -191,6 +198,8 @@ export default function ReactionTreeScreen() {
         text_overlays: null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         moderation_status: (row.moderation_status as string | undefined) ?? "active",
+        status: (row.status as Post["status"]) ?? "trial",
+        follower_visibility: (row.follower_visibility as boolean | null) ?? true,
         created_at: row.created_at as string,
         like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -207,12 +216,14 @@ export default function ReactionTreeScreen() {
   // it in the list (oldest reply first), so replies stay grouped under
   // their parent regardless of the tier 1 ranking.
   const feedItems: FeedItem[] = useMemo(() => {
-    // Index tier 2 replies by their parent_post_id
-    // Filter out replies from blocked users
+    // Index tier 2 replies by their parent_post_id.
+    // Filter out replies from blocked users, reported replies, and replies
+    // from followed creators that failed the follower-visibility rule.
     const repliesByParent = new Map<string, Post[]>();
     for (const reply of tier2Posts) {
       if (blockedUserIds.has(reply.user_id)) continue;
       if (reportedReactionIds.has(reply.id)) continue;
+      if (!isFollowerEligible(reply, user?.id, following)) continue;
       const pid = reply.parent_post_id;
       if (!pid) continue;
       if (!repliesByParent.has(pid)) repliesByParent.set(pid, []);
@@ -230,7 +241,7 @@ export default function ReactionTreeScreen() {
       }
     }
     return items;
-  }, [rankedTier1Posts, tier2Posts, blockedUserIds, reportedReactionIds]);
+  }, [rankedTier1Posts, tier2Posts, blockedUserIds, reportedReactionIds, user?.id, following]);
 
   const qc = useQueryClient();
 

@@ -28,7 +28,7 @@ import {
 import { theme } from "@/constants/theme";
 import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
-import { usePosts, resolveAvatarUrl, type Post } from "@/providers/PostsProvider";
+import { usePosts, resolveAvatarUrl, isFollowerEligible, type Post } from "@/providers/PostsProvider";
 import { supabase } from "@/lib/supabase";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 
@@ -87,7 +87,7 @@ export default function PublicProfileScreen() {
       const { data, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("user_id", id)
         .is("parent_post_id", null)
@@ -115,6 +115,7 @@ export default function PublicProfileScreen() {
         text_overlays: null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         status: (row.status as Post["status"]) ?? "trial",
+        follower_visibility: (row.follower_visibility as boolean | null) ?? true,
         created_at: row.created_at as string,
         like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -125,9 +126,6 @@ export default function PublicProfileScreen() {
   });
 
   const drops = dropsQuery.data ?? [];
-  // Blocked user's content is hidden entirely — the grid renders empty and
-  // the ListEmptyComponent shows a blocked notice instead of their drops.
-  const visibleDrops = userProfileBlocked ? [] : drops;
 
   // ── Followers / following counts ─────────────────────────────────────
   const { data: followersCount = 0 } = useQuery({
@@ -174,6 +172,22 @@ export default function PublicProfileScreen() {
       return !!data;
     },
   });
+
+  // Blocked user's content is hidden entirely — the grid renders empty and
+  // the ListEmptyComponent shows a blocked notice instead of their drops.
+  //
+  // Follower-visibility: when the viewer follows this profile's owner, only
+  // posts that survived Trial with follower visibility allowed are shown
+  // (same shared rule as the feed). Own profile and non-followers unaffected.
+  const visibleDrops = useMemo(
+    () =>
+      userProfileBlocked
+        ? []
+        : drops.filter((p) =>
+            isFollowerEligible(p, user?.id, isFollowing && id ? [id] : []),
+          ),
+    [drops, userProfileBlocked, user?.id, isFollowing, id],
+  );
 
   // ── Follow / Unfollow ────────────────────────────────────────────────
   const handleToggleFollow = useCallback(async () => {
@@ -226,7 +240,7 @@ export default function PublicProfileScreen() {
           data={visibleDrops}
           keyExtractor={(p) => p.id}
           numColumns={2}
-          columnWrapperStyle={drops.length > 0 ? styles.row : undefined}
+          columnWrapperStyle={visibleDrops.length > 0 ? styles.row : undefined}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -351,7 +365,7 @@ export default function PublicProfileScreen() {
                   <View style={styles.statsRow}>
                     <View style={styles.stat}>
                       <UiText style={styles.statNum}>
-                        {userProfileBlocked ? 0 : drops.length}
+                        {userProfileBlocked ? 0 : visibleDrops.length}
                       </UiText>
                       <UiText style={styles.statLabel}>Posts</UiText>
                     </View>
