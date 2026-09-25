@@ -23,9 +23,8 @@ import {
   Users,
   Sparkles,
 } from "lucide-react-native";
-
-import TrialLogo from "@/components/TrialLogo";
 import { FeedListView } from "@/components/FeedListView";
+import TrialLogo from "@/components/TrialLogo";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post, resolveAvatarUrl } from "@/providers/PostsProvider";
 import { supabase } from "@/lib/supabase";
@@ -33,19 +32,15 @@ import { supabase } from "@/lib/supabase";
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const FREE_VIEWS_BEFORE_GATE = 5;
 
-type FeedTab = "following" | "foryou";
-
 export default function FeedScreen() {
   const router = useRouter();
   const {
     feed, feedLoading, refetchFeed,
-    followingFeed, followingFeedLoading, refetchFollowingFeed,
     refetchMyPosts, optimisticPosts, lastPostCreatedAtRef,
   } = usePosts();
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
   const [sharePost, setSharePost] = useState<Post | null>(null);
-  const [activeTab, setActiveTab] = useState<FeedTab>("foryou");
   const isFirstFocusRef = useRef<boolean>(true);
 
   const viewedCount = viewedIds.size;
@@ -53,16 +48,12 @@ export default function FeedScreen() {
   // Re-enable before launch by restoring: !hasPostedInWindow && viewedCount >= FREE_VIEWS_BEFORE_GATE
   const gateActive = false;
 
-  const activePosts = activeTab === "following" ? followingFeed : feed;
-  const activeLoading = activeTab === "following" ? followingFeedLoading : feedLoading;
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // Refetch the active feed + myPosts so hasPostedInWindow updates correctly.
-    const refetchActive = activeTab === "following" ? refetchFollowingFeed : refetchFeed;
-    await Promise.all([refetchActive(), refetchMyPosts()]);
+    // Refetch the feed + myPosts so hasPostedInWindow updates correctly.
+    await Promise.all([refetchFeed(), refetchMyPosts()]);
     setRefreshing(false);
-  }, [activeTab, refetchFeed, refetchFollowingFeed, refetchMyPosts]);
+  }, [refetchFeed, refetchMyPosts]);
 
   // Refetch on tab focus — ensures fresh data when returning from camera
   // or edit-profile without needing a manual pull-to-refresh.
@@ -92,20 +83,18 @@ export default function FeedScreen() {
       const justPosted = msSincePost < 5_000;
       if (!hasPendingUpload && !justPosted) {
         refetchFeed();
-        refetchFollowingFeed();
       }
-    }, [refetchFeed, refetchFollowingFeed, optimisticPosts, lastPostCreatedAtRef])
+    }, [refetchFeed, optimisticPosts, lastPostCreatedAtRef])
   );
 
   return (
     <View style={styles.root}>
       <FeedListView
-        posts={activePosts}
-        isLoading={activeLoading}
+        posts={feed}
+        isLoading={feedLoading}
         onRefresh={onRefresh}
         isRefreshing={refreshing}
         initialIndex={0}
-        resetToken={activeTab}
         showGate={gateActive}
         onSharePost={(post) => setSharePost(post)}
         onReactionsPost={(post) => {
@@ -122,35 +111,9 @@ export default function FeedScreen() {
                 />
               </View>
             </View>
-
-            {/* Tab switcher */}
-            <View style={styles.tabBar} pointerEvents="box-none">
-              <Pressable
-                onPress={() => setActiveTab("following")}
-                style={[styles.tab, activeTab === "following" && styles.tabActive]}
-              >
-                <UiText style={[styles.tabText, activeTab === "following" && styles.tabTextActive]}>
-                  Following
-                </UiText>
-              </Pressable>
-              <Pressable
-                onPress={() => setActiveTab("foryou")}
-                style={[styles.tab, activeTab === "foryou" && styles.tabActive]}
-              >
-                <UiText style={[styles.tabText, activeTab === "foryou" && styles.tabTextActive]}>
-                  For You
-                </UiText>
-              </Pressable>
-            </View>
           </SafeAreaView>
         }
-        emptyComponent={
-          activeTab === "following" ? (
-            <FollowingEmptyState onExploreForYou={() => setActiveTab("foryou")} />
-          ) : (
-            <EmptyState />
-          )
-        }
+        emptyComponent={<EmptyState />}
         gateComponent={
           gateActive ? (
             <GateOverlay
@@ -180,21 +143,6 @@ function EmptyState() {
       <TrialLogo size={56} />
       <UiText style={styles.emptyTitle}>No posts yet</UiText>
       <UiText style={styles.emptySub}>Be the first to post.</UiText>
-    </SafeAreaView>
-  );
-}
-
-function FollowingEmptyState({ onExploreForYou }: { onExploreForYou: () => void }) {
-  return (
-    <SafeAreaView style={styles.emptyWrap}>
-      <Users color={theme.textMuted} size={48} />
-      <UiText style={styles.emptyTitle}>No posts from your follows yet</UiText>
-      <UiText style={styles.emptySub}>
-        Follow people to see their posts here. Head to For You to discover creators.
-      </UiText>
-      <Pressable onPress={onExploreForYou} style={styles.emptyBtn}>
-        <UiText style={styles.emptyBtnText}>Explore For You</UiText>
-      </Pressable>
     </SafeAreaView>
   );
 }
@@ -418,35 +366,6 @@ const styles = StyleSheet.create({
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   brandLogo: { width: 72, height: 22 },
-
-  /* Tab switcher */
-  tabBar: {
-    flexDirection: "row",
-    alignSelf: "center",
-    gap: 4,
-    paddingHorizontal: 16,
-    paddingBottom: 6,
-    paddingTop: 2,
-  },
-  tab: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 0,
-    backgroundColor: "transparent",
-  },
-  tabActive: {
-    backgroundColor: "rgba(10,10,10,0.08)",
-  },
-  tabText: {
-    color: theme.textMuted,
-    fontSize: 13,
-    fontWeight: "700" as const,
-    letterSpacing: 0.2,
-  },
-  tabTextActive: {
-    color: theme.text,
-    fontWeight: "900" as const,
-  },
   dmBtn: {
     width: 36,
     height: 36,
@@ -499,18 +418,6 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
     fontSize: 13,
     textAlign: "center",
-  },
-  emptyBtn: {
-    marginTop: 12,
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-    borderRadius: 0,
-    backgroundColor: theme.accent,
-  },
-  emptyBtnText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "700" as const,
   },
 
   /* Gate overlay */
