@@ -25,34 +25,51 @@ function isNetworkDownloadError(e: unknown): boolean {
 }
 
 /**
- * launchImageLibraryAsync with one automatic retry for iCloud download
- * failures (PHPhotosErrorDomain 3169/3164, CloudPhotoLibraryErrorDomain,
- * and similar sync-timing errors — see ICLOUD_DOWNLOAD_ERROR_PATTERN).
- * Large assets intermittently fail partway through the download; a single
- * retry after a short pause usually succeeds. Any other error (or a second
- * consecutive iCloud failure) is rethrown to the caller with a friendly
- * message.
+ * launchImageLibraryAsync with up to two automatic retries for iCloud
+ * download failures (PHPhotosErrorDomain 3169/3164,
+ * CloudPhotoLibraryErrorDomain, and similar sync-timing errors — see
+ * ICLOUD_DOWNLOAD_ERROR_PATTERN). Large assets (multi-second videos,
+ * freshly synced files) intermittently fail partway through the download;
+ * giving iCloud more attempts with growing pauses — 1s, then 3s — meaningfully
+ * improves the odds for borderline cases. Non-iCloud errors are rethrown
+ * immediately; once all attempts are exhausted the caller gets a friendly
+ * message instead of a raw error.
  *
- * `onRetry` fires just before the second attempt starts so callers can
- * switch their loading copy to a "trying again" message. Purely cosmetic —
- * it does not affect the retry logic or timing.
+ * Attempts only escalate on a genuine failure, so normal/fast picks pay
+ * zero extra delay — successful first attempts return immediately.
+ *
+ * `onRetry` fires just before each retry starts with the upcoming attempt
+ * number (2, then 3) so callers can switch their loading copy — e.g.
+ * "Still downloading…" → "Almost there…". Purely cosmetic — it does not
+ * affect the retry logic or timing.
  */
+const MAX_ATTEMPTS = 3;
+
+function retryDelayMs(attempt: number): number {
+  // Escalating backoff: 1s before retry 2, 3s before retry 3.
+  return attempt === 1 ? 1_000 : 3_000;
+}
+
 export async function launchLibraryWithRetry(
   options: ImagePicker.ImagePickerOptions,
-  onRetry?: () => void,
+  onRetry?: (attempt: number) => void,
 ): Promise<ImagePicker.ImagePickerResult> {
-  try {
-    return await ImagePicker.launchImageLibraryAsync(options);
-  } catch (e) {
-    if (!isNetworkDownloadError(e)) throw e;
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    onRetry?.();
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       return await ImagePicker.launchImageLibraryAsync(options);
-    } catch {
-      throw new Error(
-        "Couldn't download the media from iCloud. Check your connection and try again.",
-      );
+    } catch (e) {
+      if (attempt === MAX_ATTEMPTS) {
+        throw new Error(
+          "Couldn't download the media from iCloud. Check your connection and try again.",
+        );
+      }
+      if (!isNetworkDownloadError(e)) throw e;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt)));
+      onRetry?.(attempt + 1);
     }
   }
+  // Unreachable — every iteration either returns or throws.
+  throw new Error(
+    "Couldn't download the media from iCloud. Check your connection and try again.",
+  );
 }
