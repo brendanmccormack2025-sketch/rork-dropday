@@ -17,13 +17,15 @@ const BADGES: Record<SurvivalStatus, { label: string; color: string }> = {
 };
 
 /**
- * Plain-text status pill for the creator's own profile grid.
- * Minimum-scope verdict UI — no animation, no reveal moment.
+ * Status pill for survival verdicts — rounded capsule with a small dot
+ * indicator, colored background matching the status. Shared by the feed's
+ * top-left badge and the profile grid; the status logic itself is unchanged.
  */
 export function TrialStatusBadge({ status }: { status: Post["status"] }) {
   const badge = BADGES[status ?? "trial"];
   return (
     <View style={[styles.badge, { backgroundColor: badge.color }]}>
+      <View style={styles.dot} />
       <UiText style={styles.label}>{badge.label}</UiText>
     </View>
   );
@@ -31,9 +33,18 @@ export function TrialStatusBadge({ status }: { status: Post["status"] }) {
 
 const styles = StyleSheet.create({
   badge: {
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.95)",
   },
   label: {
     color: "#fff",

@@ -32,6 +32,7 @@ import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoSt
 
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
+import { TrialStatusBadge } from "@/components/TrialStatusBadge";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post, type TextOverlay, type TextBackgroundStyle } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
@@ -89,10 +90,14 @@ function ActionButton({
   icon,
   label,
   onPress,
+  muted = false,
 }: {
   icon: React.ReactNode;
-  label: string;
+  /** Omit for icon-only actions (e.g. share). */
+  label?: string;
   onPress?: () => void;
+  /** Informational stats (view count) get reduced visual weight. */
+  muted?: boolean;
 }) {
   const scale = useRef(new Animated.Value(1)).current;
 
@@ -129,7 +134,11 @@ function ActionButton({
     >
       <Animated.View style={[styles.actionBtn, { transform: [{ scale }] }]}>
         {icon}
-        <UiText style={styles.actionLabel}>{label}</UiText>
+        {label != null && (
+          <UiText style={[styles.actionLabel, muted && styles.actionLabelMuted]}>
+            {label}
+          </UiText>
+        )}
       </Animated.View>
     </Pressable>
   );
@@ -946,6 +955,16 @@ export const FeedItem = memo(function FeedItem({
     onError: onErrorSlotB,
   });
 
+  // ── Creator profile navigation (rail avatar + bottom-left username) ──
+  const openCreatorProfile = useCallback(() => {
+    if (!user?.id || !post.user_id) return;
+    if (post.user_id === user.id) {
+      router.push("/(tabs)/profile" as never);
+    } else {
+      router.push(`/user/${post.user_id}` as never);
+    }
+  }, [user?.id, post.user_id, router]);
+
   return (
     <View
       style={styles.item}
@@ -1123,12 +1142,29 @@ export const FeedItem = memo(function FeedItem({
         pointerEvents="none"
       />
 
+      {/* Trial status pill — top-left, below the header wordmark. Reuses the
+          shared badge (same status logic as the profile grid). */}
+      <View style={styles.statusBadgeWrap} pointerEvents="none">
+        <TrialStatusBadge status={post.status} />
+      </View>
+
+      {/* Right-side vertical action rail — avatar, like, reaction, share,
+          owner/report controls, then the view count with reduced weight. */}
       <View
         style={[
           styles.actions,
-          { bottom: bottomInset + 30 },
+          { bottom: bottomInset + 20 },
         ]}
       >
+        <Pressable
+          onPress={openCreatorProfile}
+          style={styles.railAvatarWrap}
+          hitSlop={8}
+        >
+          <View style={styles.railAvatar}>
+            <FeedAvatar profile={post.profile} name={name} />
+          </View>
+        </Pressable>
         <ActionButton
           icon={
             <Heart
@@ -1151,12 +1187,7 @@ export const FeedItem = memo(function FeedItem({
           onPress={onReactions}
         />
         <ActionButton
-          icon={<Eye color="#fff" size={26} strokeWidth={2} />}
-          label={String(post.view_count ?? 0)}
-        />
-        <ActionButton
           icon={<Send color="#fff" size={24} strokeWidth={2} />}
-          label="Share"
           onPress={onShare}
         />
         {isOwner && (
@@ -1173,8 +1204,14 @@ export const FeedItem = memo(function FeedItem({
             onPress={() => reportContent("post", post.id)}
           />
         )}
+        <ActionButton
+          icon={<Eye color="rgba(255,255,255,0.6)" size={20} strokeWidth={2} />}
+          label={String(post.view_count ?? 0)}
+          muted
+        />
       </View>
 
+      {/* Bottom-left caption block — username bold, caption lighter below */}
       <View
         style={[
           styles.bottom,
@@ -1183,20 +1220,7 @@ export const FeedItem = memo(function FeedItem({
         pointerEvents="box-none"
       >
         <View style={styles.userRow}>
-          <Pressable
-            onPress={() => {
-              if (!user?.id || !post.user_id) return;
-              if (post.user_id === user.id) {
-                router.push("/(tabs)/profile" as never);
-              } else {
-                router.push(`/user/${post.user_id}` as never);
-              }
-            }}
-            style={styles.userRowPressable}
-          >
-            <View style={styles.avatar}>
-              <FeedAvatar profile={post.profile} name={name} />
-            </View>
+          <Pressable onPress={openCreatorProfile} hitSlop={4}>
             <UiText style={styles.username}>
               @{post.profile?.username ?? "dropper"}
             </UiText>
@@ -1210,7 +1234,7 @@ export const FeedItem = memo(function FeedItem({
           </UiText>
         ) : null}
         <View style={styles.musicRow}>
-          <Music2 color={theme.textMuted} size={12} />
+          <Music2 color="rgba(255,255,255,0.65)" size={12} />
           <UiText style={styles.musicText}>
             Original sound
           </UiText>
@@ -1233,13 +1257,25 @@ const styles = StyleSheet.create({
   gradTop: { position: "absolute", top: 0, left: 0, right: 0, height: 140 },
   gradBottom: { position: "absolute", left: 0, right: 0, bottom: 0, height: 320 },
 
-  /* Actions */
+  /* Right-side action rail */
   actions: {
     position: "absolute",
     right: 12,
     alignItems: "center",
-    gap: 22,
+    gap: 18,
     zIndex: 999,
+  },
+  railAvatarWrap: { marginBottom: 6 },
+  railAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: theme.accent,
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   actionBtn: { alignItems: "center", gap: 4 },
   actionLabel: {
@@ -1248,6 +1284,21 @@ const styles = StyleSheet.create({
     fontWeight: "900" as const,
     textShadowColor: "rgba(0,0,0,0.6)",
     textShadowRadius: 4,
+  },
+  actionLabelMuted: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 10,
+    fontWeight: "600" as const,
+    textShadowColor: "rgba(0,0,0,0.6)",
+    textShadowRadius: 4,
+  },
+
+  /* Trial status pill (top-left) */
+  statusBadgeWrap: {
+    position: "absolute",
+    top: 118,
+    left: 16,
+    zIndex: 998,
   },
 
   /* Bottom info */
@@ -1259,33 +1310,29 @@ const styles = StyleSheet.create({
     zIndex: 999,
   },
   userRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  userRowPressable: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  avatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
   username: {
     color: "#fff",
     fontWeight: "900" as const,
     fontSize: 15,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowRadius: 3,
   },
-  dotSep: { color: theme.textMuted, fontSize: 13 },
-  ago: { color: theme.textMuted, fontSize: 12, fontWeight: "600" as const },
+  dotSep: { color: "rgba(255,255,255,0.6)", fontSize: 13 },
+  ago: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 12,
+    fontWeight: "600" as const,
+  },
   caption: {
-    color: "#fff",
+    color: "rgba(255,255,255,0.88)",
     fontSize: 14,
     lineHeight: 19,
+    fontWeight: "500" as const,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowRadius: 3,
   },
   musicRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
-  musicText: { color: theme.textMuted, fontSize: 12 },
+  musicText: { color: "rgba(255,255,255,0.65)", fontSize: 12 },
 
   /* Buffering indicator */
   bufferingOverlay: {

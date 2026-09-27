@@ -1,8 +1,8 @@
 import { Tabs, useRouter } from "expo-router";
 import { Compass, Home, User, Users } from "lucide-react-native";
 import React, { useCallback, useState } from "react";
-import { Platform, Pressable, StyleSheet, View } from "react-native";
-import { BlurView } from "expo-blur";
+import { Pressable, StyleSheet, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 
 import CenterPostButton from "@/components/CenterPostButton";
 import PostChoiceSheet from "@/components/PostChoiceSheet";
@@ -28,18 +28,15 @@ export default function TabLayout() {
         tabBarActiveTintColor: theme.accent,
         tabBarInactiveTintColor: theme.textDim,
         tabBarStyle: styles.tabBar,
-        tabBarBackground: () =>
-          Platform.OS === "ios" ? (
-            <BlurView
-              tint="light"
-              intensity={60}
-              style={StyleSheet.absoluteFill}
-            />
-          ) : (
-            <View
-              style={[StyleSheet.absoluteFill, { backgroundColor: theme.bg }]}
-            />
-          ),
+        // TikTok-style overlay: the tab bar already floats above screen content
+        // (position: absolute), so a translucent white gradient keeps the icons
+        // legible over full-bleed video without a solid bar blocking the feed.
+        tabBarBackground: () => (
+          <LinearGradient
+            colors={["rgba(255,255,255,0)", "rgba(255,255,255,0.94)"]}
+            style={StyleSheet.absoluteFill}
+          />
+        ),
         tabBarLabelStyle: styles.label,
       }}
     >
@@ -109,8 +106,6 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   tabBar: {
     position: "absolute",
-    borderTopWidth: 1,
-    borderTopColor: theme.border,
     backgroundColor: "transparent",
     height: 88,
     paddingTop: 6,
