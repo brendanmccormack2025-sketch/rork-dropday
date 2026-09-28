@@ -1,36 +1,35 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
+import { Animated, Easing, Pressable, StyleSheet } from "react-native";
 import { Plus } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { Platform } from "react-native";
-import { theme } from "@/constants/theme";
 
 type Props = {
   onPress?: () => void;
 };
 
 /**
- * Floating center "+" button — a compact outlined circle with a
- * gentle constant pulse. Visually distinct from the other tab icons
- * while still reading as the primary action.
+ * Center tab-bar "+" button — a 38×38 solid white rounded square with a
+ * dark plus glyph. Idle pulse is a subtle scale animation only; press
+ * feedback keeps its haptic + squash.
  */
 export default function CenterPostButton({ onPress }: Props) {
+  // Subtle idle pulse (scale only, no ring/opacity animation).
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const pressScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    const to = 1.08;
-    const dur = 1800;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
-          toValue: to,
-          duration: dur,
+          toValue: 1.04,
+          duration: 1600,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
         Animated.timing(pulseAnim, {
           toValue: 1,
-          duration: dur,
+          duration: 1600,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
@@ -43,15 +42,8 @@ export default function CenterPostButton({ onPress }: Props) {
     };
   }, [pulseAnim]);
 
-  const ringOpacity = pulseAnim.interpolate({
-    inputRange: [1, 1.08],
-    outputRange: [0.25, 0.45],
-  });
-
-  const pressScale = useRef(new Animated.Value(1)).current;
-
-  // Press feedback: haptic + squash on press-in for a snappy feel, springy
-  // release on press-out. Runs alongside the idle pulse.
+  // Press feedback: haptic + squash on press-in, springy release on
+  // press-out, multiplied with the idle pulse.
   const handlePressIn = () => {
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -80,61 +72,32 @@ export default function CenterPostButton({ onPress }: Props) {
       style={styles.container}
       hitSlop={12}
     >
-      {/* Pulsing outline ring */}
       <Animated.View
         style={[
-          styles.ring,
-          {
-            opacity: ringOpacity,
-            transform: [{ scale: pulseAnim }],
-          },
+          styles.btn,
+          { transform: [{ scale: Animated.multiply(pressScale, pulseAnim) }] },
         ]}
-      />
-      {/* Button body — outlined circle */}
-      <Animated.View
-        style={[styles.btnOuter, { transform: [{ scale: pressScale }] }]}
       >
-        <View style={styles.btn}>
-          <Plus color={theme.accent} size={20} strokeWidth={2.5} />
-        </View>
+        <Plus color="#1A1A18" size={20} strokeWidth={2.5} />
       </Animated.View>
     </Pressable>
   );
 }
 
-const SIZE = 44;
-const RING_SIZE = 56;
+const SIZE = 38;
 
 const styles = StyleSheet.create({
   container: {
-    width: RING_SIZE,
-    height: RING_SIZE,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: -14,
-  },
-  ring: {
-    position: "absolute",
-    width: RING_SIZE,
-    height: RING_SIZE,
-    borderRadius: 0,
-    borderWidth: 1.5,
-    borderColor: theme.accent,
-  },
-  btnOuter: {
     width: SIZE,
     height: SIZE,
-    borderRadius: 0,
-    borderWidth: 2,
-    borderColor: theme.accent,
-    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
   btn: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 0,
+    width: SIZE,
+    height: SIZE,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },

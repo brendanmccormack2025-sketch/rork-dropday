@@ -17,9 +17,9 @@ const BADGES: Record<SurvivalStatus, { label: string; color: string }> = {
 };
 
 /**
- * Status pill for survival verdicts — rounded capsule with a small dot
+ * Status badge for survival verdicts — small pill with a 6px white dot
  * indicator, colored background matching the status. Shared by the feed's
- * top-left badge and the profile grid; the status logic itself is unchanged.
+ * bottom-left block and the profile grid; the status logic itself is unchanged.
  */
 export function TrialStatusBadge({ status }: { status: Post["status"] }) {
   const badge = BADGES[status ?? "trial"];
@@ -35,21 +35,21 @@ const styles = StyleSheet.create({
   badge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 8,
+    gap: 6,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 999,
+    borderRadius: 3,
   },
   dot: {
-    width: 5,
-    height: 5,
+    width: 6,
+    height: 6,
     borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.95)",
+    backgroundColor: "#FFFFFF",
   },
   label: {
     color: "#fff",
-    fontSize: 9,
-    fontWeight: "900" as const,
-    letterSpacing: 0.5,
+    fontSize: 11,
+    fontWeight: "500" as const,
+    letterSpacing: 0.6,
   },
 });

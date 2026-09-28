@@ -17,24 +17,22 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import {
   Heart,
-  Music2,
+  Music,
   Send,
   Sparkles,
   RotateCcw,
-  Trash2,
   X,
   AlertCircle,
   Eye,
-  Flag,
+  MoreHorizontal,
 } from "lucide-react-native";
 import { VideoView, useVideoPlayer, type VideoPlayer } from "expo-video";
 import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
 
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
-import { FeedAvatar } from "@/components/Avatar";
 import { TrialStatusBadge } from "@/components/TrialStatusBadge";
 import { theme } from "@/constants/theme";
-import { usePosts, type Post, type TextOverlay, type TextBackgroundStyle } from "@/providers/PostsProvider";
+import { usePosts, resolveAvatarUrl, type Post, type TextOverlay, type TextBackgroundStyle } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 import { useReportContent } from "@/hooks/useReportContent";
@@ -787,6 +785,26 @@ export const FeedItem = memo(function FeedItem({
     );
   }, [deletePost, post.id]);
 
+  // ── More menu: owner Delete / non-owner Report (same actions, same
+  // owner-only permissions as the previous dedicated rail buttons) ──
+  const handleMore = useCallback(() => {
+    if (isOwner) {
+      Alert.alert("More options", undefined, [
+        { text: "Delete", style: "destructive", onPress: handleDelete },
+        { text: "Cancel", style: "cancel" },
+      ]);
+    } else {
+      Alert.alert("More options", undefined, [
+        {
+          text: "Report",
+          style: "destructive",
+          onPress: () => reportContent("post", post.id),
+        },
+        { text: "Cancel", style: "cancel" },
+      ]);
+    }
+  }, [isOwner, handleDelete, reportContent, post.id]);
+
   // ── Per-slot callbacks for dual-player ─────────────────────────────
   // Only the active slot runs the full playback/stall logic; the inactive
   // slot just tracks preload readiness via onReadyForDisplay.
@@ -954,6 +972,11 @@ export const FeedItem = memo(function FeedItem({
     onLoad: onLoadSlotB,
     onError: onErrorSlotB,
   });
+
+  const creatorAvatarUri = useMemo(
+    () => resolveAvatarUrl(post.profile?.avatar_url ?? null),
+    [post.profile?.avatar_url],
+  );
 
   // ── Creator profile navigation (rail avatar + bottom-left username) ──
   const openCreatorProfile = useCallback(() => {
@@ -1132,37 +1155,45 @@ export const FeedItem = memo(function FeedItem({
       )}
 
       <LinearGradient
-        colors={["rgba(0,0,0,0.55)", "transparent"]}
+        colors={["rgba(0,0,0,0.4)", "transparent"]}
         style={styles.gradTop}
         pointerEvents="none"
       />
+      {/* Bottom scrim — transparent → rgba(0,0,0,0.75) at 45% of the 96px
+          region behind the tab bar. */}
       <LinearGradient
-        colors={["transparent", "rgba(0,0,0,0.85)"]}
+        colors={["transparent", "rgba(0,0,0,0.75)"]}
+        locations={[0, 0.45]}
         style={styles.gradBottom}
         pointerEvents="none"
       />
 
-      {/* Trial status pill — top-left, below the header wordmark. Reuses the
-          shared badge (same status logic as the profile grid). */}
-      <View style={styles.statusBadgeWrap} pointerEvents="none">
-        <TrialStatusBadge status={post.status} />
-      </View>
-
       {/* Right-side vertical action rail — avatar, like, reaction, share,
-          owner/report controls, then the view count with reduced weight. */}
+          more menu, then the view count with reduced weight. */}
       <View
         style={[
           styles.actions,
-          { bottom: bottomInset + 20 },
+          { bottom: bottomInset + 22 },
         ]}
       >
         <Pressable
           onPress={openCreatorProfile}
-          style={styles.railAvatarWrap}
           hitSlop={8}
         >
           <View style={styles.railAvatar}>
-            <FeedAvatar profile={post.profile} name={name} />
+            {creatorAvatarUri ? (
+              <Image
+                source={{ uri: creatorAvatarUri }}
+                style={StyleSheet.absoluteFill}
+                contentFit="cover"
+                transition={100}
+                cachePolicy="memory"
+              />
+            ) : (
+              <UiText style={styles.railAvatarInitial}>
+                {name.charAt(0).toUpperCase()}
+              </UiText>
+            )}
           </View>
         </Pressable>
         <ActionButton
@@ -1187,31 +1218,21 @@ export const FeedItem = memo(function FeedItem({
           onPress={onReactions}
         />
         <ActionButton
-          icon={<Send color="#fff" size={24} strokeWidth={2} />}
+          icon={<Send color="#fff" size={26} strokeWidth={2} />}
           onPress={onShare}
         />
-        {isOwner && (
-          <ActionButton
-            icon={<Trash2 color={theme.danger} size={24} strokeWidth={2} />}
-            label="Delete"
-            onPress={handleDelete}
-          />
-        )}
-        {!isOwner && (
-          <ActionButton
-            icon={<Flag color="#fff" size={22} strokeWidth={2} />}
-            label="Report"
-            onPress={() => reportContent("post", post.id)}
-          />
-        )}
         <ActionButton
-          icon={<Eye color="rgba(255,255,255,0.6)" size={20} strokeWidth={2} />}
+          icon={<MoreHorizontal color="#fff" size={26} strokeWidth={2} />}
+          onPress={handleMore}
+        />
+        <ActionButton
+          icon={<Eye color="rgba(255,255,255,0.6)" size={22} strokeWidth={2} />}
           label={String(post.view_count ?? 0)}
           muted
         />
       </View>
 
-      {/* Bottom-left caption block — username bold, caption lighter below */}
+      {/* Bottom-left block — status badge, username, caption, sound row */}
       <View
         style={[
           styles.bottom,
@@ -1219,6 +1240,9 @@ export const FeedItem = memo(function FeedItem({
         ]}
         pointerEvents="box-none"
       >
+        <View style={styles.badgeSlot} pointerEvents="none">
+          <TrialStatusBadge status={post.status} />
+        </View>
         <View style={styles.userRow}>
           <Pressable onPress={openCreatorProfile} hitSlop={4}>
             <UiText style={styles.username}>
@@ -1234,7 +1258,7 @@ export const FeedItem = memo(function FeedItem({
           </UiText>
         ) : null}
         <View style={styles.musicRow}>
-          <Music2 color="rgba(255,255,255,0.65)" size={12} />
+          <Music color="rgba(255,255,255,0.6)" size={12} />
           <UiText style={styles.musicText}>
             Original sound
           </UiText>
@@ -1254,85 +1278,86 @@ const styles = StyleSheet.create({
     height: SCREEN_H,
     backgroundColor: "#F5F3EE",
   },
-  gradTop: { position: "absolute", top: 0, left: 0, right: 0, height: 140 },
-  gradBottom: { position: "absolute", left: 0, right: 0, bottom: 0, height: 320 },
+  gradTop: { position: "absolute", top: 0, left: 0, right: 0, height: 90 },
+  gradBottom: { position: "absolute", left: 0, right: 0, bottom: 0, height: 96 },
 
   /* Right-side action rail */
   actions: {
     position: "absolute",
     right: 12,
     alignItems: "center",
-    gap: 18,
+    gap: 20,
     zIndex: 999,
   },
-  railAvatarWrap: { marginBottom: 6 },
   railAvatar: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: 999,
     borderWidth: 2,
-    borderColor: theme.accent,
+    borderColor: "#FFFFFF",
     overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "#B8281A",
     alignItems: "center",
     justifyContent: "center",
+  },
+  railAvatarInitial: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "500" as const,
   },
   actionBtn: { alignItems: "center", gap: 4 },
   actionLabel: {
     color: "#fff",
-    fontSize: 11,
-    fontWeight: "900" as const,
+    fontSize: 12,
+    fontWeight: "500" as const,
     textShadowColor: "rgba(0,0,0,0.6)",
     textShadowRadius: 4,
   },
   actionLabelMuted: {
     color: "rgba(255,255,255,0.6)",
-    fontSize: 10,
-    fontWeight: "600" as const,
+    fontSize: 11,
+    fontWeight: "500" as const,
     textShadowColor: "rgba(0,0,0,0.6)",
     textShadowRadius: 4,
-  },
-
-  /* Trial status pill (top-left) */
-  statusBadgeWrap: {
-    position: "absolute",
-    top: 118,
-    left: 16,
-    zIndex: 998,
   },
 
   /* Bottom info */
   bottom: {
     position: "absolute",
-    left: 16,
-    right: 80,
-    gap: 8,
+    left: 18,
+    right: 84,
+    gap: 6,
     zIndex: 999,
   },
+  badgeSlot: { marginBottom: 4 },
   userRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   username: {
     color: "#fff",
-    fontWeight: "900" as const,
+    fontWeight: "500" as const,
     fontSize: 15,
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowRadius: 3,
   },
-  dotSep: { color: "rgba(255,255,255,0.6)", fontSize: 13 },
+  dotSep: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 13,
+    fontWeight: "400" as const,
+  },
   ago: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 12,
-    fontWeight: "600" as const,
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 13,
+    fontWeight: "400" as const,
   },
   caption: {
-    color: "rgba(255,255,255,0.88)",
-    fontSize: 14,
-    lineHeight: 19,
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 13,
+    lineHeight: 18,
     fontWeight: "500" as const,
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowRadius: 3,
   },
   musicRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
-  musicText: { color: "rgba(255,255,255,0.65)", fontSize: 12 },
+  musicText: { color: "rgba(255,255,255,0.6)", fontSize: 12 },
 
   /* Buffering indicator */
   bufferingOverlay: {

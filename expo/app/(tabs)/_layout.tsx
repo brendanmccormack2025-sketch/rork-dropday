@@ -25,27 +25,30 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: theme.accent,
-        tabBarInactiveTintColor: theme.textDim,
+        tabBarActiveTintColor: "#FF5A44",
+        tabBarInactiveTintColor: "rgba(255,255,255,0.75)",
         tabBarStyle: styles.tabBar,
-        // TikTok-style overlay: the tab bar already floats above screen content
-        // (position: absolute), so a translucent white gradient keeps the icons
-        // legible over full-bleed video without a solid bar blocking the feed.
+        // Bottom scrim behind the tab bar: transparent → rgba(0,0,0,0.75)
+        // reached at 45% of the bar height, so icons stay legible over any
+        // full-bleed video content.
         tabBarBackground: () => (
           <LinearGradient
-            colors={["rgba(255,255,255,0)", "rgba(255,255,255,0.94)"]}
+            colors={["transparent", "rgba(0,0,0,0.75)"]}
+            locations={[0, 0.45]}
             style={StyleSheet.absoluteFill}
           />
         ),
         tabBarLabelStyle: styles.label,
+        // 3px gap between icon and label.
+        tabBarIconStyle: { marginBottom: 3 },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: "Feed",
-          tabBarIcon: ({ color, size }) => (
-            <Home color={color} size={size} />
+          tabBarIcon: ({ color }) => (
+            <Home color={color} size={23} />
           ),
         }}
       />
@@ -53,7 +56,7 @@ export default function TabLayout() {
         name="explore"
         options={{
           title: "Explore",
-          tabBarIcon: ({ color, size }) => <Compass color={color} size={size} />,
+          tabBarIcon: ({ color }) => <Compass color={color} size={23} />,
         }}
       />
       <Tabs.Screen
@@ -78,7 +81,7 @@ export default function TabLayout() {
           title: "Friends",
           tabBarIcon: ({ color, size }) => (
             <View>
-              <Users color={color} size={size} />
+              <Users color={color} size={23} />
               {unreadCount > 0 && (
                 <View style={styles.tabBadge}>
                   <UiText style={styles.tabBadgeText}>
@@ -94,7 +97,7 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
+          tabBarIcon: ({ color }) => <User color={color} size={23} />,
         }}
       />
     </Tabs>
