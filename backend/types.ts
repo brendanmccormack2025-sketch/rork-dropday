@@ -139,69 +139,110 @@ export type Database = {
           },
         ]
       }
+      post_qualified_views: {
+        Row: {
+          created_at: string
+          post_id: string
+          viewer_id: string
+        }
+        Insert: {
+          created_at?: string
+          post_id: string
+          viewer_id: string
+        }
+        Update: {
+          created_at?: string
+          post_id?: string
+          viewer_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_qualified_views_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       posts: {
         Row: {
           audio_url: string | null
           caption: string | null
+          checkpoint_at: string | null
           comment_count: number | null
           created_at: string | null
+          follower_visibility: boolean
           id: string
           is_mature: boolean
-          like_count: number | null
+          like_count: number
           media_type: string
           media_url: string
           moderation_status: string
           original_duration_ms: number | null
           parent_post_id: string | null
           poster_timezone: string | null
+          qualified_view_count: number
           reaction_count: number
           segments: Json | null
+          status: string
           text_overlays: Json | null
           thumbnail_url: string | null
           trim_data: Json | null
           user_id: string
+          view_count: number
         }
         Insert: {
           audio_url?: string | null
           caption?: string | null
+          checkpoint_at?: string | null
           comment_count?: number | null
           created_at?: string | null
+          follower_visibility?: boolean
           id?: string
           is_mature?: boolean
-          like_count?: number | null
+          like_count?: number
           media_type: string
           media_url: string
           moderation_status?: string
           original_duration_ms?: number | null
           parent_post_id?: string | null
           poster_timezone?: string | null
+          qualified_view_count?: number
           reaction_count?: number
           segments?: Json | null
+          status?: string
           text_overlays?: Json | null
           thumbnail_url?: string | null
           trim_data?: Json | null
           user_id: string
+          view_count?: number
         }
         Update: {
           audio_url?: string | null
           caption?: string | null
+          checkpoint_at?: string | null
           comment_count?: number | null
           created_at?: string | null
+          follower_visibility?: boolean
           id?: string
           is_mature?: boolean
-          like_count?: number | null
+          like_count?: number
           media_type?: string
           media_url?: string
           moderation_status?: string
           original_duration_ms?: number | null
           parent_post_id?: string | null
           poster_timezone?: string | null
+          qualified_view_count?: number
           reaction_count?: number
           segments?: Json | null
+          status?: string
           text_overlays?: Json | null
           thumbnail_url?: string | null
           trim_data?: Json | null
           user_id?: string
+          view_count?: number
         }
         Relationships: [
           {
@@ -222,10 +263,13 @@ export type Database = {
       }
       profiles: {
         Row: {
+          age_confirmed_13_plus: boolean
           avatar_url: string | null
           bio: string | null
           birthdate: string | null
+          bypass_drop_window: boolean
           created_at: string | null
+          default_follower_visibility: boolean
           display_name: string | null
           id: string
           instagram_handle: string | null
@@ -236,10 +280,13 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          age_confirmed_13_plus?: boolean
           avatar_url?: string | null
           bio?: string | null
           birthdate?: string | null
+          bypass_drop_window?: boolean
           created_at?: string | null
+          default_follower_visibility?: boolean
           display_name?: string | null
           id: string
           instagram_handle?: string | null
@@ -250,10 +297,13 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          age_confirmed_13_plus?: boolean
           avatar_url?: string | null
           bio?: string | null
           birthdate?: string | null
+          bypass_drop_window?: boolean
           created_at?: string | null
+          default_follower_visibility?: boolean
           display_name?: string | null
           id?: string
           instagram_handle?: string | null
@@ -366,23 +416,28 @@ export type Database = {
         Returns: {
           audio_url: string | null
           caption: string | null
+          checkpoint_at: string | null
           comment_count: number | null
           created_at: string | null
+          follower_visibility: boolean
           id: string
           is_mature: boolean
-          like_count: number | null
+          like_count: number
           media_type: string
           media_url: string
           moderation_status: string
           original_duration_ms: number | null
           parent_post_id: string | null
           poster_timezone: string | null
+          qualified_view_count: number
           reaction_count: number
           segments: Json | null
+          status: string
           text_overlays: Json | null
           thumbnail_url: string | null
           trim_data: Json | null
           user_id: string
+          view_count: number
         }[]
         SetofOptions: {
           from: "*"
@@ -392,6 +447,8 @@ export type Database = {
         }
       }
       get_tonight_drop_count: { Args: { since_ts: string }; Returns: number }
+      record_qualified_view: { Args: { p_post_id: string }; Returns: undefined }
+      run_survival_checkpoint: { Args: never; Returns: number }
       user_id: { Args: never; Returns: string }
     }
     Enums: {
@@ -411,12 +468,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -440,11 +497,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -465,11 +522,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -490,11 +547,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -507,11 +564,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
