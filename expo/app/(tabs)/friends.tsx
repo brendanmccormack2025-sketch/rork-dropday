@@ -227,7 +227,7 @@ export default function FriendsScreen() {
         actionText = "Your post survived Trial 🏆";
       } else if (notif.type === "verdict_archived") {
         icon = <Archive color={theme.textDim} size={15} strokeWidth={2} />;
-        actionText = "Your post didn't survive Trial";
+        actionText = "Your trial ended. Your post didn't earn enough engagement to survive. Try again!";
       }
 
       return (

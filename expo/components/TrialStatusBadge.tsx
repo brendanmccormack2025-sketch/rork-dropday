@@ -13,7 +13,7 @@ const BADGES: Record<SurvivalStatus, { label: string; color: string }> = {
   trial: { label: "ON TRIAL", color: theme.accent },
   incomplete: { label: "ON TRIAL", color: theme.accent },
   survived: { label: "SURVIVED", color: theme.success },
-  archived: { label: "TRIAL FAILED", color: "rgba(10,10,10,0.65)" },
+  archived: { label: "TRIAL ENDED", color: "rgba(10,10,10,0.65)" },
 };
 
 /**
