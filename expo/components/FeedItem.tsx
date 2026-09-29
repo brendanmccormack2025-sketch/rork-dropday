@@ -1175,6 +1175,14 @@ export const FeedItem = memo(function FeedItem({
         </View>
       )}
 
+      {/* Archived scrim — owner-only dim. Archived posts are filtered out of
+          every non-owner surface (feeds, other-user profiles), so this only
+          ever renders on the creator's own drops. Content dims; UI chrome
+          (action rail, TRIAL ENDED badge, username) stays bright. */}
+      {post.status === "archived" && (
+        <View style={styles.archivedScrim} pointerEvents="none" />
+      )}
+
       <LinearGradient
         colors={["rgba(0,0,0,0.4)", "transparent"]}
         style={styles.gradTop}
@@ -1423,6 +1431,12 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "700" as const,
+  },
+
+  /* Archived scrim — full-bleed dark wash over the content */
+  archivedScrim: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "rgba(0,0,0,0.6)",
   },
 
   /* Optimistic posting overlay */
