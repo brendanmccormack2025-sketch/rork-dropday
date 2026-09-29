@@ -25,6 +25,7 @@ import {
   AlertCircle,
   Eye,
   MoreHorizontal,
+  Video,
 } from "lucide-react-native";
 import { VideoView, useVideoPlayer, type VideoPlayer } from "expo-video";
 import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
@@ -93,6 +94,7 @@ function ActionButton({
   label,
   onPress,
   muted = false,
+  circle = false,
 }: {
   icon: React.ReactNode;
   /** Omit for icon-only actions (e.g. share). */
@@ -100,13 +102,17 @@ function ActionButton({
   onPress?: () => void;
   /** Informational stats (view count) get reduced visual weight. */
   muted?: boolean;
+  /** Render the icon inside a translucent circle (React action). */
+  circle?: boolean;
 }) {
   const scale = useRef(new Animated.Value(1)).current;
+  const [isPressed, setIsPressed] = useState(false);
 
   // Press feedback: quick squash on press-in, springy release on press-out.
   // Display-only stats (no onPress) stay static.
   const handlePressIn = () => {
     if (!onPress) return;
+    setIsPressed(true);
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     }
@@ -119,6 +125,7 @@ function ActionButton({
   };
   const handlePressOut = () => {
     if (!onPress) return;
+    setIsPressed(false);
     Animated.spring(scale, {
       toValue: 1,
       speed: 40,
@@ -135,7 +142,15 @@ function ActionButton({
       hitSlop={8}
     >
       <Animated.View style={[styles.actionBtn, { transform: [{ scale }] }]}>
-        {icon}
+        {circle ? (
+          <View
+            style={[styles.actionIconCircle, isPressed && styles.actionIconCirclePressed]}
+          >
+            {icon}
+          </View>
+        ) : (
+          icon
+        )}
         {label != null && (
           <UiText style={[styles.actionLabel, muted && styles.actionLabelMuted]}>
             {label}
@@ -1242,7 +1257,8 @@ export const FeedItem = memo(function FeedItem({
           }}
         />
         <ActionButton
-          icon={<Sparkles color="#fff" size={28} strokeWidth={1.8} />}
+          circle
+          icon={<Video color="#fff" size={18} strokeWidth={2} />}
           label={String(reactionCount)}
           onPress={onReactions}
         />
@@ -1335,6 +1351,15 @@ const styles = StyleSheet.create({
     fontWeight: "500" as const,
   },
   actionBtn: { alignItems: "center", gap: 4 },
+  actionIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionIconCirclePressed: { backgroundColor: "rgba(255,255,255,0.28)" },
   actionLabel: {
     color: "#fff",
     fontSize: 12,

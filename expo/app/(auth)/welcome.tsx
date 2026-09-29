@@ -92,7 +92,7 @@ export default function WelcomeScreen() {
               contentFit="contain"
             />
           </Animated.View>
-          <UiText style={styles.tagline}>Just try.</UiText>
+          <UiText style={styles.tagline}>Post it. See if it survives.</UiText>
         </View>
 
         {/* Actions */}
@@ -104,7 +104,20 @@ export default function WelcomeScreen() {
           />
 
           <UiText style={styles.legal}>
-            By continuing you agree to just try.
+            By continuing you agree to the{" "}
+            <UiText
+              style={styles.legalLink}
+              onPress={() => router.push("/(auth)/legal?tab=terms" as never)}
+            >
+              Terms
+            </UiText>{" "}
+            and{" "}
+            <UiText
+              style={styles.legalLink}
+              onPress={() => router.push("/(auth)/legal?tab=privacy" as never)}
+            >
+              Privacy Policy
+            </UiText>.
           </UiText>
           <Pressable
             onPress={() => router.push("/(auth)/sign-in")}
@@ -150,6 +163,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
   },
+  legalLink: { color: theme.accent },
   switch: { alignItems: "center", marginTop: 6 },
   switchText: { color: theme.textMuted, fontSize: 14 },
   switchAccent: { color: theme.accent, fontWeight: "700" as const },

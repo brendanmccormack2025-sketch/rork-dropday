@@ -96,7 +96,10 @@ export default function FeedScreen() {
         isRefreshing={refreshing}
         initialIndex={0}
         showGate={gateActive}
-        onSharePost={(post) => setSharePost(post)}
+        onSharePost={(post) => {
+          // DM sharing disabled for this build — native share sheet only.
+          Share.share({ message: `Check out this Trial: ${post.media_url}` }).catch(() => {});
+        }}
         onReactionsPost={(post) => {
           router.push(`/post/${post.id}/reaction-tree` as never);
         }}

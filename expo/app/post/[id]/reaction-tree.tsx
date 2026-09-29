@@ -56,28 +56,45 @@ export default function ReactionTreeScreen() {
     queryKey: ["post", id],
     enabled: !!id,
     staleTime: 30_000,
-    queryFn: async (): Promise<string | null> => {
+    queryFn: async (): Promise<{
+      user_id: string | null;
+      status: string | null;
+      moderation_status: string | null;
+    } | null> => {
       if (!id) return null;
       const { data, error } = await supabase
         .from("posts")
-        .select("user_id")
+        .select("user_id, status, moderation_status")
         .eq("id", id)
         .maybeSingle();
       if (error) {
         console.error("[reaction-tree] root drop query error", error.message);
         return null;
       }
-      return (data?.user_id as string) ?? null;
+      if (!data) return null;
+      return {
+        user_id: (data.user_id as string) ?? null,
+        status: (data.status as string) ?? null,
+        moderation_status: (data.moderation_status as string) ?? null,
+      };
     },
   });
 
-  const rootDropCreatorId = rootDropQuery.data ?? null;
+  const rootDrop = rootDropQuery.data ?? null;
+  const rootDropCreatorId = rootDrop?.user_id ?? null;
   const isCreator = !!user?.id && !!rootDropCreatorId && user.id === rootDropCreatorId;
+  // Non-owner gate: if the root drop is archived or not active, show an
+  // unavailable screen and never fetch tier 1/2. Owners open their own tree.
+  const rootUnavailable =
+    !isCreator &&
+    rootDropQuery.isSuccess &&
+    ((rootDrop?.status ?? "archived") === "archived" ||
+      (rootDrop?.moderation_status ?? "inactive") !== "active");
 
   // ── Query 2: tier 1 reactions (parent_post_id = root drop) ────────────
   const tier1Query = useQuery({
     queryKey: ["reactions", id],
-    enabled: !!id,
+    enabled: !!id && !rootUnavailable,
     staleTime: 30_000,
     queryFn: async (): Promise<Post[]> => {
       if (!id) return [];
@@ -337,7 +354,17 @@ export default function ReactionTreeScreen() {
       </SafeAreaView>
 
       {/* Body */}
-      {isLoading ? (
+      {rootUnavailable ? (
+        <View style={styles.center}>
+          <UiText style={styles.emptyTitle}>This post is no longer available</UiText>
+          <Pressable
+            onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
+            style={styles.emptyReactBtn}
+          >
+            <UiText style={styles.emptyReactBtnText}>Go back</UiText>
+          </Pressable>
+        </View>
+      ) : isLoading ? (
         <View style={styles.center}>
           <UiText style={styles.emptySub}>Loading…</UiText>
         </View>
@@ -388,7 +415,7 @@ export default function ReactionTreeScreen() {
 
           reactingTo is ALWAYS the root Drop's ID — hardcoded, intentional.
           Do NOT change this to a dynamic value based on scroll position. */}
-      {!isLoading && (
+      {!isLoading && !rootUnavailable && (
         <SafeAreaView edges={["bottom"]} style={styles.reactSafe}>
           <Pressable
             onPress={() => {
