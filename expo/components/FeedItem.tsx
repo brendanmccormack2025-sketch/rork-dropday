@@ -44,6 +44,10 @@ const TAB_BAR_HEIGHT = 88;
 const QUALIFIED_VIEW_MS = 3000;
 /** Session-level dedupe so scrolling back to a post doesn't re-record the same viewer. */
 const qualifiedViewRecorded = new Set<string>();
+/** Session-level dedupe for raw impressions — mirrors qualifiedViewRecorded; the
+ *  server dedupes per viewer/post anyway (post_raw_views PK), this just avoids
+ *  repeat RPCs when scrolling back to a post. */
+const rawViewRecorded = new Set<string>();
 /** Height reserved for the action buttons + username row at the bottom of each feed item. */
 const BOTTOM_OVERLAY_HEIGHT = 130;
 
@@ -494,6 +498,23 @@ export const FeedItem = memo(function FeedItem({
         });
     }, QUALIFIED_VIEW_MS);
     return () => clearTimeout(timer);
+  }, [active, post.id]);
+
+  // Raw view: fires immediately when the post becomes the active, playing feed
+  // item — a basic impression, no watch-duration gate and no author exclusion
+  // (unlike qualified views). Feeds posts.view_count shown on the feed's eye
+  // icon. Dedupe per viewer/post is enforced server-side by post_raw_views;
+  // the Set avoids repeat RPCs when scrolling back to a post.
+  useEffect(() => {
+    if (!active) return;
+    if (rawViewRecorded.has(post.id)) return;
+    rawViewRecorded.add(post.id);
+    supabase
+      .rpc("record_raw_view", { p_post_id: post.id })
+      .then(null, () => {
+        // Recording failed — clear the dedupe so a later activation retries.
+        rawViewRecorded.delete(post.id);
+      });
   }, [active, post.id]);
 
   // Clear prebuffer safety timer on unmount or when post changes

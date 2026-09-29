@@ -165,6 +165,32 @@ export type Database = {
           },
         ]
       }
+      post_raw_views: {
+        Row: {
+          created_at: string
+          post_id: string
+          viewer_id: string
+        }
+        Insert: {
+          created_at?: string
+          post_id: string
+          viewer_id: string
+        }
+        Update: {
+          created_at?: string
+          post_id?: string
+          viewer_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_raw_views_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       posts: {
         Row: {
           audio_url: string | null
@@ -448,6 +474,7 @@ export type Database = {
       }
       get_tonight_drop_count: { Args: { since_ts: string }; Returns: number }
       record_qualified_view: { Args: { p_post_id: string }; Returns: undefined }
+      record_raw_view: { Args: { p_post_id: string }; Returns: undefined }
       run_survival_checkpoint: { Args: never; Returns: number }
       user_id: { Args: never; Returns: string }
     }
