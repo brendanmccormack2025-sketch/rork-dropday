@@ -1,0 +1,1 @@
+{"query": "select p.proname, p.prosecdef as is_security_definer, p.proconfig, t.tgname\nfrom pg_proc p\njoin pg_namespace n on n.oid = p.pronamespace\nleft join pg_trigger t on t.tgfoid = p.oid and not t.tgisinternal\nwhere n.nspname = 'public' and p.proname in ('notify_on_like','notify_on_reaction','notify_on_follow','notify_on_follow_accept')\norder by p.proname;"}

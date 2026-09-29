@@ -91,6 +91,7 @@ export type Database = {
         Row: {
           actor_id: string
           created_at: string | null
+          extra_count: number
           id: string
           post_id: string | null
           read: boolean
@@ -100,6 +101,7 @@ export type Database = {
         Insert: {
           actor_id: string
           created_at?: string | null
+          extra_count?: number
           id?: string
           post_id?: string | null
           read?: boolean
@@ -109,6 +111,7 @@ export type Database = {
         Update: {
           actor_id?: string
           created_at?: string | null
+          extra_count?: number
           id?: string
           post_id?: string | null
           read?: boolean

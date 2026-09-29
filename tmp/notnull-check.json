@@ -1,0 +1,1 @@
+{"query": "select table_name, column_name, is_nullable\nfrom information_schema.columns\nwhere table_schema = 'public'\n  and table_name in ('posts','follows','likes')\n  and is_nullable = 'NO'\n  and column_default is null\norder by table_name, ordinal_position;"}

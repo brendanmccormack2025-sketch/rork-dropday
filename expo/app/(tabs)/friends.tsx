@@ -207,13 +207,21 @@ export default function FriendsScreen() {
       let actionText = "";
       if (notif.type === "like") {
         icon = <Heart color="#E8291C" size={15} strokeWidth={2} fill="#E8291C" />;
-        actionText = "liked your post";
+        // Like-collapse: one row per post; N = other likers beyond the displayed actor
+        const others = notif.extra_count ?? 0;
+        actionText =
+          others > 0
+            ? `and ${others} ${others === 1 ? "other" : "others"} liked your post`
+            : "liked your post";
       } else if (notif.type === "reaction") {
         icon = <Zap color={theme.accent} size={15} strokeWidth={2} fill={theme.accent} />;
         actionText = "reacted to your post";
       } else if (notif.type === "follow") {
         icon = <UserPlus color={theme.success} size={15} strokeWidth={2} />;
         actionText = "started following you";
+      } else if (notif.type === "followed_post_survived") {
+        icon = <Trophy color={theme.success} size={15} strokeWidth={2} />;
+        actionText = "had a post survive Trial 🏆";
       } else if (notif.type === "verdict_survived") {
         icon = <Trophy color={theme.success} size={15} strokeWidth={2} />;
         actionText = "Your post survived Trial 🏆";

@@ -11,7 +11,8 @@ export type NotificationType =
   | "follow"
   | "group_post"
   | "verdict_survived"
-  | "verdict_archived";
+  | "verdict_archived"
+  | "followed_post_survived";
 
 export type NotificationRow = {
   id: string;
@@ -21,6 +22,8 @@ export type NotificationRow = {
   post_id: string | null;
   read: boolean;
   created_at: string;
+  /** Like-collapse: additional likers beyond the displayed actor ("X and N others liked your post"). */
+  extra_count: number;
   /** Joined actor profile */
   actor: {
     username: string;
@@ -56,7 +59,7 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
         const { data, error } = await supabase
           .from("notifications")
           .select(
-            "id, recipient_id, actor_id, type, post_id, read, created_at, actor:profiles!notifications_actor_id_fkey(username, display_name, avatar_url), post:posts!notifications_post_id_fkey(thumbnail_url, media_type)"
+            "id, recipient_id, actor_id, type, post_id, read, created_at, extra_count, actor:profiles!notifications_actor_id_fkey(username, display_name, avatar_url), post:posts!notifications_post_id_fkey(thumbnail_url, media_type)"
           )
           .eq("recipient_id", userId)
           .order("created_at", { ascending: false })
