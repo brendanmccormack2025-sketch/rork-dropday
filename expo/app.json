@@ -16,10 +16,10 @@
         "UIBackgroundModes": [
           "remote-notification"
         ],
-        "NSCameraUsageDescription": "Trial uses your camera to capture tonight's drop.",
-        "NSMicrophoneUsageDescription": "Trial records audio with your video drops.",
-        "NSPhotoLibraryUsageDescription": "Trial needs access to your photo library so you can import media for your drops.",
-        "NSPhotoLibraryAddUsageDescription": "Trial saves your recorded drops to your photo library."
+        "NSCameraUsageDescription": "Trial uses your camera to record your videos and reactions.",
+        "NSMicrophoneUsageDescription": "Trial uses your microphone to record sound with your videos.",
+        "NSPhotoLibraryUsageDescription": "Trial needs access to your photo library so you can choose videos to put on Trial.",
+        "NSPhotoLibraryAddUsageDescription": "Trial saves the videos you record to your photo library."
       },
       "usesAppleSignIn": true,
       "buildNumber": "20"
@@ -57,22 +57,22 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Trial needs access to your photos so you can pick a drop.",
-          "cameraPermission": "Trial uses your camera so you can capture tonight's drop."
+          "photosPermission": "Trial needs access to your photos so you can choose a video to put on Trial.",
+          "cameraPermission": "Trial uses your camera to record your videos and reactions."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Trial uses your camera so you can capture tonight's drop.",
-          "microphonePermission": "Trial records audio with your video drops."
+          "cameraPermission": "Trial uses your camera to record your videos and reactions.",
+          "microphonePermission": "Trial uses your microphone to record sound with your videos."
         }
       ],
       [
         "expo-media-library",
         {
-          "photosPermission": "Trial saves your drops to your photo library.",
-          "savePhotosPermission": "Trial saves your recorded drops to your photo library."
+          "photosPermission": "Trial accesses your photo library so you can choose videos and save your recordings.",
+          "savePhotosPermission": "Trial saves the videos you record to your photo library."
         }
       ],
       [
