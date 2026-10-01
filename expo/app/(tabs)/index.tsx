@@ -167,14 +167,14 @@ function GateOverlay({
         <UiText style={styles.gateTitle}>Post to unlock</UiText>
         <UiText style={styles.gateSub}>
           You've watched {viewed} posts. Post your Trial to keep watching
-          tonight's feed.
+          the feed.
         </UiText>
         <Pressable onPress={onDrop} style={styles.gateBtn}>
           <Sparkles color="#fff" size={16} />
           <UiText style={styles.gateBtnText}>Post now</UiText>
         </Pressable>
         <UiText style={styles.gateFootnote}>
-          Unlimited access for the night once you post.
+          Unlimited access once you post.
         </UiText>
       </View>
     </View>
