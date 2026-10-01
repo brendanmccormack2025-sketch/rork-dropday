@@ -19,6 +19,7 @@ import { setAudioModeAsync } from "expo-audio";
 import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Flag, Heart, Sparkles, Reply, RotateCcw, ShieldCheck, Trash2 } from "lucide-react-native";
 
@@ -326,28 +327,32 @@ export default function ReactionTreeScreen() {
 
   const isLoading = tier1Query.isLoading || rootDropQuery.isLoading;
   const postCount = feedItems.length;
+  // Header sits over a full-screen video only when the feed is showing; the
+  // loading/empty/unavailable states are on the cream background.
+  const overVideo = !rootUnavailable && !isLoading && feedItems.length > 0;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <View style={styles.root}>
+      {overVideo && screenFocused && <StatusBar style="light" />}
       {/* Header */}
       <SafeAreaView edges={["top"]} style={styles.headerSafe}>
         <View style={styles.headerRow}>
           <Pressable
             onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
-            style={styles.headerBtn}
+            style={[styles.headerBtn, overVideo && styles.headerBtnOnVideo]}
             hitSlop={8}
           >
-            <ArrowLeft color={theme.text} size={22} strokeWidth={2} />
+            <ArrowLeft color={overVideo ? "#FFFFFF" : theme.text} size={22} strokeWidth={2} />
           </Pressable>
           <View style={styles.headerCenter}>
             <Sparkles color={theme.accent} size={16} />
-            <UiText style={styles.headerTitle}>Reactions</UiText>
+            <UiText style={[styles.headerTitle, overVideo && styles.headerTextOnVideo]}>Reactions</UiText>
           </View>
           <View style={styles.headerBtn} />
         </View>
         {postCount > 0 && (
-          <UiText style={styles.headerCount}>
+          <UiText style={[styles.headerCount, overVideo && styles.headerTextOnVideo]}>
             {postCount} reaction{postCount !== 1 ? "s" : ""}
           </UiText>
         )}
@@ -845,12 +850,22 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   headerBtn: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
     borderRadius: 0,
     backgroundColor: "rgba(10,10,10,0.08)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  headerBtnOnVideo: {
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  headerTextOnVideo: {
+    color: "#FFFFFF",
+    textShadowColor: "rgba(0,0,0,0.6)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   headerCenter: {
     flexDirection: "row",
