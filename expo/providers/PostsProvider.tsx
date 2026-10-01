@@ -83,7 +83,8 @@ export type Post = {
  * - The viewer's own posts always pass.
  * - Posts from creators the viewer does NOT follow always pass (the
  *   "outside audience" — unaffected by follower visibility).
- * - Posts from followed creators pass only when the post survived Trial
+ * - Reactions (parent_post_id set) always pass: they never receive a verdict.
+ * - Root posts from followed creators pass only when the post survived Trial
  *   AND the creator allowed follower visibility.
  *
  * Consumers: fyp feed, following feed, public profile (user/[id] +
@@ -91,11 +92,12 @@ export type Post = {
  * Keep all call sites in sync when the rule changes.
  */
 export function isFollowerEligible(
-  post: Pick<Post, "user_id" | "status" | "follower_visibility">,
+  post: Pick<Post, "user_id" | "status" | "follower_visibility" | "parent_post_id">,
   viewerId: string | null | undefined,
   followingIds: readonly string[],
 ): boolean {
   if (post.user_id === viewerId) return true;
+  if (post.parent_post_id) return true;
   if (!followingIds.includes(post.user_id)) return true;
   return post.status === "survived" && post.follower_visibility !== false;
 }
