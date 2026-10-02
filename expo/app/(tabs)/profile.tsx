@@ -494,7 +494,7 @@ function ProfileTile({ post, onPress }: { post: Post; onPress: () => void }) {
         style={styles.tileGrad}
       />
       <View style={styles.statusBadgeWrap}>
-        <TrialStatusBadge status={post.status} />
+        <TrialStatusBadge status={post.status} distributionExpiresAt={post.distribution_expires_at} />
       </View>
       <View style={styles.tileBottom}>
         <View style={styles.tileStats}>

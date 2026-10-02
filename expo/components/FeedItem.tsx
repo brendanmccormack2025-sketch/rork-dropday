@@ -1286,7 +1286,7 @@ export const FeedItem = memo(function FeedItem({
         pointerEvents="box-none"
       >
         <View style={styles.badgeSlot} pointerEvents="none">
-          <TrialStatusBadge status={post.status} />
+          <TrialStatusBadge status={post.status} distributionExpiresAt={post.distribution_expires_at} />
         </View>
         <View style={styles.userRow}>
           <Pressable onPress={openCreatorProfile} hitSlop={4}>

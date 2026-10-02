@@ -14,6 +14,7 @@ const BADGES: Record<SurvivalStatus, { label: string; color: string }> = {
   incomplete: { label: "ON TRIAL", color: theme.accent },
   survived: { label: "SURVIVED", color: theme.success },
   archived: { label: "TRIAL ENDED", color: "rgba(10,10,10,0.65)" },
+  expired: { label: "EXPIRED", color: theme.textMuted },
 };
 
 /**
@@ -21,8 +22,22 @@ const BADGES: Record<SurvivalStatus, { label: string; color: string }> = {
  * indicator, colored background matching the status. Shared by the feed's
  * bottom-left block and the profile grid; the status logic itself is unchanged.
  */
-export function TrialStatusBadge({ status }: { status: Post["status"] }) {
-  const badge = BADGES[status ?? "trial"];
+export function TrialStatusBadge({
+  status,
+  distributionExpiresAt,
+}: {
+  status: Post["status"];
+  /** SURVIVED shows only while this is in the future (or null: survivors with no window yet). */
+  distributionExpiresAt?: string | null;
+}) {
+  let shown: string = status ?? "trial";
+  if (shown === "survived" && distributionExpiresAt) {
+    const expiresMs = Date.parse(distributionExpiresAt);
+    if (!Number.isNaN(expiresMs) && expiresMs <= Date.now()) shown = "expired";
+  }
+  // Unknown statuses render no badge instead of crashing.
+  if (!Object.prototype.hasOwnProperty.call(BADGES, shown)) return null;
+  const badge = BADGES[shown as SurvivalStatus];
   return (
     <View style={[styles.badge, { backgroundColor: badge.color }]}>
       <View style={styles.dot} />
