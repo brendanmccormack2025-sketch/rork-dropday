@@ -29,6 +29,24 @@
 --      their original status; see the rollback notes at the bottom).
 --   8. BEFORE INSERT trigger force_post_defaults: signed-in API users cannot
 --      set status, counters or lifecycle timestamps on insert.
+-- Statements that CHANGE EXISTING ROWS (everything else is schema, functions,
+-- triggers or indexes and changes no existing value):
+--   * section 7: "update public.posts set status = 'archived'" for legacy root
+--     posts (checkpoint_at is null, status trial or survived). This is the ONLY
+--     update to posts. Originals are copied first.
+--   * section 7: "insert into posts_legacy_status_backup ... select" writes new
+--     rows into a NEW table (it reads posts, changes nothing in it).
+--   * section 2: "insert into trial_config ... on conflict do nothing" writes new
+--     rows into a NEW table.
+--   * section 3: cron.unschedule + cron.schedule delete and re-create the one
+--     cron.job row 'survival-checkpoint' (same name, same */5 schedule).
+--   Also: adding the five columns gives every existing post NULL in them (no
+--   rewrite, no value changes), and re-adding the status CHECK re-validates
+--   every existing post row without changing any.
+--   After the migration, the next */5 run of run_survival_checkpoint() applies
+--   the new rules to live 'trial' posts and to 'incomplete' posts that reached
+--   the gate (status changes, verdict notifications). That is the rule change
+--   taking effect, not a statement in this file.
 -- Not touched: RLS on posts, the existing triggers (trg_set_checkpoint_at,
 -- trg_notify_reaction, trg_reaction_count_insert/delete, the likes triggers,
 -- the follows triggers), the moderation_status and media_type CHECKs, storage,
