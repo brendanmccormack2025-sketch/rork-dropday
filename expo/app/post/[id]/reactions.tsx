@@ -21,7 +21,7 @@ import { ArrowLeft, EllipsisVertical, Flag, Heart, Reply, RotateCcw, Sparkles, X
 
 import { theme } from "@/constants/theme";
 import { FeedAvatar } from "@/components/Avatar";
-import { usePosts, isFollowerEligible, type Post } from "@/providers/PostsProvider";
+import { usePosts, isFollowerEligible, isReactionVisible, type Post } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 import { useReportContent } from "@/hooks/useReportContent";
@@ -50,8 +50,10 @@ export default function PostReactionsScreen() {
   const reactions = useMemo<Post[]>(
     () =>
       id
-        ? (reactionsByParent[id] ?? []).filter((p) =>
-            isFollowerEligible(p, user?.id, following),
+        ? (reactionsByParent[id] ?? []).filter(
+            (p) =>
+              isReactionVisible(p, user?.id) &&
+              isFollowerEligible(p, user?.id, following),
           )
         : [],
     [id, reactionsByParent, user?.id, following],

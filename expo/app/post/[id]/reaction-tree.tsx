@@ -29,7 +29,7 @@ import { FeedAvatar } from "@/components/Avatar";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
-import { usePosts, isFollowerEligible, type Post } from "@/providers/PostsProvider";
+import { usePosts, isFollowerEligible, isReactionVisible, type Post } from "@/providers/PostsProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { useReportContent } from "@/hooks/useReportContent";
 
@@ -89,7 +89,7 @@ export default function ReactionTreeScreen() {
   const rootUnavailable =
     !isCreator &&
     rootDropQuery.isSuccess &&
-    ((rootDrop?.status ?? "archived") === "archived" ||
+    (["archived", "expired"].includes(rootDrop?.status ?? "archived") ||
       (rootDrop?.moderation_status ?? "inactive") !== "active");
 
   // ── Query 2: tier 1 reactions (parent_post_id = root drop) ────────────
@@ -161,6 +161,7 @@ export default function ReactionTreeScreen() {
       (p) =>
         !blockedUserIds.has(p.user_id) &&
         !reportedReactionIds.has(p.id) &&
+        isReactionVisible(p, user?.id) &&
         isFollowerEligible(p, user?.id, following),
     );
     if (visible.length === 0) return visible;
@@ -241,6 +242,7 @@ export default function ReactionTreeScreen() {
     for (const reply of tier2Posts) {
       if (blockedUserIds.has(reply.user_id)) continue;
       if (reportedReactionIds.has(reply.id)) continue;
+      if (!isReactionVisible(reply, user?.id)) continue;
       if (!isFollowerEligible(reply, user?.id, following)) continue;
       const pid = reply.parent_post_id;
       if (!pid) continue;

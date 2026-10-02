@@ -83,6 +83,18 @@ export type Post = {
 };
 
 /**
+ * Reactions whose status is archived or expired are hidden from everyone
+ * except their own author. Used by the reaction lists (reactions + tree).
+ */
+export function isReactionVisible(
+  post: Pick<Post, "user_id" | "status">,
+  viewerId: string | null | undefined,
+): boolean {
+  if (post.user_id === viewerId) return true;
+  return post.status !== "archived" && post.status !== "expired";
+}
+
+/**
  * Follower-visibility eligibility — the single source of truth for whether
  * the current viewer may see a post/reaction created by someone they follow.
  *
