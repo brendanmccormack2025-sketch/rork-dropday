@@ -1902,12 +1902,15 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       } else {
         // Upload all segments when present (multi-clip), otherwise the single primary clip.
         // This mirrors the isRemoteUrl branch which correctly passes through segmentUris.
-        const urisToUpload =
+        const allUris =
           input.segmentUris && input.segmentUris.length > 1
             ? input.segmentUris
             : [uploadUri];
+        // Segments of the same source file share one uri: upload it once and
+        // let every segment reference the same URL.
+        const urisToUpload = Array.from(new Set(allUris));
 
-        const uploadedUrls: string[] = [];
+        const urlByUri = new Map<string, string>();
         for (let i = 0; i < urisToUpload.length; i++) {
           const segUri = urisToUpload[i]!;
 
@@ -1975,8 +1978,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
 
           const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(segPath);
-          uploadedUrls.push(pub.publicUrl);
+          urlByUri.set(segUri, pub.publicUrl);
         }
+        const uploadedUrls = allUris.map((u) => urlByUri.get(u)!);
 
         mediaUrl = uploadedUrls[0]!;
         if (uploadedUrls.length > 1) {

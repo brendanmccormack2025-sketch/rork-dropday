@@ -1902,8 +1902,7 @@ export default function EditScreen() {
 
       const isWeb = Platform.OS === "web";
 
-      const copiedClips = await Promise.all(
-        clips.map(async (c, i) => {
+      const copyClip = async (c: (typeof clips)[number], i: number) => {
           // On web there is no real filesystem — data:/blob: URIs hold the
           // bytes in memory and are uploaded directly by createPost.
           if (isWeb && (c.uri.startsWith("data:") || c.uri.startsWith("blob:"))) {
@@ -1945,6 +1944,18 @@ export default function EditScreen() {
             );
           }
           return { ...c, uri: stableUri };
+      };
+      // Clips that share a source uri (segments of one recording) are copied
+      // once; every such clip then points at the same stable file.
+      const copyCache = new Map<string, ReturnType<typeof copyClip>>();
+      const copiedClips = await Promise.all(
+        clips.map(async (c, i) => {
+          let pending = copyCache.get(c.uri);
+          if (!pending) {
+            pending = copyClip(c, i);
+            copyCache.set(c.uri, pending);
+          }
+          return { ...c, uri: (await pending).uri };
         }),
       );
 
