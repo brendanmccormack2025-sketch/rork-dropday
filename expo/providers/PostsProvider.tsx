@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { documentDirectory, cacheDirectory, getInfoAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
+import { router } from "expo-router";
 import { showAlert } from "@/lib/showAlert";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { concatMP4Files } from "@/src/integrations/concatMP4";
@@ -564,6 +565,11 @@ async function uploadToStorage(
     }
     throw err;
   }
+}
+
+/** True for the database error raised when reacting to an archived/expired (or missing) parent post. */
+function isParentUnavailableError(message: string | null | undefined): boolean {
+  return /cannot react/i.test(message ?? "");
 }
 
 function rankFeed(posts: Post[], followingIds: string[], currentUserId?: string): Post[] {
@@ -1898,10 +1904,13 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         // Persist the error so we can retrieve it after the fact
         AsyncStorage.setItem("dropday:lastInsertError", JSON.stringify({ ...errMeta, ts: Date.now() })).catch(() => {});
         // Show a visible alert so the user DEFINITELY sees the error
-        showAlert(
-          "Post Failed",
-          insErr.message || "Database insert failed.",
-        );
+        // (a reaction to an ended/expired post gets a friendly message in onError instead).
+        if (!isParentUnavailableError(insErr.message)) {
+          showAlert(
+            "Post Failed",
+            insErr.message || "Database insert failed.",
+          );
+        }
         throw insErr;
       }
 
@@ -2034,6 +2043,22 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         cause: errAny?.cause,
       };
       console.error("[createPost] onError — POST FAILED", errMeta);
+      // Reaction to a post whose trial ended or that expired (database trigger:
+      // "Cannot react: this post is no longer available ..."): friendly message,
+      // drop the optimistic reaction, and send the user back to the feed.
+      if (variables.parentPostId && isParentUnavailableError((err as Error)?.message)) {
+        showAlert(
+          "This post is no longer available",
+          "Its trial ended or it expired, so it can't take new reactions.",
+        );
+        if (variables.optimisticTempId) removeOptimisticPost(variables.optimisticTempId);
+        try {
+          router.replace("/(tabs)");
+        } catch {
+          // Navigation is best-effort.
+        }
+        return;
+      }
       // Persist the error so we can retrieve it after the fact
       AsyncStorage.setItem("dropday:lastMutationError", JSON.stringify({ ...errMeta, ts: Date.now() })).catch(() => {});
       // Show a visible alert so the user DEFINITELY sees the error
