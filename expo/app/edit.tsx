@@ -2334,7 +2334,7 @@ export default function EditScreen() {
   if (draftId && !draftsLoaded) {
     return (
       <View style={[styles.screen, styles.centered]}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <ActivityIndicator color={theme.accent} size="large" />
         <UiText style={[styles.emptyText, { marginTop: 16 }]}>
           Loading draft…
@@ -2347,7 +2347,7 @@ export default function EditScreen() {
   if (clips.length === 0) {
     return (
       <View style={[styles.screen, styles.centered]}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <UiText style={styles.emptyText}>Nothing to preview</UiText>
         <Pressable onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.emptyBtn}>
           <UiText style={styles.emptyBtnText}>Go back</UiText>
@@ -2366,7 +2366,7 @@ export default function EditScreen() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={styles.screen}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
 
         {/* ── Top bar ────────────────────────────────────────────────── */}
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
