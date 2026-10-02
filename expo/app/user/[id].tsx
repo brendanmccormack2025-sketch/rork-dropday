@@ -96,7 +96,7 @@ export default function PublicProfileScreen() {
       const { data, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)",
         )
         .eq("user_id", id)
         .is("parent_post_id", null)

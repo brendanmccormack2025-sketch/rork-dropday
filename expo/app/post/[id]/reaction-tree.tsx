@@ -103,7 +103,7 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)",
         )
         .eq("parent_post_id", id)
         .eq("moderation_status", "active")
@@ -193,7 +193,7 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)",
         )
         .in("parent_post_id", tier1Ids)
         .eq("moderation_status", "active")

@@ -24,7 +24,21 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export { supabaseUrl, supabaseAnonKey };
 
+// Until migration-profile-links.sql is run, profiles has no youtube_url column and
+// selects that name it fail. Retry such GETs once without the column.
+const fetchWithoutMissingYoutube: typeof fetch = async (input, init) => {
+  const res = await fetch(input, init);
+  if (res.status !== 400 || (init?.method && init.method !== "GET")) return res;
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (!url.includes("youtube_url")) return res;
+  const body = await res.clone().text().catch(() => "");
+  if (!body.includes("youtube_url")) return res;
+  const retryUrl = url.replace(/(%2C|,)?youtube_url(%2C|,)?/, (_m, a, b) => (a && b ? a : ""));
+  return fetch(retryUrl, init);
+};
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: { fetch: fetchWithoutMissingYoutube },
   auth: {
     storage: AsyncStorage,
     autoRefreshToken: true,

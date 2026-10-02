@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Alert,
   Animated,
   Dimensions,
@@ -32,6 +33,7 @@ import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoSt
 
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { TrialStatusBadge } from "@/components/TrialStatusBadge";
+import CreatorLinkIcons from "@/components/CreatorLinkIcons";
 import { theme } from "@/constants/theme";
 import { usePosts, resolveAvatarUrl, type Post, type TextOverlay, type TextBackgroundStyle } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
@@ -1016,6 +1018,17 @@ export const FeedItem = memo(function FeedItem({
     [post.profile?.avatar_url],
   );
 
+  // Pause while an external app opens; resume when we come back to the foreground.
+  const pauseForExternalLink = useCallback(() => {
+    setIsPaused(true);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        sub.remove();
+        setIsPaused(false);
+      }
+    });
+  }, []);
+
   // ── Creator profile navigation (rail avatar + bottom-left username) ──
   const openCreatorProfile = useCallback(() => {
     if (!user?.id || !post.user_id) return;
@@ -1313,6 +1326,7 @@ export const FeedItem = memo(function FeedItem({
           <UiText style={styles.dotSep}>·</UiText>
           <UiText style={styles.ago}>{ago}</UiText>
         </View>
+        <CreatorLinkIcons profile={post.profile} onBeforeOpen={pauseForExternalLink} />
         {post.caption ? (
           <UiText style={styles.caption} numberOfLines={3}>
             {post.caption}
