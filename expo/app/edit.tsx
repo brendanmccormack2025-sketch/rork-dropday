@@ -43,6 +43,8 @@ import {
 import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
+import { OWNER_USER_ID } from "@/constants/debug";
+import { autoEdit } from "@/lib/ai/autoEdit";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -59,6 +61,10 @@ import TextOverlayEditor from "@/components/TextOverlayEditor";
 import DraggableTextOverlay, {
   BG_STYLES,
 } from "@/components/DraggableTextOverlay";
+
+/** Auto-edit (silence trimming) switches. */
+const AUTO_TRIM_OWNER_ONLY = true;
+const AUTO_EDIT_ENABLED = true;
 
 const DRAG_EDGE_MARGIN = 0.01;
 /** Lead time (ms) before a clip's expected end to start preloading the next clip. */
@@ -1753,6 +1759,35 @@ export default function EditScreen() {
     textEditSnapshotTakenRef.current = false;
   }, [redo, pushSnapshot]);
 
+  // ── Auto-edit: background silence analysis ───────────────────────────
+  // Root posts only, one untrimmed video clip, once per editor session. Never
+  // blocks the editor or Post; every failure is log-only.
+  const [autoEditRunning, setAutoEditRunning] = useState(false);
+  const autoEditStartedRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  useEffect(() => {
+    if (!AUTO_EDIT_ENABLED || autoEditStartedRef.current) return;
+    if (reactingTo || rootDropId || draftId) return;
+    if (AUTO_TRIM_OWNER_ONLY && (!user?.id || user.id !== OWNER_USER_ID)) return;
+    const clip = clips.length === 1 ? clips[0] : undefined;
+    if (!clip || clip.type !== "video" || !(clip.durationMs && clip.durationMs > 0)) return;
+    const trimEnd = clip.trimEndMs ?? 0;
+    if ((clip.trimStartMs ?? 0) > 0 || (trimEnd > 0 && trimEnd < clip.durationMs - 50)) return;
+
+    autoEditStartedRef.current = true;
+    setAutoEditRunning(true);
+    autoEdit({ uri: clip.uri, durationMs: clip.durationMs })
+      .then((result) => {
+        console.log("[edit] autoEdit result:", result.changed ? "changed" : result.reason);
+      })
+      .catch((e) => console.warn("[edit] autoEdit failed", (e as Error)?.message ?? e))
+      .finally(() => {
+        if (mountedRef.current) setAutoEditRunning(false);
+      });
+  }, [clips, user?.id, reactingTo, rootDropId, draftId]);
+
   // ── Thumbnail generation helper ────────────────────────────────────────────
 
   const generateThumbnail = useCallback(async (videoUri: string, timeMs = 0): Promise<string | null> => {
@@ -2311,6 +2346,12 @@ export default function EditScreen() {
         </Pressable>
 
         {/* ── Timeline editor ────────────────────────────────────────── */}
+        {autoEditRunning && (
+          <View style={styles.autoEditRow}>
+            <ActivityIndicator size="small" color="rgba(255,255,255,0.7)" />
+            <UiText style={styles.autoEditText}>Auto-editing...</UiText>
+          </View>
+        )}
         {isVideo && (
           <TimelineEditor
             clips={clips}
@@ -2754,6 +2795,18 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(10,10,10,0.05)",
     backgroundColor: "#F5F3EE",
+  },
+  autoEditRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 6,
+  },
+  autoEditText: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 12,
+    fontWeight: "600" as const,
   },
   bannerError: {
     backgroundColor: "rgba(232,41,28,0.12)",
