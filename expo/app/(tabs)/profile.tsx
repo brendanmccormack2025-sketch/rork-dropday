@@ -319,8 +319,8 @@ export default function ProfileScreen() {
                     />
                     <UiText style={styles.emptyTitle}>Nothing on Trial right now</UiText>
                     <UiText style={styles.emptySub}>
-                      Tap + to post a video. It shows here while it's tested and for 24
-                      hours if it survives.
+                      Tap + to post a video. Trial tests it with people who don't know you.
+                      If it survives, it's pushed to more viewers for 24 hours.
                     </UiText>
                   </View>
                 )}
