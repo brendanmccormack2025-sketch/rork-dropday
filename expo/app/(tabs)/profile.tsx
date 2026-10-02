@@ -317,10 +317,10 @@ export default function ProfileScreen() {
                       size={40}
                       strokeWidth={1.5}
                     />
-                    <UiText style={styles.emptyTitle}>Nothing on trial right now</UiText>
+                    <UiText style={styles.emptyTitle}>Nothing on Trial right now</UiText>
                     <UiText style={styles.emptySub}>
-                      Post a video to put it on Trial. It shows here while it is being
-                      tested and while it is live.
+                      Tap + to post a video. It shows here while it's tested and for 24
+                      hours if it survives.
                     </UiText>
                   </View>
                 )}
