@@ -17,6 +17,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
+  Bell,
   Music2,
   Send,
   X,
@@ -27,6 +28,7 @@ import { FeedListView } from "@/components/FeedListView";
 import TrialLogo from "@/components/TrialLogo";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post, resolveAvatarUrl } from "@/providers/PostsProvider";
+import { useNotifications } from "@/providers/NotificationsProvider";
 import { supabase } from "@/lib/supabase";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
@@ -34,6 +36,7 @@ const FREE_VIEWS_BEFORE_GATE = 5;
 
 export default function FeedScreen() {
   const router = useRouter();
+  const { unreadCount } = useNotifications();
   const {
     feed, feedLoading, refetchFeed,
     refetchMyPosts, optimisticPosts, lastPostCreatedAtRef,
@@ -113,6 +116,16 @@ export default function FeedScreen() {
                   contentFit="contain"
                 />
               </View>
+              {/* Notifications bell, top-right (right of the wordmark, below the status bar) */}
+              <Pressable
+                onPress={() => router.push("/notifications" as never)}
+                style={styles.bellBtn}
+                hitSlop={10}
+                accessibilityLabel="Notifications"
+              >
+                <Bell color="#fff" size={20} strokeWidth={2} />
+                {unreadCount > 0 && <View style={styles.bellDot} />}
+              </Pressable>
             </View>
           </SafeAreaView>
         }
@@ -369,6 +382,25 @@ const styles = StyleSheet.create({
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   brandLogo: { width: 72, height: 22 },
+  bellBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bellDot: {
+    position: "absolute",
+    top: 5,
+    right: 6,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: theme.danger,
+    borderWidth: 1.5,
+    borderColor: "#fff",
+  },
   dmBtn: {
     width: 36,
     height: 36,
