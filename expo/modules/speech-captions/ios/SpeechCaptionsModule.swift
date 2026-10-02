@@ -10,7 +10,7 @@ private let chunkSeconds: Double = 55
 
 // Neighbouring chunks overlap by this much so a word on a boundary is heard
 // whole by at least one of them; the merge below keeps each word exactly once.
-private let chunkOverlapSeconds: Double = 1
+private let chunkOverlapSeconds: Double = 2
 
 // A single chunk that has not finished after this long is cancelled.
 private let chunkTimeoutSeconds: Double = 90
