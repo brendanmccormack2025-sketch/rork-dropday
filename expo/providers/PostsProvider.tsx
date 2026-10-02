@@ -1,5 +1,5 @@
 import createContextHook from "@nkzw/create-context-hook";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -592,6 +592,51 @@ function isParentUnavailableError(message: string | null | undefined): boolean {
   return /cannot react/i.test(message ?? "");
 }
 
+const FEED_POST_SELECT =
+  "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)";
+
+/** true: For You comes from get_feed (server order). false: the old on-device query + rankFeed. */
+const USE_SERVER_FEED = true;
+
+const FEED_PAGE_SIZE = 20;
+
+/** One page of the server feed. `rows` is what get_feed returned (used for end detection). */
+type FeedPage = { posts: Post[]; offset: number; rows: number };
+
+/** Status allow-list for the feed (second layer behind get_feed). */
+const FEED_STATUSES = ["trial", "incomplete", "survived"];
+
+/** Map a raw posts row (FEED_POST_SELECT shape) to a Post. */
+function mapFeedRow(row: Record<string, unknown>): Post {
+  return {
+    id: row.id as string,
+    user_id: row.user_id as string,
+    media_url: row.media_url as string,
+    media_type: row.media_type as "image" | "video",
+    caption: (row.caption as string | null) ?? null,
+    parent_post_id: (row.parent_post_id as string | null) ?? null,
+    segments: (row.segments as string[] | null) ?? null,
+    audio_url: (row.audio_url as string | null) ?? null,
+    trim_data: (row.trim_data as Post["trim_data"]) ?? null,
+    text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
+    thumbnail_url: (row.thumbnail_url as string | null) ?? null,
+    is_mature: (row.is_mature as boolean | null) ?? false,
+    moderation_status: (row.moderation_status as string | undefined) ?? "active",
+    status: (row.status as Post["status"]) ?? "trial",
+    survived_at: (row.survived_at as string | null) ?? null,
+    distribution_started_at: (row.distribution_started_at as string | null) ?? null,
+    distribution_expires_at: (row.distribution_expires_at as string | null) ?? null,
+    expired_at: (row.expired_at as string | null) ?? null,
+    media_deleted_at: (row.media_deleted_at as string | null) ?? null,
+    created_at: row.created_at as string,
+    like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
+    comment_count: (row.comment_count as number | undefined) ?? 0,
+    reaction_count: (row.reaction_count as number | undefined) ?? 0,
+    profile: (row.profiles as Post["profile"]) ?? null,
+    follower_visibility: (row.follower_visibility as boolean | null) ?? true,
+  };
+}
+
 function rankFeed(posts: Post[], followingIds: string[], currentUserId?: string): Post[] {
   if (posts.length === 0) return posts;
   const follows = new Set(followingIds);
@@ -814,6 +859,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
   const feedQuery = useQuery({
     queryKey: ["posts", "fyp", user?.id],
+    enabled: !USE_SERVER_FEED,
     retry: 1,
     staleTime: 30_000,
     queryFn: async (): Promise<Post[]> => {
@@ -841,7 +887,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         let q = supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)"
+            FEED_POST_SELECT
           )
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
@@ -861,33 +907,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         logQueryError("feed", e);
         return [];
       }
-      const raw: Post[] = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
-        id: row.id as string,
-        user_id: row.user_id as string,
-        media_url: row.media_url as string,
-        media_type: row.media_type as "image" | "video",
-        caption: (row.caption as string | null) ?? null,
-        parent_post_id: (row.parent_post_id as string | null) ?? null,
-        segments: (row.segments as string[] | null) ?? null,
-        audio_url: (row.audio_url as string | null) ?? null,
-        trim_data: (row.trim_data as Post["trim_data"]) ?? null,
-        text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
-        thumbnail_url: (row.thumbnail_url as string | null) ?? null,
-        is_mature: (row.is_mature as boolean | null) ?? false,
-        moderation_status: (row.moderation_status as string | undefined) ?? "active",
-        status: (row.status as Post["status"]) ?? "trial",
-        survived_at: (row.survived_at as string | null) ?? null,
-        distribution_started_at: (row.distribution_started_at as string | null) ?? null,
-        distribution_expires_at: (row.distribution_expires_at as string | null) ?? null,
-        expired_at: (row.expired_at as string | null) ?? null,
-        media_deleted_at: (row.media_deleted_at as string | null) ?? null,
-        created_at: row.created_at as string,
-        like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
-        comment_count: (row.comment_count as number | undefined) ?? 0,
-        reaction_count: (row.reaction_count as number | undefined) ?? 0,
-        profile: (row.profiles as Post["profile"]) ?? null,
-        follower_visibility: (row.follower_visibility as boolean | null) ?? true,
-      }));
+      const raw: Post[] = ((data ?? []) as Record<string, unknown>[]).map(mapFeedRow);
       // ── Follower-visibility eligibility ──────────────────────────────
       // The viewer's own posts and posts from creators they do NOT follow
       // always pass (the "outside audience"). Posts from followed creators
@@ -899,6 +919,114 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       return rankFeed(eligible, followingIds, user?.id);
     },
   });
+
+  // ── Server feed: get_feed(p_limit, p_offset) returns the ordered post ids ──
+  // The client does not rank. Each page fetches its posts by id and returns
+  // them in the order of the returned positions.
+  const serverFeedKey = useMemo(() => ["posts", "fyp", user?.id, "server"] as const, [user?.id]);
+  const serverFeedQuery = useInfiniteQuery({
+    queryKey: serverFeedKey,
+    enabled: !!user?.id,
+    retry: 1,
+    staleTime: 30_000,
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }): Promise<FeedPage> => {
+      const offset = pageParam as number;
+      const rpc = await (supabase as unknown as {
+        rpc: (
+          fn: string,
+          args: Record<string, unknown>,
+        ) => Promise<{ data: unknown; error: { message: string } | null }>;
+      }).rpc("get_feed", { p_limit: FEED_PAGE_SIZE, p_offset: offset });
+      if (rpc.error) {
+        logQueryError("feed", rpc.error);
+        throw new Error(rpc.error.message);
+      }
+      const rows = (rpc.data ?? []) as Array<{ post_id: string; position: number }>;
+      const ids = rows.map((r) => r.post_id);
+      if (ids.length === 0) return { posts: [], offset, rows: 0 };
+      const res = await supabase
+        .from("posts")
+        .select(FEED_POST_SELECT)
+        .in("id", ids);
+      if (res.error) {
+        logQueryError("feed", res.error);
+        throw new Error(res.error.message);
+      }
+      const byId = new Map<string, Post>();
+      for (const row of (res.data ?? []) as unknown as Record<string, unknown>[]) {
+        const post = mapFeedRow(row);
+        // Second layer behind get_feed: roots only, active, allowed statuses.
+        if (post.parent_post_id) continue;
+        if (post.moderation_status !== "active") continue;
+        if (!FEED_STATUSES.includes(post.status ?? "")) continue;
+        byId.set(post.id, post);
+      }
+      const posts = [...rows]
+        .sort((a, b) => a.position - b.position)
+        .map((r) => byId.get(r.post_id))
+        .filter((p): p is Post => !!p);
+      return { posts, offset, rows: rows.length };
+    },
+    getNextPageParam: (last) =>
+      last.rows < FEED_PAGE_SIZE ? undefined : last.offset + FEED_PAGE_SIZE,
+  });
+
+  /** Flat, de-duplicated posts across all loaded pages (order can shift between requests). */
+  const serverFeedPosts = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Post[] = [];
+    for (const page of serverFeedQuery.data?.pages ?? []) {
+      for (const p of page.posts) {
+        if (seen.has(p.id)) continue;
+        seen.add(p.id);
+        out.push(p);
+      }
+    }
+    return out;
+  }, [serverFeedQuery.data]);
+
+  /** Pull to refresh: drop pages after the first, then refetch page 0. */
+  const refetchServerFeed = useCallback(async () => {
+    qc.setQueryData<InfiniteData<FeedPage, number>>(serverFeedKey, (data) =>
+      data ? { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) } : data,
+    );
+    return serverFeedQuery.refetch();
+  }, [qc, serverFeedKey, serverFeedQuery]);
+
+  /** Apply a Post[] cache patch (like counts, optimistic posts) to the feed cache in use. */
+  const patchFyp = useCallback(
+    (updater: (old: Post[] | undefined) => Post[] | undefined) => {
+      if (!USE_SERVER_FEED) {
+        qc.setQueryData<Post[]>(["posts", "fyp", user?.id], updater);
+        return;
+      }
+      qc.setQueryData<InfiniteData<FeedPage, number>>(serverFeedKey, (data) => {
+        if (!data) return data;
+        const flat = data.pages.flatMap((pg) => pg.posts);
+        const next = updater(flat);
+        if (!next) return data;
+        // Posts keep their page; unknown (new) posts go to the front of page 0.
+        const pageOf = new Map<string, number>();
+        data.pages.forEach((pg, i) => pg.posts.forEach((p) => pageOf.set(p.id, i)));
+        const buckets: Post[][] = data.pages.map(() => []);
+        const fresh: Post[] = [];
+        for (const p of next) {
+          const i = pageOf.get(p.id);
+          if (i === undefined) fresh.push(p);
+          else buckets[i].push(p);
+        }
+        return {
+          ...data,
+          pages: data.pages.map((pg, i) => ({
+            ...pg,
+            posts: i === 0 ? [...fresh, ...buckets[0]] : buckets[i],
+          })),
+        };
+      });
+    },
+    [qc, serverFeedKey, user?.id],
+  );
 
   // ── Following feed: chronological with live-window sort override ──
   // Fetches posts only from users the current user follows, ordered by
@@ -1110,14 +1238,16 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
     onMutate: async ({ postId, liked }) => {
       // Snapshot current feed caches for rollback on error
-      const prevFyp = qc.getQueryData<Post[]>(["posts", "fyp", user?.id]);
+      const prevFyp = USE_SERVER_FEED
+        ? qc.getQueryData<InfiniteData<FeedPage, number>>(serverFeedKey)?.pages.flatMap((pg) => pg.posts)
+        : qc.getQueryData<Post[]>(["posts", "fyp", user?.id]);
       const prevFollowing = qc.getQueryData<Post[]>(["posts", "following-feed", user?.id]);
       const prevMine = qc.getQueryData<Post[]>(["posts", "mine", user?.id]);
 
       // Optimistically patch like_count in place — no refetch, no reorder
       const delta = liked ? 1 : -1;
       if (prevFyp) {
-        qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) =>
+        patchFyp((old) =>
           (old ?? []).map((p) =>
             p.id === postId ? { ...p, like_count: (p.like_count ?? 0) + delta } : p
           )
@@ -1143,7 +1273,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     onError: (_error, _vars, context) => {
       // Rollback optimistic cache patches
       if (context?.prevFyp) {
-        qc.setQueryData(["posts", "fyp", user?.id], context.prevFyp);
+        patchFyp(() => context.prevFyp);
       }
       if (context?.prevFollowing) {
         qc.setQueryData(["posts", "following-feed", user?.id], context.prevFollowing);
@@ -1525,7 +1655,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // Reactions belong in the reaction-tree query, which fetches from the DB
       // independently — optimistic entries would pollute the fyp cache.
       if (!parentPostId) {
-        qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+        patchFyp((old) => {
           if (!old) return [optPost];
           return [optPost, ...old];
         });
@@ -1577,7 +1707,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       });
 
       // Only update fyp cache for root Drops — reactions aren't in this cache.
-      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+      patchFyp((old) => {
         if (!old) return old;
         return old.map((p) =>
           p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
@@ -1619,7 +1749,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       });
 
       // Only update fyp cache for root Drops — reactions aren't in this cache.
-      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+      patchFyp((old) => {
         if (!old) return old;
         return old.map((p) =>
           p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
@@ -2004,7 +2134,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // Only insert into the main fyp feed cache for root Drops (no parent).
       // Reactions are NOT part of the fyp feed — they live in the reaction-tree.
       if (!newPost.parent_post_id) {
-        qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+        patchFyp((old) => {
           if (!old) return [newPost];
           const filtered = old.filter(
             (p) => p._optimistic?.tempId !== variables.optimisticTempId
@@ -2129,7 +2259,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       });
 
       // Only update the feed cache for root Drops — reactions aren't in it.
-      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+      patchFyp((old) => {
         if (!old) return old;
         return old.map((p) =>
           p._optimistic?.tempId === tempId && !p._optimistic.parentPostId
@@ -2186,7 +2316,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return next;
       });
       // Remove from all feed caches
-      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+      patchFyp((old) => {
         if (!old) return old;
         return old.filter((p) => p._optimistic?.tempId !== tempId);
       });
@@ -2517,7 +2647,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     onSuccess: (_data, postId) => {
 
       // Remove from main feed cache
-      qc.setQueryData<Post[]>(["posts", "fyp", user?.id], (old) => {
+      patchFyp((old) => {
         if (!old) return [];
         return old.filter((p) => p.id !== postId);
       });
@@ -2691,9 +2821,17 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       ),
       exploreCreatorsLoading: exploreCreatorsQuery.isLoading,
       refetchExploreCreators: exploreCreatorsQuery.refetch,
-      feed: filterBlocked(feedQuery.data ?? []),
-      feedLoading: feedQuery.isLoading,
-      refetchFeed: feedQuery.refetch,
+      feed: filterBlocked(USE_SERVER_FEED ? serverFeedPosts : (feedQuery.data ?? [])),
+      feedLoading: USE_SERVER_FEED ? serverFeedQuery.isLoading : feedQuery.isLoading,
+      feedError: USE_SERVER_FEED ? serverFeedQuery.isError && serverFeedPosts.length === 0 : false,
+      feedHasMore: USE_SERVER_FEED ? !!serverFeedQuery.hasNextPage : false,
+      feedLoadingMore: USE_SERVER_FEED ? serverFeedQuery.isFetchingNextPage : false,
+      fetchMoreFeed: () => {
+        if (USE_SERVER_FEED && serverFeedQuery.hasNextPage && !serverFeedQuery.isFetchingNextPage) {
+          void serverFeedQuery.fetchNextPage();
+        }
+      },
+      refetchFeed: USE_SERVER_FEED ? refetchServerFeed : feedQuery.refetch,
       followingFeed: filterBlocked(followingFeedQuery.data ?? []),
       followingFeedLoading: followingFeedQuery.isLoading,
       refetchFollowingFeed: followingFeedQuery.refetch,
@@ -2747,6 +2885,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     [
       exploreCreatorsQuery,
       feedQuery,
+      serverFeedQuery,
+      serverFeedPosts,
+      refetchServerFeed,
       followingFeedQuery,
       myPostsQuery,
       myProfileQuery,
