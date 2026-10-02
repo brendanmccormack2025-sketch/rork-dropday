@@ -335,6 +335,11 @@ export const FeedItem = memo(function FeedItem({
     () => (post.segments && post.segments.length > 0 ? post.segments : [post.media_url]),
     [post.segments, post.media_url],
   );
+  // Segments cut from one source file share a URL; they differ only by trim range.
+  const hasSharedSegmentUrls = useMemo(
+    () => new Set(allSegments).size < allSegments.length,
+    [allSegments],
+  );
   const [segIdx, setSegIdx] = useState<number>(0);
   const currentUri = allSegments[segIdx] ?? post.media_url;
   const segIdxRef = useRef<number>(0);
@@ -356,6 +361,13 @@ export const FeedItem = memo(function FeedItem({
   const playerB = useVideoPlayer(null, (p) => {
     p.timeUpdateEventInterval = 0.25;
   });
+  // Shared-URL segments are cut inside one file, so overshooting trimEnd plays
+  // footage that was cut out. Report position more often so the seam is tight.
+  useEffect(() => {
+    const interval = hasSharedSegmentUrls ? 0.05 : 0.25;
+    playerA.timeUpdateEventInterval = interval;
+    playerB.timeUpdateEventInterval = interval;
+  }, [hasSharedSegmentUrls, playerA, playerB]);
   const videoRefA = useRef<VideoPlayer | null>(null);
   const videoRefB = useRef<VideoPlayer | null>(null);
   const activeVideoRef = useRef<VideoPlayer | null>(null);
@@ -728,6 +740,23 @@ export const FeedItem = memo(function FeedItem({
     }
   }, [allSegments, shouldMountPreload, post.id, post.trim_data]);
 
+  // Shared-URL segments never trigger a preload load (the URL is already in the
+  // idle slot), so the idle player would sit at a stale position. Park it on the
+  // next segment's trimStart so the swap is a play(), not a cold seek. Delayed
+  // past the 200ms crossfade so the fading-out frame isn't disturbed.
+  useEffect(() => {
+    if (!shouldMountPreload || !hasSharedSegmentUrls) return;
+    const timer = setTimeout(() => {
+      const idleLoadedUri =
+        activeSlotRef.current === 0 ? slotBLoadedUriRef.current : slotALoadedUriRef.current;
+      if (idleLoadedUri !== preloadUri) return;
+      const idle = activeSlotRef.current === 0 ? videoRefB.current : videoRefA.current;
+      const nextTrim = post.trim_data?.[(segIdx + 1) % allSegments.length];
+      if (idle) idle.currentTime = (nextTrim?.trimStartMs ?? 0) / 1000;
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [segIdx, activeSlot, shouldMountPreload, hasSharedSegmentUrls, preloadUri, post.trim_data, allSegments.length]);
+
   // When video finishes, advance to next segment or loop
   const onSegmentStatus = useCallback(
     (status: VideoPlaybackStatus) => {
@@ -779,7 +808,7 @@ export const FeedItem = memo(function FeedItem({
             ? Math.min(trimEndRef.current, sourceDur)
             : sourceDur;
 
-        if (status.positionMillis >= effectiveTrimEnd - 120) {
+        if (status.positionMillis >= effectiveTrimEnd - (hasSharedSegmentUrls ? 30 : 120)) {
           trimEndHandledRef.current = true;
           if (allSegments.length === 1) {
             if (videoRef.current) {
@@ -798,7 +827,7 @@ export const FeedItem = memo(function FeedItem({
         advanceSegment();
       }
     },
-    [allSegments.length, handleStallDetection, advanceSegment, post.id],
+    [allSegments.length, hasSharedSegmentUrls, handleStallDetection, advanceSegment, post.id],
   );
 
   // ── Error recovery: retry loading ──────────────────────────────────
