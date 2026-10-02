@@ -87,6 +87,13 @@ function newClipId() {
   return `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** What the timeline plays: source + trim range per clip (ids and durations ignored). */
+function clipsSignature(list: DraftClip[]): string {
+  return JSON.stringify(
+    list.map((c) => [c.uri, c.trimStartMs ?? 0, c.trimEndMs ?? c.durationMs ?? 0]),
+  );
+}
+
 /** Minimum ms from either trim edge required to allow a split */
 const MIN_SPLIT_EDGE_MS = 200;
 
@@ -1763,6 +1770,58 @@ export default function EditScreen() {
   // Root posts only, one untrimmed video clip, once per editor session. Never
   // blocks the editor or Post; every failure is log-only.
   const [autoEditRunning, setAutoEditRunning] = useState(false);
+  // Set once auto-edit changed the timeline. The bar's mode is derived from the
+  // live clips, so undo/redo and manual edits need no extra bookkeeping.
+  const [autoEditSession, setAutoEditSession] = useState<{
+    original: DraftClip;
+    originalSig: string;
+    producedSig: string;
+    savedMs: number;
+  } | null>(null);
+  const uploadingRef = useRef(false);
+  useEffect(() => { uploadingRef.current = uploading; }, [uploading]);
+
+  // Swap the whole clip list (same playback reset as undo/redo, text untouched).
+  const replaceClips = useCallback((next: DraftClip[]) => {
+    clipsRef.current = next;
+    activeIndexRef.current = 0;
+    selectedClipIdxRef.current = -1;
+    isIsolatedRef.current = false;
+    const firstClip = next[0];
+    trimStartRef.current = firstClip?.trimStartMs ?? 0;
+    trimEndRef.current = firstClip?.trimEndMs ?? (firstClip?.durationMs ?? 0);
+    prevTrimStartRef.current = trimStartRef.current;
+    prevTrimEndRef.current = trimEndRef.current;
+    trimEndHandledRef.current = false;
+    trimGenerationRef.current += 1;
+    trimSeekDoneRef.current = false;
+    segmentOffsetRef.current = 0;
+    lastPositionUpdate.current = 0;
+    durationSetRef.current = false;
+    pendingSeekRef.current = firstClip?.trimStartMs ?? 0;
+    currentPlayingClipUriRef.current = firstClip?.uri ?? null;
+    safeSeekActiveRef.current = false;
+    setClips(next);
+    setSelectedClipId(null);
+    setActiveIndex(0);
+    setPositionMs(0);
+    setIsPlaying(true);
+    trimNeedsSnapshotRef.current = false;
+  }, []);
+
+  // Back to the original clip (one undoable step); text overlays are kept.
+  const handleUseOriginal = useCallback(() => {
+    if (!autoEditSession) return;
+    pushSnapshot(clips, textOverlays);
+    replaceClips([autoEditSession.original]);
+  }, [autoEditSession, clips, textOverlays, pushSnapshot, replaceClips]);
+
+  const autoBarMode = useMemo<"auto" | "manual" | null>(() => {
+    if (!autoEditSession) return null;
+    const sig = clipsSignature(clips);
+    if (sig === autoEditSession.producedSig) return "auto";
+    return sig === autoEditSession.originalSig ? null : "manual";
+  }, [autoEditSession, clips]);
   const autoEditStartedRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
@@ -1781,11 +1840,31 @@ export default function EditScreen() {
     autoEdit({ uri: clip.uri, durationMs: clip.durationMs })
       .then((result) => {
         console.log("[edit] autoEdit result:", result.changed ? "changed" : result.reason);
+        if (!mountedRef.current || !result.changed || uploadingRef.current) return;
+        // Only apply if the user hasn't touched the clip meanwhile.
+        const current = clipsForUndoRef.current;
+        if (current.length !== 1 || clipsSignature(current) !== clipsSignature([clip])) return;
+        const original = { ...current[0]!, trimStartMs: 0, trimEndMs: current[0]!.trimEndMs || clip.durationMs };
+        const produced = result.clips.map((c) => ({
+          ...original,
+          id: newClipId(),
+          trimStartMs: c.trimStartMs,
+          trimEndMs: c.trimEndMs,
+        }));
+        pushSnapshot(current, textOverlaysForUndoRef.current);
+        replaceClips(produced);
+        setAutoEditSession({
+          original,
+          originalSig: clipsSignature(current),
+          producedSig: clipsSignature(produced),
+          savedMs: result.detection.savedMs,
+        });
       })
       .catch((e) => console.warn("[edit] autoEdit failed", (e as Error)?.message ?? e))
       .finally(() => {
         if (mountedRef.current) setAutoEditRunning(false);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clips, user?.id, reactingTo, rootDropId, draftId]);
 
   // ── Thumbnail generation helper ────────────────────────────────────────────
@@ -2352,6 +2431,20 @@ export default function EditScreen() {
             <UiText style={styles.autoEditText}>Auto-editing...</UiText>
           </View>
         )}
+        {autoBarMode && autoEditSession && (
+          <View style={styles.autoBar}>
+            <UiText style={styles.autoBarText}>
+              {autoBarMode === "auto"
+                ? `Trimmed ${(autoEditSession.savedMs / 1000).toFixed(1)} s of silence`
+                : "Edited manually"}
+            </UiText>
+            <Pressable onPress={handleUseOriginal} hitSlop={8}>
+              <UiText style={styles.autoBarAction}>
+                {autoBarMode === "auto" ? "Undo" : "Use original"}
+              </UiText>
+            </Pressable>
+          </View>
+        )}
         {isVideo && (
           <TimelineEditor
             clips={clips}
@@ -2802,6 +2895,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     paddingVertical: 6,
+  },
+  autoBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "rgba(255,255,255,0.1)",
+  },
+  autoBarText: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600" as const,
+  },
+  autoBarAction: {
+    color: theme.accent,
+    fontSize: 13,
+    fontWeight: "800" as const,
   },
   autoEditText: {
     color: "rgba(255,255,255,0.7)",
