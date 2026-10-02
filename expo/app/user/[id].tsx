@@ -20,15 +20,13 @@ import {
   Heart,
   MessageCircle,
   Sparkles,
-  UserCheck,
-  UserPlus,
   Video,
 } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
-import { usePosts, resolveAvatarUrl, isFollowerEligible, type Post } from "@/providers/PostsProvider";
+import { resolveAvatarUrl, type Post } from "@/providers/PostsProvider";
 import { supabase } from "@/lib/supabase";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 
@@ -41,8 +39,6 @@ export default function PublicProfileScreen() {
   const navigation = useNavigation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
-  const { followUser, unfollowUser } = usePosts();
-  const [followPending, setFollowPending] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
   const isOwnProfile = !!user?.id && user.id === id;
@@ -132,91 +128,12 @@ export default function PublicProfileScreen() {
 
   const drops = dropsQuery.data ?? [];
 
-  // ── Followers / following counts ─────────────────────────────────────
-  const { data: followersCount = 0 } = useQuery({
-    queryKey: ["followers-count", id],
-    enabled: !!id,
-    queryFn: async (): Promise<number> => {
-      if (!id) return 0;
-      const { count, error } = await supabase
-        .from("follows")
-        .select("*", { count: "exact", head: true })
-        .eq("followee_id", id);
-      if (error) return 0;
-      return count ?? 0;
-    },
-  });
-
-  const { data: followingCount = 0 } = useQuery({
-    queryKey: ["following-count", id],
-    enabled: !!id,
-    queryFn: async (): Promise<number> => {
-      if (!id) return 0;
-      const { count, error } = await supabase
-        .from("follows")
-        .select("*", { count: "exact", head: true })
-        .eq("follower_id", id);
-      if (error) return 0;
-      return count ?? 0;
-    },
-  });
-
-  // ── Is the current user following this profile? ──────────────────────
-  const { data: isFollowing = false } = useQuery({
-    queryKey: ["is-following", user?.id, id],
-    enabled: !!user?.id && !!id && !isOwnProfile,
-    queryFn: async (): Promise<boolean> => {
-      if (!user?.id || !id) return false;
-      const { data, error } = await supabase
-        .from("follows")
-        .select("follower_id")
-        .eq("follower_id", user.id)
-        .eq("followee_id", id)
-        .maybeSingle();
-      if (error) return false;
-      return !!data;
-    },
-  });
-
   // Blocked user's content is hidden entirely — the grid renders empty and
   // the ListEmptyComponent shows a blocked notice instead of their drops.
-  //
-  // Follower-visibility: when the viewer follows this profile's owner, only
-  // posts that survived Trial with follower visibility allowed are shown
-  // (same shared rule as the feed). Own profile and non-followers unaffected.
   const visibleDrops = useMemo(
-    () =>
-      userProfileBlocked
-        ? []
-        : drops.filter((p) =>
-            isFollowerEligible(p, user?.id, isFollowing && id ? [id] : []),
-          ),
-    [drops, userProfileBlocked, user?.id, isFollowing, id],
+    () => (userProfileBlocked ? [] : drops),
+    [drops, userProfileBlocked],
   );
-
-  // ── Follow / Unfollow ────────────────────────────────────────────────
-  const handleToggleFollow = useCallback(async () => {
-    if (!id || isOwnProfile || followPending) return;
-    setFollowPending(true);
-    try {
-      // Raw check: does a follows row already exist?
-      const { data: existingRow, error: rawErr } = await supabase
-        .from("follows")
-        .select("follower_id, followee_id, created_at")
-        .eq("follower_id", user!.id)
-        .eq("followee_id", id)
-        .maybeSingle();
-      if (isFollowing) {
-        await unfollowUser.mutateAsync(id);
-      } else {
-        await followUser.mutateAsync(id);
-      }
-    } catch (e) {
-      console.warn("[user/follow] error", (e as Error)?.message ?? e);
-    } finally {
-      setFollowPending(false);
-    }
-  }, [id, isOwnProfile, isFollowing, followPending, followUser, unfollowUser]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -303,36 +220,9 @@ export default function PublicProfileScreen() {
                     <UiText style={styles.bio}>{profile.bio}</UiText>
                   ) : null}
 
-                  {/* Follow / Block buttons */}
+                  {/* Block button */}
                   {!isOwnProfile && (
                     <View style={styles.actionRow}>
-                      <Pressable
-                        onPress={handleToggleFollow}
-                        disabled={followPending}
-                        style={({ pressed }) => [
-                          styles.followBtn,
-                          isFollowing && styles.followBtnActive,
-                          pressed && !isFollowing && styles.followBtnPressed,
-                          pressed && isFollowing && styles.followBtnActivePressed,
-                        ]}
-                      >
-                        {followPending ? (
-                          <ActivityIndicator
-                            color={isFollowing ? theme.textMuted : "#fff"}
-                            size="small"
-                          />
-                        ) : isFollowing ? (
-                          <>
-                            <UserCheck color={theme.textMuted} size={16} strokeWidth={2.5} />
-                            <UiText style={styles.followBtnTextActive}>Following</UiText>
-                          </>
-                        ) : (
-                          <>
-                            <UserPlus color="#fff" size={16} strokeWidth={2.5} />
-                            <UiText style={styles.followBtnText}>Follow</UiText>
-                          </>
-                        )}
-                      </Pressable>
                       <Pressable
                         onPress={() => {
                           if (userProfileBlocked) {
@@ -374,42 +264,6 @@ export default function PublicProfileScreen() {
                       </UiText>
                       <UiText style={styles.statLabel}>Posts</UiText>
                     </View>
-                    <View style={styles.statDivider} />
-                    <Pressable
-                      style={styles.stat}
-                      onPress={() => {
-                        if (!id) return;
-                        router.push({
-                          pathname: "/follow-list",
-                          params: {
-                            userId: id,
-                            type: "followers",
-                            title: "Followers",
-                          },
-                        } as never);
-                      }}
-                    >
-                      <UiText style={styles.statNum}>{followersCount}</UiText>
-                      <UiText style={styles.statLabel}>Followers</UiText>
-                    </Pressable>
-                    <View style={styles.statDivider} />
-                    <Pressable
-                      style={styles.stat}
-                      onPress={() => {
-                        if (!id) return;
-                        router.push({
-                          pathname: "/follow-list",
-                          params: {
-                            userId: id,
-                            type: "following",
-                            title: "Following",
-                          },
-                        } as never);
-                      }}
-                    >
-                      <UiText style={styles.statNum}>{followingCount}</UiText>
-                      <UiText style={styles.statLabel}>Following</UiText>
-                    </Pressable>
                   </View>
 
                   {/* Section header — hidden when this account is blocked */}

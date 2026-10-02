@@ -92,10 +92,6 @@ function ProfileHeader({
   onEditProfile,
   onSettings,
   isOwnProfile,
-  followersCount,
-  followingCount,
-  onFollowersTap,
-  onFollowingTap,
   otherUserId,
   onSendMessage,
 }: {
@@ -108,10 +104,6 @@ function ProfileHeader({
   onEditProfile: () => void;
   onSettings: () => void;
   isOwnProfile: boolean;
-  followersCount: number;
-  followingCount: number;
-  onFollowersTap: () => void;
-  onFollowingTap: () => void;
   otherUserId?: string | null;
   onSendMessage?: () => void;
 }) {
@@ -227,16 +219,6 @@ function ProfileHeader({
           <UiText style={styles.statNum}>{drops.length}</UiText>
           <UiText style={styles.statLabel}>Posts</UiText>
         </View>
-        <View style={styles.statDivider} />
-        <Pressable style={styles.stat} onPress={onFollowersTap}>
-          <UiText style={styles.statNum}>{followersCount}</UiText>
-          <UiText style={styles.statLabel}>Followers</UiText>
-        </Pressable>
-        <View style={styles.statDivider} />
-        <Pressable style={styles.stat} onPress={onFollowingTap}>
-          <UiText style={styles.statNum}>{followingCount}</UiText>
-          <UiText style={styles.statLabel}>Following</UiText>
-        </Pressable>
       </View>
 
       {/* Tab switcher */}
@@ -247,7 +229,7 @@ function ProfileHeader({
 
 export default function ProfileScreen() {
   const { user } = useAuth();
-  const { myPosts, myProfile, draftProjects, refetchMyPosts, refetchProfile, following, findOrCreateConversation } = usePosts();
+  const { myPosts, myProfile, draftProjects, refetchMyPosts, refetchProfile, findOrCreateConversation } = usePosts();
   const qc = useQueryClient();
   const router = useRouter();
   const [tab, setTab] = useState<TabKey>("drops");
@@ -255,23 +237,6 @@ export default function ProfileScreen() {
 
   // Currently only self-profile; draft privacy is gated on this flag
   const isOwnProfile = true;
-
-  // ── Followers count ──────────────────────────────────────────
-  const { data: followersCount = 0 } = useQuery({
-    queryKey: ["followers-count", user?.id],
-    enabled: !!user?.id,
-    queryFn: async (): Promise<number> => {
-      if (!user?.id) return 0;
-      const { count, error } = await supabase
-        .from("follows")
-        .select("*", { count: "exact", head: true })
-        .eq("followee_id", user.id);
-      if (error) return 0;
-      return count ?? 0;
-    },
-  });
-
-  const followingCount = following.length;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -309,30 +274,6 @@ export default function ProfileScreen() {
   const activePosts = tab === "drops" ? drops : [];
   const isGridTab = tab === "drafts";
 
-  const handleFollowersTap = useCallback(() => {
-    if (!user?.id) return;
-    router.push({
-      pathname: "/follow-list",
-      params: {
-        userId: user.id,
-        type: "followers",
-        title: "Followers",
-      },
-    } as never);
-  }, [router, user?.id]);
-
-  const handleFollowingTap = useCallback(() => {
-    if (!user?.id) return;
-    router.push({
-      pathname: "/follow-list",
-      params: {
-        userId: user.id,
-        type: "following",
-        title: "Following",
-      },
-    } as never);
-  }, [router, user?.id]);
-
   const handleSendMessage = useCallback(async () => {
     // otherUserId will be provided when viewing another user's profile.
     // For now, isOwnProfile is always true so this is unreachable.
@@ -357,10 +298,6 @@ export default function ProfileScreen() {
       onEditProfile={() => router.push("/edit-profile")}
       onSettings={() => router.push("/settings")}
       isOwnProfile={isOwnProfile}
-      followersCount={followersCount}
-      followingCount={followingCount}
-      onFollowersTap={handleFollowersTap}
-      onFollowingTap={handleFollowingTap}
       otherUserId={null}
       onSendMessage={handleSendMessage}
     />
