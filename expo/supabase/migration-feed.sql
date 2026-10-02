@@ -41,8 +41,9 @@
 --   4. mature content hidden for teen viewers (is_mature, viewer tier from
 --      profiles.birthdate; client: tier === 'teen'). Here under_13 is hidden as
 --      well (stricter; the client does not hide for under_13). Unknown/adult see all.
---   5. posts by users the viewer blocked     (filterBlocked via user_blocks). Here in
---      BOTH directions (the client only filters blocks the viewer made).
+--   5. posts by users the viewer blocked     (filterBlocked via user_blocks). Only the
+--      blocks the viewer made; the reverse direction (users who blocked the viewer)
+--      is intentionally not filtered, same as the client.
 --   6. posts the viewer reported             (filterBlocked via reports, target_type 'post')
 --   Not replicated: follower eligibility / follow boost (no follower system), the
 --   300-newest window, random jitter, the "no two in a row from one author" shuffle
@@ -59,11 +60,13 @@
 --   get_feed is SECURITY INVOKER (RLS and auth.uid() apply), but the tables it
 --   needs are protected: trial_config has RLS with no policies; post_qualified_
 --   views and post_raw_views have no SELECT policy; user_blocks only shows the
---   viewer the blocks they made (the reverse direction is invisible to them).
+--   viewer the blocks they made. feed_blocked_ids() returns only those; it never
+--   returns users who blocked the viewer, so it cannot reveal who blocked them.
 --   Four small SECURITY DEFINER helpers expose only what the caller needs:
 --   trial_required_views(), feed_settings(), feed_blocked_ids(), feed_seen_ids().
 --   Each is scoped to auth.uid() or returns configuration, and is executable by
---   signed-in users only.
+--   signed-in users only. trial_required_views() and feed_settings() are readable
+--   by any signed-in user and expose only the exposure gate and the feed constants.
 
 -- ── 1. Config (trial_config; defaults never overwrite an existing row) ──────
 insert into public.trial_config (key, value) values
@@ -162,7 +165,7 @@ as $$
   from public.trial_config;
 $$;
 
--- Users the signed-in viewer blocked OR who blocked the viewer.
+-- Users the signed-in viewer blocked (not the reverse direction).
 create or replace function public.feed_blocked_ids()
 returns setof uuid
 language sql
@@ -170,9 +173,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select b.blocked_id from public.user_blocks b where b.blocker_id = auth.uid()
-  union
-  select b.blocker_id from public.user_blocks b where b.blocked_id = auth.uid();
+  select b.blocked_id from public.user_blocks b where b.blocker_id = auth.uid();
 $$;
 
 -- Which of the given posts the signed-in viewer has already seen (qualified or raw view).
@@ -301,10 +302,9 @@ begin
              order by
                (b.id in (select id from seen)),
                -- feed_testing_mode: 0 = fewest qualified views first (current behavior).
-               -- 1 = RESERVED for a future relevance-based order. PLACEHOLDER: not
-               -- implemented, falls back to mode 0. Put the relevance key here.
-               case when cfg.testing_mode = 1 then b.qualified_view_count
-                    else b.qualified_view_count end,
+               -- 1 = RESERVED for a future relevance-based order; falls back to mode 0.
+               -- Relevance key goes here, before qualified_view_count.
+               b.qualified_view_count,
                b.created_at,
                b.id
            ) as k
