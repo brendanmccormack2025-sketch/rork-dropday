@@ -1774,6 +1774,7 @@ export default function EditScreen() {
   // Root posts only, one untrimmed video clip, once per editor session. Never
   // blocks the editor or Post; every failure is log-only.
   const [autoEditRunning, setAutoEditRunning] = useState(false);
+  const [autoEditNote, setAutoEditNote] = useState<string | null>(null);
   // Set once auto-edit changed the timeline. The bar's mode is derived from the
   // live clips, so undo/redo and manual edits need no extra bookkeeping.
   const [autoEditSession, setAutoEditSession] = useState<{
@@ -1922,6 +1923,16 @@ export default function EditScreen() {
         SENSITIVITY_PRESETS[sensitivity],
       );
       console.log("[edit] autoEdit result:", result.changed ? "changed" : result.reason);
+      if (
+        mountedRef.current &&
+        !result.changed &&
+        (result.reason === "nothing_found" || result.reason === "no_audio")
+      ) {
+        setAutoEditNote("No long pauses found");
+        setTimeout(() => {
+          if (mountedRef.current) setAutoEditNote(null);
+        }, 3000);
+      }
       if (!mountedRef.current || !result.changed || uploadingRef.current) return;
       // Only apply if the user hasn't touched the clip meanwhile.
       const current = clipsForUndoRef.current;
@@ -2515,6 +2526,11 @@ export default function EditScreen() {
           <View style={styles.autoEditRow}>
             <ActivityIndicator size="small" color="rgba(255,255,255,0.7)" />
             <UiText style={styles.autoEditText}>Auto-editing...</UiText>
+          </View>
+        )}
+        {autoEditNote && !autoEditRunning && (
+          <View style={styles.autoEditRow}>
+            <UiText style={styles.autoEditText}>{autoEditNote}</UiText>
           </View>
         )}
         {autoBarMode && autoEditSession && (
