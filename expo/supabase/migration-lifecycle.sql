@@ -19,6 +19,8 @@
 --      config-driven; follower term and followed_post_survived fan-out REMOVED
 --      (the bar is just floor_points); survive sets the distribution window;
 --      rows whose status would not change are never rewritten.
+--      The post author's own likes no longer count toward engagement (like the
+--      author's own reactions).
 --   4. expire_posts() is DEFINED here but NOT scheduled and never called.
 --   5. BEFORE INSERT trigger: a reaction cannot be added to an archived or
 --      expired parent, or to a parent that does not exist.
@@ -177,7 +179,7 @@ begin
         limit 1
       ) end as nth_view_at,
       (select count(distinct r.user_id) from public.posts r where r.parent_post_id = c.id and r.user_id <> c.user_id) as video_reactions,
-      (select count(*) from public.likes l where l.post_id = c.id) as likes
+      (select count(*) from public.likes l where l.post_id = c.id and l.user_id <> c.user_id) as likes
     from candidates c
   ),
   decided as (
