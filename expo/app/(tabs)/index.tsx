@@ -184,7 +184,7 @@ function EmptyState({ error, onRetry }: { error: boolean; onRetry: () => void })
     <SafeAreaView style={styles.emptyWrap}>
       <TrialLogo size={56} />
       <UiText style={styles.emptyTitle}>
-        {error ? "Couldn't load the feed" : "Nothing to test right now"}
+        {error ? "Can't reach Trial right now" : "Nothing to test right now"}
       </UiText>
       <UiText style={styles.emptySub}>
         {error
