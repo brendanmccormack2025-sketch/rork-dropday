@@ -34,6 +34,24 @@ export const MAX_CUTS = 5;
 /** Videos longer than this are skipped entirely. */
 export const MAX_VIDEO_MS = 180_000;
 
+// ── Sensitivity presets (Review sheet) ──────────────────────────────────────
+
+export type Sensitivity = "gentle" | "normal" | "tight";
+export const DEFAULT_SENSITIVITY: Sensitivity = "normal";
+/**
+ * Minimum silence length and loudness margin per preset. Tighter cuts shorter
+ * pauses and counts slightly louder audio as silence. Normal equals the
+ * defaults above.
+ */
+export const SENSITIVITY_PRESETS: Record<
+  Sensitivity,
+  { minSilenceMs: number; thresholdMarginDb: number }
+> = {
+  gentle: { minSilenceMs: 1600, thresholdMarginDb: 6 },
+  normal: { minSilenceMs: MIN_SILENCE_MS, thresholdMarginDb: THRESHOLD_MARGIN_DB },
+  tight: { minSilenceMs: 800, thresholdMarginDb: 10 },
+};
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export type TimeRange = { startMs: number; endMs: number; lengthMs: number };

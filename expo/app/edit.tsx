@@ -43,6 +43,12 @@ import {
 import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
+import { OWNER_USER_ID } from "@/constants/debug";
+import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
+import { keepRangesToClips } from "@/lib/editModel";
+import { SENSITIVITY_PRESETS, type Sensitivity } from "@/lib/silenceDetection";
+import { getAutoEditEnabled, getAutoEditSensitivity, setAutoEditSensitivity } from "@/lib/autoEditSettings";
+import AutoEditReviewSheet from "@/components/AutoEditReviewSheet";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -59,6 +65,10 @@ import TextOverlayEditor from "@/components/TextOverlayEditor";
 import DraggableTextOverlay, {
   BG_STYLES,
 } from "@/components/DraggableTextOverlay";
+
+/** Auto-edit (silence trimming) switches. */
+const AUTO_TRIM_OWNER_ONLY = true;
+const AUTO_EDIT_ENABLED = true;
 
 const DRAG_EDGE_MARGIN = 0.01;
 /** Lead time (ms) before a clip's expected end to start preloading the next clip. */
@@ -79,6 +89,13 @@ function triggerHaptic(style: Haptics.ImpactFeedbackStyle) {
 
 function newClipId() {
   return `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** What the timeline plays: source + trim range per clip (ids and durations ignored). */
+function clipsSignature(list: DraftClip[]): string {
+  return JSON.stringify(
+    list.map((c) => [c.uri, c.trimStartMs ?? 0, c.trimEndMs ?? c.durationMs ?? 0]),
+  );
 }
 
 /** Minimum ms from either trim edge required to allow a split */
@@ -1753,6 +1770,201 @@ export default function EditScreen() {
     textEditSnapshotTakenRef.current = false;
   }, [redo, pushSnapshot]);
 
+  // ── Auto-edit: background silence analysis ───────────────────────────
+  // Root posts only, one untrimmed video clip, once per editor session. Never
+  // blocks the editor or Post; every failure is log-only.
+  const [autoEditRunning, setAutoEditRunning] = useState(false);
+  const [autoEditNote, setAutoEditNote] = useState<string | null>(null);
+  // Set once auto-edit changed the timeline. The bar's mode is derived from the
+  // live clips, so undo/redo and manual edits need no extra bookkeeping.
+  const [autoEditSession, setAutoEditSession] = useState<{
+    original: DraftClip;
+    originalSig: string;
+    producedSig: string;
+    savedMs: number;
+    /** What produced the current clips, so Review can reopen exactly there. */
+    sensitivity: Sensitivity;
+    cutEnabled: boolean[];
+    analysisDurationMs: number;
+  } | null>(null);
+  const autoEditWindowsRef = useRef<number[]>([]);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewSens, setReviewSens] = useState<Sensitivity>("normal");
+  const [reviewEnabled, setReviewEnabled] = useState<boolean[]>([]);
+  const uploadingRef = useRef(false);
+  useEffect(() => { uploadingRef.current = uploading; }, [uploading]);
+
+  // Swap the whole clip list (same playback reset as undo/redo, text untouched).
+  const replaceClips = useCallback((next: DraftClip[]) => {
+    clipsRef.current = next;
+    activeIndexRef.current = 0;
+    selectedClipIdxRef.current = -1;
+    isIsolatedRef.current = false;
+    const firstClip = next[0];
+    trimStartRef.current = firstClip?.trimStartMs ?? 0;
+    trimEndRef.current = firstClip?.trimEndMs ?? (firstClip?.durationMs ?? 0);
+    prevTrimStartRef.current = trimStartRef.current;
+    prevTrimEndRef.current = trimEndRef.current;
+    trimEndHandledRef.current = false;
+    trimGenerationRef.current += 1;
+    trimSeekDoneRef.current = false;
+    segmentOffsetRef.current = 0;
+    lastPositionUpdate.current = 0;
+    durationSetRef.current = false;
+    pendingSeekRef.current = firstClip?.trimStartMs ?? 0;
+    currentPlayingClipUriRef.current = firstClip?.uri ?? null;
+    safeSeekActiveRef.current = false;
+    setClips(next);
+    setSelectedClipId(null);
+    setActiveIndex(0);
+    setPositionMs(0);
+    setIsPlaying(true);
+    trimNeedsSnapshotRef.current = false;
+  }, []);
+
+  // Back to the original clip (one undoable step); text overlays are kept.
+  const handleUseOriginal = useCallback(() => {
+    if (!autoEditSession) return;
+    pushSnapshot(clips, textOverlays);
+    replaceClips([autoEditSession.original]);
+  }, [autoEditSession, clips, textOverlays, pushSnapshot, replaceClips]);
+
+  // Review: re-runs detectSilences on the windows kept in memory (no file read).
+  const reviewPlan = useMemo(() => {
+    if (!reviewOpen || !autoEditSession) return null;
+    return planSilenceTrim(
+      { uri: autoEditSession.original.uri, durationMs: autoEditSession.analysisDurationMs },
+      autoEditWindowsRef.current,
+      SENSITIVITY_PRESETS[reviewSens],
+    );
+  }, [reviewOpen, autoEditSession, reviewSens]);
+
+  const handleOpenReview = useCallback(() => {
+    if (!autoEditSession) return;
+    setReviewSens(autoEditSession.sensitivity);
+    setReviewEnabled(autoEditSession.cutEnabled);
+    setReviewOpen(true);
+  }, [autoEditSession]);
+
+  const handleReviewSensitivity = useCallback(
+    (value: Sensitivity) => {
+      if (!autoEditSession) return;
+      setAutoEditSensitivity(value);
+      const plan = planSilenceTrim(
+        { uri: autoEditSession.original.uri, durationMs: autoEditSession.analysisDurationMs },
+        autoEditWindowsRef.current,
+        SENSITIVITY_PRESETS[value],
+      );
+      setReviewSens(value);
+      setReviewEnabled(plan.detection.cuts.map(() => true));
+    },
+    [autoEditSession],
+  );
+
+  const handleReviewToggle = useCallback((index: number, value: boolean) => {
+    setReviewEnabled((prev) => prev.map((v, i) => (i === index ? value : v)));
+  }, []);
+
+  const handleReviewDone = useCallback(() => {
+    setReviewOpen(false);
+    if (!autoEditSession || !reviewPlan) return;
+    const { original } = autoEditSession;
+    const produced = keepRangesToClips(
+      original.uri,
+      mergeKeepRanges(reviewPlan.detection.keepRanges, reviewEnabled),
+    ).map((c) => ({
+      ...original,
+      id: newClipId(),
+      trimStartMs: c.trimStartMs,
+      trimEndMs: c.trimEndMs,
+    }));
+    const producedSig = clipsSignature(produced);
+    if (producedSig !== clipsSignature(clips)) {
+      pushSnapshot(clips, textOverlays);
+      replaceClips(produced);
+    }
+    setAutoEditSession({
+      ...autoEditSession,
+      producedSig,
+      savedMs: reviewPlan.detection.cuts.reduce(
+        (sum, c, i) => sum + (reviewEnabled[i] ? c.lengthMs : 0),
+        0,
+      ),
+      sensitivity: reviewSens,
+      cutEnabled: reviewEnabled,
+    });
+  }, [autoEditSession, reviewPlan, reviewEnabled, reviewSens, clips, textOverlays, pushSnapshot, replaceClips]);
+
+  const autoBarMode = useMemo<"auto" | "manual" | null>(() => {
+    if (!autoEditSession) return null;
+    const sig = clipsSignature(clips);
+    if (sig === autoEditSession.producedSig) return "auto";
+    return sig === autoEditSession.originalSig ? null : "manual";
+  }, [autoEditSession, clips]);
+  const autoEditStartedRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  useEffect(() => {
+    if (!AUTO_EDIT_ENABLED || autoEditStartedRef.current) return;
+    if (reactingTo || rootDropId || draftId) return;
+    if (AUTO_TRIM_OWNER_ONLY && (!user?.id || user.id !== OWNER_USER_ID)) return;
+    const clip = clips.length === 1 ? clips[0] : undefined;
+    if (!clip || clip.type !== "video" || !(clip.durationMs && clip.durationMs > 0)) return;
+    const trimEnd = clip.trimEndMs ?? 0;
+    if ((clip.trimStartMs ?? 0) > 0 || (trimEnd > 0 && trimEnd < clip.durationMs - 50)) return;
+
+    autoEditStartedRef.current = true;
+    (async () => {
+      if (!(await getAutoEditEnabled())) return;
+      if (mountedRef.current) setAutoEditRunning(true);
+      const sensitivity = await getAutoEditSensitivity();
+      const result = await autoEdit(
+        { uri: clip.uri, durationMs: clip.durationMs! },
+        SENSITIVITY_PRESETS[sensitivity],
+      );
+      console.log("[edit] autoEdit result:", result.changed ? "changed" : result.reason);
+      if (
+        mountedRef.current &&
+        !result.changed &&
+        (result.reason === "nothing_found" || result.reason === "no_audio")
+      ) {
+        setAutoEditNote("No long pauses found");
+        setTimeout(() => {
+          if (mountedRef.current) setAutoEditNote(null);
+        }, 3000);
+      }
+      if (!mountedRef.current || !result.changed || uploadingRef.current) return;
+      // Only apply if the user hasn't touched the clip meanwhile.
+      const current = clipsForUndoRef.current;
+      if (current.length !== 1 || clipsSignature(current) !== clipsSignature([clip])) return;
+      const original = { ...current[0]!, trimStartMs: 0, trimEndMs: current[0]!.trimEndMs || clip.durationMs };
+      const produced = result.clips.map((c) => ({
+        ...original,
+        id: newClipId(),
+        trimStartMs: c.trimStartMs,
+        trimEndMs: c.trimEndMs,
+      }));
+      pushSnapshot(current, textOverlaysForUndoRef.current);
+      replaceClips(produced);
+      autoEditWindowsRef.current = result.windows;
+      setAutoEditSession({
+        original,
+        originalSig: clipsSignature(current),
+        producedSig: clipsSignature(produced),
+        savedMs: result.detection.savedMs,
+        sensitivity,
+        cutEnabled: result.detection.cuts.map(() => true),
+        analysisDurationMs: result.durationMs,
+      });
+    })()
+      .catch((e) => console.warn("[edit] autoEdit failed", (e as Error)?.message ?? e))
+      .finally(() => {
+        if (mountedRef.current) setAutoEditRunning(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clips, user?.id, reactingTo, rootDropId, draftId]);
+
   // ── Thumbnail generation helper ────────────────────────────────────────────
 
   const generateThumbnail = useCallback(async (videoUri: string, timeMs = 0): Promise<string | null> => {
@@ -2311,6 +2523,36 @@ export default function EditScreen() {
         </Pressable>
 
         {/* ── Timeline editor ────────────────────────────────────────── */}
+        {autoEditRunning && (
+          <View style={styles.autoEditRow}>
+            <ActivityIndicator size="small" color="rgba(255,255,255,0.7)" />
+            <UiText style={styles.autoEditText}>Auto-editing...</UiText>
+          </View>
+        )}
+        {autoEditNote && !autoEditRunning && (
+          <View style={styles.autoEditRow}>
+            <UiText style={styles.autoEditText}>{autoEditNote}</UiText>
+          </View>
+        )}
+        {autoBarMode && autoEditSession && (
+          <View style={styles.autoBar}>
+            <UiText style={styles.autoBarText}>
+              {autoBarMode === "auto"
+                ? `Trimmed ${(autoEditSession.savedMs / 1000).toFixed(1)} s of silence`
+                : "Edited manually"}
+            </UiText>
+            {autoBarMode === "auto" && (
+              <Pressable onPress={handleOpenReview} hitSlop={8}>
+                <UiText style={styles.autoBarAction}>Review</UiText>
+              </Pressable>
+            )}
+            <Pressable onPress={handleUseOriginal} hitSlop={8}>
+              <UiText style={styles.autoBarAction}>
+                {autoBarMode === "auto" ? "Undo" : "Use original"}
+              </UiText>
+            </Pressable>
+          </View>
+        )}
         {isVideo && (
           <TimelineEditor
             clips={clips}
@@ -2575,6 +2817,19 @@ export default function EditScreen() {
       </View>
 
       {/* ── Text overlay editor modal ─────────────────────────────── */}
+      <AutoEditReviewSheet
+        visible={reviewOpen && !!reviewPlan}
+        cuts={reviewPlan?.detection.cuts ?? []}
+        enabled={reviewEnabled}
+        sensitivity={reviewSens}
+        onSensitivity={handleReviewSensitivity}
+        onToggle={handleReviewToggle}
+        onUseOriginal={() => {
+          setReviewOpen(false);
+          handleUseOriginal();
+        }}
+        onDone={handleReviewDone}
+      />
       <TextOverlayEditor
         visible={textEditorVisible}
         initialText={
@@ -2754,6 +3009,40 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(10,10,10,0.05)",
     backgroundColor: "#F5F3EE",
+  },
+  autoEditRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 6,
+  },
+  autoBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "rgba(255,255,255,0.1)",
+  },
+  autoBarText: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600" as const,
+  },
+  autoBarAction: {
+    color: theme.accent,
+    fontSize: 13,
+    fontWeight: "800" as const,
+  },
+  autoEditText: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 12,
+    fontWeight: "600" as const,
   },
   bannerError: {
     backgroundColor: "rgba(232,41,28,0.12)",

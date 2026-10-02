@@ -1,26 +1,32 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   Alert,
   Linking,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   View,
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ban, ChevronLeft, FileText, LogOut, Shield, Trash2, User } from "lucide-react-native";
+import { Ban, ChevronLeft, FileText, LogOut, Scissors, Shield, Trash2, User } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import { isDebugOwner } from "@/constants/debug";
 import UiText from "@/components/UiText";
+import { getAutoEditEnabled, setAutoEditEnabled } from "@/lib/autoEditSettings";
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { user, signOut, deleteAccount } = useAuth();
   const [deleting, setDeleting] = useState<boolean>(false);
+  const [autoEdit, setAutoEdit] = useState<boolean>(true);
+  useEffect(() => {
+    getAutoEditEnabled().then(setAutoEdit);
+  }, []);
   const handleSignOut = useCallback(() => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
@@ -100,6 +106,25 @@ export default function SettingsScreen() {
                 style={{ transform: [{ rotate: "180deg" }] }}
               />
             </Pressable>
+          </View>
+
+          {/* Editing section */}
+          <UiText style={styles.sectionLabel}>Editing</UiText>
+          <View style={styles.sectionCard}>
+            <View style={styles.row}>
+              <Scissors color={theme.textMuted} size={18} strokeWidth={2} />
+              <UiText style={styles.rowText}>Auto-edit my videos</UiText>
+              <Switch
+                value={autoEdit}
+                onValueChange={(v) => {
+                  setAutoEdit(v);
+                  setAutoEditEnabled(v);
+                }}
+                trackColor={{ false: theme.border, true: theme.accent }}
+                thumbColor="#fff"
+                ios_backgroundColor={theme.border}
+              />
+            </View>
           </View>
 
           {/* Safety section */}
