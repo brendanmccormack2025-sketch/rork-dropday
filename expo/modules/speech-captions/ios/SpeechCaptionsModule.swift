@@ -13,7 +13,7 @@ private let chunkSeconds: Double = 55
 private let chunkOverlapSeconds: Double = 1
 
 // A single chunk that has not finished after this long is cancelled.
-private let chunkTimeoutSeconds: Double = 180
+private let chunkTimeoutSeconds: Double = 90
 
 struct SpeechFailure {
   let code: String
