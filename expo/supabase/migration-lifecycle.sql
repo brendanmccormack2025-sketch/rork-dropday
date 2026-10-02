@@ -1,9 +1,13 @@
 -- ============================================================================
--- Post lifecycle: testing -> survived (distribution window) -> expired (idempotent)
+-- Post lifecycle, part 1 of 2: columns, config, survival rules, guards (idempotent)
 -- ============================================================================
 -- Based on run_survival_checkpoint() in migration-verdict-at-n-views.sql, which
 -- this file supersedes. Run manually in the Supabase SQL editor. Safe to re-run.
 -- Never re-run older migrations that define run_survival_checkpoint.
+--
+-- Part 2 is migration-lifecycle-expiry.sql: run it ONLY after the client handles
+-- the 'expired' status. This file does not schedule the 'expire-posts' cron job
+-- and never sets any post to 'expired'.
 --
 -- What this migration does (details inline):
 --   1. posts: survived_at, distribution_started_at, distribution_expires_at,
@@ -15,13 +19,12 @@
 --      config-driven; follower term and followed_post_survived fan-out REMOVED
 --      (the bar is just floor_points); survive sets the distribution window;
 --      rows whose status would not change are never rewritten.
---   4. expire_posts() + cron job 'expire-posts' (every 5 minutes). No row and
---      no file is deleted.
+--   4. expire_posts() is DEFINED here but NOT scheduled and never called.
 --   5. BEFORE INSERT trigger: a reaction cannot be added to an archived or
 --      expired parent, or to a parent that does not exist.
 --   6. Indexes.
---   7. Legacy posts (no checkpoint_at) become 'expired' (reversible, see the
---      rollback notes at the bottom; originals are kept in a backup table).
+--   7. Legacy posts (no checkpoint_at) become 'archived' (the backup table keeps
+--      their original status; see the rollback notes at the bottom).
 --   8. BEFORE INSERT trigger force_post_defaults: signed-in API users cannot
 --      set status, counters or lifecycle timestamps on insert.
 -- Not touched: RLS on posts, the existing triggers (trg_set_checkpoint_at,
@@ -246,11 +249,12 @@ select cron.schedule(
   $cron$
 );
 
--- ── 4. expire_posts() + cron 'expire-posts' ─────────────────────────────────
+-- ── 4. expire_posts() (defined, NOT scheduled) ───────────────────────────────
 -- Survived posts whose distribution window has ended become 'expired'.
 -- Reactions (parent_post_id not null) become 'expired' when their parent is
 -- expired or archived; repeated so replies to reactions follow in the same call.
--- Deletes nothing: no row, no file.
+-- Deletes nothing: no row, no file. Nothing calls it until
+-- migration-lifecycle-expiry.sql schedules the 'expire-posts' cron job.
 create or replace function public.expire_posts()
 returns integer
 language plpgsql
@@ -289,16 +293,6 @@ begin
   return total;
 end;
 $$;
-
-select cron.unschedule(job.jobid) from cron.job job where job.jobname = 'expire-posts';
-
-select cron.schedule(
-  'expire-posts',
-  '*/5 * * * *',
-  $cron$
-    select public.expire_posts();
-  $cron$
-);
 
 -- ── 5. Reactions need a live parent ─────────────────────────────────────────
 create or replace function public.check_reaction_parent()
@@ -391,8 +385,11 @@ create index if not exists post_qualified_views_created_at_idx
 
 -- ── 7. Legacy posts ─────────────────────────────────────────────────────────
 -- Root posts from before the survival system (checkpoint_at is null) that are
--- still 'trial' or 'survived' become 'expired'. Their original status is saved
--- first so the change can be undone exactly (see rollback notes below).
+-- still 'trial' or 'survived' become 'archived' (hidden from other users by the
+-- existing client filters; shown to their owner as "Trial ended"). Their
+-- original status is saved first so the change can be undone exactly (see the
+-- rollback notes below). run_survival_checkpoint() ignores posts without
+-- checkpoint_at, so they are never judged again.
 create table if not exists public.posts_legacy_status_backup (
   post_id    uuid primary key,
   old_status text not null,
@@ -410,8 +407,7 @@ where p.parent_post_id is null
 on conflict (post_id) do nothing;
 
 update public.posts p
-set status = 'expired',
-    expired_at = now()
+set status = 'archived'
 where p.parent_post_id is null
   and p.checkpoint_at is null
   and p.status in ('trial', 'survived');
@@ -478,28 +474,31 @@ where p.parent_post_id is null
 --     distribution_expires_at = now() + interval '24 hours'
 -- where status = 'survived' and distribution_expires_at is null and parent_post_id is null;
 
--- ── Rollback notes (comments; run the statements you need, in order) ─────────
--- a) Stop the new cron job and remove the new triggers/function:
---      select cron.unschedule(jobid) from cron.job where jobname = 'expire-posts';
+-- ── Rollback notes (comments; run the statements you need, in this order) ───
+-- If migration-lifecycle-expiry.sql was run, roll that file back FIRST (its own
+-- rollback section), then:
+-- a) Put legacy posts back exactly as they were (only rows this file archived;
+--    run_survival_checkpoint never touches them):
+--      update public.posts p
+--      set status = b.old_status
+--      from public.posts_legacy_status_backup b
+--      where b.post_id = p.id
+--        and p.status = 'archived'
+--        and p.parent_post_id is null
+--        and p.checkpoint_at is null;
+-- b) Remove the new triggers and functions:
 --      drop trigger if exists force_post_defaults on public.posts;
 --      drop trigger if exists check_reaction_parent on public.posts;
 --      drop function if exists public.force_post_defaults();
 --      drop function if exists public.check_reaction_parent();
 --      drop function if exists public.expire_posts();
--- b) Put legacy posts back exactly as they were:
---      update public.posts p
---      set status = b.old_status, expired_at = null
---      from public.posts_legacy_status_backup b
---      where b.post_id = p.id and p.status = 'expired';
--- c) Any other 'expired' posts (expired by expire_posts()) were 'survived':
---      update public.posts set status = 'survived', expired_at = null where status = 'expired';
--- d) Restore the previous 4-value status CHECK (only after b and c):
+-- c) Restore the previous 4-value status CHECK (only if no row is 'expired'):
 --      alter table public.posts drop constraint if exists posts_status_check;
 --      alter table public.posts add constraint posts_status_check
 --        check (status in ('trial', 'survived', 'archived', 'incomplete'));
--- e) Restore the previous survival function: re-run migration-verdict-at-n-views.sql
+-- d) Restore the previous survival function: re-run migration-verdict-at-n-views.sql
 --    (the version this file replaced; it also re-registers 'survival-checkpoint').
--- f) The new columns, trial_config and posts_legacy_status_backup can stay; they
+-- e) The new columns, trial_config and posts_legacy_status_backup can stay; they
 --    are unused by the old function. To remove them:
 --      alter table public.posts drop column if exists survived_at,
 --        drop column if exists distribution_started_at, drop column if exists distribution_expires_at,
