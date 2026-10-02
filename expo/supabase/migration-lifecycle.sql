@@ -414,67 +414,68 @@ where p.parent_post_id is null
   and p.checkpoint_at is null
   and p.status in ('trial', 'survived');
 
--- ── Read-only previews (run separately, ideally BEFORE the migration) ───────
--- 1) Posts by status:
--- select status, parent_post_id is not null as is_reaction, count(*)
--- from public.posts group by 1, 2 order by 1, 2;
+-- ── Read-only previews (run separately; safe to run BEFORE this migration) ───
+-- They use literal defaults (no trial_config) and only columns that exist today.
+-- (to_jsonb(p) ->> '...' reads a column that may not exist yet as NULL.)
 --
--- 2) Legacy posts that would be expired (root posts without checkpoint_at):
+-- 1) Counts by status (root posts vs reactions):
+-- select status, parent_post_id is not null as is_reaction, count(*) as posts
+-- from public.posts
+-- group by 1, 2
+-- order by 1, 2;
+--
+-- 2) Legacy posts (root posts with no checkpoint_at, still trial/survived):
+--    the ones this migration archives. Count, then the list:
+-- select status, count(*) as legacy_posts
+-- from public.posts
+-- where parent_post_id is null and checkpoint_at is null and status in ('trial', 'survived')
+-- group by status
+-- order by status;
+--
 -- select id, user_id, status, created_at
 -- from public.posts
 -- where parent_post_id is null and checkpoint_at is null and status in ('trial', 'survived')
 -- order by created_at;
 --
--- 3) Posts that would flip to archived under the current rules (gate met, bar
---    missed, Nth view settled). Uses trial_config when it exists, else defaults:
--- with cfg as (
---   select
---     coalesce((select value from public.trial_config where key = 'gate_min'), 3)             as gate_min,
---     coalesce((select value from public.trial_config where key = 'gate_fraction'), 0.25)     as gate_fraction,
---     coalesce((select value from public.trial_config where key = 'floor_points'), 2)         as floor_points,
---     coalesce((select value from public.trial_config where key = 'reaction_weight'), 2)      as reaction_weight,
---     coalesce((select value from public.trial_config where key = 'like_weight'), 1)          as like_weight,
---     coalesce((select value from public.trial_config where key = 'settle_minutes'), 10)      as settle_minutes,
---     coalesce((select value from public.trial_config where key = 'active_window_days'), 7)   as window_days
--- ), active as (
+-- 3) Survived posts with no distribution_expires_at (expire_posts() would ignore
+--    them; see migration-lifecycle-expiry.sql step C):
+-- select p.id, p.created_at, p.checkpoint_at
+-- from public.posts p
+-- where p.status = 'survived'
+--   and p.parent_post_id is null
+--   and to_jsonb(p) ->> 'distribution_expires_at' is null
+-- order by p.created_at;
+--
+-- 4) Posts that would flip to archived on the next survival run (gate met, bar
+--    missed, Nth view settled). Literal defaults: gate_min 3, gate_fraction 0.25,
+--    floor_points 2, reaction_weight 2, like_weight 1, settle 10 minutes, active
+--    window 7 days. The author's own likes are not counted.
+-- with active as (
 --   select count(*)::int as n from (
---     select viewer_id as uid from public.post_raw_views       where created_at >= now() - (select window_days from cfg) * interval '1 day'
---     union select viewer_id         from public.post_qualified_views where created_at >= now() - (select window_days from cfg) * interval '1 day'
---     union select user_id           from public.likes                where created_at >= now() - (select window_days from cfg) * interval '1 day'
---     union select user_id           from public.posts                where created_at >= now() - (select window_days from cfg) * interval '1 day'
+--     select viewer_id as uid from public.post_raw_views       where created_at >= now() - interval '7 days'
+--     union select viewer_id         from public.post_qualified_views where created_at >= now() - interval '7 days'
+--     union select user_id           from public.likes                where created_at >= now() - interval '7 days'
+--     union select user_id           from public.posts                where created_at >= now() - interval '7 days'
 --   ) a
 -- ), gate as (
---   select least(100, greatest(c.gate_min, ceil(a.n * c.gate_fraction)), greatest(1, a.n - 1))::int as required_views
---   from cfg c, active a
+--   select least(100, greatest(3, ceil(n * 0.25)), greatest(1, n - 1))::int as required_views from active
 -- ), scored as (
---   select p.id, p.status, p.qualified_view_count, g.required_views, c.floor_points,
---          (select count(distinct r.user_id) from public.posts r where r.parent_post_id = p.id and r.user_id <> p.user_id) * c.reaction_weight
---            + (select count(*) from public.likes l where l.post_id = p.id) * c.like_weight as engagement,
+--   select p.id, p.status, p.qualified_view_count, g.required_views,
+--          (select count(distinct r.user_id) from public.posts r where r.parent_post_id = p.id and r.user_id <> p.user_id) * 2
+--            + (select count(*) from public.likes l where l.post_id = p.id and l.user_id <> p.user_id) * 1 as engagement,
 --          case when p.qualified_view_count >= g.required_views then (
 --            select v.created_at from public.post_qualified_views v where v.post_id = p.id
 --            order by v.created_at offset (g.required_views - 1) limit 1) end as nth_view_at,
---          (p.checkpoint_at <= now()) as is_24h, c.settle_minutes
---   from public.posts p cross join gate g cross join cfg c
+--          (p.checkpoint_at <= now()) as is_24h
+--   from public.posts p cross join gate g
 --   where p.parent_post_id is null and p.checkpoint_at is not null and p.status in ('trial', 'incomplete')
 -- )
--- select id, status as current_status, qualified_view_count, required_views, engagement, floor_points, nth_view_at
+-- select id, status as current_status, qualified_view_count, required_views, engagement, nth_view_at
 -- from scored
 -- where qualified_view_count >= required_views
---   and engagement < floor_points
---   and ((nth_view_at is not null and nth_view_at <= now() - settle_minutes * interval '1 minute')
+--   and engagement < 2
+--   and ((nth_view_at is not null and nth_view_at <= now() - interval '10 minutes')
 --        or (nth_view_at is null and is_24h));
---
--- 4) Survived posts that have NO distribution window (survived before this
---    migration; expire_posts() ignores them until they get distribution_expires_at):
--- select id, survived_at, distribution_expires_at, created_at
--- from public.posts
--- where status = 'survived' and distribution_expires_at is null and parent_post_id is null;
---    Optional backfill (NOT run by this migration; choose a rule first):
--- update public.posts
--- set survived_at = coalesce(survived_at, now()),
---     distribution_started_at = coalesce(distribution_started_at, now()),
---     distribution_expires_at = now() + interval '24 hours'
--- where status = 'survived' and distribution_expires_at is null and parent_post_id is null;
 
 -- ── Rollback notes (comments; run the statements you need, in this order) ───
 -- If migration-lifecycle-expiry.sql was run, roll that file back FIRST (its own
