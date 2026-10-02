@@ -47,7 +47,7 @@ import { OWNER_USER_ID } from "@/constants/debug";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
 import { keepRangesToClips } from "@/lib/editModel";
 import { SENSITIVITY_PRESETS, type Sensitivity } from "@/lib/silenceDetection";
-import { getAutoEditSensitivity, setAutoEditSensitivity } from "@/lib/autoEditSettings";
+import { getAutoEditEnabled, getAutoEditSensitivity, setAutoEditSensitivity } from "@/lib/autoEditSettings";
 import AutoEditReviewSheet from "@/components/AutoEditReviewSheet";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -1915,8 +1915,9 @@ export default function EditScreen() {
     if ((clip.trimStartMs ?? 0) > 0 || (trimEnd > 0 && trimEnd < clip.durationMs - 50)) return;
 
     autoEditStartedRef.current = true;
-    setAutoEditRunning(true);
     (async () => {
+      if (!(await getAutoEditEnabled())) return;
+      if (mountedRef.current) setAutoEditRunning(true);
       const sensitivity = await getAutoEditSensitivity();
       const result = await autoEdit(
         { uri: clip.uri, durationMs: clip.durationMs! },
