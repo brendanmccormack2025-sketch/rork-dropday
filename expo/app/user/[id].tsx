@@ -26,7 +26,9 @@ import {
 import { theme } from "@/constants/theme";
 import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
-import { resolveAvatarUrl, type Post } from "@/providers/PostsProvider";
+import { resolveAvatarUrl, isOnTrialNow, type Post } from "@/providers/PostsProvider";
+import CreatorLinkPills from "@/components/CreatorLinkPills";
+import { noteMissingYoutubeColumn, profileLinkColumns } from "@/lib/creatorLinks";
 import { supabase } from "@/lib/supabase";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 
@@ -51,11 +53,18 @@ export default function PublicProfileScreen() {
     enabled: !!id,
     queryFn: async () => {
       if (!id) return null;
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, username, display_name, avatar_url, bio")
-        .eq("id", id)
-        .maybeSingle();
+      // Column list is built at run time (youtube_url may not exist yet).
+      const run = async () =>
+        (await supabase
+          .from("profiles")
+          .select(`id, username, display_name, avatar_url, bio, ${profileLinkColumns()}`)
+          .eq("id", id)
+          .maybeSingle()) as unknown as {
+          data: Record<string, unknown> | null;
+          error: { message: string } | null;
+        };
+      let { data, error } = await run();
+      if (noteMissingYoutubeColumn(error)) ({ data, error } = await run());
       if (error) {
         console.warn("[user/profile] error", error.message);
         return null;
@@ -67,6 +76,10 @@ export default function PublicProfileScreen() {
             display_name: (data.display_name as string | null) ?? null,
             avatar_url: (data.avatar_url as string | null) ?? null,
             bio: (data.bio as string | null) ?? null,
+            website: (data.website as string | null) ?? null,
+            instagram_handle: (data.instagram_handle as string | null) ?? null,
+            tiktok_handle: (data.tiktok_handle as string | null) ?? null,
+            youtube_url: (data.youtube_url as string | null | undefined) ?? null,
           }
         : null;
     },
@@ -91,7 +104,8 @@ export default function PublicProfileScreen() {
         // Public profile shows content that earned its place — another
         // user's failed trials are hidden here (the creator still sees
         // them on their own profile).
-        .in("status", ["trial", "incomplete", "survived"])
+        // Only posts that are testing or still live (see isOnTrialNow below).
+        .in("status", ["trial", "survived"])
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) {
@@ -131,7 +145,7 @@ export default function PublicProfileScreen() {
   // Blocked user's content is hidden entirely — the grid renders empty and
   // the ListEmptyComponent shows a blocked notice instead of their drops.
   const visibleDrops = useMemo(
-    () => (userProfileBlocked ? [] : drops),
+    () => (userProfileBlocked ? [] : drops.filter(isOnTrialNow)),
     [drops, userProfileBlocked],
   );
 
@@ -220,6 +234,9 @@ export default function PublicProfileScreen() {
                     <UiText style={styles.bio}>{profile.bio}</UiText>
                   ) : null}
 
+                  {/* Links (shared helper: only valid https links) */}
+                  <CreatorLinkPills profile={profile} />
+
                   {/* Block button */}
                   {!isOwnProfile && (
                     <View style={styles.actionRow}>
@@ -256,21 +273,11 @@ export default function PublicProfileScreen() {
                     </View>
                   )}
 
-                  {/* Stats row */}
-                  <View style={styles.statsRow}>
-                    <View style={styles.stat}>
-                      <UiText style={styles.statNum}>
-                        {userProfileBlocked ? 0 : visibleDrops.length}
-                      </UiText>
-                      <UiText style={styles.statLabel}>Posts</UiText>
-                    </View>
-                  </View>
-
                   {/* Section header — hidden when this account is blocked */}
                   {!userProfileBlocked && (
                     <View style={styles.sectionHeader}>
                       <Sparkles color={theme.accent} size={14} strokeWidth={2} />
-                      <UiText style={styles.sectionLabel}>Posts</UiText>
+                      <UiText style={styles.sectionLabel}>On Trial now</UiText>
                     </View>
                   )}
                 </>
@@ -292,9 +299,9 @@ export default function PublicProfileScreen() {
               ) : (
                 <View style={styles.empty}>
                   <Video color={theme.textDim} size={40} strokeWidth={1.5} />
-                  <UiText style={styles.emptyTitle}>No posts yet</UiText>
+                  <UiText style={styles.emptyTitle}>Nothing on trial right now</UiText>
                   <UiText style={styles.emptySub}>
-                    @{username} hasn't posted any posts yet.
+                    @{username} has no posts on trial at the moment.
                   </UiText>
                 </View>
               )

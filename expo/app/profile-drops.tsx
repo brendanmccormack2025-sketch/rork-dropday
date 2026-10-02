@@ -8,7 +8,7 @@ import { ArrowLeft } from "lucide-react-native";
 
 import { FeedListView } from "@/components/FeedListView";
 import { theme } from "@/constants/theme";
-import { usePosts, isFollowerEligible, isOnTrialNow, type Post } from "@/providers/PostsProvider";
+import { usePosts, isOnTrialNow, type Post } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { supabase } from "@/lib/supabase";
 
@@ -36,24 +36,6 @@ export default function ProfileDropsScreen() {
   // same pattern as the profile screen (user/[id].tsx).
   const isOtherUser = !!userId && userId !== user?.id;
 
-  // ── Is the current user following this profile's owner? ──────────────
-  // Needed for the follower-visibility eligibility rule (same as user/[id].tsx).
-  const { data: isFollowing = false } = useQuery({
-    queryKey: ["is-following", user?.id, userId],
-    enabled: isOtherUser && !!user?.id && !!userId,
-    queryFn: async (): Promise<boolean> => {
-      if (!user?.id || !userId) return false;
-      const { data, error } = await supabase
-        .from("follows")
-        .select("follower_id")
-        .eq("follower_id", user.id)
-        .eq("followee_id", userId)
-        .maybeSingle();
-      if (error) return false;
-      return !!data;
-    },
-  });
-
   const otherUserPostsQuery = useQuery({
     queryKey: ["posts", "user", userId],
     enabled: isOtherUser,
@@ -67,9 +49,8 @@ export default function ProfileDropsScreen() {
         .eq("user_id", userId)
         .is("parent_post_id", null)
         .eq("moderation_status", "active")
-        // Same rule as user/[id].tsx: another user's failed trials are
-        // hidden from public views.
-        .in("status", ["trial", "incomplete", "survived"])
+        // Same rule as user/[id].tsx: only posts that are testing or still live.
+        .in("status", ["trial", "survived"])
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) {
@@ -117,19 +98,14 @@ export default function ProfileDropsScreen() {
     qc.invalidateQueries({ queryKey: ["posts", "all-reactions"] });
   }, [qc, isOtherUser, userId]);
 
-  // Filter to root drops only. For own profile, use myPosts (same data source
-  // as the profile grid). For other users, use the direct query result.
-  // Follower-visibility: when the viewer follows this creator, only posts
-  // that survived Trial with follower visibility allowed are shown (same
-  // shared rule as the feed and user/[id].tsx).
+  // Root drops that are on trial now. Own profile uses myPosts (same source
+  // as the profile screen); other users use the direct query result.
   const posts = useMemo(
     () =>
-      (isOtherUser ? otherUserPostsQuery.data ?? [] : myPosts.filter(isOnTrialNow))
+      (isOtherUser ? otherUserPostsQuery.data ?? [] : myPosts)
         .filter((p) => !p.parent_post_id)
-        .filter((p) =>
-          isFollowerEligible(p, user?.id, isFollowing && userId ? [userId] : []),
-        ),
-    [isOtherUser, myPosts, otherUserPostsQuery.data, user?.id, isFollowing, userId],
+        .filter(isOnTrialNow),
+    [isOtherUser, myPosts, otherUserPostsQuery.data],
   );
 
   const handleReactions = useCallback(
