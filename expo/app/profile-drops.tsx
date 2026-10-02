@@ -8,7 +8,7 @@ import { ArrowLeft } from "lucide-react-native";
 
 import { FeedListView } from "@/components/FeedListView";
 import { theme } from "@/constants/theme";
-import { usePosts, isFollowerEligible, type Post } from "@/providers/PostsProvider";
+import { usePosts, isFollowerEligible, isOnTrialNow, type Post } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { supabase } from "@/lib/supabase";
 
@@ -124,7 +124,7 @@ export default function ProfileDropsScreen() {
   // shared rule as the feed and user/[id].tsx).
   const posts = useMemo(
     () =>
-      (isOtherUser ? otherUserPostsQuery.data ?? [] : myPosts)
+      (isOtherUser ? otherUserPostsQuery.data ?? [] : myPosts.filter(isOnTrialNow))
         .filter((p) => !p.parent_post_id)
         .filter((p) =>
           isFollowerEligible(p, user?.id, isFollowing && userId ? [userId] : []),

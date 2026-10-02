@@ -30,7 +30,7 @@ import {
 import { theme } from "@/constants/theme";
 import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
-import { usePosts, type MyProfile, type Post, type DraftProject } from "@/providers/PostsProvider";
+import { usePosts, isOnTrialNow, type MyProfile, type Post, type DraftProject } from "@/providers/PostsProvider";
 import { TrialStatusBadge } from "@/components/TrialStatusBadge";
 import CreatorLinkPills from "@/components/CreatorLinkPills";
 import { supabase } from "@/lib/supabase";
@@ -56,7 +56,7 @@ function TabBar({ tab, onTab, isOwnProfile }: { tab: TabKey; onTab: (t: TabKey) 
         <UiText
           style={[styles.tabLabel, tab === "drops" && styles.tabLabelActive]}
         >
-          Posts
+          On Trial now
         </UiText>
       </Pressable>
       {isOwnProfile && (
@@ -156,14 +156,6 @@ function ProfileHeader({
       {/* Links row (shared helper: only valid https links) */}
       <CreatorLinkPills profile={myProfile} />
 
-      {/* Stats row */}
-      <View style={styles.statsRow}>
-        <View style={styles.stat}>
-          <UiText style={styles.statNum}>{drops.length}</UiText>
-          <UiText style={styles.statLabel}>Posts</UiText>
-        </View>
-      </View>
-
       {/* Tab switcher */}
       <TabBar tab={tab} onTab={onTab} isOwnProfile={isOwnProfile} />
     </View>
@@ -210,8 +202,9 @@ export default function ProfileScreen() {
     [myProfile],
   );
 
+  // Only what is on trial right now (no history grid).
   const drops = useMemo(
-    () => myPosts.filter((p) => !p.parent_post_id),
+    () => myPosts.filter((p) => !p.parent_post_id && isOnTrialNow(p)),
     [myPosts],
   );
   const activePosts = tab === "drops" ? drops : [];
@@ -324,9 +317,10 @@ export default function ProfileScreen() {
                       size={40}
                       strokeWidth={1.5}
                     />
-                    <UiText style={styles.emptyTitle}>No posts yet</UiText>
+                    <UiText style={styles.emptyTitle}>Nothing on trial right now</UiText>
                     <UiText style={styles.emptySub}>
-                      Your posts will appear here.
+                      Post a video to put it on Trial. It shows here while it is being
+                      tested and while it is live.
                     </UiText>
                   </View>
                 )}

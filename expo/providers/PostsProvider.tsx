@@ -85,6 +85,19 @@ export type Post = {
 };
 
 /**
+ * "On Trial now": testing posts, plus survivors whose distribution window has not
+ * ended (a null window counts as still active). Archived, expired and incomplete
+ * posts are not. Used by the own profile and its post viewer.
+ */
+export function isOnTrialNow(post: Pick<Post, "status" | "distribution_expires_at">): boolean {
+  if (post.status === "trial") return true;
+  if (post.status !== "survived") return false;
+  if (!post.distribution_expires_at) return true;
+  const expiresMs = Date.parse(post.distribution_expires_at);
+  return Number.isNaN(expiresMs) || expiresMs > Date.now();
+}
+
+/**
  * Reactions whose status is archived or expired are hidden from everyone
  * except their own author. Used by the reaction lists (reactions + tree).
  */
