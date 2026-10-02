@@ -40,6 +40,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDetection";
 import { useReportContent } from "@/hooks/useReportContent";
 import { supabase } from "@/lib/supabase";
+import { getOutputTimeMs } from "@/lib/editModel";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
@@ -340,6 +341,12 @@ export const FeedItem = memo(function FeedItem({
     () => new Set(allSegments).size < allSegments.length,
     [allSegments],
   );
+  // Output-timeline position (after cuts), tracked only when an overlay has a
+  // time window so posts without timed overlays never re-render for it.
+  const hasTimedOverlays = !!post.text_overlays?.some(
+    (ov) => ov.startMs !== undefined || ov.endMs !== undefined,
+  );
+  const [outputTimeMs, setOutputTimeMs] = useState<number>(0);
   const [segIdx, setSegIdx] = useState<number>(0);
   const currentUri = allSegments[segIdx] ?? post.media_url;
   const segIdxRef = useRef<number>(0);
@@ -631,6 +638,7 @@ export const FeedItem = memo(function FeedItem({
   useEffect(() => {
     setSegIdx(0);
     segIdxRef.current = 0;
+    setOutputTimeMs(0);
     setActiveSlot(0);
     activeSlotRef.current = 0;
     activeVideoRef.current = videoRefA.current;
@@ -764,6 +772,16 @@ export const FeedItem = memo(function FeedItem({
 
       if (!status.isLoaded) return;
 
+      if (hasTimedOverlays) {
+        setOutputTimeMs(
+          getOutputTimeMs(
+            segIdxRef.current,
+            status.positionMillis,
+            post.trim_data ?? allSegments.map(() => ({ trimStartMs: 0, trimEndMs: Infinity })),
+          ),
+        );
+      }
+
       // ── Pre-buffer gate ──
       // Only pass on a real onReadyForDisplay event (readyForDisplayRef set
       // by onReadySlotA/B). The notBuffering fallback was removed because it
@@ -827,7 +845,7 @@ export const FeedItem = memo(function FeedItem({
         advanceSegment();
       }
     },
-    [allSegments.length, hasSharedSegmentUrls, handleStallDetection, advanceSegment, post.id],
+    [allSegments, hasSharedSegmentUrls, hasTimedOverlays, post.trim_data, handleStallDetection, advanceSegment, post.id],
   );
 
   // ── Error recovery: retry loading ──────────────────────────────────
@@ -1187,7 +1205,13 @@ export const FeedItem = memo(function FeedItem({
       {/* Text overlays — rendered on top of media, below UI chrome */}
       {post.text_overlays && post.text_overlays.length > 0 && !post._optimistic?.status && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {post.text_overlays.map((ov) => (
+          {post.text_overlays
+            .filter(
+              (ov) =>
+                (ov.startMs === undefined || outputTimeMs >= ov.startMs) &&
+                (ov.endMs === undefined || outputTimeMs < ov.endMs),
+            )
+            .map((ov) => (
             <FeedTextOverlay
               key={ov.id}
               overlay={ov}
