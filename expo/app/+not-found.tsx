@@ -1,9 +1,9 @@
 import { Link, Stack } from "expo-router";
+import { SearchX } from "lucide-react-native";
 import { StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
 
 import ScreenBackground from "@/components/ScreenBackground";
-import TrialLogo from "@/components/TrialLogo";
 import { theme } from "@/constants/theme";
 
 export default function NotFoundScreen() {
@@ -12,7 +12,7 @@ export default function NotFoundScreen() {
       <Stack.Screen options={{ title: "Lost post", headerShown: false }} />
       <ScreenBackground>
         <View style={styles.container}>
-          <TrialLogo size={80} />
+          <SearchX color={theme.textDim} size={56} strokeWidth={1.5} />
           <UiText style={styles.title}>This post slipped away</UiText>
           <UiText style={styles.sub}>That screen doesn&apos;t exist.</UiText>
           <Link href="/(tabs)" style={styles.link}>

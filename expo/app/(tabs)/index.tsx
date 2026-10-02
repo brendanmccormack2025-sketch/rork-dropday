@@ -20,12 +20,13 @@ import {
   Bell,
   Music2,
   Send,
+  Video,
+  WifiOff,
   X,
   Users,
   Sparkles,
 } from "lucide-react-native";
 import { FeedListView } from "@/components/FeedListView";
-import TrialLogo from "@/components/TrialLogo";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post, resolveAvatarUrl } from "@/providers/PostsProvider";
 import { useNotifications } from "@/providers/NotificationsProvider";
@@ -182,7 +183,11 @@ export default function FeedScreen() {
 function EmptyState({ error, onRetry }: { error: boolean; onRetry: () => void }) {
   return (
     <SafeAreaView style={styles.emptyWrap}>
-      <TrialLogo size={56} />
+      {error ? (
+        <WifiOff color={theme.textDim} size={44} strokeWidth={1.5} />
+      ) : (
+        <Video color={theme.textDim} size={44} strokeWidth={1.5} />
+      )}
       <UiText style={styles.emptyTitle}>
         {error ? "Can't reach Trial right now" : "Nothing to test right now"}
       </UiText>
@@ -212,7 +217,7 @@ function GateOverlay({
       <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
       <View style={styles.gateInner}>
         <View style={styles.gateIcon}>
-          <TrialLogo size={42} />
+          <Video color="#fff" size={32} strokeWidth={1.75} />
         </View>
         <UiText style={styles.gateTitle}>Post to unlock</UiText>
         <UiText style={styles.gateSub}>
