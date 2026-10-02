@@ -2831,7 +2831,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           void serverFeedQuery.fetchNextPage();
         }
       },
-      refetchFeed: USE_SERVER_FEED ? refetchServerFeed : feedQuery.refetch,
+      refetchFeed: USE_SERVER_FEED ? serverFeedQuery.refetch : feedQuery.refetch,
+      // Pull to refresh / Retry: start over from page 0.
+      refreshFeed: USE_SERVER_FEED ? refetchServerFeed : feedQuery.refetch,
       followingFeed: filterBlocked(followingFeedQuery.data ?? []),
       followingFeedLoading: followingFeedQuery.isLoading,
       refetchFollowingFeed: followingFeedQuery.refetch,

@@ -31,6 +31,8 @@ export interface FeedListViewProps {
   headerComponent?: React.ReactNode;
   /** Custom empty state when posts is empty and not loading */
   emptyComponent?: React.ReactNode;
+  /** Called when the user scrolls near the end of the list (infinite scroll) */
+  onEndReached?: () => void;
   /** Whether the participation gate overlay should be shown */
   showGate?: boolean;
   /** Gate overlay component */
@@ -67,6 +69,7 @@ export function FeedListView({
   initialIndex = 0,
   headerComponent,
   emptyComponent,
+  onEndReached,
   showGate = false,
   gateComponent,
   forceFocused,
@@ -149,6 +152,8 @@ export function FeedListView({
         keyExtractor={(p) => p.id}
         renderItem={renderItem}
         ListEmptyComponent={emptyNode}
+        onEndReached={onEndReached}
+        onEndReachedThreshold={2}
         contentContainerStyle={
           showEmpty ? styles.emptyContainer : undefined
         }

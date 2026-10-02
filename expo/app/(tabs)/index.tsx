@@ -38,7 +38,7 @@ export default function FeedScreen() {
   const router = useRouter();
   const { unreadCount } = useNotifications();
   const {
-    feed, feedLoading, refetchFeed,
+    feed, feedLoading, feedError, fetchMoreFeed, refetchFeed, refreshFeed,
     refetchMyPosts, optimisticPosts, lastPostCreatedAtRef,
   } = usePosts();
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -54,9 +54,9 @@ export default function FeedScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     // Refetch the feed + myPosts so hasPostedInWindow updates correctly.
-    await Promise.all([refetchFeed(), refetchMyPosts()]);
+    await Promise.all([refreshFeed(), refetchMyPosts()]);
     setRefreshing(false);
-  }, [refetchFeed, refetchMyPosts]);
+  }, [refreshFeed, refetchMyPosts]);
 
   // Refetch on tab focus — ensures fresh data when returning from camera
   // or edit-profile without needing a manual pull-to-refresh.
@@ -95,6 +95,7 @@ export default function FeedScreen() {
       <FeedListView
         posts={feed}
         isLoading={feedLoading}
+        onEndReached={fetchMoreFeed}
         onRefresh={onRefresh}
         isRefreshing={refreshing}
         initialIndex={0}
@@ -129,7 +130,7 @@ export default function FeedScreen() {
             </View>
           </SafeAreaView>
         }
-        emptyComponent={<EmptyState />}
+        emptyComponent={<EmptyState error={feedError} onRetry={() => void refreshFeed()} />}
         gateComponent={
           gateActive ? (
             <GateOverlay
@@ -153,12 +154,23 @@ export default function FeedScreen() {
 
 
 
-function EmptyState() {
+function EmptyState({ error, onRetry }: { error: boolean; onRetry: () => void }) {
   return (
     <SafeAreaView style={styles.emptyWrap}>
       <TrialLogo size={56} />
-      <UiText style={styles.emptyTitle}>No posts yet</UiText>
-      <UiText style={styles.emptySub}>Be the first to post.</UiText>
+      <UiText style={styles.emptyTitle}>
+        {error ? "Couldn't load the feed" : "Nothing to test right now"}
+      </UiText>
+      <UiText style={styles.emptySub}>
+        {error
+          ? "Check your connection and try again."
+          : "Be the first: tap + to put something on Trial."}
+      </UiText>
+      {error ? (
+        <Pressable onPress={onRetry} style={styles.retryBtn} accessibilityRole="button">
+          <UiText style={styles.retryText}>Retry</UiText>
+        </Pressable>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -449,6 +461,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "900" as const,
   },
+  retryBtn: {
+    marginTop: 8,
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: theme.accent,
+  },
+  retryText: { color: "#fff", fontSize: 14, fontWeight: "700" as const },
   emptySub: {
     color: theme.textMuted,
     fontSize: 13,
