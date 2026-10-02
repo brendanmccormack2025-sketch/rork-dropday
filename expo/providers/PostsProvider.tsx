@@ -717,6 +717,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   // onSuccess cache patch (which inserts the new post at the top).
   const lastPostCreatedAtRef = useRef<number>(0);
 
+  // Bumped when a root post (not a reaction) is published; the feed shows a
+  // short "on Trial" banner for it.
+  const [postedBannerAt, setPostedBannerAt] = useState<number>(0);
+
   // Load draft projects from AsyncStorage on mount
   useEffect(() => {
     (async () => {
@@ -1619,6 +1623,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const addOptimisticPost = useCallback(
     (payload: OptimisticRetryPayload, parentPostId?: string | null): string => {
       const tempId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      if (!parentPostId) setPostedBannerAt(Date.now());
       const optPost: Post = {
         id: tempId,
         user_id: user?.id ?? "",
@@ -2823,6 +2828,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       refetchExploreCreators: exploreCreatorsQuery.refetch,
       feed: filterBlocked(USE_SERVER_FEED ? serverFeedPosts : (feedQuery.data ?? [])),
       feedLoading: USE_SERVER_FEED ? serverFeedQuery.isLoading : feedQuery.isLoading,
+      postedBannerAt,
       feedError: USE_SERVER_FEED ? serverFeedQuery.isError && serverFeedPosts.length === 0 : false,
       feedHasMore: USE_SERVER_FEED ? !!serverFeedQuery.hasNextPage : false,
       feedLoadingMore: USE_SERVER_FEED ? serverFeedQuery.isFetchingNextPage : false,
@@ -2887,6 +2893,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     [
       exploreCreatorsQuery,
       feedQuery,
+      postedBannerAt,
       serverFeedQuery,
       serverFeedPosts,
       refetchServerFeed,

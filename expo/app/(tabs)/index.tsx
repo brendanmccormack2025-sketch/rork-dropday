@@ -38,13 +38,22 @@ export default function FeedScreen() {
   const router = useRouter();
   const { unreadCount } = useNotifications();
   const {
-    feed, feedLoading, feedError, fetchMoreFeed, refetchFeed, refreshFeed,
+    feed, feedLoading, feedError, postedBannerAt, fetchMoreFeed, refetchFeed, refreshFeed,
     refetchMyPosts, optimisticPosts, lastPostCreatedAtRef,
   } = usePosts();
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [viewedIds, setViewedIds] = useState<Set<string>>(new Set());
   const [sharePost, setSharePost] = useState<Post | null>(null);
   const isFirstFocusRef = useRef<boolean>(true);
+  const [bannerVisible, setBannerVisible] = useState<boolean>(false);
+
+  // "Your post is on Trial" banner after a root post is published (not reactions).
+  useEffect(() => {
+    if (!postedBannerAt) return;
+    setBannerVisible(true);
+    const t = setTimeout(() => setBannerVisible(false), 6000);
+    return () => clearTimeout(t);
+  }, [postedBannerAt]);
 
   const viewedCount = viewedIds.size;
   // MVP: participation gate disabled — all users can scroll the full feed.
@@ -140,6 +149,22 @@ export default function FeedScreen() {
           ) : undefined
         }
       />
+
+      {bannerVisible ? (
+        <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.bannerWrap}>
+          <Pressable
+            onPress={() => setBannerVisible(false)}
+            style={styles.banner}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss"
+          >
+            <UiText style={styles.bannerText}>
+              Your post is on Trial. We'll tell you when the result is in.
+            </UiText>
+            <X color="#fff" size={16} />
+          </Pressable>
+        </SafeAreaView>
+      ) : null}
 
       {/* Share sheet */}
       <ShareSheet
@@ -461,6 +486,19 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "900" as const,
   },
+  bannerWrap: { position: "absolute", top: 0, left: 0, right: 0 },
+  banner: {
+    marginTop: 52,
+    marginHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "rgba(20,20,20,0.92)",
+  },
+  bannerText: { flex: 1, color: "#fff", fontSize: 13, fontWeight: "600" as const },
   retryBtn: {
     marginTop: 8,
     paddingHorizontal: 22,
