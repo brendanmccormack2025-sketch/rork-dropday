@@ -62,7 +62,7 @@ export default function ProfileDropsScreen() {
       const { data, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("user_id", userId)
         .is("parent_post_id", null)
@@ -89,6 +89,11 @@ export default function ProfileDropsScreen() {
         text_overlays: null,
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         status: (row.status as Post["status"]) ?? "trial",
+        survived_at: (row.survived_at as string | null) ?? null,
+        distribution_started_at: (row.distribution_started_at as string | null) ?? null,
+        distribution_expires_at: (row.distribution_expires_at as string | null) ?? null,
+        expired_at: (row.expired_at as string | null) ?? null,
+        media_deleted_at: (row.media_deleted_at as string | null) ?? null,
         follower_visibility: (row.follower_visibility as boolean | null) ?? true,
         created_at: row.created_at as string,
         like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,

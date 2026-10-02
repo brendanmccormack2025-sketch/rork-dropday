@@ -52,8 +52,14 @@ export type Post = {
   is_mature?: boolean;
   /** Moderation status: 'active' (visible), 'hidden' (auto/flagged), 'removed' (confirmed violation). */
   moderation_status?: string;
-  /** Survival status: 'trial' (live, awaiting verdict), 'incomplete' (awaiting enough exposure to judge), 'survived', 'archived' (hidden from public surfaces). */
-  status?: "trial" | "incomplete" | "survived" | "archived";
+  /** Survival status: 'trial' (live, awaiting verdict), 'incomplete' (awaiting enough exposure to judge), 'survived', 'archived' (hidden from public surfaces), 'expired' (distribution window over). */
+  status?: "trial" | "incomplete" | "survived" | "archived" | "expired";
+  /** Lifecycle timestamps (set server-side). */
+  survived_at?: string | null;
+  distribution_started_at?: string | null;
+  distribution_expires_at?: string | null;
+  expired_at?: string | null;
+  media_deleted_at?: string | null;
   /** When false, this post is never shown to the creator's followers (even after it survives Trial). Non-followers are unaffected. */
   follower_visibility?: boolean;
   profile?: {
@@ -797,7 +803,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         let q = supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
@@ -832,6 +838,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         is_mature: (row.is_mature as boolean | null) ?? false,
         moderation_status: (row.moderation_status as string | undefined) ?? "active",
         status: (row.status as Post["status"]) ?? "trial",
+        survived_at: (row.survived_at as string | null) ?? null,
+        distribution_started_at: (row.distribution_started_at as string | null) ?? null,
+        distribution_expires_at: (row.distribution_expires_at as string | null) ?? null,
+        expired_at: (row.expired_at as string | null) ?? null,
+        media_deleted_at: (row.media_deleted_at as string | null) ?? null,
         created_at: row.created_at as string,
         like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -880,7 +891,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         let q = supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
@@ -911,6 +922,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           is_mature: (row.is_mature as boolean | null) ?? false,
           moderation_status: (row.moderation_status as string | undefined) ?? "active",
           status: (row.status as Post["status"]) ?? "trial",
+          survived_at: (row.survived_at as string | null) ?? null,
+          distribution_started_at: (row.distribution_started_at as string | null) ?? null,
+          distribution_expires_at: (row.distribution_expires_at as string | null) ?? null,
+          expired_at: (row.expired_at as string | null) ?? null,
+          media_deleted_at: (row.media_deleted_at as string | null) ?? null,
           created_at: row.created_at as string,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -941,7 +957,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       try {
         const { data, error } = await supabase
           .from("posts")
-          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, moderation_status, status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
+          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, moderation_status, status, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
           .eq("user_id", user.id)
           .eq("moderation_status", "active")
           .order("created_at", { ascending: false })
@@ -964,6 +980,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           moderation_status: (row.moderation_status as string | undefined) ?? "active",
           status: (row.status as Post["status"]) ?? "trial",
+          survived_at: (row.survived_at as string | null) ?? null,
+          distribution_started_at: (row.distribution_started_at as string | null) ?? null,
+          distribution_expires_at: (row.distribution_expires_at as string | null) ?? null,
+          expired_at: (row.expired_at as string | null) ?? null,
+          media_deleted_at: (row.media_deleted_at as string | null) ?? null,
           created_at: row.created_at as string,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -998,7 +1019,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data: postRows, error: postErr } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, moderation_status, status, created_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, moderation_status, status, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .in("id", postIds)
           .eq("moderation_status", "active");
@@ -1019,6 +1040,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           moderation_status: (row.moderation_status as string | undefined) ?? "active",
           status: (row.status as Post["status"]) ?? "trial",
+          survived_at: (row.survived_at as string | null) ?? null,
+          distribution_started_at: (row.distribution_started_at as string | null) ?? null,
+          distribution_expires_at: (row.distribution_expires_at as string | null) ?? null,
+          expired_at: (row.expired_at as string | null) ?? null,
+          media_deleted_at: (row.media_deleted_at as string | null) ?? null,
           created_at: row.created_at as string,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
@@ -1283,7 +1309,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)"
           )
           .not("parent_post_id", "is", null)
           .eq("moderation_status", "active")
@@ -1307,6 +1333,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           thumbnail_url: (row.thumbnail_url as string | null) ?? null,
           moderation_status: (row.moderation_status as string | undefined) ?? "active",
           status: (row.status as Post["status"]) ?? "trial",
+          survived_at: (row.survived_at as string | null) ?? null,
+          distribution_started_at: (row.distribution_started_at as string | null) ?? null,
+          distribution_expires_at: (row.distribution_expires_at as string | null) ?? null,
+          expired_at: (row.expired_at as string | null) ?? null,
+          media_deleted_at: (row.media_deleted_at as string | null) ?? null,
           follower_visibility: (row.follower_visibility as boolean | null) ?? true,
           created_at: row.created_at as string,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
