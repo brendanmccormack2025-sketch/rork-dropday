@@ -3,18 +3,25 @@ import {
   ActivityIndicator,
   Dimensions,
   FlatList,
+  Platform,
   RefreshControl,
   StyleSheet,
   View,
   ViewToken,
 } from "react-native";
 import { useFocusEffect } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useVideoFocus } from "@/hooks/useVideoFocus";
 import { FeedItem } from "@/components/FeedItem";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post } from "@/providers/PostsProvider";
 
 const { height: SCREEN_H } = Dimensions.get("window");
+
+/** Space the Feed header (wordmark + bell) takes below the status bar. */
+const HEADER_BELOW_INSET = 48;
+/** iOS: how far past the top (px) a drag must go to trigger a refresh. */
+const PULL_TO_REFRESH_DISTANCE = 70;
 
 export interface FeedListViewProps {
   /** The posts to render in the feed */
@@ -79,6 +86,9 @@ export function FeedListView({
   resetToken,
 }: FeedListViewProps) {
   const tabFocused = useVideoFocus();
+  const insets = useSafeAreaInsets();
+  // Refresh indicator sits below the header, inside the safe area.
+  const indicatorTop = insets.top + HEADER_BELOW_INSET + 8;
 
   const [isFocused, setIsFocused] = useState(true);
   useFocusEffect(
@@ -185,17 +195,38 @@ export function FeedListView({
             });
           }, 150);
         }}
+        // iOS: a RefreshControl insets the content while it spins, which pushes the
+        // post down. Trigger on pull distance instead and show the overlay below.
+        onScrollEndDrag={
+          Platform.OS === "ios" && onRefresh
+            ? (e) => {
+                if (!isRefreshing && e.nativeEvent.contentOffset.y < -PULL_TO_REFRESH_DISTANCE) {
+                  onRefresh();
+                }
+              }
+            : undefined
+        }
+        // Android: the native control only supplies the gesture (it is drawn
+        // transparent and placed below the header); the overlay is the indicator.
         refreshControl={
-          onRefresh ? (
+          Platform.OS === "android" && onRefresh ? (
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={onRefresh}
-              tintColor={theme.accent}
-              progressBackgroundColor={theme.card}
+              colors={["transparent"]}
+              progressBackgroundColor="transparent"
+              progressViewOffset={indicatorTop}
             />
           ) : undefined
         }
       />
+
+      {/* Refresh indicator: small, below the header, does not move the list */}
+      {isRefreshing ? (
+        <View style={[styles.refreshIndicator, { top: indicatorTop }]} pointerEvents="none">
+          <ActivityIndicator size="small" color={theme.accent} />
+        </View>
+      ) : null}
 
       {/* Custom header overlay */}
       <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
@@ -210,6 +241,14 @@ export function FeedListView({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.bg },
+  refreshIndicator: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   emptyContainer: {
     flexGrow: 1,
     minHeight: SCREEN_H + 1,
