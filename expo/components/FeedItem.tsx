@@ -1194,7 +1194,7 @@ export const FeedItem = memo(function FeedItem({
           every non-owner surface (feeds, other-user profiles), so this only
           ever renders on the creator's own drops. Content dims; UI chrome
           (action rail, TRIAL ENDED badge, username) stays bright. */}
-      {post.status === "archived" && (
+      {(post.status === "archived" || post.status === "expired") && (
         <View style={styles.archivedScrim} pointerEvents="none" />
       )}
 

@@ -475,7 +475,7 @@ function ProfileTile({ post, onPress }: { post: Post; onPress: () => void }) {
   const coverUri = post.thumbnail_url ?? post.media_url;
   // Failed trials stay visible on the creator's own profile but read as
   // faded — the content didn't earn its place.
-  const isArchived = post.status === "archived";
+  const isArchived = post.status === "archived" || post.status === "expired";
   return (
     <Pressable onPress={onPress} style={styles.tile}>
       <Image
