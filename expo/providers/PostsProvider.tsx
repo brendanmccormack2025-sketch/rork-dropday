@@ -274,6 +274,13 @@ export type TextOverlay = {
   color: string;
   /** Background style preset */
   backgroundStyle: TextBackgroundStyle;
+  /** Absent = 'text'. Stored in the existing text_overlays JSON; no new columns. */
+  kind?: "text" | "caption";
+  /** When it shows, in ms on the OUTPUT timeline (after cuts). Missing startMs/endMs = whole video. */
+  startMs?: number;
+  endMs?: number;
+  /** Free-form style name for the renderer. */
+  style?: string;
 };
 
 export type DraftProject = {
