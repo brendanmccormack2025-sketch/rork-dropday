@@ -1755,9 +1755,9 @@ export default function EditScreen() {
 
   // ── Thumbnail generation helper ────────────────────────────────────────────
 
-  const generateThumbnail = useCallback(async (videoUri: string): Promise<string | null> => {
+  const generateThumbnail = useCallback(async (videoUri: string, timeMs = 0): Promise<string | null> => {
     try {
-      const result = await getThumbnailAsync(videoUri, { time: 0 });
+      const result = await getThumbnailAsync(videoUri, { time: timeMs });
       if (!result?.uri) return null;
       const permanentDir = `${documentDirectory}thumbnails/`;
       await makeDirectoryAsync(permanentDir, { intermediates: true });
@@ -1784,7 +1784,7 @@ export default function EditScreen() {
     try {
       // Auto-generate cover thumbnail from first video frame
       const firstVideo = clips.find((c) => c.type === "video");
-      const thumbnailUri = firstVideo ? await generateThumbnail(firstVideo.uri) : null;
+      const thumbnailUri = firstVideo ? await generateThumbnail(firstVideo.uri, firstVideo.trimStartMs ?? 0) : null;
       if (firstVideo) {
         }
 
@@ -1964,7 +1964,7 @@ export default function EditScreen() {
       // ── 2b. Generate cover thumbnail from first video frame ──────────
       let thumbnailUri: string | null = null;
       if (stablePrimary.type === "video") {
-        thumbnailUri = await generateThumbnail(stablePrimary.uri);
+        thumbnailUri = await generateThumbnail(stablePrimary.uri, stablePrimary.trimStartMs ?? 0);
       }
 
       // For multi-clip Drops, upload each segment individually.
