@@ -95,7 +95,7 @@ export default function PublicProfileScreen() {
         // Public profile shows content that earned its place — another
         // user's failed trials are hidden here (the creator still sees
         // them on their own profile).
-        .neq("status", "archived")
+        .in("status", ["trial", "incomplete", "survived"])
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) {

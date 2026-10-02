@@ -69,7 +69,7 @@ export default function ProfileDropsScreen() {
         .eq("moderation_status", "active")
         // Same rule as user/[id].tsx: another user's failed trials are
         // hidden from public views.
-        .neq("status", "archived")
+        .in("status", ["trial", "incomplete", "survived"])
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) {
