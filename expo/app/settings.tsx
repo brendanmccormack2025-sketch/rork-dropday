@@ -16,6 +16,7 @@ import { Ban, ChevronLeft, FileText, LogOut, Shield, Trash2, User, Users } from 
 import { theme } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
+import { isDebugOwner } from "@/constants/debug";
 import UiText from "@/components/UiText";
 
 export default function SettingsScreen() {
@@ -219,6 +220,13 @@ export default function SettingsScreen() {
                   "https://brendanmccormack2025-sketch.github.io/DropDay-Legal/terms.html",
                 )
               }
+              // Hidden: long-press opens the silence debug screen, owner only.
+              onLongPress={
+                isDebugOwner(user?.id)
+                  ? () => router.push("/debug-silence" as never)
+                  : undefined
+              }
+              delayLongPress={1500}
               style={({ pressed }) => [
                 styles.row,
                 pressed && { opacity: 0.6 },

@@ -95,6 +95,12 @@
       "expo-audio",
       "expo-asset"
     ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/dd7875e4-d7a1-46bf-a2be-4351576c3585"
+    },
     "experiments": {
       "typedRoutes": true
     },
