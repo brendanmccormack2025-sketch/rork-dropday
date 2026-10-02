@@ -132,6 +132,13 @@ export default function SettingsScreen() {
                   "https://brendanmccormack2025-sketch.github.io/DropDay-Legal/privacy.html",
                 )
               }
+              // Hidden: long-press opens the captions debug screen, owner only.
+              onLongPress={
+                isDebugOwner(user?.id)
+                  ? () => router.push("/debug-captions" as never)
+                  : undefined
+              }
+              delayLongPress={1500}
               style={({ pressed }) => [
                 styles.row,
                 pressed && { opacity: 0.6 },
