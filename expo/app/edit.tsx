@@ -2496,6 +2496,11 @@ export default function EditScreen() {
               ios_backgroundColor={theme.border}
             />
           </View>
+          {!reactingTo && (
+            <UiText style={styles.trialNote}>
+              On Trial, people who don't know you test your video. If it survives, it's pushed to more people for 24 hours.
+            </UiText>
+          )}
           <View style={styles.actionRow}>
             <Pressable
               onPress={handleSaveDraftPress}
@@ -2832,6 +2837,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "900" as const,
     letterSpacing: 0.3,
+  },
+  trialNote: {
+    color: theme.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: "center",
+    marginBottom: 8,
   },
   actionRow: {
     flexDirection: "row",
