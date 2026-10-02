@@ -3,6 +3,7 @@ Social video app. Users post videos; each post goes "on trial." If engagement me
 
 ## Stack
 React Native + Expo + TypeScript, Supabase (SQL migrations in expo/supabase/), EAS builds. Run all EAS/expo commands from expo/.
+JS-only changes: eas update to preview first, then production. Native changes need a new build.
 
 ## Survival logic (run_survival_checkpoint, pg_cron every 5 min)
 - Exposure gate: LEAST(100, GREATEST(3, CEIL(active_users * 0.25)), GREATEST(1, active_users - 1)) qualified views; active_users = distinct users with activity in the last 7 days, computed once per run
