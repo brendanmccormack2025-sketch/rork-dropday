@@ -9,7 +9,7 @@
  * this module only wires them together.
  */
 import { FEATURES } from "@/lib/editorFeatures";
-import { keepRangesToClips, type EditClip } from "@/lib/editModel";
+import { keepRangesToClips, type EditClip, type KeepRange } from "@/lib/editModel";
 import {
   detectSilences,
   type SilenceDetectionOptions,
@@ -33,6 +33,8 @@ export type AutoEditResult =
       clips: EditClip[];
       /** Loudness windows, kept by the caller so sensitivity can re-run instantly. */
       windows: number[];
+      /** Duration the analysis used (the file's real length). */
+      durationMs: number;
       detection: SilenceDetectionResult;
     };
 
@@ -47,6 +49,22 @@ export function planSilenceTrim(
     ...options,
   });
   return { detection, clips: keepRangesToClips(input.uri, detection.keepRanges) };
+}
+
+/**
+ * Keep ranges after switching some cuts off: a disabled cut merges its two
+ * neighbouring keep ranges back into one. detectSilences always returns
+ * cuts.length + 1 keep ranges, cut i sitting between ranges i and i + 1.
+ */
+export function mergeKeepRanges(keepRanges: KeepRange[], cutEnabled: boolean[]): KeepRange[] {
+  if (keepRanges.length !== cutEnabled.length + 1) return keepRanges;
+  const out: KeepRange[] = [{ ...keepRanges[0]! }];
+  for (let i = 0; i < cutEnabled.length; i++) {
+    const next = keepRanges[i + 1]!;
+    if (cutEnabled[i]) out.push({ ...next });
+    else out[out.length - 1]!.endMs = next.endMs;
+  }
+  return out;
 }
 
 export async function autoEdit(
@@ -67,7 +85,13 @@ export async function autoEdit(
       );
       result =
         plan.detection.savedMs >= AUTO_EDIT_MIN_SAVED_MS
-          ? { changed: true, clips: plan.clips, windows: loudness.windows, detection: plan.detection }
+          ? {
+            changed: true,
+            clips: plan.clips,
+            windows: loudness.windows,
+            durationMs: loudness.durationMs,
+            detection: plan.detection,
+          }
           : { changed: false, reason: "nothing_found" };
     }
 

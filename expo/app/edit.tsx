@@ -44,7 +44,11 @@ import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
 import { OWNER_USER_ID } from "@/constants/debug";
-import { autoEdit } from "@/lib/ai/autoEdit";
+import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
+import { keepRangesToClips } from "@/lib/editModel";
+import { SENSITIVITY_PRESETS, type Sensitivity } from "@/lib/silenceDetection";
+import { getAutoEditSensitivity, setAutoEditSensitivity } from "@/lib/autoEditSettings";
+import AutoEditReviewSheet from "@/components/AutoEditReviewSheet";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -1777,7 +1781,15 @@ export default function EditScreen() {
     originalSig: string;
     producedSig: string;
     savedMs: number;
+    /** What produced the current clips, so Review can reopen exactly there. */
+    sensitivity: Sensitivity;
+    cutEnabled: boolean[];
+    analysisDurationMs: number;
   } | null>(null);
+  const autoEditWindowsRef = useRef<number[]>([]);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewSens, setReviewSens] = useState<Sensitivity>("normal");
+  const [reviewEnabled, setReviewEnabled] = useState<boolean[]>([]);
   const uploadingRef = useRef(false);
   useEffect(() => { uploadingRef.current = uploading; }, [uploading]);
 
@@ -1816,6 +1828,72 @@ export default function EditScreen() {
     replaceClips([autoEditSession.original]);
   }, [autoEditSession, clips, textOverlays, pushSnapshot, replaceClips]);
 
+  // Review: re-runs detectSilences on the windows kept in memory (no file read).
+  const reviewPlan = useMemo(() => {
+    if (!reviewOpen || !autoEditSession) return null;
+    return planSilenceTrim(
+      { uri: autoEditSession.original.uri, durationMs: autoEditSession.analysisDurationMs },
+      autoEditWindowsRef.current,
+      SENSITIVITY_PRESETS[reviewSens],
+    );
+  }, [reviewOpen, autoEditSession, reviewSens]);
+
+  const handleOpenReview = useCallback(() => {
+    if (!autoEditSession) return;
+    setReviewSens(autoEditSession.sensitivity);
+    setReviewEnabled(autoEditSession.cutEnabled);
+    setReviewOpen(true);
+  }, [autoEditSession]);
+
+  const handleReviewSensitivity = useCallback(
+    (value: Sensitivity) => {
+      if (!autoEditSession) return;
+      setAutoEditSensitivity(value);
+      const plan = planSilenceTrim(
+        { uri: autoEditSession.original.uri, durationMs: autoEditSession.analysisDurationMs },
+        autoEditWindowsRef.current,
+        SENSITIVITY_PRESETS[value],
+      );
+      setReviewSens(value);
+      setReviewEnabled(plan.detection.cuts.map(() => true));
+    },
+    [autoEditSession],
+  );
+
+  const handleReviewToggle = useCallback((index: number, value: boolean) => {
+    setReviewEnabled((prev) => prev.map((v, i) => (i === index ? value : v)));
+  }, []);
+
+  const handleReviewDone = useCallback(() => {
+    setReviewOpen(false);
+    if (!autoEditSession || !reviewPlan) return;
+    const { original } = autoEditSession;
+    const produced = keepRangesToClips(
+      original.uri,
+      mergeKeepRanges(reviewPlan.detection.keepRanges, reviewEnabled),
+    ).map((c) => ({
+      ...original,
+      id: newClipId(),
+      trimStartMs: c.trimStartMs,
+      trimEndMs: c.trimEndMs,
+    }));
+    const producedSig = clipsSignature(produced);
+    if (producedSig !== clipsSignature(clips)) {
+      pushSnapshot(clips, textOverlays);
+      replaceClips(produced);
+    }
+    setAutoEditSession({
+      ...autoEditSession,
+      producedSig,
+      savedMs: reviewPlan.detection.cuts.reduce(
+        (sum, c, i) => sum + (reviewEnabled[i] ? c.lengthMs : 0),
+        0,
+      ),
+      sensitivity: reviewSens,
+      cutEnabled: reviewEnabled,
+    });
+  }, [autoEditSession, reviewPlan, reviewEnabled, reviewSens, clips, textOverlays, pushSnapshot, replaceClips]);
+
   const autoBarMode = useMemo<"auto" | "manual" | null>(() => {
     if (!autoEditSession) return null;
     const sig = clipsSignature(clips);
@@ -1837,29 +1915,37 @@ export default function EditScreen() {
 
     autoEditStartedRef.current = true;
     setAutoEditRunning(true);
-    autoEdit({ uri: clip.uri, durationMs: clip.durationMs })
-      .then((result) => {
-        console.log("[edit] autoEdit result:", result.changed ? "changed" : result.reason);
-        if (!mountedRef.current || !result.changed || uploadingRef.current) return;
-        // Only apply if the user hasn't touched the clip meanwhile.
-        const current = clipsForUndoRef.current;
-        if (current.length !== 1 || clipsSignature(current) !== clipsSignature([clip])) return;
-        const original = { ...current[0]!, trimStartMs: 0, trimEndMs: current[0]!.trimEndMs || clip.durationMs };
-        const produced = result.clips.map((c) => ({
-          ...original,
-          id: newClipId(),
-          trimStartMs: c.trimStartMs,
-          trimEndMs: c.trimEndMs,
-        }));
-        pushSnapshot(current, textOverlaysForUndoRef.current);
-        replaceClips(produced);
-        setAutoEditSession({
-          original,
-          originalSig: clipsSignature(current),
-          producedSig: clipsSignature(produced),
-          savedMs: result.detection.savedMs,
-        });
-      })
+    (async () => {
+      const sensitivity = await getAutoEditSensitivity();
+      const result = await autoEdit(
+        { uri: clip.uri, durationMs: clip.durationMs! },
+        SENSITIVITY_PRESETS[sensitivity],
+      );
+      console.log("[edit] autoEdit result:", result.changed ? "changed" : result.reason);
+      if (!mountedRef.current || !result.changed || uploadingRef.current) return;
+      // Only apply if the user hasn't touched the clip meanwhile.
+      const current = clipsForUndoRef.current;
+      if (current.length !== 1 || clipsSignature(current) !== clipsSignature([clip])) return;
+      const original = { ...current[0]!, trimStartMs: 0, trimEndMs: current[0]!.trimEndMs || clip.durationMs };
+      const produced = result.clips.map((c) => ({
+        ...original,
+        id: newClipId(),
+        trimStartMs: c.trimStartMs,
+        trimEndMs: c.trimEndMs,
+      }));
+      pushSnapshot(current, textOverlaysForUndoRef.current);
+      replaceClips(produced);
+      autoEditWindowsRef.current = result.windows;
+      setAutoEditSession({
+        original,
+        originalSig: clipsSignature(current),
+        producedSig: clipsSignature(produced),
+        savedMs: result.detection.savedMs,
+        sensitivity,
+        cutEnabled: result.detection.cuts.map(() => true),
+        analysisDurationMs: result.durationMs,
+      });
+    })()
       .catch((e) => console.warn("[edit] autoEdit failed", (e as Error)?.message ?? e))
       .finally(() => {
         if (mountedRef.current) setAutoEditRunning(false);
@@ -2438,6 +2524,11 @@ export default function EditScreen() {
                 ? `Trimmed ${(autoEditSession.savedMs / 1000).toFixed(1)} s of silence`
                 : "Edited manually"}
             </UiText>
+            {autoBarMode === "auto" && (
+              <Pressable onPress={handleOpenReview} hitSlop={8}>
+                <UiText style={styles.autoBarAction}>Review</UiText>
+              </Pressable>
+            )}
             <Pressable onPress={handleUseOriginal} hitSlop={8}>
               <UiText style={styles.autoBarAction}>
                 {autoBarMode === "auto" ? "Undo" : "Use original"}
@@ -2709,6 +2800,19 @@ export default function EditScreen() {
       </View>
 
       {/* ── Text overlay editor modal ─────────────────────────────── */}
+      <AutoEditReviewSheet
+        visible={reviewOpen && !!reviewPlan}
+        cuts={reviewPlan?.detection.cuts ?? []}
+        enabled={reviewEnabled}
+        sensitivity={reviewSens}
+        onSensitivity={handleReviewSensitivity}
+        onToggle={handleReviewToggle}
+        onUseOriginal={() => {
+          setReviewOpen(false);
+          handleUseOriginal();
+        }}
+        onDone={handleReviewDone}
+      />
       <TextOverlayEditor
         visible={textEditorVisible}
         initialText={
