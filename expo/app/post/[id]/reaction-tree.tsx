@@ -103,7 +103,7 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .eq("parent_post_id", id)
         .eq("moderation_status", "active")
@@ -129,6 +129,7 @@ export default function ReactionTreeScreen() {
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         moderation_status: (row.moderation_status as string | undefined) ?? "active",
         status: (row.status as Post["status"]) ?? "trial",
+        media_deleted_at: (row.media_deleted_at as string | null) ?? null,
         follower_visibility: (row.follower_visibility as boolean | null) ?? true,
         created_at: row.created_at as string,
         like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
@@ -192,7 +193,7 @@ export default function ReactionTreeScreen() {
       const { data: rows, error } = await supabase
         .from("posts")
         .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
+          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url)",
         )
         .in("parent_post_id", tier1Ids)
         .eq("moderation_status", "active")
@@ -218,6 +219,7 @@ export default function ReactionTreeScreen() {
         thumbnail_url: (row.thumbnail_url as string | null) ?? null,
         moderation_status: (row.moderation_status as string | undefined) ?? "active",
         status: (row.status as Post["status"]) ?? "trial",
+        media_deleted_at: (row.media_deleted_at as string | null) ?? null,
         follower_visibility: (row.follower_visibility as boolean | null) ?? true,
         created_at: row.created_at as string,
         like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
@@ -553,8 +555,10 @@ function ReactionItem({
   const errorCountRef = useRef<number>(0);
 
   // ── expo-video player ──
+  // A deleted media file never gets a player ("Media unavailable" shows instead).
+  const mediaGone = !!post.media_deleted_at;
   const player = useVideoPlayer(
-    typeof post.media_url === "string" && post.media_url.length > 0
+    typeof post.media_url === "string" && post.media_url.length > 0 && !mediaGone
       ? { uri: post.media_url }
       : null,
     (p) => {
@@ -644,7 +648,7 @@ function ReactionItem({
   }, [post.media_url, active, videoRef]);
 
   // ── Guard: missing or empty media_url → show thumbnail fallback ──
-  const hasValidMediaUrl = typeof post.media_url === "string" && post.media_url.length > 0;
+  const hasValidMediaUrl = typeof post.media_url === "string" && post.media_url.length > 0 && !mediaGone;
 
   return (
     <View style={styles.item}>

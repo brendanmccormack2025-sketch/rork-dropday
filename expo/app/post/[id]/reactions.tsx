@@ -209,7 +209,7 @@ function ReactionItem({ post, active }: { post: Post; active: boolean }) {
     );
   }, [deleteReaction, post.id]);
 
-  const hasValidMediaUrl = typeof post.media_url === "string" && post.media_url.length > 0;
+  const hasValidMediaUrl = typeof post.media_url === "string" && post.media_url.length > 0 && !post.media_deleted_at;
 
   // ── expo-video player ──
   const player = useVideoPlayer(

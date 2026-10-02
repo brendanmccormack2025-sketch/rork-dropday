@@ -323,6 +323,8 @@ export const FeedItem = memo(function FeedItem({
   const router = useRouter();
   const isOwner = !!user?.id && post.user_id === user.id;
   const reactionCount = reactionsByParent[post.id]?.length ?? 0;
+  // Once the media file is deleted (after expiry) no player is ever mounted.
+  const isPlayableVideo = post.media_type === "video" && !post.media_deleted_at;
   // Multi-segment playback: if post.segments exists, cycle through them
   const allSegments = useMemo<string[]>(
     () => (post.segments && post.segments.length > 0 ? post.segments : [post.media_url]),
@@ -341,7 +343,7 @@ export const FeedItem = memo(function FeedItem({
   // next one. Sources are swapped via replace() (useVideoPlayer only reads
   // its initial argument), mirroring the old per-slot `source` props.
   const playerA = useVideoPlayer(
-    post.media_type === "video" ? { uri: allSegments[0] ?? post.media_url } : null,
+    isPlayableVideo ? { uri: allSegments[0] ?? post.media_url } : null,
     (p) => {
       p.timeUpdateEventInterval = 0.25;
     },
@@ -354,7 +356,7 @@ export const FeedItem = memo(function FeedItem({
   const activeVideoRef = useRef<VideoPlayer | null>(null);
   // URIs the players were last asked to load (replace() dedupe)
   const loadedAUriRef = useRef<string | null>(
-    post.media_type === "video" ? allSegments[0] ?? post.media_url : null,
+    isPlayableVideo ? allSegments[0] ?? post.media_url : null,
   );
   const loadedBUriRef = useRef<string | null>(null);
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
@@ -388,7 +390,7 @@ export const FeedItem = memo(function FeedItem({
 
   // Only multi-segment posts need the preload player, and only when the
   // item is active/visible — off-screen items must not double up players.
-  const shouldMountPreload = active && allSegments.length > 1;
+  const shouldMountPreload = isPlayableVideo && active && allSegments.length > 1;
 
   // Keep player refs + activeVideoRef in sync with the active slot
   useEffect(() => {
@@ -404,12 +406,12 @@ export const FeedItem = memo(function FeedItem({
 
   // Replace player sources when the active/preload segment changes
   useEffect(() => {
-    if (post.media_type !== "video") return;
+    if (!isPlayableVideo) return;
     if (loadedAUriRef.current !== slotAUri) {
       loadedAUriRef.current = slotAUri;
       playerA.replace({ uri: slotAUri });
     }
-  }, [slotAUri, playerA, post.media_type]);
+  }, [slotAUri, playerA, isPlayableVideo]);
 
   useEffect(() => {
     if (shouldMountPreload) {
@@ -451,7 +453,7 @@ export const FeedItem = memo(function FeedItem({
 
   // Playback control (mirrors the old shouldPlay/isLooping/isMuted props)
   useEffect(() => {
-    if (post.media_type !== "video") return;
+    if (!isPlayableVideo) return;
     const canPlay = active && playbackReady && !isPaused && post._optimistic?.status !== "failed";
     playerA.muted = activeSlot === 0 ? !active : true;
     playerA.loop = allSegments.length === 1 && activeSlot === 0;
@@ -467,7 +469,7 @@ export const FeedItem = memo(function FeedItem({
     } else {
       playerB.pause();
     }
-  }, [playerA, playerB, activeSlot, active, playbackReady, isPaused, shouldMountPreload, allSegments.length, post.media_type, post._optimistic?.status]);
+  }, [playerA, playerB, activeSlot, active, playbackReady, isPaused, shouldMountPreload, allSegments.length, isPlayableVideo, post._optimistic?.status]);
 
   // Reset pre-buffer gate & pause state when the post changes
   // (segIdx changes are handled by advanceSegment's hot-swap logic)
@@ -1034,7 +1036,7 @@ export const FeedItem = memo(function FeedItem({
         }
       }}
     >
-      {post.media_type === "video" ? (
+      {isPlayableVideo ? (
         <View style={StyleSheet.absoluteFill}>
           {/* Slot A — primary player, always mounted for video posts */}
           <Animated.View
@@ -1110,6 +1112,20 @@ export const FeedItem = memo(function FeedItem({
               ) : null}
             </View>
           )}
+        </View>
+      ) : post.media_deleted_at ? (
+        <View style={[StyleSheet.absoluteFill, styles.mediaGone]}>
+          {post.thumbnail_url ? (
+            <Image
+              source={{ uri: post.thumbnail_url }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              transition={150}
+            />
+          ) : null}
+          <View style={styles.mediaGoneLabel}>
+            <UiText style={styles.mediaGoneText}>EXPIRED</UiText>
+          </View>
         </View>
       ) : (
         <Image
@@ -1426,6 +1442,24 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  /* Media deleted after expiry: thumbnail (or plain) background + label */
+  mediaGone: {
+    backgroundColor: "#111",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mediaGoneLabel: {
+    backgroundColor: "rgba(0,0,0,0.55)",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  mediaGoneText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700" as const,
+    letterSpacing: 1,
   },
 
   /* Stall / error recovery overlay */
