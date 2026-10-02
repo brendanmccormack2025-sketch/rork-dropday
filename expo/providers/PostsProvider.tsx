@@ -6,6 +6,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { documentDirectory, cacheDirectory, getInfoAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
 import { router } from "expo-router";
 import { showAlert } from "@/lib/showAlert";
+import { noteMissingYoutubeColumn, profileLinkColumns } from "@/lib/creatorLinks";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { concatMP4Files } from "@/src/integrations/concatMP4";
 
@@ -195,6 +196,8 @@ export type MyProfile = {
   website: string | null;
   instagram_handle: string | null;
   tiktok_handle: string | null;
+  /** "@handle" or an https URL; null until set (or until migration-profile-links.sql is run). */
+  youtube_url?: string | null;
   /** ISO date string (YYYY-MM-DD) or null if not set. */
   birthdate: string | null;
   /** Demo/reviewer flag: skip the 8-10 PM Drop posting window. */
@@ -1147,11 +1150,20 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     staleTime: 120_000,
     queryFn: async (): Promise<MyProfile | null> => {
       if (!user?.id) return null;
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, birthdate, bypass_drop_window")
-        .eq("id", user.id)
-        .maybeSingle();
+      // Column list is built at run time (youtube_url may not exist yet), so the
+      // typed result is cast to a plain record.
+      const runProfileQuery = async () =>
+        (await supabase
+          .from("profiles")
+          .select(`id, username, display_name, avatar_url, bio, ${profileLinkColumns()}, birthdate, bypass_drop_window`)
+          .eq("id", user.id)
+          .maybeSingle()) as unknown as {
+          data: Record<string, unknown> | null;
+          error: { message: string; code?: string; details?: string; hint?: string } | null;
+        };
+      let { data, error } = await runProfileQuery();
+      // youtube_url may not exist until migration-profile-links.sql is run.
+      if (noteMissingYoutubeColumn(error)) ({ data, error } = await runProfileQuery());
 
       if (error) {
         console.warn("[profile:query] ERROR", {
@@ -1173,6 +1185,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           website: (data.website as string | null) ?? null,
           instagram_handle: (data.instagram_handle as string | null) ?? null,
           tiktok_handle: (data.tiktok_handle as string | null) ?? null,
+          youtube_url: (data.youtube_url as string | null | undefined) ?? null,
           birthdate: (data.birthdate as string | null) ?? null,
           bypass_drop_window: (data.bypass_drop_window as boolean | null) ?? false,
         };
@@ -1191,6 +1204,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       website?: string | null;
       instagram_handle?: string | null;
       tiktok_handle?: string | null;
+      youtube_url?: string | null;
     }) => {
       if (!user?.id) throw new Error("Not signed in.");
 
@@ -1202,6 +1216,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (input.website !== undefined) updateData.website = input.website;
       if (input.instagram_handle !== undefined) updateData.instagram_handle = input.instagram_handle;
       if (input.tiktok_handle !== undefined) updateData.tiktok_handle = input.tiktok_handle;
+      if (input.youtube_url !== undefined) updateData.youtube_url = input.youtube_url;
       if (Object.keys(updateData).length === 0) return;
 
       const { error } = await supabase

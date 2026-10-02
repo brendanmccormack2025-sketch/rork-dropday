@@ -27,6 +27,7 @@ import {
   Globe,
   Instagram,
   Music2,
+  Youtube,
   X,
 } from "lucide-react-native";
 
@@ -34,6 +35,13 @@ import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import { usePosts, type MyProfile } from "@/providers/PostsProvider";
 import { supabase } from "@/lib/supabase";
+import {
+  normalizeInstagramHandle,
+  normalizeTikTokHandle,
+  normalizeWebsite,
+  normalizeYouTubeValue,
+  sanitizeHandleInput,
+} from "@/lib/creatorLinks";
 
 const BIO_MAX_LENGTH = 150;
 const BUCKET = "drops";
@@ -72,6 +80,7 @@ export default function EditProfileScreen() {
     myProfile?.instagram_handle ?? "",
   );
   const [tiktok, setTiktok] = useState(myProfile?.tiktok_handle ?? "");
+  const [youtube, setYoutube] = useState(myProfile?.youtube_url ?? "");
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [isPickingAvatar, setPickingAvatar] = useState<boolean>(false);
   const [isAvatarRetrying, setAvatarRetrying] = useState<boolean>(false);
@@ -85,8 +94,9 @@ export default function EditProfileScreen() {
     if (website !== (myProfile?.website ?? "")) return true;
     if (instagram !== (myProfile?.instagram_handle ?? "")) return true;
     if (tiktok !== (myProfile?.tiktok_handle ?? "")) return true;
+    if (youtube !== (myProfile?.youtube_url ?? "")) return true;
     return false;
-  }, [myProfile, displayName, username, bio, website, instagram, tiktok, avatarUri]);
+  }, [myProfile, displayName, username, bio, website, instagram, tiktok, youtube, avatarUri]);
 
   const pickAvatar = useCallback(async () => {
     if (isPickingAvatar) return;
@@ -180,14 +190,35 @@ export default function EditProfileScreen() {
         finalAvatarUrl = pub.publicUrl;
       }
 
+      // Links: validate and normalize through the shared helper (pasted URLs
+      // become handles; anything invalid is rejected before saving).
+      const websiteValue = website.trim() ? normalizeWebsite(website) : null;
+      const instagramValue = instagram.trim() ? normalizeInstagramHandle(instagram) : null;
+      const tiktokValue = tiktok.trim() ? normalizeTikTokHandle(tiktok) : null;
+      const youtubeValue = youtube.trim() ? normalizeYouTubeValue(youtube) : null;
+      const invalid =
+        (website.trim() && !websiteValue && "Website must be a valid https link (for example your-link.com).") ||
+        (instagram.trim() && !instagramValue && "Instagram handle can only contain letters, numbers, dots and underscores.") ||
+        (tiktok.trim() && !tiktokValue && "TikTok handle can only contain letters, numbers, dots and underscores.") ||
+        (youtube.trim() && !youtubeValue && "YouTube must be an @handle or a youtube.com link.") ||
+        null;
+      if (invalid) {
+        Alert.alert("Check your links", invalid);
+        setSaving(false);
+        return;
+      }
+
       await updateProfile.mutateAsync({
         username: username.trim(),
         display_name: displayName.trim() || null,
         avatar_url: finalAvatarUrl,
         bio: bio.trim() || null,
-        website: website.trim() || null,
-        instagram_handle: instagram.trim() || null,
-        tiktok_handle: tiktok.trim() || null,
+        website: websiteValue,
+        instagram_handle: instagramValue,
+        tiktok_handle: tiktokValue,
+        // Only sent when it changed, so profiles can still be saved before
+        // migration-profile-links.sql has been run.
+        ...(youtube !== (myProfile?.youtube_url ?? "") ? { youtube_url: youtubeValue } : {}),
       });
 
       // Force a fresh refetch so the profile screen has the latest data
@@ -217,6 +248,7 @@ export default function EditProfileScreen() {
     website,
     instagram,
     tiktok,
+    youtube,
     avatarUri,
     myProfile,
     user,
@@ -396,14 +428,7 @@ export default function EditProfileScreen() {
               <TextInput
                 style={styles.input}
                 value={instagram}
-                onChangeText={(t) =>
-                  setInstagram(
-                    t
-                      .replace(/^@/, "")
-                      .replace(/[^a-zA-Z0-9._]/g, "")
-                      .slice(0, 30),
-                  )
-                }
+                onChangeText={(t) => setInstagram(sanitizeHandleInput(t, "instagram"))}
                 placeholder="username"
                 placeholderTextColor={theme.textDim}
                 autoCapitalize="none"
@@ -421,18 +446,30 @@ export default function EditProfileScreen() {
               <TextInput
                 style={styles.input}
                 value={tiktok}
-                onChangeText={(t) =>
-                  setTiktok(
-                    t
-                      .replace(/^@/, "")
-                      .replace(/[^a-zA-Z0-9._]/g, "")
-                      .slice(0, 30),
-                  )
-                }
+                onChangeText={(t) => setTiktok(sanitizeHandleInput(t, "tiktok"))}
                 placeholder="username"
                 placeholderTextColor={theme.textDim}
                 autoCapitalize="none"
                 autoCorrect={false}
+                returnKeyType="next"
+              />
+            </View>
+
+            {/* YouTube */}
+            <View style={styles.field}>
+              <View style={styles.labelRow}>
+                <Youtube color={theme.textMuted} size={14} strokeWidth={2} />
+                <UiText style={styles.label}>YouTube (optional)</UiText>
+              </View>
+              <TextInput
+                style={styles.input}
+                value={youtube}
+                onChangeText={setYoutube}
+                placeholder="@channel or youtube.com link"
+                placeholderTextColor={theme.textDim}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
                 returnKeyType="done"
               />
             </View>

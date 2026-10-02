@@ -32,6 +32,7 @@ import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
 import { usePosts, type MyProfile, type Post, type DraftProject } from "@/providers/PostsProvider";
 import { TrialStatusBadge } from "@/components/TrialStatusBadge";
+import CreatorLinkPills from "@/components/CreatorLinkPills";
 import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_W } = Dimensions.get("window");
@@ -107,12 +108,6 @@ function ProfileHeader({
   otherUserId?: string | null;
   onSendMessage?: () => void;
 }) {
-  const hasLinks = !!(
-    myProfile?.website ||
-    myProfile?.instagram_handle ||
-    myProfile?.tiktok_handle
-  );
-
   return (
     <View style={styles.header}>
       {/* Profile row */}
@@ -158,60 +153,8 @@ function ProfileHeader({
         <UiText style={styles.bio}>{myProfile.bio}</UiText>
       ) : null}
 
-      {/* Links row */}
-      {hasLinks ? (
-        <View style={styles.linksRow}>
-          {myProfile?.website ? (
-            <Pressable
-              style={styles.linkPill}
-              onPress={() => {
-                const url = myProfile.website!.startsWith("http")
-                  ? myProfile.website!
-                  : `https://${myProfile.website!}`;
-                Linking.openURL(url).catch(() => {});
-              }}
-            >
-              <Globe color={theme.accent} size={12} strokeWidth={2} />
-              <UiText style={styles.linkText} numberOfLines={1}>
-                {myProfile.website!
-                  .replace(/^https?:\/\//, "")
-                  .replace(/\/$/, "")}
-              </UiText>
-            </Pressable>
-          ) : null}
-          {myProfile?.instagram_handle ? (
-            <Pressable
-              style={styles.linkPill}
-              onPress={() => {
-                Linking.openURL(
-                  `https://instagram.com/${myProfile.instagram_handle}`,
-                ).catch(() => {});
-              }}
-            >
-              <Instagram color="#E8291C" size={12} strokeWidth={2} />
-              <UiText style={styles.linkText} numberOfLines={1}>
-                {myProfile.instagram_handle}
-              </UiText>
-            </Pressable>
-          ) : null}
-          {myProfile?.tiktok_handle ? (
-            <Pressable
-              style={styles.linkPill}
-              onPress={() => {
-                Linking.openURL(
-                  `https://tiktok.com/@${myProfile.tiktok_handle}`,
-                ).catch(() => {});
-              }}
-            >
-              <Music2 color={theme.text} size={12} strokeWidth={2} />
-              <UiText style={styles.linkText} numberOfLines={1}>
-                {myProfile.tiktok_handle}
-              </UiText>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
-
+      {/* Links row (shared helper: only valid https links) */}
+      <CreatorLinkPills profile={myProfile} />
 
       {/* Stats row */}
       <View style={styles.statsRow}>
