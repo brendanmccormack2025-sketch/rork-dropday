@@ -1,26 +1,25 @@
-# Trial (formerly DropDay/Nexo)
-Social video app. Users post videos; each post goes "on trial." If engagement meets the threshold it survives and reaches followers; if not, the trial ends and it is archived privately for the creator.
+# Trial
+Three systems: AI video editor, content testing, a fresh feed. Core loop: upload video -> AI edit -> Post ("Put it on Trial") -> tested by strangers -> survives -> 24-hour distribution -> expires. No follower/following system; no DMs or groups. Profile = username, picture, bio, external links (Instagram, TikTok, YouTube, website), not a grid of all videos. Navigation: Feed, Create/AI Editor, Profile.
 
 ## Stack
 React Native + Expo + TypeScript, Supabase (SQL migrations in expo/supabase/), EAS builds. Run all EAS/expo commands from expo/.
 
-## Survival logic (run_survival_checkpoint, pg_cron every 5 min)
-- Exposure gate: LEAST(100, GREATEST(3, CEIL(active_users * 0.25)), GREATEST(1, active_users - 1)) qualified views; active_users = distinct users with activity in the last 7 days, computed once per run
-- Engagement: (distinct reactors x 2) + likes x1 vs expected, floor 2; reactors counted once each, post author excluded
-- Reactions (posts with parent_post_id) never receive a verdict; only root posts are judged
-- Survive early once gate AND engagement met, at any age
-- At 24h+: gate met + engagement missed -> archived; gate unmet -> incomplete (silent, stays on trial)
-- Internal status "archived" is shown to users as "TRIAL ENDED". Never rename statuses or notification types.
-- Archived posts must be hidden from everyone except the owner (feeds, other profiles, reaction trees).
+## Lifecycle (times calculated server-side, never from the device clock)
+testing -> survived (active for 24 hours) -> expired. A post that does not survive is archived (shown to the creator as "Trial ended"). Stored: testing_started_at, survived_at, distribution_started_at, distribution_expires_at, expired_at. Expired and archived posts leave every feed. Post metadata and metrics are kept; the large video file is deleted later (about 7 days after expiry) by a scheduled job, only after a dry run. Reactions expire with their parent post and never get their own verdict. A reaction cannot be published to an expired post.
 
-- The latest run_survival_checkpoint lives in the newest migration (expo/supabase/migration-reactions-no-verdict-engagement.sql). Older migrations that define it must never be re-run.
+## Verdict rule
+N = exposure gate, scaled by users active in the last 7 days: LEAST(100, GREATEST(3, CEIL(active*0.25)), GREATEST(1, active-1)). A post is judged when it reaches N qualified views; engagement = (distinct reactors x 2) + likes, author excluded. Survive immediately when the bar is met; if not met, archive once the Nth view is at least 10 minutes old (settling time). Posts that never reach N stay in testing. Thresholds must be configurable (a config table), and must not depend on follower counts. (A migration for this exists on branch verdict-at-n-views and is not merged yet.)
 
-## Notifications (server-side SQL triggers only)
-like (one row per post, collapsed with extra_count), reaction, follow, follow_accept, verdict_survived, verdict_archived, followed_post_survived. Unique indexes dedupe. Push is not wired yet.
+## Feed
+Rank survivors by engagement rate with recency decay; reserve about one in three slots for posts still in testing, fewest qualified views first. Precompute scores on a schedule into an indexed column; never compute ranking per feed request. After posting, the user lands in the feed.
 
-## Rules
-- Prefer minimal edits; no rewrites. Reuse existing components.
-- SQL changes: idempotent migration files in expo/supabase/, and I run them manually in the Supabase SQL editor.
-- DMs are not part of the product yet; do not expose the dm screens.
+## Notifications
+In-app rows are created in SQL. Push (Expo): post survived, reaction on my post, likes only as milestones (1st, 5, 10, 25), optional "trial ended". No follower notifications.
+
+## Cost rules
+Process once, store the final asset, serve it, expire it. No paid AI API in the core product. The editor works on-device and deterministically: silence detection (native module expo/modules/audio-loudness, thresholds in expo/lib/silenceDetection.ts), cuts saved as segments/trim_data instructions, never re-rendering. Captions later via on-device speech recognition.
+
+## Working rules
+Minimal edits, reuse existing code. One commit per numbered item. SQL changes are idempotent migration files in expo/supabase/ that I run manually in the Supabase SQL editor; the latest migration defining run_survival_checkpoint supersedes earlier ones and older ones must never be re-run. Never commit .env or keys. Native changes (new native modules, plugins, app.json permissions, icons, SDK upgrades) need a new EAS build and a version bump in app.json (runtime policy is appVersion); JS-only changes can ship with eas update. Do not blindly delete DropDay code: audit dependencies first, hide or disable before deleting, and keep tables until a migration plan exists.
+- Never rename existing statuses or notification types; add new values instead.
 - No text comments in the app; conversations happen through video reactions.
-- Never commit .env or API keys.
