@@ -11,7 +11,8 @@ testing -> survived (active for 24 hours) -> expired. Stored status for testing 
 N = exposure gate, scaled by users active in the last 7 days: LEAST(100, GREATEST(3, CEIL(active*0.25)), GREATEST(1, active-1)). A post is judged when it reaches N qualified views; engagement = (distinct reactors x 2) + likes, author excluded. Survive immediately when the bar is met; if not met, archive once the Nth view is at least 10 minutes old (settling time). Posts that never reach N stay in testing. Thresholds live in the trial_config table (gate_min, gate_fraction, floor_points, reaction_weight, like_weight, settle_minutes, distribution_hours, retention_days, active_window_days) and must not depend on follower counts. (A migration for this exists on branch verdict-at-n-views and is not merged yet.)
 
 ## Feed
-Rank survivors by engagement rate with recency decay; reserve about one in three slots for posts still in testing, fewest qualified views first. Precompute scores on a schedule into an indexed column; never compute ranking per feed request. After posting, the user lands in the feed.
+Feed order: active survivors (status survived and distribution_expires_at in the future; survivors with a null window are not boosted) ranked by engagement rate with recency decay; about one in three slots go to testing posts, ordered by fewest qualified views until a relevance mode exists (trial_config feed_testing_mode). Scores are computed inside get_feed for now and move to a precomputed column on a schedule when load requires it. After posting, the user lands in the feed.
+The client reads ordered post ids from the get_feed(p_limit, p_offset) SQL function and does not rank posts on the device.
 
 ## Notifications
 In-app rows are created in SQL. Push (Expo): post survived, reaction on my post, likes only as milestones (1st, 5, 10, 25), optional "trial ended". No follower notifications.
