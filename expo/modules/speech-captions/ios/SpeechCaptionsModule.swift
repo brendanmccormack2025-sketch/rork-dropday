@@ -113,6 +113,12 @@ private final class OnceFlag {
   }
 }
 
+// Holds the recognition task so the timeout closure can cancel it without
+// capturing a mutable local.
+private final class TaskBox {
+  var task: SFSpeechRecognitionTask?
+}
+
 // "No speech detected" is not a failure: it means an empty transcript.
 private func isNoSpeech(_ error: Error) -> Bool {
   let e = error as NSError
@@ -128,8 +134,8 @@ private func recognize(url: URL, recognizer: SFSpeechRecognizer) async throws ->
     request.taskHint = .dictation
 
     let once = OnceFlag()
-    var task: SFSpeechRecognitionTask?
-    task = recognizer.recognitionTask(with: request) { result, error in
+    let box = TaskBox()
+    box.task = recognizer.recognitionTask(with: request) { result, error in
       if let result = result, result.isFinal {
         if once.claim() {
           continuation.resume(returning: result.bestTranscription.segments)
@@ -147,7 +153,7 @@ private func recognize(url: URL, recognizer: SFSpeechRecognizer) async throws ->
 
     DispatchQueue.global().asyncAfter(deadline: .now() + chunkTimeoutSeconds) {
       if once.claim() {
-        task?.cancel()
+        box.task?.cancel()
         continuation.resume(throwing: fail("ERR_SPEECH_TIMEOUT", "recognition timed out"))
       }
     }
