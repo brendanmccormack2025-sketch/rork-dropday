@@ -22,6 +22,10 @@ const { height: SCREEN_H } = Dimensions.get("window");
 const HEADER_BELOW_INSET = 48;
 /** iOS: how far past the top (px) a drag must go to trigger a refresh. */
 const PULL_TO_REFRESH_DISTANCE = 70;
+/** Height of the floating tab bar (app/(tabs)/_layout.tsx tabBar.height). */
+const TAB_BAR_HEIGHT = 88;
+/** Content area of the tab bar above the home indicator. */
+const TAB_BAR_CONTENT = 54;
 
 export interface FeedListViewProps {
   /** The posts to render in the feed */
@@ -89,6 +93,11 @@ export function FeedListView({
   const insets = useSafeAreaInsets();
   // Refresh indicator sits below the header, inside the safe area.
   const indicatorTop = insets.top + HEADER_BELOW_INSET + 8;
+  // Posts are exactly as tall as the list (the header is an overlay and the tab bar
+  // floats on top), so snapping never drifts. Overlays clear the tab bar plus the
+  // bottom safe area.
+  const [listH, setListH] = useState<number>(SCREEN_H);
+  const overlayInset = bottomInset ?? Math.max(TAB_BAR_HEIGHT, insets.bottom + TAB_BAR_CONTENT);
 
   const [isFocused, setIsFocused] = useState(true);
   useFocusEffect(
@@ -124,11 +133,11 @@ export function FeedListView({
 
   const getItemLayout = useCallback(
     (_: ArrayLike<Post> | null | undefined, index: number) => ({
-      length: SCREEN_H,
-      offset: SCREEN_H * index,
+      length: listH,
+      offset: listH * index,
       index,
     }),
-    [],
+    [listH],
   );
 
   const renderItem = useCallback(
@@ -136,14 +145,15 @@ export function FeedListView({
       <FeedItem
         post={item}
         active={index === activeIndex && screenFocused}
-        bottomInset={bottomInset}
+        bottomInset={overlayInset}
+        itemHeight={listH}
         onShare={() => onSharePost?.(item)}
         onReactions={() => onReactionsPost?.(item)}
         onRetry={() => retryOptimisticPost(item._optimistic?.tempId ?? "")}
         onDismiss={() => removeOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),
-    [activeIndex, screenFocused, retryOptimisticPost, removeOptimisticPost, bottomInset, onSharePost, onReactionsPost],
+    [activeIndex, screenFocused, retryOptimisticPost, removeOptimisticPost, overlayInset, listH, onSharePost, onReactionsPost],
   );
 
   const safeInitialIndex = Math.max(0, Math.min(initialIndex, posts.length - 1));
@@ -151,11 +161,17 @@ export function FeedListView({
   // Only show empty state when not loading and posts is empty
   const showEmpty = !isLoading && posts.length === 0;
   const emptyNode = showEmpty
-    ? (emptyComponent as React.ReactElement | undefined) ?? <View style={styles.emptyDefault} />
+    ? (emptyComponent as React.ReactElement | undefined) ?? <View style={{ height: listH }} />
     : undefined;
 
   return (
-    <View style={styles.root}>
+    <View
+      style={styles.root}
+      onLayout={(e) => {
+        const h = Math.round(e.nativeEvent.layout.height);
+        if (h > 0 && h !== listH) setListH(h);
+      }}
+    >
       <FlatList
         ref={listRef}
         data={posts}
@@ -165,9 +181,9 @@ export function FeedListView({
         onEndReached={onEndReached}
         onEndReachedThreshold={2}
         contentContainerStyle={
-          showEmpty ? styles.emptyContainer : undefined
+          showEmpty ? [styles.emptyContainer, { minHeight: listH + 1 }] : undefined
         }
-        snapToInterval={SCREEN_H}
+        snapToInterval={listH}
         snapToAlignment="start"
         decelerationRate="fast"
         bounces

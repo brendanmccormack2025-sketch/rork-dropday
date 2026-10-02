@@ -300,6 +300,7 @@ export const FeedItem = memo(function FeedItem({
   onRetry,
   onDismiss,
   bottomInset = TAB_BAR_HEIGHT,
+  itemHeight,
 }: {
   post: Post;
   active: boolean;
@@ -309,6 +310,8 @@ export const FeedItem = memo(function FeedItem({
   onDismiss: () => void;
   /** Bottom offset for action buttons and user info — TAB_BAR_HEIGHT on main feed, safe-area-based on profile view. */
   bottomInset?: number;
+  /** Measured list height; defaults to the window height. */
+  itemHeight?: number;
 }) {
   const [isPaused, setIsPaused] = useState<boolean>(false);
   // Measured container dimensions — used for cover-crop-aware overlay positioning
@@ -1041,7 +1044,7 @@ export const FeedItem = memo(function FeedItem({
 
   return (
     <View
-      style={styles.item}
+      style={itemHeight ? [styles.item, { height: itemHeight }] : styles.item}
       onLayout={(e) => {
         const { width, height } = e.nativeEvent.layout;
         if (width > 0 && height > 0 && (width !== containerDims.w || height !== containerDims.h)) {

@@ -479,6 +479,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
     paddingHorizontal: 32,
+    // Keep the message clear of the floating tab bar.
+    paddingBottom: 96,
     minHeight: SCREEN_H + 1,
   },
   emptyTitle: {
