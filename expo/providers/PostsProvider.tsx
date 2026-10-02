@@ -717,8 +717,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   // onSuccess cache patch (which inserts the new post at the top).
   const lastPostCreatedAtRef = useRef<number>(0);
 
-  // Bumped when a root post (not a reaction) is published; the feed shows a
-  // short "on Trial" banner for it.
+  // Bumped when a root post (not a reaction) has been published successfully;
+  // the feed shows a short "on Trial" banner for it.
   const [postedBannerAt, setPostedBannerAt] = useState<number>(0);
 
   // Load draft projects from AsyncStorage on mount
@@ -1623,7 +1623,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const addOptimisticPost = useCallback(
     (payload: OptimisticRetryPayload, parentPostId?: string | null): string => {
       const tempId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      if (!parentPostId) setPostedBannerAt(Date.now());
       const optPost: Post = {
         id: tempId,
         user_id: user?.id ?? "",
@@ -2139,6 +2138,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // Only insert into the main fyp feed cache for root Drops (no parent).
       // Reactions are NOT part of the fyp feed — they live in the reaction-tree.
       if (!newPost.parent_post_id) {
+        // Publish succeeded: show the "on Trial" banner (never on failure).
+        setPostedBannerAt(Date.now());
         patchFyp((old) => {
           if (!old) return [newPost];
           const filtered = old.filter(

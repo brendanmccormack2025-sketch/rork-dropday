@@ -160,7 +160,7 @@ export default function FeedScreen() {
             accessibilityLabel="Dismiss"
           >
             <UiText style={styles.bannerText}>
-              Your post is on Trial. We'll tell you when the result is in.
+              Your post is on Trial. If it survives, it's pushed to more people for 24 hours.
             </UiText>
             <X color="#fff" size={16} />
           </Pressable>
