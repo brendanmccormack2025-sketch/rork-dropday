@@ -26,9 +26,9 @@ export const MERGE_GAP_MS = 100;
 /** Only silences at least this long are considered. */
 export const MIN_SILENCE_MS = 900;
 /** Silence kept after speech ends, before the cut starts. */
-export const PAD_AFTER_SPEECH_MS = 100;
+export const PAD_AFTER_SPEECH_MS = 60;
 /** Silence kept before speech resumes, after the cut ends. */
-export const PAD_BEFORE_SPEECH_MS = 150;
+export const PAD_BEFORE_SPEECH_MS = 90;
 /** A cut result may never leave less video than this. */
 export const MIN_RESULT_MS = 5000;
 /** At most this many cuts; the longest silences win. */
