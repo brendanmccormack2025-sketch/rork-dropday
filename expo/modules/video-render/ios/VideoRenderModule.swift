@@ -630,9 +630,26 @@ private func render(
     try? FileManager.default.removeItem(at: outputURL)
     throw fail("ERR_RENDER_EXPORT_FAILED", "output file is empty")
   }
+
+  // Check the file itself: it must have video and not be shorter than the edit.
+  let outputAsset = AVURLAsset(url: outputURL)
+  let outputSeconds = CMTimeGetSeconds(outputAsset.duration)
+  if outputAsset.tracks(withMediaType: .video).isEmpty {
+    try? FileManager.default.removeItem(at: outputURL)
+    throw fail("ERR_RENDER_EMPTY_VIDEO", "the rendered file has no video track")
+  }
+  if !outputSeconds.isFinite || totalSeconds - outputSeconds > 0.150 {
+    try? FileManager.default.removeItem(at: outputURL)
+    throw fail(
+      "ERR_RENDER_TRUNCATED",
+      "rendered \(Int((outputSeconds.isFinite ? outputSeconds : 0) * 1000)) ms, expected \(Int(totalSeconds * 1000)) ms"
+    )
+  }
+
   return [
     "uri": outputURL.absoluteString,
     "durationMs": Int((totalSeconds * 1000).rounded()),
+    "actualDurationMs": Int((outputSeconds * 1000).rounded()),
     "sizeBytes": sizeBytes,
   ]
 }

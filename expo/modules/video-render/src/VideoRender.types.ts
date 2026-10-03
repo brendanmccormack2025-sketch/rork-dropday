@@ -19,7 +19,10 @@ export type RenderOptions = {
 export type RenderResult = {
   /** file:// URI of the finished mp4 in the cache directory. */
   uri: string;
+  /** Expected duration: the length of the edit. */
   durationMs: number;
+  /** Duration of the written file, read back (within 150 ms of durationMs or the render fails). */
+  actualDurationMs: number;
   sizeBytes: number;
 };
 
