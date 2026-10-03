@@ -329,6 +329,8 @@ export const FeedItem = memo(function FeedItem({
   itemHeight?: number;
 }) {
   const [isPaused, setIsPaused] = useState<boolean>(false);
+  const isPausedRef = useRef<boolean>(false);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
   // Measured container dimensions — used for cover-crop-aware overlay positioning
   const [containerDims, setContainerDims] = useState<{ w: number; h: number }>(
     { w: SCREEN_W, h: SCREEN_H },
@@ -764,6 +766,14 @@ export const FeedItem = memo(function FeedItem({
       slotAOpacity.setValue(newSlot === 0 ? 1 : 0);
       slotBOpacity.setValue(newSlot === 0 ? 0 : 1);
       lastSwapHardCutRef.current = true;
+      // Safety net: after a swap the incoming player must be playing. If both
+      // players ended up paused (and the post should be playing), start it.
+      if (active && !isPaused && newActiveRef) {
+        const swapped = newActiveRef;
+        setTimeout(() => {
+          if (activeVideoRef.current === swapped && !isPausedRef.current && !swapped.playing) swapped.play();
+        }, 200);
+      }
       playbackReadyRef.current = true;
       readyForDisplayRef.current = true;
       setPlaybackReady(true);
@@ -866,6 +876,9 @@ export const FeedItem = memo(function FeedItem({
     let runupStartedAt = 0;
     seamTimerRef.current = setInterval(() => {
       const now = Date.now();
+      // Cut-out footage is never audible: the outgoing player is muted the
+      // moment it reaches its trimEnd, even if the swap is a few ms late.
+      if (outgoing.currentTime * 1000 >= outTrimEnd - 5) outgoing.muted = true;
       if (runupStartedAt === 0) {
         if (outgoing.currentTime * 1000 >= outTrimEnd - seamLeadMsRef.current) {
           runupStartedAt = now;
