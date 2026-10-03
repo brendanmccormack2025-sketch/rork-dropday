@@ -261,9 +261,19 @@ export default function DebugRenderScreen() {
               <UiText style={styles.sectionLabel}>Result</UiText>
               <ResultPlayer uri={outcome.result.uri} />
               <View style={styles.card}>
-                <UiText style={styles.line}>Duration: {(outcome.result.durationMs / 1000).toFixed(2)}s</UiText>
+                <UiText style={styles.line}>
+                  Duration: expected {(outcome.result.durationMs / 1000).toFixed(2)}s, actual{" "}
+                  {(outcome.result.actualDurationMs / 1000).toFixed(2)}s
+                </UiText>
                 <UiText style={styles.line}>
                   File size: {(outcome.result.sizeBytes / (1024 * 1024)).toFixed(2)} MB
+                </UiText>
+                <UiText style={styles.line}>
+                  Actual bitrate:{" "}
+                  {outcome.result.actualDurationMs > 0
+                    ? ((outcome.result.sizeBytes * 8) / outcome.result.actualDurationMs / 1000).toFixed(2)
+                    : "?"}{" "}
+                  Mbps (the bitrate option is advisory)
                 </UiText>
                 <UiText style={styles.line}>Render time: {(outcome.renderMs / 1000).toFixed(1)}s</UiText>
               </View>
@@ -274,6 +284,9 @@ export default function DebugRenderScreen() {
                 <UiText style={styles.secondaryBtnText}>Save to camera roll</UiText>
               </Pressable>
               {saveNote ? <UiText style={styles.muted}>{saveNote}</UiText> : null}
+              <UiText style={styles.muted}>
+                Note: an iPhone HDR video may look dim or washed out after the render.
+              </UiText>
             </>
           ) : null}
         </ScrollView>
