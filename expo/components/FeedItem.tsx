@@ -869,6 +869,7 @@ export const FeedItem = memo(function FeedItem({
     const outTrimEnd = post.trim_data?.[current]?.trimEndMs ?? 0;
     const nextStart = post.trim_data?.[next]?.trimStartMs ?? 0;
     if (!outgoing || !incoming || outTrimEnd <= 0) {
+      if (__DEV__) console.log(`[seam:${post.id.slice(0, 8)}] FALLBACK: no players or no trim data`);
       advanceSegment();
       return;
     }
@@ -889,6 +890,7 @@ export const FeedItem = memo(function FeedItem({
           incoming.play();
           seamRunupActiveRef.current = true;
         } else if (now - armedAt > 1000) {
+          if (__DEV__) console.log(`[seam:${post.id.slice(0, 8)}] FALLBACK: outgoing never reached its lead point`);
           stopSeamTimer();
           advanceSegment();
         }
@@ -897,6 +899,13 @@ export const FeedItem = memo(function FeedItem({
       const reached = incoming.currentTime * 1000 >= nextStart;
       if (reached || now - runupStartedAt >= SEAM_FALLBACK_MS) {
         stopSeamTimer();
+        if (__DEV__) {
+          console.log(
+            reached
+              ? `[seam:${post.id.slice(0, 8)}] swap ${now - runupStartedAt} ms after run-up start (lead ${Math.round(seamLeadMsRef.current)} ms)`
+              : `[seam:${post.id.slice(0, 8)}] FALLBACK: incoming at ${Math.round(incoming.currentTime * 1000)} ms, wanted ${nextStart} ms after ${now - runupStartedAt} ms`,
+          );
+        }
         if (reached) {
           // Running average (weight 1/4 on the newest), clamped to 0-SEAM_LEAD_MAX_MS.
           seamLeadMsRef.current = Math.min(
