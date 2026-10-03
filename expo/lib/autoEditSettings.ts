@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DEFAULT_SENSITIVITY, type Sensitivity } from "@/lib/silenceDetection";
 
+const SAVE_EDITED_KEY = "dropday:saveEditedToRoll";
 const ENABLED_KEY = "dropday:autoEditEnabled";
 const SENSITIVITY_KEY = "dropday:autoEditSensitivity";
 
@@ -29,4 +30,17 @@ export async function getAutoEditEnabled(): Promise<boolean> {
 
 export function setAutoEditEnabled(value: boolean): void {
   AsyncStorage.setItem(ENABLED_KEY, value ? "1" : "0").catch(() => {});
+}
+
+/** "Save my edited video to my camera roll" switch; on unless the user turned it off. */
+export async function getSaveEditedToRoll(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(SAVE_EDITED_KEY)) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setSaveEditedToRoll(value: boolean): void {
+  AsyncStorage.setItem(SAVE_EDITED_KEY, value ? "1" : "0").catch(() => {});
 }

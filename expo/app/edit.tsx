@@ -46,10 +46,11 @@ import { supabase } from "@/lib/supabase";
 import { OWNER_USER_ID } from "@/constants/debug";
 import { renderForPost, shouldRenderAtPost, type RenderedEdit } from "@/lib/renderAtPost";
 import { cancelRender } from "@/modules/video-render";
+import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
 import { keepRangesToClips } from "@/lib/editModel";
 import { SENSITIVITY_PRESETS, type Sensitivity } from "@/lib/silenceDetection";
-import { getAutoEditEnabled, getAutoEditSensitivity, setAutoEditSensitivity } from "@/lib/autoEditSettings";
+import { getAutoEditEnabled, getAutoEditSensitivity, getSaveEditedToRoll, setAutoEditSensitivity } from "@/lib/autoEditSettings";
 import AutoEditReviewSheet from "@/components/AutoEditReviewSheet";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -2163,6 +2164,18 @@ export default function EditScreen() {
             throw new Error("copy of the rendered file failed");
           }
           rendered = { ...rendered, uri: stableRender };
+          // Save the edited video to the camera roll once, in the background, only
+          // if the setting is on and photo permission is ALREADY granted (never
+          // prompts here). Raw recordings are saved elsewhere, unchanged.
+          void (async () => {
+            try {
+              if (!(await getSaveEditedToRoll())) return;
+              const permission = await getMediaLibrary()?.getPermissionsAsync();
+              if (permission?.granted) await saveToLibraryAsync(stableRender);
+            } catch (saveErr) {
+              if (__DEV__) console.log("[render] camera roll save skipped:", (saveErr as Error)?.message);
+            }
+          })();
         } catch (copyErr) {
           if (__DEV__) console.log("[render] could not stage the rendered file:", (copyErr as Error)?.message);
           rendered = null;

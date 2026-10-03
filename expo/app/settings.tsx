@@ -17,15 +17,22 @@ import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import { isDebugOwner } from "@/constants/debug";
 import UiText from "@/components/UiText";
-import { getAutoEditEnabled, setAutoEditEnabled } from "@/lib/autoEditSettings";
+import {
+  getAutoEditEnabled,
+  getSaveEditedToRoll,
+  setAutoEditEnabled,
+  setSaveEditedToRoll,
+} from "@/lib/autoEditSettings";
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { user, signOut, deleteAccount } = useAuth();
   const [deleting, setDeleting] = useState<boolean>(false);
   const [autoEdit, setAutoEdit] = useState<boolean>(true);
+  const [saveEdited, setSaveEdited] = useState<boolean>(true);
   useEffect(() => {
     getAutoEditEnabled().then(setAutoEdit);
+    getSaveEditedToRoll().then(setSaveEdited);
   }, []);
   const handleSignOut = useCallback(() => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -119,6 +126,21 @@ export default function SettingsScreen() {
                 onValueChange={(v) => {
                   setAutoEdit(v);
                   setAutoEditEnabled(v);
+                }}
+                trackColor={{ false: theme.border, true: theme.accent }}
+                thumbColor="#fff"
+                ios_backgroundColor={theme.border}
+              />
+            </View>
+            <View style={styles.rowDivider} />
+            <View style={styles.row}>
+              <Scissors color={theme.textMuted} size={18} strokeWidth={2} />
+              <UiText style={styles.rowText}>Save my edited video to my camera roll</UiText>
+              <Switch
+                value={saveEdited}
+                onValueChange={(v) => {
+                  setSaveEdited(v);
+                  setSaveEditedToRoll(v);
                 }}
                 trackColor={{ false: theme.border, true: theme.accent }}
                 thumbColor="#fff"
