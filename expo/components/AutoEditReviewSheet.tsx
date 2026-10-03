@@ -2,7 +2,7 @@ import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
-import type { Sensitivity, TimeRange } from "@/lib/silenceDetection";
+import type { Cut, Sensitivity } from "@/lib/silenceDetection";
 
 const LEVELS: Array<{ id: Sensitivity; label: string }> = [
   { id: "gentle", label: "Gentle" },
@@ -18,7 +18,7 @@ function fmt(ms: number): string {
 
 type Props = {
   visible: boolean;
-  cuts: TimeRange[];
+  cuts: Cut[];
   enabled: boolean[];
   sensitivity: Sensitivity;
   onSensitivity: (value: Sensitivity) => void;
@@ -66,7 +66,13 @@ export default function AutoEditReviewSheet({
               cuts.map((c, i) => (
                 <View key={`${c.startMs}`} style={styles.row}>
                   <UiText style={styles.rowText}>
-                    {fmt(c.startMs)} – {fmt(c.endMs)}  ·  {(c.lengthMs / 1000).toFixed(1)} s
+                    {c.edge === "start"
+                      ? "Start"
+                      : c.edge === "end"
+                        ? "End"
+                        : `${fmt(c.startMs)} – ${fmt(c.endMs)}`}
+                    {"  ·  "}
+                    {(c.lengthMs / 1000).toFixed(1)} s
                   </UiText>
                   <Switch
                     value={enabled[i] ?? false}

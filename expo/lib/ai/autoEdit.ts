@@ -9,7 +9,7 @@
  * this module only wires them together.
  */
 import { FEATURES } from "@/lib/editorFeatures";
-import { keepRangesToClips, type EditClip, type KeepRange } from "@/lib/editModel";
+import { keepRangesToClips, type EditClip } from "@/lib/editModel";
 import {
   detectSilences,
   type SilenceDetectionOptions,
@@ -51,21 +51,7 @@ export function planSilenceTrim(
   return { detection, clips: keepRangesToClips(input.uri, detection.keepRanges) };
 }
 
-/**
- * Keep ranges after switching some cuts off: a disabled cut merges its two
- * neighbouring keep ranges back into one. detectSilences always returns
- * cuts.length + 1 keep ranges, cut i sitting between ranges i and i + 1.
- */
-export function mergeKeepRanges(keepRanges: KeepRange[], cutEnabled: boolean[]): KeepRange[] {
-  if (keepRanges.length !== cutEnabled.length + 1) return keepRanges;
-  const out: KeepRange[] = [{ ...keepRanges[0]! }];
-  for (let i = 0; i < cutEnabled.length; i++) {
-    const next = keepRanges[i + 1]!;
-    if (cutEnabled[i]) out.push({ ...next });
-    else out[out.length - 1]!.endMs = next.endMs;
-  }
-  return out;
-}
+export { mergeKeepRanges } from "@/lib/silenceDetection";
 
 export async function autoEdit(
   input: AutoEditInput,

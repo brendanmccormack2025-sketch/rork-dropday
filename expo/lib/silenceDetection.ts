@@ -35,6 +35,8 @@ export const MIN_RESULT_MS = 3000;
 export const MAX_CUTS = 14;
 /** No kept piece may be shorter than this; the cut that created it is dropped. */
 export const MIN_KEEP_MS = 350;
+/** A leading or trailing silence qualifies from this length (no seam, so lower than MIN_SILENCE_MS). */
+export const EDGE_MIN_SILENCE_MS = 250;
 /** Videos longer than this are skipped entirely. */
 export const MAX_VIDEO_MS = 180_000;
 /** Soft onsets: when speech resumes, the cut end steps back at most this far. */
@@ -64,9 +66,13 @@ export const SENSITIVITY_PRESETS: Record<
 
 export type TimeRange = { startMs: number; endMs: number; lengthMs: number };
 
+/** A proposed cut. `edge` marks the head ("start") and tail ("end") trims: they make no seam. */
+export type Cut = TimeRange & { edge?: "start" | "end" };
+
 export type Silence = TimeRange & {
   /** True when this silence became one of the proposed cuts. */
   cut: boolean;
+  edge?: "start" | "end";
 };
 
 export type SkipReason =
@@ -90,6 +96,7 @@ export type SilenceDetectionOptions = {
   minResultMs?: number;
   maxCuts?: number;
   minKeepMs?: number;
+  edgeMinSilenceMs?: number;
   maxVideoMs?: number;
   /** 0 turns the soft-onset look-back off. */
   onsetLookBackMs?: number;
@@ -98,9 +105,12 @@ export type SilenceDetectionOptions = {
 export type SilenceDetectionResult = {
   /** Every silence of at least minSilenceMs, in time order. */
   silences: Silence[];
-  /** The proposed cuts (silence minus padding), in time order. */
-  cuts: TimeRange[];
-  /** Ranges to keep, in time order. One full-length range when nothing is cut. */
+  /** The proposed cuts (silence minus padding), in time order. Head and tail trims have `edge` set. */
+  cuts: Cut[];
+  /**
+   * Ranges to keep, in time order. One full-length range when nothing is cut.
+   * There are cuts.length + 1 of them, minus one for a head trim and one for a tail trim.
+   */
   keepRanges: TimeRange[];
   /** Total milliseconds removed by the cuts. */
   savedMs: number;
@@ -173,6 +183,7 @@ export function detectSilences(
   const minResultMs = options.minResultMs ?? MIN_RESULT_MS;
   const maxCuts = options.maxCuts ?? MAX_CUTS;
   const minKeepMs = options.minKeepMs ?? MIN_KEEP_MS;
+  const edgeMinSilenceMs = options.edgeMinSilenceMs ?? EDGE_MIN_SILENCE_MS;
   const maxVideoMs = options.maxVideoMs ?? MAX_VIDEO_MS;
   const onsetLookBackMs = options.onsetLookBackMs ?? ONSET_LOOKBACK_MS;
 
@@ -206,7 +217,7 @@ export function detectSilences(
   //    the end steps back over a soft consonant onset (still rising, still above
   //    the noise floor + ONSET_MARGIN_DB) so it is kept.
   const lookBackWindows = Math.floor(onsetLookBackMs / windowMs);
-  const runs: Array<{ startMs: number; endMs: number }> = [];
+  const runs: Array<{ startMs: number; endMs: number; atEnd: boolean }> = [];
   let runStart = -1;
   for (let i = 0; i <= sm.length; i++) {
     const quiet = i < sm.length && Number.isFinite(sm[i]!) && sm[i]! < thresholdDb;
@@ -226,35 +237,56 @@ export function detectSilences(
           steps++;
         }
       }
-      runs.push({ startMs: runStart * windowMs, endMs: Math.min(endIdx * windowMs, durationMs) });
+      runs.push({
+        startMs: runStart * windowMs,
+        endMs: Math.min(endIdx * windowMs, durationMs),
+        atEnd: i === sm.length,
+      });
       runStart = -1;
     }
   }
 
   // 2. Merge runs separated by a very short sound (a click or a breath).
-  const merged: Array<{ startMs: number; endMs: number }> = [];
+  const merged: Array<{ startMs: number; endMs: number; atEnd: boolean }> = [];
   for (const run of runs) {
     const last = merged[merged.length - 1];
     if (last && run.startMs - last.endMs <= mergeGapMs) {
       last.endMs = run.endMs;
+      last.atEnd = run.atEnd;
     } else {
       merged.push({ ...run });
     }
   }
 
   // 3. Keep only long silences; the cut is the silence minus the padding at each end.
+  //    A silence at the very start (head) or end (tail) of the clip makes no seam:
+  //    it qualifies from edgeMinSilenceMs, the first clip then starts
+  //    padBeforeSpeechMs before the first speech and the last ends padAfterSpeechMs
+  //    after the last. A silence covering the whole clip is never cut.
   const candidates = merged
-    .filter((r) => r.endMs - r.startMs >= minSilenceMs)
-    .map((r) => ({
-      silence: range(r.startMs, r.endMs),
-      cut: range(r.startMs + padAfterSpeechMs, r.endMs - padBeforeSpeechMs),
-    }))
+    .filter((r) => !(r.startMs === 0 && r.atEnd))
+    .map((r) => {
+      const edge: "start" | "end" | undefined = r.startMs === 0 ? "start" : r.atEnd ? "end" : undefined;
+      const cutStart = edge === "start" ? 0 : r.startMs + padAfterSpeechMs;
+      const cutEnd = edge === "end" ? durationMs : r.endMs - padBeforeSpeechMs;
+      return {
+        silence: range(r.startMs, r.endMs),
+        cut: range(cutStart, cutEnd),
+        edge,
+      };
+    })
+    .filter((c) => c.silence.lengthMs >= (c.edge ? edgeMinSilenceMs : minSilenceMs))
     .filter((c) => c.cut.lengthMs > 0);
 
-  // 4. At most maxCuts, longest silences first.
-  let chosen = [...candidates]
-    .sort((a, b) => b.cut.lengthMs - a.cut.lengthMs)
-    .slice(0, Math.max(0, maxCuts));
+  // 4. At most maxCuts interior cuts, longest silences first. Head and tail trims
+  //    are extra: they do not count toward maxCuts.
+  let chosen = [
+    ...candidates
+      .filter((c) => !c.edge)
+      .sort((a, b) => b.cut.lengthMs - a.cut.lengthMs)
+      .slice(0, Math.max(0, maxCuts)),
+    ...candidates.filter((c) => c.edge),
+  ];
 
   // 5. Never leave less than minResultMs: drop the smallest cuts first.
   const remainingFor = (list: typeof chosen) =>
@@ -270,18 +302,20 @@ export function detectSilences(
 
   // 5b. Never keep a piece shorter than minKeepMs: drop the cut that created it
   //     (the shorter of its two neighbours), which merges it into the next piece.
+  //     Head and tail trims make no seam, so they are never dropped by this rule.
   for (;;) {
     let dropIndex = -1;
     let cursorMs = 0;
     for (let i = 0; i <= chosen.length; i++) {
       const pieceEnd = i < chosen.length ? chosen[i]!.cut.startMs : durationMs;
       if (pieceEnd - cursorMs < minKeepMs && pieceEnd > cursorMs) {
-        const before = i > 0 ? i - 1 : -1;
-        const after = i < chosen.length ? i : -1;
-        if (before < 0) dropIndex = after;
-        else if (after < 0) dropIndex = before;
-        else dropIndex = chosen[before]!.cut.lengthMs <= chosen[after]!.cut.lengthMs ? before : after;
-        break;
+        const neighbours = [i - 1, i].filter((n) => n >= 0 && n < chosen.length && !chosen[n]!.edge);
+        if (neighbours.length > 0) {
+          dropIndex = neighbours.reduce((best, n) =>
+            chosen[n]!.cut.lengthMs < chosen[best]!.cut.lengthMs ? n : best,
+          );
+          break;
+        }
       }
       if (i < chosen.length) cursorMs = chosen[i]!.cut.endMs;
     }
@@ -301,13 +335,49 @@ export function detectSilences(
   const chosenStarts = new Set(chosen.map((c) => c.silence.startMs));
   return {
     silences: candidates
-      .map((c) => ({ ...c.silence, cut: chosenStarts.has(c.silence.startMs) }))
+      .map((c) => ({ ...c.silence, cut: chosenStarts.has(c.silence.startMs), edge: c.edge }))
       .sort((a, b) => a.startMs - b.startMs),
-    cuts: chosen.map((c) => c.cut),
+    cuts: chosen.map((c) => (c.edge ? { ...c.cut, edge: c.edge } : c.cut)),
     keepRanges,
     savedMs: chosen.reduce((sum, c) => sum + c.cut.lengthMs, 0),
     noiseFloorDb,
     thresholdDb,
     skipReason: null,
   };
+}
+
+/**
+ * Keep ranges after switching some cuts off: a disabled cut merges its two
+ * neighbouring keep ranges back into one; a disabled head trim brings the first
+ * range back to 0 and a disabled tail trim brings the last range to the end.
+ * Pass the detection's `cuts` so edge cuts are understood: keepRanges then has
+ * cuts.length + 1 entries minus one per edge cut. Without `cuts` every cut is
+ * interior (cuts.length + 1 ranges).
+ */
+export function mergeKeepRanges(
+  keepRanges: Array<{ startMs: number; endMs: number }>,
+  cutEnabled: boolean[],
+  cuts?: Cut[],
+): Array<{ startMs: number; endMs: number }> {
+  const edges = cuts ?? [];
+  const startEdge = edges[0]?.edge === "start";
+  const endEdge = edges[edges.length - 1]?.edge === "end";
+  const expected = cutEnabled.length + 1 - (startEdge ? 1 : 0) - (endEdge ? 1 : 0);
+  if (keepRanges.length !== expected || keepRanges.length === 0) return keepRanges;
+
+  const out = [{ startMs: keepRanges[0]!.startMs, endMs: keepRanges[0]!.endMs }];
+  let next = 1;
+  for (let i = 0; i < cutEnabled.length; i++) {
+    const edge = edges[i]?.edge;
+    if (edge === "start") {
+      if (!cutEnabled[i]) out[0]!.startMs = edges[i]!.startMs;
+    } else if (edge === "end") {
+      if (!cutEnabled[i]) out[out.length - 1]!.endMs = edges[i]!.endMs;
+    } else {
+      const piece = keepRanges[next++]!;
+      if (cutEnabled[i]) out.push({ startMs: piece.startMs, endMs: piece.endMs });
+      else out[out.length - 1]!.endMs = piece.endMs;
+    }
+  }
+  return out;
 }

@@ -7,7 +7,7 @@
  *
  * (From expo/. Node 22.6+; the flag is a no-op on newer Node.)
  */
-import { detectSilences } from "../lib/silenceDetection.ts";
+import { detectSilences, mergeKeepRanges } from "../lib/silenceDetection.ts";
 
 const WINDOW_MS = 20;
 
@@ -111,6 +111,84 @@ const cases = [
     expect: (r) => r.cuts.length === 2 && r.keepRanges.every((k) => k.lengthMs >= 350),
   },
   {
+    name: "head only: 1.5 s of silence then speech: first clip starts 50 ms before speech",
+    windows: build([[1500, -70], [10000, -22]], 0),
+    expect: (r) =>
+      r.cuts.length === 1 && r.cuts[0].edge === "start" && r.cuts[0].startMs === 0 &&
+      Math.abs(r.cuts[0].endMs - 1450) <= 20 && r.keepRanges.length === 1 &&
+      Math.abs(r.keepRanges[0].startMs - 1450) <= 20,
+  },
+  {
+    name: "tail only: speech then 2 s of silence: last clip ends 30 ms after speech",
+    windows: build([[10000, -22], [2000, -70]], 0),
+    expect: (r) =>
+      r.cuts.length === 1 && r.cuts[0].edge === "end" && r.cuts[0].endMs === 12000 &&
+      Math.abs(r.cuts[0].startMs - 10030) <= 20 && r.keepRanges.length === 1 &&
+      Math.abs(r.keepRanges[0].endMs - 10030) <= 20,
+  },
+  {
+    name: "head and tail: two cuts, one keep range",
+    windows: build([[1500, -70], [10000, -22], [2000, -70]], 0),
+    expect: (r) =>
+      r.cuts.length === 2 && r.cuts[0].edge === "start" && r.cuts[1].edge === "end" && r.keepRanges.length === 1,
+  },
+  {
+    name: "head, tail and two interior pauses: four cuts, three keep ranges",
+    windows: build([[1500, -70], [5000, -22], [1000, -70], [5000, -22], [1000, -70], [5000, -22], [2000, -70]], 0),
+    expect: (r) =>
+      r.cuts.length === 4 && r.cuts.filter((c) => c.edge).length === 2 && r.keepRanges.length === 3,
+  },
+  {
+    name: "edge silence of 200 ms is below the 250 ms edge minimum",
+    windows: build([[200, -70], [10000, -22], [200, -70]], 0),
+    expect: (r) => r.cuts.length === 0,
+  },
+  {
+    name: "edge silence of 300 ms qualifies (250 ms edge minimum, no interior minimum applies)",
+    windows: build([[300, -70], [10000, -22]], 0),
+    expect: (r) => r.cuts.length === 1 && r.cuts[0].edge === "start",
+  },
+  {
+    name: "3 s floor: head 1.45 s + tail 1.97 s would leave 1.6 s of 5 s, so the smaller cut is dropped",
+    windows: build([[1500, -70], [1500, -22], [2000, -70]], 0),
+    expect: (r) =>
+      r.cuts.length === 1 && r.cuts[0].edge === "end" && 5000 - r.savedMs >= 3000,
+  },
+  {
+    name: "edge trims do not count toward maxCuts (maxCuts 1 keeps head, tail and one interior)",
+    windows: build([[1500, -70], [4000, -22], [1000, -70], [4000, -22], [1500, -70], [4000, -22], [2000, -70]], 0),
+    options: { maxCuts: 1 },
+    expect: (r) => r.cuts.length === 3 && r.cuts.filter((c) => !c.edge).length === 1,
+  },
+  {
+    name: "350 ms rule never drops an edge trim: a 280 ms piece next to the head trim drops the interior cut",
+    windows: build([[1000, -70], [200, -22], [1000, -70], [8000, -22]], 0),
+    expect: (r) =>
+      r.cuts.length === 1 && r.cuts[0].edge === "start",
+  },
+  {
+    name: "merge: switching edge and interior cuts off restores the ranges",
+    windows: build([[1500, -70], [5000, -22], [1000, -70], [5000, -22], [2000, -70]], 0),
+    expect: (r) => {
+      // cuts: start, interior, end -> keep ranges: two
+      if (r.cuts.length !== 3 || r.keepRanges.length !== 2) return false;
+      const all = mergeKeepRanges(r.keepRanges, [true, true, true], r.cuts);
+      const noStart = mergeKeepRanges(r.keepRanges, [false, true, true], r.cuts);
+      const noEnd = mergeKeepRanges(r.keepRanges, [true, true, false], r.cuts);
+      const noInterior = mergeKeepRanges(r.keepRanges, [true, false, true], r.cuts);
+      const none = mergeKeepRanges(r.keepRanges, [false, false, false], r.cuts);
+      const dur = r.keepRanges[1].endMs > r.cuts[2].startMs ? r.keepRanges[1].endMs : r.cuts[2].endMs;
+      return (
+        all.length === 2 &&
+        noStart.length === 2 && noStart[0].startMs === 0 &&
+        noEnd.length === 2 && noEnd[1].endMs === r.cuts[2].endMs &&
+        noInterior.length === 1 && noInterior[0].startMs === r.keepRanges[0].startMs &&
+        noInterior[0].endMs === r.keepRanges[1].endMs &&
+        none.length === 1 && none[0].startMs === 0 && none[0].endMs === r.cuts[2].endMs && dur > 0
+      );
+    },
+  },
+  {
     name: "soft onset: look-back keeps up to 40 ms of a rising consonant (20 ms windows)",
     windows: build([[8000, -22], [2000, -70], [20, -66], [20, -65], [8000, -22]], 0),
     expect: (r, noLookBack) =>
@@ -132,8 +210,8 @@ const cases = [
 
 let failed = 0;
 for (const c of cases) {
-  const r = detectSilences(c.windows, WINDOW_MS);
-  const ok = c.expect(r, detectSilences(c.windows, WINDOW_MS, { onsetLookBackMs: 0 }));
+  const r = detectSilences(c.windows, WINDOW_MS, c.options);
+  const ok = c.expect(r, detectSilences(c.windows, WINDOW_MS, { ...c.options, onsetLookBackMs: 0 }));
   if (!ok) failed++;
   console.log(`\n${ok ? "PASS" : "FAIL"}  ${c.name}`);
   console.log(

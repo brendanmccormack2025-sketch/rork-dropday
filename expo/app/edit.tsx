@@ -1885,7 +1885,7 @@ export default function EditScreen() {
     const { original } = autoEditSession;
     const produced = keepRangesToClips(
       original.uri,
-      mergeKeepRanges(reviewPlan.detection.keepRanges, reviewEnabled),
+      mergeKeepRanges(reviewPlan.detection.keepRanges, reviewEnabled, reviewPlan.detection.cuts),
     ).map((c) => ({
       ...original,
       id: newClipId(),
