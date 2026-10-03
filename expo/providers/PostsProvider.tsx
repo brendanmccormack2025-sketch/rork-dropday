@@ -1800,6 +1800,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       isMature?: boolean;
       /** Per-post follower-visibility override. Undefined → use the creator's profile default. */
       followerVisibility?: boolean;
+      /** Temporary file (a rendered mp4) to delete once the post is saved. */
+      cleanupUri?: string;
       optimisticTempId?: string;
       onProgress?: (percent: number) => void;
     }) => {
@@ -2099,6 +2101,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
       if (input.draftId) {
         await deleteDraftProject(input.draftId);
+      }
+      if (input.cleanupUri) {
+        await deleteAsync(input.cleanupUri, { idempotent: true }).catch(() => {});
       }
 
       // ── Clean up stitch temp files ─────────────────────────────────

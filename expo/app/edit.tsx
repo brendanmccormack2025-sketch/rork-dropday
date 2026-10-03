@@ -2152,9 +2152,22 @@ export default function EditScreen() {
         }
       }
       if (rendered) {
-        // Not posted yet: discard the file and carry on the old way.
-        await deleteAsync(rendered.uri, { idempotent: true }).catch(() => {});
-        rendered = null;
+        // Move the render out of the cache into the stable upload folder (the
+        // upload runs in the background). If that fails, post the old way.
+        const tempRender = rendered.uri;
+        try {
+          const stableRender = `${stableDir}render_${Date.now()}.mp4`;
+          await copyAsync({ from: tempRender, to: stableRender });
+          const copied = await getInfoAsync(stableRender);
+          if (!copied.exists || (copied.size ?? 0) !== rendered.sizeBytes) {
+            throw new Error("copy of the rendered file failed");
+          }
+          rendered = { ...rendered, uri: stableRender };
+        } catch (copyErr) {
+          if (__DEV__) console.log("[render] could not stage the rendered file:", (copyErr as Error)?.message);
+          rendered = null;
+        }
+        await deleteAsync(tempRender, { idempotent: true }).catch(() => {});
       }
 
       const copyClip = async (c: (typeof clips)[number], i: number) => {
@@ -2203,7 +2216,7 @@ export default function EditScreen() {
       // Clips that share a source uri (segments of one recording) are copied
       // once; every such clip then points at the same stable file.
       const copyCache = new Map<string, ReturnType<typeof copyClip>>();
-      const copiedClips = await Promise.all(
+      const copiedClips = rendered ? [] : await Promise.all(
         clips.map(async (c, i) => {
           let pending = copyCache.get(c.uri);
           if (!pending) {
@@ -2214,7 +2227,11 @@ export default function EditScreen() {
         }),
       );
 
-      let stablePrimary = copiedClips[0]!;
+      // A rendered post uploads the rendered file as the ONLY segment (no
+      // segments, no trim_data); otherwise the source clips, as before.
+      const stablePrimary: DraftClip = rendered
+        ? { id: "rendered", uri: rendered.uri, type: "video", trimStartMs: 0 }
+        : copiedClips[0]!;
 
       // ── 2b. Generate cover thumbnail from first video frame ──────────
       let thumbnailUri: string | null = null;
@@ -2225,7 +2242,7 @@ export default function EditScreen() {
       // For multi-clip Drops, upload each segment individually.
       const segmentUris =
         copiedClips.length > 1 ? copiedClips.map((c) => c.uri) : undefined;
-      const hasAnyTrim = copiedClips.some(
+      const hasAnyTrim = !rendered && copiedClips.some(
         (c) =>
           (c.trimStartMs ?? 0) > 0 ||
           (c.trimEndMs ?? 0) < (c.durationMs ?? Infinity),
@@ -2273,6 +2290,7 @@ export default function EditScreen() {
         thumbnailUri: thumbnailUri ?? undefined,
         isMature,
         followerVisibility,
+        cleanupUri: rendered?.uri,
         optimisticTempId: tempId,
         onProgress: (percent: number) => {
           updateOptimisticProgress(tempId, percent);
