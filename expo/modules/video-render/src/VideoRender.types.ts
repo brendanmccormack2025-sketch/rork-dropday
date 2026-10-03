@@ -5,7 +5,12 @@ export type RenderOptions = {
   height?: number;
   /** 'fill' = aspect-fill centre crop (default), 'fit' = letterbox. */
   reframe?: "fill" | "fit";
-  /** Video bitrate cap in bits per second. Default 8_000_000. */
+  /**
+   * Advisory only: AVAssetExportSession cannot enforce a bitrate. The export
+   * preset follows the size (1280x720 preset when width <= 720, otherwise the
+   * highest quality). Check the real bitrate (size * 8 / duration) of the result.
+   * Default 8_000_000.
+   */
   bitrate?: number;
   /** Scale 108% on every second segment to hide jump cuts. Default false. */
   punchIn?: boolean;

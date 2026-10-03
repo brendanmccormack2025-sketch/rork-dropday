@@ -587,7 +587,10 @@ private func render(
     .appendingPathComponent("render_\(UUID().uuidString).mp4")
   try? FileManager.default.removeItem(at: outputURL)
 
-  guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+  // The preset picks the encoder quality; renderSize (above) is the real output
+  // size. The bitrate option is advisory only: nothing here enforces it.
+  let preset = settings.width <= 720 ? AVAssetExportPreset1280x720 : AVAssetExportPresetHighestQuality
+  guard let session = AVAssetExportSession(asset: composition, presetName: preset) else {
     throw fail("ERR_RENDER_EXPORT_FAILED", "could not create export session")
   }
   session.outputURL = outputURL
@@ -595,9 +598,6 @@ private func render(
   session.videoComposition = videoComposition
   session.audioMix = audioMix
   session.shouldOptimizeForNetworkUse = true
-  // AVAssetExportSession has no bitrate setting; cap the file size instead
-  // (video bitrate plus about 128 kbps of audio, over the real duration).
-  session.fileLengthLimit = Int64((settings.bitrate + 128_000) * totalSeconds / 8)
   RenderState.shared.setSession(session)
 
   let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
