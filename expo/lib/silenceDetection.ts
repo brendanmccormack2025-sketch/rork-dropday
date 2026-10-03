@@ -35,6 +35,10 @@ export const MIN_RESULT_MS = 5000;
 export const MAX_CUTS = 5;
 /** Videos longer than this are skipped entirely. */
 export const MAX_VIDEO_MS = 180_000;
+/** Soft onsets: when speech resumes, the cut end steps back at most this far. */
+export const ONSET_LOOKBACK_MS = 40;
+/** ...while loudness is still rising and above the noise floor by more than this. */
+export const ONSET_MARGIN_DB = 3;
 
 // ── Sensitivity presets (Review sheet) ──────────────────────────────────────
 
@@ -84,6 +88,8 @@ export type SilenceDetectionOptions = {
   minResultMs?: number;
   maxCuts?: number;
   maxVideoMs?: number;
+  /** 0 turns the soft-onset look-back off. */
+  onsetLookBackMs?: number;
 };
 
 export type SilenceDetectionResult = {
@@ -113,6 +119,19 @@ function percentile(sorted: number[], p: number): number {
   const clamped = Math.min(1, Math.max(0, p));
   const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(clamped * sorted.length) - 1));
   return sorted[idx]!;
+}
+
+/**
+ * Median of each window and its two neighbours: one noisy window can no longer
+ * split a silence, and edges stay where they are. Non-finite windows are kept.
+ */
+function smooth3(w: number[]): number[] {
+  return w.map((v, i) => {
+    if (!Number.isFinite(v)) return v;
+    const a = Number.isFinite(w[i - 1]) ? w[i - 1]! : v;
+    const b = Number.isFinite(w[i + 1]) ? w[i + 1]! : v;
+    return Math.max(Math.min(a, v), Math.min(Math.max(a, v), b));
+  });
 }
 
 function empty(
@@ -151,8 +170,11 @@ export function detectSilences(
   const minResultMs = options.minResultMs ?? MIN_RESULT_MS;
   const maxCuts = options.maxCuts ?? MAX_CUTS;
   const maxVideoMs = options.maxVideoMs ?? MAX_VIDEO_MS;
+  const onsetLookBackMs = options.onsetLookBackMs ?? ONSET_LOOKBACK_MS;
 
-  const values = windows.filter((v) => Number.isFinite(v));
+  // All timing below is in ms, from the window length: windowMs may be 20 or 50.
+  const sm = smooth3(windows);
+  const values = sm.filter((v) => Number.isFinite(v));
   if (values.length === 0 || !(windowMs > 0)) {
     return empty(0, 0, 0, "no_windows");
   }
@@ -175,15 +197,32 @@ export function detectSilences(
     return empty(durationMs, noiseFloorDb, thresholdDb, "no_activity");
   }
 
-  // 1. Runs of consecutive quiet windows.
+  // 1. Runs of consecutive quiet windows. A run starts at the first window below
+  //    the threshold and ends at the first window above it; if speech resumes,
+  //    the end steps back over a soft consonant onset (still rising, still above
+  //    the noise floor + ONSET_MARGIN_DB) so it is kept.
+  const lookBackWindows = Math.floor(onsetLookBackMs / windowMs);
   const runs: Array<{ startMs: number; endMs: number }> = [];
   let runStart = -1;
-  for (let i = 0; i <= windows.length; i++) {
-    const quiet = i < windows.length && Number.isFinite(windows[i]!) && windows[i]! < thresholdDb;
+  for (let i = 0; i <= sm.length; i++) {
+    const quiet = i < sm.length && Number.isFinite(sm[i]!) && sm[i]! < thresholdDb;
     if (quiet && runStart < 0) {
       runStart = i;
     } else if (!quiet && runStart >= 0) {
-      runs.push({ startMs: runStart * windowMs, endMs: Math.min(i * windowMs, durationMs) });
+      let endIdx = i;
+      if (i < sm.length && Number.isFinite(sm[i]!)) {
+        let steps = 0;
+        while (
+          steps < lookBackWindows &&
+          endIdx - 1 > runStart &&
+          sm[endIdx - 1]! > noiseFloorDb + ONSET_MARGIN_DB &&
+          sm[endIdx - 1]! <= sm[endIdx]!
+        ) {
+          endIdx--;
+          steps++;
+        }
+      }
+      runs.push({ startMs: runStart * windowMs, endMs: Math.min(endIdx * windowMs, durationMs) });
       runStart = -1;
     }
   }

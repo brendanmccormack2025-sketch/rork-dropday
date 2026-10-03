@@ -18,7 +18,7 @@ import {
 import { getLoudnessAsync } from "@/modules/audio-loudness";
 
 /** Loudness window size read from the native module. */
-export const AUTO_EDIT_WINDOW_MS = 50;
+export const AUTO_EDIT_WINDOW_MS = 20;
 /** Cuts that save less than this in total are not applied. */
 export const AUTO_EDIT_MIN_SAVED_MS = 2000;
 

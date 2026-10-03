@@ -9,7 +9,7 @@
  */
 import { detectSilences } from "../lib/silenceDetection.ts";
 
-const WINDOW_MS = 50;
+const WINDOW_MS = 20;
 
 // Small deterministic jitter so windows are not perfectly flat.
 let seed = 12345;
@@ -93,12 +93,30 @@ const cases = [
     windows: build([[10000, -22], [1000, -70], [10000, -22]]),
     expect: (r) => r.cuts.length === 1 && Math.abs(r.cuts[0].lengthMs - 750) <= 100 && r.savedMs < 2000,
   },
+  {
+    name: "soft onset: look-back keeps up to 40 ms of a rising consonant (20 ms windows)",
+    windows: build([[8000, -22], [2000, -70], [20, -66], [20, -65], [8000, -22]], 0),
+    expect: (r, noLookBack) =>
+      r.silences.length === 1 &&
+      noLookBack.silences[0].endMs - r.silences[0].endMs === 40 &&
+      r.cuts[0].endMs === noLookBack.cuts[0].endMs - 40,
+  },
+  {
+    name: "flat silence: look-back changes nothing (no rise above floor + 3 dB)",
+    windows: build([[8000, -22], [2000, -70], [8000, -22]], 0),
+    expect: (r, noLookBack) => r.silences[0].endMs === noLookBack.silences[0].endMs,
+  },
+  {
+    name: "one noisy window inside a pause does not split it (3-window smoothing)",
+    windows: build([[8000, -22], [1000, -70], [20, -30], [1000, -70], [8000, -22]], 0),
+    expect: (r) => r.silences.length === 1 && r.silences[0].lengthMs >= 2000,
+  },
 ];
 
 let failed = 0;
 for (const c of cases) {
   const r = detectSilences(c.windows, WINDOW_MS);
-  const ok = c.expect(r);
+  const ok = c.expect(r, detectSilences(c.windows, WINDOW_MS, { onsetLookBackMs: 0 }));
   if (!ok) failed++;
   console.log(`\n${ok ? "PASS" : "FAIL"}  ${c.name}`);
   console.log(
