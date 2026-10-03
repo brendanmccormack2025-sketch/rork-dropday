@@ -44,6 +44,7 @@ import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
 import { OWNER_USER_ID } from "@/constants/debug";
+import { shouldRenderAtPost } from "@/lib/renderAtPost";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
 import { keepRangesToClips } from "@/lib/editModel";
 import { SENSITIVITY_PRESETS, type Sensitivity } from "@/lib/silenceDetection";
@@ -2127,6 +2128,15 @@ export default function EditScreen() {
       await makeDirectoryAsync(stableDir, { intermediates: true });
 
       const isWeb = Platform.OS === "web";
+
+      // Render-at-post gate: ROOT posts only (never reactions), and only when the
+      // timeline has cuts. Not wired to a render yet.
+      const renderAtPost = shouldRenderAtPost({
+        isRoot: !reactingTo && !rootDropId,
+        userId: user?.id,
+        clips,
+      });
+      if (__DEV__) console.log("[edit] render at post:", renderAtPost ? "yes" : "no");
 
       const copyClip = async (c: (typeof clips)[number], i: number) => {
           // On web there is no real filesystem — data:/blob: URIs hold the
