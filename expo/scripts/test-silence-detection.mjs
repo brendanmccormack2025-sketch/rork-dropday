@@ -47,7 +47,7 @@ const cases = [
   {
     name: "one long pause (60 s clip, 6 s pause)",
     windows: build([[27000, -23], [6000, -72], [27000, -22]]),
-    expect: (r) => r.cuts.length === 1 && Math.abs(r.savedMs - 5400) < 200,
+    expect: (r) => r.cuts.length === 1 && Math.abs(r.savedMs - 5750) < 200,
   },
   {
     name: "no pauses: continuous speech with 0.6 s gaps (40 s)",
@@ -79,14 +79,19 @@ const cases = [
     expect: (r) => r.cuts.length === 0 && r.silences.length === 1,
   },
   {
-    name: "pause of 1.0 s is below the 1.2 s minimum",
-    windows: build([[10000, -22], [1000, -70], [10000, -22]]),
+    name: "pause of 0.8 s is below the 0.9 s minimum",
+    windows: build([[10000, -22], [800, -70], [10000, -22]]),
     expect: (r) => r.silences.length === 0 && r.cuts.length === 0,
   },
   {
-    name: "pause of 1.4 s keeps 0.3 s each side: cut is ~0.8 s",
+    name: "pause of 1.4 s keeps 0.1 s after speech and 0.15 s before: cut is ~1.15 s",
     windows: build([[10000, -22], [1400, -70], [10000, -22]]),
-    expect: (r) => r.cuts.length === 1 && Math.abs(r.cuts[0].lengthMs - 800) <= 100,
+    expect: (r) => r.cuts.length === 1 && Math.abs(r.cuts[0].lengthMs - 1150) <= 100,
+  },
+  {
+    name: "pause of 1.0 s now qualifies (0.9 s minimum): cut is ~0.75 s, under the 2 s apply threshold",
+    windows: build([[10000, -22], [1000, -70], [10000, -22]]),
+    expect: (r) => r.cuts.length === 1 && Math.abs(r.cuts[0].lengthMs - 750) <= 100 && r.savedMs < 2000,
   },
 ];
 

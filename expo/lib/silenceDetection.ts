@@ -24,9 +24,11 @@ export const ACTIVITY_PERCENTILE = 0.9;
 /** Silent stretches separated by a sound shorter than this are one silence. */
 export const MERGE_GAP_MS = 100;
 /** Only silences at least this long are considered. */
-export const MIN_SILENCE_MS = 1200;
-/** Audio kept on each side of every cut. */
-export const PAD_MS = 300;
+export const MIN_SILENCE_MS = 900;
+/** Silence kept after speech ends, before the cut starts. */
+export const PAD_AFTER_SPEECH_MS = 100;
+/** Silence kept before speech resumes, after the cut ends. */
+export const PAD_BEFORE_SPEECH_MS = 150;
 /** A cut result may never leave less video than this. */
 export const MIN_RESULT_MS = 5000;
 /** At most this many cuts; the longest silences win. */
@@ -47,9 +49,9 @@ export const SENSITIVITY_PRESETS: Record<
   Sensitivity,
   { minSilenceMs: number; thresholdMarginDb: number }
 > = {
-  gentle: { minSilenceMs: 1600, thresholdMarginDb: 6 },
+  gentle: { minSilenceMs: 1200, thresholdMarginDb: 6 },
   normal: { minSilenceMs: MIN_SILENCE_MS, thresholdMarginDb: THRESHOLD_MARGIN_DB },
-  tight: { minSilenceMs: 800, thresholdMarginDb: 10 },
+  tight: { minSilenceMs: 600, thresholdMarginDb: 10 },
 };
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -77,7 +79,8 @@ export type SilenceDetectionOptions = {
   activityPercentile?: number;
   mergeGapMs?: number;
   minSilenceMs?: number;
-  padMs?: number;
+  padAfterSpeechMs?: number;
+  padBeforeSpeechMs?: number;
   minResultMs?: number;
   maxCuts?: number;
   maxVideoMs?: number;
@@ -143,7 +146,8 @@ export function detectSilences(
   const activityPercentile = options.activityPercentile ?? ACTIVITY_PERCENTILE;
   const mergeGapMs = options.mergeGapMs ?? MERGE_GAP_MS;
   const minSilenceMs = options.minSilenceMs ?? MIN_SILENCE_MS;
-  const padMs = options.padMs ?? PAD_MS;
+  const padAfterSpeechMs = options.padAfterSpeechMs ?? PAD_AFTER_SPEECH_MS;
+  const padBeforeSpeechMs = options.padBeforeSpeechMs ?? PAD_BEFORE_SPEECH_MS;
   const minResultMs = options.minResultMs ?? MIN_RESULT_MS;
   const maxCuts = options.maxCuts ?? MAX_CUTS;
   const maxVideoMs = options.maxVideoMs ?? MAX_VIDEO_MS;
@@ -195,12 +199,12 @@ export function detectSilences(
     }
   }
 
-  // 3. Keep only long silences; the cut is the silence minus padding each side.
+  // 3. Keep only long silences; the cut is the silence minus the padding at each end.
   const candidates = merged
     .filter((r) => r.endMs - r.startMs >= minSilenceMs)
     .map((r) => ({
       silence: range(r.startMs, r.endMs),
-      cut: range(r.startMs + padMs, r.endMs - padMs),
+      cut: range(r.startMs + padAfterSpeechMs, r.endMs - padBeforeSpeechMs),
     }))
     .filter((c) => c.cut.lengthMs > 0);
 
