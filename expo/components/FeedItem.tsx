@@ -44,9 +44,20 @@ import { getOutputTimeMs } from "@/lib/editModel";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
-/** Seam swap lead time (ms): starts here, then follows the measured swap latency. */
-const SEAM_LEAD_INITIAL_MS = 60;
+/**
+ * Same-file seams: the idle player waits parked RUNUP_MS before the next
+ * segment's trimStart, and starts playing (muted, hidden) a "lead" before the
+ * outgoing segment ends so it is at normal speed when it reaches trimStart.
+ * The lead follows the measured run-up-to-swap time (initial value, clamp).
+ */
+const RUNUP_MS = 80;
+const SEAM_LEAD_INITIAL_MS = 100;
 const SEAM_LEAD_MAX_MS = 120;
+/** The seam timer is armed this long before the lead point, then polls fast. */
+const SEAM_ARM_AHEAD_MS = 70;
+const SEAM_POLL_MS = 16;
+/** If the incoming player has not reached trimStart this long after its run-up started, swap anyway. */
+const SEAM_FALLBACK_MS = 150;
 /** Watch duration that qualifies a view for the exposure gate (posts.qualified_view_count). */
 const QUALIFIED_VIEW_MS = 3000;
 /** Session-level dedupe so scrolling back to a post doesn't re-record the same viewer. */
@@ -389,11 +400,14 @@ export const FeedItem = memo(function FeedItem({
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
   const activeSlotRef = useRef<0 | 1>(0);
   const preloadReadyRef = useRef<boolean>(false);
-  // Seam timing (shared-URL hard cuts): how long a swap takes, from the swap
-  // trigger to the incoming player reporting playing. The next swap is triggered
-  // that many ms early so playback is continuous.
-  const swapStartRef = useRef<number>(0);
+  // Seam timing (same-file hard cuts): how long the run-up takes from its start
+  // to the swap. The next run-up starts that many ms before the segment ends.
   const seamLeadMsRef = useRef<number>(SEAM_LEAD_INITIAL_MS);
+  const seamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // True while the idle player is already playing its run-up (the swap then only
+  // flips visibility and sound; no seek, no play).
+  const seamRunupActiveRef = useRef<boolean>(false);
+  const lastSwapHardCutRef = useRef<boolean>(false);
   // Debounce: prevent multiple advanceSegment calls within 500ms
   const lastAdvanceTimeRef = useRef<number>(0);
   // Track which URI each slot has loaded, so we can detect when a slot
@@ -658,21 +672,10 @@ export const FeedItem = memo(function FeedItem({
     slotALoadedUriRef.current = null;
     slotBLoadedUriRef.current = null;
     pendingCrossfadeRef.current = null;
+    lastSwapHardCutRef.current = false;
     slotAOpacity.setValue(1);
     slotBOpacity.setValue(0);
   }, [post.id]);
-
-  // True when the idle player holds the next segment's file, is readyToPlay and
-  // sits within 40 ms of that segment's trimStart (shared-URL seams only).
-  const isIdleParked = useCallback(() => {
-    const idleIsB = activeSlotRef.current === 0;
-    const idle = idleIsB ? videoRefB.current : videoRefA.current;
-    const loaded = idleIsB ? slotBLoadedUriRef.current : slotALoadedUriRef.current;
-    const next = (segIdxRef.current + 1) % allSegments.length;
-    if (!idle || loaded !== allSegments[next]) return false;
-    const target = post.trim_data?.[next]?.trimStartMs ?? 0;
-    return idle.status === "readyToPlay" && Math.abs(idle.currentTime * 1000 - target) <= 40;
-  }, [allSegments, post.trim_data]);
 
   // ── Advance to next segment via dual-player hot-swap ──────────────
   // Flips the active/inactive slots. If the preload was ready, the
@@ -683,8 +686,8 @@ export const FeedItem = memo(function FeedItem({
   const advanceSegment = useCallback(() => {
     // Debounce: end-of-segment detection can fire multiple times rapidly
     const now = Date.now();
-    const swapTriggerAt = now;
-    if (now - lastAdvanceTimeRef.current < 500) {
+    // Same-file seams can be 350 ms apart, so their debounce is much shorter.
+    if (now - lastAdvanceTimeRef.current < (hasSharedSegmentUrls ? 120 : 500)) {
       return;
     }
     lastAdvanceTimeRef.current = now;
@@ -693,7 +696,6 @@ export const FeedItem = memo(function FeedItem({
     const next = (current + 1) % allSegments.length;
     const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
     const wasPreloadReady = preloadReadyRef.current;
-    const idleParked = hasSharedSegmentUrls && isIdleParked();
 
     // Check if the new active slot already has the target URI loaded.
     // This happens on wrap-around for 2-segment posts: slot A was loaded
@@ -742,29 +744,34 @@ export const FeedItem = memo(function FeedItem({
     const seekTo = trim?.trimStartMs ?? 0;
 
     // Seam between two segments of the same file: a hard cut. No dissolve (it
-    // would blend two moments of one recording); the outgoing player is paused
-    // and muted and the incoming one unmuted and started in the same tick.
+    // would blend two moments of one recording). Normally the incoming player is
+    // already playing its run-up (muted, hidden) and is at trimStart: the swap
+    // only flips visibility and sound. Without a run-up (fallback) it seeks and
+    // starts here. The outgoing player stops at the swap.
     if (hasSharedSegmentUrls && slotAlreadyLoaded && allSegments[current] === targetUri) {
       const outgoing = newSlot === 0 ? videoRefB.current : videoRefA.current;
+      const runupActive = seamRunupActiveRef.current;
+      seamRunupActiveRef.current = false;
       if (outgoing) {
         outgoing.pause();
         outgoing.muted = true;
       }
       if (newActiveRef) {
-        // Already parked on trimStart: no seek, so no seek stall at the seam.
-        if (!idleParked) newActiveRef.currentTime = seekTo / 1000;
+        if (!runupActive) newActiveRef.currentTime = seekTo / 1000;
         newActiveRef.muted = !active;
         if (active && !isPaused) newActiveRef.play();
       }
       slotAOpacity.setValue(newSlot === 0 ? 1 : 0);
       slotBOpacity.setValue(newSlot === 0 ? 0 : 1);
-      if (active && !isPaused) swapStartRef.current = swapTriggerAt;
+      lastSwapHardCutRef.current = true;
       playbackReadyRef.current = true;
       readyForDisplayRef.current = true;
       setPlaybackReady(true);
       pendingCrossfadeRef.current = null;
       return;
     }
+    lastSwapHardCutRef.current = false;
+    seamRunupActiveRef.current = false;
 
     if (wasPreloadReady || slotAlreadyLoaded) {
       // Preload was ready OR the slot already has this URI loaded (wrap-around
@@ -793,23 +800,28 @@ export const FeedItem = memo(function FeedItem({
       setPlaybackReady(false);
       pendingCrossfadeRef.current = { incomingSlot: newSlot };
     }
-  }, [allSegments, shouldMountPreload, post.id, post.trim_data, hasSharedSegmentUrls, active, isPaused, isIdleParked]);
+  }, [allSegments, shouldMountPreload, post.id, post.trim_data, hasSharedSegmentUrls, active, isPaused]);
 
   // Shared-URL segments never trigger a preload load (the file is already in the
-  // idle slot), so the idle player is parked by hand: paused, muted and sitting
-  // on the next segment's trimStart. Checked every 50 ms so it also catches the
-  // first seam (idle player still loading at mount). Skipped for 250 ms after a
-  // swap in case a crossfade is still showing the idle player's last frame.
+  // idle slot), so the idle player is parked by hand: paused, muted, hidden and
+  // sitting RUNUP_MS before the next segment's trimStart, ready to be started.
+  // Checked every 50 ms so it also catches the first seam (idle player still
+  // loading at mount). After a crossfade swap (mixed posts) it waits 250 ms so
+  // the fading-out frame is not disturbed; after a hard cut it parks at once.
+  const parkPositionMs = useCallback(
+    (nextIndex: number) => Math.max(0, (post.trim_data?.[nextIndex]?.trimStartMs ?? 0) - RUNUP_MS),
+    [post.trim_data],
+  );
   useEffect(() => {
     if (!shouldMountPreload || !hasSharedSegmentUrls) return;
     const timer = setInterval(() => {
-      if (Date.now() - slotSwapTimeRef.current < 250) return;
+      if (seamTimerRef.current) return;
+      if (!lastSwapHardCutRef.current && Date.now() - slotSwapTimeRef.current < 250) return;
       const idleIsB = activeSlotRef.current === 0;
       const idle = idleIsB ? videoRefB.current : videoRefA.current;
       const loaded = idleIsB ? slotBLoadedUriRef.current : slotALoadedUriRef.current;
       if (!idle || loaded !== preloadUri || idle.status !== "readyToPlay") return;
-      const next = (segIdxRef.current + 1) % allSegments.length;
-      const target = post.trim_data?.[next]?.trimStartMs ?? 0;
+      const target = parkPositionMs((segIdxRef.current + 1) % allSegments.length);
       if (Math.abs(idle.currentTime * 1000 - target) > 40) {
         idle.pause();
         idle.muted = true;
@@ -817,31 +829,74 @@ export const FeedItem = memo(function FeedItem({
       }
     }, 50);
     return () => clearInterval(timer);
-  }, [shouldMountPreload, hasSharedSegmentUrls, preloadUri, post.trim_data, allSegments.length]);
+  }, [shouldMountPreload, hasSharedSegmentUrls, preloadUri, parkPositionMs, allSegments.length]);
 
-  // End of a segment whose next segment is in the same file: swap at once if the
-  // idle player is parked and ready; otherwise give it up to 150 ms, then swap
-  // anyway (a swap always starts the incoming player, so both are never paused).
-  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
-  }, [post.id]);
-  const advanceWhenReady = useCallback(() => {
-    if (isIdleParked()) {
+  // Seam into the same file. Armed a little before the lead point, then polled
+  // every 16 ms: when the outgoing player is `lead` ms from its trimEnd the idle
+  // player (parked RUNUP_MS before the next trimStart) starts playing, muted and
+  // hidden. The moment its position reaches the next trimStart, advanceSegment
+  // swaps. If that has not happened SEAM_FALLBACK_MS after the run-up started,
+  // advanceSegment swaps anyway (seeking and playing the incoming player).
+  const stopSeamTimer = useCallback(() => {
+    if (seamTimerRef.current) {
+      clearInterval(seamTimerRef.current);
+      seamTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => {
+    return () => {
+      stopSeamTimer();
+      seamRunupActiveRef.current = false;
+    };
+  }, [post.id, stopSeamTimer]);
+
+  const armSeam = useCallback(() => {
+    if (seamTimerRef.current) return;
+    const current = segIdxRef.current;
+    const next = (current + 1) % allSegments.length;
+    const outgoing = activeSlotRef.current === 0 ? videoRefA.current : videoRefB.current;
+    const incoming = activeSlotRef.current === 0 ? videoRefB.current : videoRefA.current;
+    const outTrimEnd = post.trim_data?.[current]?.trimEndMs ?? 0;
+    const nextStart = post.trim_data?.[next]?.trimStartMs ?? 0;
+    if (!outgoing || !incoming || outTrimEnd <= 0) {
       advanceSegment();
       return;
     }
-    const startedAt = Date.now();
-    const poll = () => {
-      if (isIdleParked() || Date.now() - startedAt >= 150) {
-        advanceTimerRef.current = null;
-        advanceSegment();
-      } else {
-        advanceTimerRef.current = setTimeout(poll, 10);
+    const armedAt = Date.now();
+    let runupStartedAt = 0;
+    seamTimerRef.current = setInterval(() => {
+      const now = Date.now();
+      if (runupStartedAt === 0) {
+        if (outgoing.currentTime * 1000 >= outTrimEnd - seamLeadMsRef.current) {
+          runupStartedAt = now;
+          // Normally already parked; if not, seek there first (the fallback covers a slow seek).
+          const parkAt = parkPositionMs(next);
+          if (Math.abs(incoming.currentTime * 1000 - parkAt) > 40) incoming.currentTime = parkAt / 1000;
+          incoming.muted = true;
+          incoming.play();
+          seamRunupActiveRef.current = true;
+        } else if (now - armedAt > 1000) {
+          stopSeamTimer();
+          advanceSegment();
+        }
+        return;
       }
-    };
-    advanceTimerRef.current = setTimeout(poll, 10);
-  }, [isIdleParked, advanceSegment]);
+      const reached = incoming.currentTime * 1000 >= nextStart;
+      if (reached || now - runupStartedAt >= SEAM_FALLBACK_MS) {
+        stopSeamTimer();
+        if (reached) {
+          // Running average (weight 1/4 on the newest), clamped to 0-SEAM_LEAD_MAX_MS.
+          seamLeadMsRef.current = Math.min(
+            SEAM_LEAD_MAX_MS,
+            Math.max(0, seamLeadMsRef.current * 0.75 + (now - runupStartedAt) * 0.25),
+          );
+        } else {
+          seamRunupActiveRef.current = false;
+        }
+        advanceSegment();
+      }
+    }, SEAM_POLL_MS);
+  }, [allSegments.length, post.trim_data, advanceSegment, parkPositionMs, stopSeamTimer]);
 
   // When video finishes, advance to next segment or loop
   const onSegmentStatus = useCallback(
@@ -858,22 +913,6 @@ export const FeedItem = memo(function FeedItem({
             post.trim_data ?? allSegments.map(() => ({ trimStartMs: 0, trimEndMs: Infinity })),
           ),
         );
-      }
-
-      // Seam latency: swap trigger -> incoming player reports playing.
-      if (swapStartRef.current && status.isPlaying) {
-        const latency = Date.now() - swapStartRef.current;
-        swapStartRef.current = 0;
-        // Running average (weight 1/4 on the newest), clamped to 0-120 ms.
-        seamLeadMsRef.current = Math.min(
-          SEAM_LEAD_MAX_MS,
-          Math.max(0, seamLeadMsRef.current * 0.75 + latency * 0.25),
-        );
-        if (__DEV__) {
-          console.log(
-            `[FeedItem:${post.id.slice(0, 8)}] seam latency ${latency} ms, next lead ${Math.round(seamLeadMsRef.current)} ms`,
-          );
-        }
       }
 
       // ── Pre-buffer gate ──
@@ -911,7 +950,9 @@ export const FeedItem = memo(function FeedItem({
       // premature END OF SEGMENT on the new segment. Skip end-of-segment
       // detection for 400ms after a slot swap to let the seek settle.
       const msSinceSwap = Date.now() - slotSwapTimeRef.current;
-      const isStalePosition = msSinceSwap < 400;
+      // After a same-file hard cut the incoming player was already playing, so
+      // only 40 ms are skipped (pieces can be 350 ms long).
+      const isStalePosition = msSinceSwap < (lastSwapHardCutRef.current ? 40 : 400);
 
       // ── Unified end-of-segment detection ──
       if (!isStalePosition && !status.didJustFinish && !trimEndHandledRef.current && sourceDur > 0) {
@@ -920,18 +961,20 @@ export const FeedItem = memo(function FeedItem({
             ? Math.min(trimEndRef.current, sourceDur)
             : sourceDur;
 
-        if (status.positionMillis >= effectiveTrimEnd - (hasSharedSegmentUrls ? seamLeadMsRef.current : 120)) {
+        const sameFileSeam =
+          hasSharedSegmentUrls &&
+          allSegments.length > 1 &&
+          allSegments[segIdxRef.current] === allSegments[(segIdxRef.current + 1) % allSegments.length];
+        const margin = sameFileSeam ? seamLeadMsRef.current + SEAM_ARM_AHEAD_MS : 120;
+        if (status.positionMillis >= effectiveTrimEnd - margin) {
           trimEndHandledRef.current = true;
           if (allSegments.length === 1) {
             if (videoRef.current) {
               videoRef.current.currentTime = trimStartRef.current / 1000;
               trimEndHandledRef.current = false;
             }
-          } else if (
-            hasSharedSegmentUrls &&
-            allSegments[segIdxRef.current] === allSegments[(segIdxRef.current + 1) % allSegments.length]
-          ) {
-            advanceWhenReady();
+          } else if (sameFileSeam) {
+            armSeam();
           } else {
             advanceSegment();
           }
@@ -944,7 +987,7 @@ export const FeedItem = memo(function FeedItem({
         advanceSegment();
       }
     },
-    [allSegments, hasSharedSegmentUrls, hasTimedOverlays, post.trim_data, handleStallDetection, advanceSegment, advanceWhenReady, post.id],
+    [allSegments, hasSharedSegmentUrls, hasTimedOverlays, post.trim_data, handleStallDetection, advanceSegment, armSeam, post.id],
   );
 
   // ── Error recovery: retry loading ──────────────────────────────────
