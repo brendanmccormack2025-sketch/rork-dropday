@@ -719,6 +719,29 @@ export const FeedItem = memo(function FeedItem({
         : null;
     const seekTo = trim?.trimStartMs ?? 0;
 
+    // Seam between two segments of the same file: a hard cut. No dissolve (it
+    // would blend two moments of one recording); the outgoing player is paused
+    // and muted and the incoming one unmuted and started in the same tick.
+    if (hasSharedSegmentUrls && slotAlreadyLoaded && allSegments[current] === targetUri) {
+      const outgoing = newSlot === 0 ? videoRefB.current : videoRefA.current;
+      if (outgoing) {
+        outgoing.pause();
+        outgoing.muted = true;
+      }
+      if (newActiveRef) {
+        newActiveRef.currentTime = seekTo / 1000;
+        newActiveRef.muted = !active;
+        if (active && !isPaused) newActiveRef.play();
+      }
+      slotAOpacity.setValue(newSlot === 0 ? 1 : 0);
+      slotBOpacity.setValue(newSlot === 0 ? 0 : 1);
+      playbackReadyRef.current = true;
+      readyForDisplayRef.current = true;
+      setPlaybackReady(true);
+      pendingCrossfadeRef.current = null;
+      return;
+    }
+
     if (wasPreloadReady || slotAlreadyLoaded) {
       // Preload was ready OR the slot already has this URI loaded (wrap-around
       // for 2-segment posts). The frame is already displayed on the new slot.
@@ -746,7 +769,7 @@ export const FeedItem = memo(function FeedItem({
       setPlaybackReady(false);
       pendingCrossfadeRef.current = { incomingSlot: newSlot };
     }
-  }, [allSegments, shouldMountPreload, post.id, post.trim_data]);
+  }, [allSegments, shouldMountPreload, post.id, post.trim_data, hasSharedSegmentUrls, active, isPaused]);
 
   // Shared-URL segments never trigger a preload load (the URL is already in the
   // idle slot), so the idle player would sit at a stale position. Park it on the
