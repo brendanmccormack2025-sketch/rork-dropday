@@ -654,6 +654,18 @@ export const FeedItem = memo(function FeedItem({
     slotBOpacity.setValue(0);
   }, [post.id]);
 
+  // True when the idle player holds the next segment's file, is readyToPlay and
+  // sits within 40 ms of that segment's trimStart (shared-URL seams only).
+  const isIdleParked = useCallback(() => {
+    const idleIsB = activeSlotRef.current === 0;
+    const idle = idleIsB ? videoRefB.current : videoRefA.current;
+    const loaded = idleIsB ? slotBLoadedUriRef.current : slotALoadedUriRef.current;
+    const next = (segIdxRef.current + 1) % allSegments.length;
+    if (!idle || loaded !== allSegments[next]) return false;
+    const target = post.trim_data?.[next]?.trimStartMs ?? 0;
+    return idle.status === "readyToPlay" && Math.abs(idle.currentTime * 1000 - target) <= 40;
+  }, [allSegments, post.trim_data]);
+
   // ── Advance to next segment via dual-player hot-swap ──────────────
   // Flips the active/inactive slots. If the preload was ready, the
   // transition is seamless (playbackReady stays true). If not, the
@@ -672,6 +684,7 @@ export const FeedItem = memo(function FeedItem({
     const next = (current + 1) % allSegments.length;
     const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
     const wasPreloadReady = preloadReadyRef.current;
+    const idleParked = hasSharedSegmentUrls && isIdleParked();
 
     // Check if the new active slot already has the target URI loaded.
     // This happens on wrap-around for 2-segment posts: slot A was loaded
@@ -729,7 +742,8 @@ export const FeedItem = memo(function FeedItem({
         outgoing.muted = true;
       }
       if (newActiveRef) {
-        newActiveRef.currentTime = seekTo / 1000;
+        // Already parked on trimStart: no seek, so no seek stall at the seam.
+        if (!idleParked) newActiveRef.currentTime = seekTo / 1000;
         newActiveRef.muted = !active;
         if (active && !isPaused) newActiveRef.play();
       }
@@ -769,24 +783,55 @@ export const FeedItem = memo(function FeedItem({
       setPlaybackReady(false);
       pendingCrossfadeRef.current = { incomingSlot: newSlot };
     }
-  }, [allSegments, shouldMountPreload, post.id, post.trim_data, hasSharedSegmentUrls, active, isPaused]);
+  }, [allSegments, shouldMountPreload, post.id, post.trim_data, hasSharedSegmentUrls, active, isPaused, isIdleParked]);
 
-  // Shared-URL segments never trigger a preload load (the URL is already in the
-  // idle slot), so the idle player would sit at a stale position. Park it on the
-  // next segment's trimStart so the swap is a play(), not a cold seek. Delayed
-  // past the 200ms crossfade so the fading-out frame isn't disturbed.
+  // Shared-URL segments never trigger a preload load (the file is already in the
+  // idle slot), so the idle player is parked by hand: paused, muted and sitting
+  // on the next segment's trimStart. Checked every 50 ms so it also catches the
+  // first seam (idle player still loading at mount). Skipped for 250 ms after a
+  // swap in case a crossfade is still showing the idle player's last frame.
   useEffect(() => {
     if (!shouldMountPreload || !hasSharedSegmentUrls) return;
-    const timer = setTimeout(() => {
-      const idleLoadedUri =
-        activeSlotRef.current === 0 ? slotBLoadedUriRef.current : slotALoadedUriRef.current;
-      if (idleLoadedUri !== preloadUri) return;
-      const idle = activeSlotRef.current === 0 ? videoRefB.current : videoRefA.current;
-      const nextTrim = post.trim_data?.[(segIdx + 1) % allSegments.length];
-      if (idle) idle.currentTime = (nextTrim?.trimStartMs ?? 0) / 1000;
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [segIdx, activeSlot, shouldMountPreload, hasSharedSegmentUrls, preloadUri, post.trim_data, allSegments.length]);
+    const timer = setInterval(() => {
+      if (Date.now() - slotSwapTimeRef.current < 250) return;
+      const idleIsB = activeSlotRef.current === 0;
+      const idle = idleIsB ? videoRefB.current : videoRefA.current;
+      const loaded = idleIsB ? slotBLoadedUriRef.current : slotALoadedUriRef.current;
+      if (!idle || loaded !== preloadUri || idle.status !== "readyToPlay") return;
+      const next = (segIdxRef.current + 1) % allSegments.length;
+      const target = post.trim_data?.[next]?.trimStartMs ?? 0;
+      if (Math.abs(idle.currentTime * 1000 - target) > 40) {
+        idle.pause();
+        idle.muted = true;
+        idle.currentTime = target / 1000;
+      }
+    }, 50);
+    return () => clearInterval(timer);
+  }, [shouldMountPreload, hasSharedSegmentUrls, preloadUri, post.trim_data, allSegments.length]);
+
+  // End of a segment whose next segment is in the same file: swap at once if the
+  // idle player is parked and ready; otherwise give it up to 150 ms, then swap
+  // anyway (a swap always starts the incoming player, so both are never paused).
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+  }, [post.id]);
+  const advanceWhenReady = useCallback(() => {
+    if (isIdleParked()) {
+      advanceSegment();
+      return;
+    }
+    const startedAt = Date.now();
+    const poll = () => {
+      if (isIdleParked() || Date.now() - startedAt >= 150) {
+        advanceTimerRef.current = null;
+        advanceSegment();
+      } else {
+        advanceTimerRef.current = setTimeout(poll, 10);
+      }
+    };
+    advanceTimerRef.current = setTimeout(poll, 10);
+  }, [isIdleParked, advanceSegment]);
 
   // When video finishes, advance to next segment or loop
   const onSegmentStatus = useCallback(
@@ -856,6 +901,11 @@ export const FeedItem = memo(function FeedItem({
               videoRef.current.currentTime = trimStartRef.current / 1000;
               trimEndHandledRef.current = false;
             }
+          } else if (
+            hasSharedSegmentUrls &&
+            allSegments[segIdxRef.current] === allSegments[(segIdxRef.current + 1) % allSegments.length]
+          ) {
+            advanceWhenReady();
           } else {
             advanceSegment();
           }
@@ -868,7 +918,7 @@ export const FeedItem = memo(function FeedItem({
         advanceSegment();
       }
     },
-    [allSegments, hasSharedSegmentUrls, hasTimedOverlays, post.trim_data, handleStallDetection, advanceSegment, post.id],
+    [allSegments, hasSharedSegmentUrls, hasTimedOverlays, post.trim_data, handleStallDetection, advanceSegment, advanceWhenReady, post.id],
   );
 
   // ── Error recovery: retry loading ──────────────────────────────────
