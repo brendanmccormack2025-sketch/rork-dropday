@@ -67,7 +67,7 @@ import DraggableTextOverlay, {
 } from "@/components/DraggableTextOverlay";
 
 /** Auto-edit (silence trimming) switches. */
-const AUTO_TRIM_OWNER_ONLY = true;
+const AUTO_TRIM_OWNER_ONLY = false;
 const AUTO_EDIT_ENABLED = true;
 
 const DRAG_EDGE_MARGIN = 0.01;
