@@ -132,6 +132,13 @@ export default function SettingsScreen() {
           <View style={styles.sectionCard}>
             <Pressable
               onPress={() => router.push("/settings/blocked-accounts")}
+              // Hidden: long-press opens the render debug screen, owner only.
+              onLongPress={
+                isDebugOwner(user?.id)
+                  ? () => router.push("/debug-render" as never)
+                  : undefined
+              }
+              delayLongPress={1500}
               style={({ pressed }) => [
                 styles.row,
                 pressed && { opacity: 0.6 },
