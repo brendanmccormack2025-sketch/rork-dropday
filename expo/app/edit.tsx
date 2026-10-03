@@ -2291,6 +2291,23 @@ export default function EditScreen() {
         isMature,
         followerVisibility,
         cleanupUri: rendered?.uri,
+        // If the rendered file cannot be uploaded: the old way, from the source clips.
+        renderedFallback: rendered
+          ? {
+              uri: clips[0]!.uri,
+              segmentUris: clips.length > 1 ? clips.map((c) => c.uri) : undefined,
+              trimData: clips.some(
+                (c) =>
+                  (c.trimStartMs ?? 0) > 0 ||
+                  (c.trimEndMs ?? 0) < (c.durationMs ?? Infinity),
+              )
+                ? clips.map((c) => ({
+                    trimStartMs: c.trimStartMs ?? 0,
+                    trimEndMs: c.trimEndMs ?? (c.durationMs ?? 0),
+                  }))
+                : undefined,
+            }
+          : undefined,
         optimisticTempId: tempId,
         onProgress: (percent: number) => {
           updateOptimisticProgress(tempId, percent);

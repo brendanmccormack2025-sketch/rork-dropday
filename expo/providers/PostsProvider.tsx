@@ -1787,7 +1787,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   );
 
   const createPost = useMutation({
-    mutationFn: async (input: {
+    mutationFn: async (rawInput: {
       uri: string;
       mediaType: "image" | "video";
       caption?: string;
@@ -1802,9 +1802,16 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       followerVisibility?: boolean;
       /** Temporary file (a rendered mp4) to delete once the post is saved. */
       cleanupUri?: string;
+      /** Used if uploading `uri` (the rendered file) fails: post the source clips the old way. */
+      renderedFallback?: {
+        uri: string;
+        segmentUris?: string[];
+        trimData?: Array<{ trimStartMs: number; trimEndMs: number }>;
+      };
       optimisticTempId?: string;
       onProgress?: (percent: number) => void;
     }) => {
+      let input = rawInput;
 
       if (!user?.id) {
         console.error("[createPost] mutationFn ABORT — no user.id");
@@ -1902,13 +1909,14 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       }
       */
 
-      let mediaUrl: string;
+      let mediaUrl!: string;
       let segmentUrls: string[] | null = null;
 
       if (isRemoteUrl) {
         mediaUrl = input.uri;
         segmentUrls = input.segmentUris ?? null;
       } else {
+       const uploadSegments = async () => {
         // Upload all segments when present (multi-clip), otherwise the single primary clip.
         // This mirrors the isRemoteUrl branch which correctly passes through segmentUris.
         const allUris =
@@ -1995,6 +2003,18 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         if (uploadedUrls.length > 1) {
           segmentUrls = uploadedUrls;
         }
+       };
+       try {
+         await uploadSegments();
+       } catch (uploadErr) {
+         if (!rawInput.renderedFallback) throw uploadErr;
+         // The rendered file could not be uploaded: post the old way instead.
+         if (__DEV__) console.log("[createPost] rendered upload failed, using the source clips:", (uploadErr as Error)?.message);
+         input = { ...rawInput, ...rawInput.renderedFallback, renderedFallback: undefined };
+         uploadUri = input.uri;
+         segmentUrls = null;
+         await uploadSegments();
+       }
       }
 
       // Upload thumbnail if provided (always JPEG)
