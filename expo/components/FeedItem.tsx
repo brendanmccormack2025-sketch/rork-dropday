@@ -44,6 +44,9 @@ import { getOutputTimeMs } from "@/lib/editModel";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
+/** Seam swap lead time (ms): starts here, then follows the measured swap latency. */
+const SEAM_LEAD_INITIAL_MS = 60;
+const SEAM_LEAD_MAX_MS = 120;
 /** Watch duration that qualifies a view for the exposure gate (posts.qualified_view_count). */
 const QUALIFIED_VIEW_MS = 3000;
 /** Session-level dedupe so scrolling back to a post doesn't re-record the same viewer. */
@@ -386,6 +389,11 @@ export const FeedItem = memo(function FeedItem({
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
   const activeSlotRef = useRef<0 | 1>(0);
   const preloadReadyRef = useRef<boolean>(false);
+  // Seam timing (shared-URL hard cuts): how long a swap takes, from the swap
+  // trigger to the incoming player reporting playing. The next swap is triggered
+  // that many ms early so playback is continuous.
+  const swapStartRef = useRef<number>(0);
+  const seamLeadMsRef = useRef<number>(SEAM_LEAD_INITIAL_MS);
   // Debounce: prevent multiple advanceSegment calls within 500ms
   const lastAdvanceTimeRef = useRef<number>(0);
   // Track which URI each slot has loaded, so we can detect when a slot
@@ -675,6 +683,7 @@ export const FeedItem = memo(function FeedItem({
   const advanceSegment = useCallback(() => {
     // Debounce: end-of-segment detection can fire multiple times rapidly
     const now = Date.now();
+    const swapTriggerAt = now;
     if (now - lastAdvanceTimeRef.current < 500) {
       return;
     }
@@ -749,6 +758,7 @@ export const FeedItem = memo(function FeedItem({
       }
       slotAOpacity.setValue(newSlot === 0 ? 1 : 0);
       slotBOpacity.setValue(newSlot === 0 ? 0 : 1);
+      if (active && !isPaused) swapStartRef.current = swapTriggerAt;
       playbackReadyRef.current = true;
       readyForDisplayRef.current = true;
       setPlaybackReady(true);
@@ -850,6 +860,22 @@ export const FeedItem = memo(function FeedItem({
         );
       }
 
+      // Seam latency: swap trigger -> incoming player reports playing.
+      if (swapStartRef.current && status.isPlaying) {
+        const latency = Date.now() - swapStartRef.current;
+        swapStartRef.current = 0;
+        // Running average (weight 1/4 on the newest), clamped to 0-120 ms.
+        seamLeadMsRef.current = Math.min(
+          SEAM_LEAD_MAX_MS,
+          Math.max(0, seamLeadMsRef.current * 0.75 + latency * 0.25),
+        );
+        if (__DEV__) {
+          console.log(
+            `[FeedItem:${post.id.slice(0, 8)}] seam latency ${latency} ms, next lead ${Math.round(seamLeadMsRef.current)} ms`,
+          );
+        }
+      }
+
       // ── Pre-buffer gate ──
       // Only pass on a real onReadyForDisplay event (readyForDisplayRef set
       // by onReadySlotA/B). The notBuffering fallback was removed because it
@@ -894,7 +920,7 @@ export const FeedItem = memo(function FeedItem({
             ? Math.min(trimEndRef.current, sourceDur)
             : sourceDur;
 
-        if (status.positionMillis >= effectiveTrimEnd - (hasSharedSegmentUrls ? 30 : 120)) {
+        if (status.positionMillis >= effectiveTrimEnd - (hasSharedSegmentUrls ? seamLeadMsRef.current : 120)) {
           trimEndHandledRef.current = true;
           if (allSegments.length === 1) {
             if (videoRef.current) {
