@@ -238,6 +238,20 @@ export default function EditScreen() {
   const playerB = useVideoPlayer(null, (p) => {
     p.timeUpdateEventInterval = 0.2;
   });
+  // Clips cut from one source file (auto-edit, split) share a uri and play on one
+  // player with a seek at each seam. Overshooting trimEnd plays cut-out footage,
+  // so report position more often and trigger the seam closer to trimEnd.
+  const hasSharedClipUris = useMemo(
+    () => new Set(clips.map((c) => c.uri)).size < clips.length,
+    [clips],
+  );
+  const hasSharedClipUrisRef = useRef(hasSharedClipUris);
+  useEffect(() => {
+    hasSharedClipUrisRef.current = hasSharedClipUris;
+    const interval = hasSharedClipUris ? 0.05 : 0.2;
+    playerA.timeUpdateEventInterval = interval;
+    playerB.timeUpdateEventInterval = interval;
+  }, [hasSharedClipUris, playerA, playerB]);
   const videoRefA = useRef<VideoPlayer | null>(null);
   const videoRefB = useRef<VideoPlayer | null>(null);
   const videoRef = useRef<VideoPlayer | null>(null);
@@ -776,7 +790,7 @@ export default function EditScreen() {
       !trimEndHandledRef.current &&
       sourceDur > 0 &&
       effectiveTrimEnd > 0 &&
-      status.positionMillis >= effectiveTrimEnd - 120
+      status.positionMillis >= effectiveTrimEnd - (hasSharedClipUrisRef.current ? 60 : 120)
     ) {
       trimEndHandledRef.current = true;
       if (isIsolatedRef.current) {
