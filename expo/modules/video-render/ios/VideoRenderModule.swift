@@ -1,5 +1,5 @@
 import AVFoundation
-import CoreAnimation
+import QuartzCore
 import ExpoModulesCore
 import UIKit
 
