@@ -2552,7 +2552,9 @@ export default function EditScreen() {
           <View style={styles.autoBar}>
             <UiText style={styles.autoBarText}>
               {autoBarMode === "auto"
-                ? `Trimmed ${(autoEditSession.savedMs / 1000).toFixed(1)} s of silence`
+                ? `${autoEditSession.cutEnabled.filter(Boolean).length} ${
+                    autoEditSession.cutEnabled.filter(Boolean).length === 1 ? "cut" : "cuts"
+                  }, saved ${(autoEditSession.savedMs / 1000).toFixed(1)} s`
                 : "Edited manually"}
             </UiText>
             {autoBarMode === "auto" && (

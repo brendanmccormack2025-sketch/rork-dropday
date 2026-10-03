@@ -47,11 +47,11 @@ const cases = [
   {
     name: "one long pause (60 s clip, 6 s pause)",
     windows: build([[27000, -23], [6000, -72], [27000, -22]]),
-    expect: (r) => r.cuts.length === 1 && Math.abs(r.savedMs - 5750) < 200,
+    expect: (r) => r.cuts.length === 1 && Math.abs(r.savedMs - 5920) < 200,
   },
   {
-    name: "no pauses: continuous speech with 0.6 s gaps (40 s)",
-    windows: build([[9000, -22], [600, -60], [9000, -21], [600, -60], [9000, -23], [600, -60], [11200, -22]]),
+    name: "no pauses: continuous speech with 0.4 s gaps (40 s)",
+    windows: build([[9000, -22], [400, -60], [9000, -21], [400, -60], [9000, -23], [400, -60], [12000, -22]]),
     expect: (r) => r.cuts.length === 0 && r.savedMs === 0 && r.keepRanges.length === 1,
   },
   {
@@ -65,33 +65,50 @@ const cases = [
     expect: (r) => r.cuts.length === 0 && r.skipReason === "too_long",
   },
   {
-    name: "eight pauses: at most 5 cuts, longest kept (60 s)",
+    name: "eight pauses: all eight are cut (limit is 14) (60 s)",
     windows: build([
       [4000, -22], [1500, -70], [4000, -22], [2000, -70], [4000, -22], [2500, -70],
       [4000, -22], [3000, -70], [4000, -22], [3500, -70], [4000, -22], [4000, -70],
       [4000, -22], [4500, -70], [4000, -22], [5000, -70], [4000, -22],
     ]),
-    expect: (r) => r.cuts.length === 5 && r.silences.length === 8 && r.silences.filter((s) => s.cut).length === 5,
+    expect: (r) => r.cuts.length === 8 && r.silences.length === 8 && r.silences.filter((s) => s.cut).length === 8,
   },
   {
-    name: "short clip: 7 s with a 3 s pause would leave under 5 s",
-    windows: build([[2000, -22], [3000, -70], [2000, -22]]),
+    name: "short clip: 5 s with a 3 s pause would leave under the 3 s floor",
+    windows: build([[1000, -22], [3000, -70], [1000, -22]]),
     expect: (r) => r.cuts.length === 0 && r.silences.length === 1,
   },
   {
-    name: "pause of 0.8 s is below the 0.9 s minimum",
-    windows: build([[10000, -22], [800, -70], [10000, -22]]),
+    name: "pause of 0.4 s is below the 0.5 s minimum",
+    windows: build([[10000, -22], [400, -70], [10000, -22]]),
     expect: (r) => r.silences.length === 0 && r.cuts.length === 0,
   },
   {
-    name: "pause of 1.4 s keeps 0.1 s after speech and 0.15 s before: cut is ~1.15 s",
+    name: "pause of 1.4 s keeps 30 ms after speech and 50 ms before: cut is ~1.32 s",
     windows: build([[10000, -22], [1400, -70], [10000, -22]]),
-    expect: (r) => r.cuts.length === 1 && Math.abs(r.cuts[0].lengthMs - 1150) <= 100,
+    expect: (r) => r.cuts.length === 1 && Math.abs(r.cuts[0].lengthMs - 1320) <= 60,
   },
   {
-    name: "pause of 1.0 s now qualifies (0.9 s minimum): cut is ~0.75 s, under the 2 s apply threshold",
-    windows: build([[10000, -22], [1000, -70], [10000, -22]]),
-    expect: (r) => r.cuts.length === 1 && Math.abs(r.cuts[0].lengthMs - 750) <= 100 && r.savedMs < 2000,
+    name: "pause of 0.6 s qualifies (0.5 s minimum): cut is ~0.52 s",
+    windows: build([[10000, -22], [600, -70], [10000, -22]]),
+    expect: (r) => r.cuts.length === 1 && Math.abs(r.cuts[0].lengthMs - 520) <= 60,
+  },
+  {
+    name: "sixteen pauses: at most 14 cuts (90 s)",
+    windows: build(
+      Array.from({ length: 16 }, (_, i) => [[4000, -22], [800 + i * 50, -70]]).flat().concat([[4000, -22]]),
+    ),
+    expect: (r) => r.cuts.length === 14 && r.silences.length === 16 && r.silences.filter((s) => s.cut).length === 14,
+  },
+  {
+    name: "350 ms rule: a 200 ms burst between two pauses would be a 280 ms piece, so one cut is dropped",
+    windows: build([[8000, -22], [1000, -70], [200, -22], [1000, -70], [8000, -22]], 0),
+    expect: (r) => r.cuts.length === 1 && r.keepRanges.every((k) => k.lengthMs >= 350),
+  },
+  {
+    name: "350 ms rule: a 400 ms burst (kept piece ~480 ms) keeps both cuts",
+    windows: build([[8000, -22], [1000, -70], [400, -22], [1000, -70], [8000, -22]], 0),
+    expect: (r) => r.cuts.length === 2 && r.keepRanges.every((k) => k.lengthMs >= 350),
   },
   {
     name: "soft onset: look-back keeps up to 40 ms of a rising consonant (20 ms windows)",

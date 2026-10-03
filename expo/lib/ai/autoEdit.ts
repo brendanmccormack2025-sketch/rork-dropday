@@ -20,7 +20,7 @@ import { getLoudnessAsync } from "@/modules/audio-loudness";
 /** Loudness window size read from the native module. */
 export const AUTO_EDIT_WINDOW_MS = 20;
 /** Cuts that save less than this in total are not applied. */
-export const AUTO_EDIT_MIN_SAVED_MS = 2000;
+export const AUTO_EDIT_MIN_SAVED_MS = 1000;
 
 /** The editor's current clip, untrimmed: the whole file. */
 export type AutoEditInput = { uri: string; durationMs: number };

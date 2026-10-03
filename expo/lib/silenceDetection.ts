@@ -24,15 +24,17 @@ export const ACTIVITY_PERCENTILE = 0.9;
 /** Silent stretches separated by a sound shorter than this are one silence. */
 export const MERGE_GAP_MS = 100;
 /** Only silences at least this long are considered. */
-export const MIN_SILENCE_MS = 900;
+export const MIN_SILENCE_MS = 500;
 /** Silence kept after speech ends, before the cut starts. */
-export const PAD_AFTER_SPEECH_MS = 60;
+export const PAD_AFTER_SPEECH_MS = 30;
 /** Silence kept before speech resumes, after the cut ends. */
-export const PAD_BEFORE_SPEECH_MS = 90;
+export const PAD_BEFORE_SPEECH_MS = 50;
 /** A cut result may never leave less video than this. */
-export const MIN_RESULT_MS = 5000;
+export const MIN_RESULT_MS = 3000;
 /** At most this many cuts; the longest silences win. */
-export const MAX_CUTS = 5;
+export const MAX_CUTS = 14;
+/** No kept piece may be shorter than this; the cut that created it is dropped. */
+export const MIN_KEEP_MS = 350;
 /** Videos longer than this are skipped entirely. */
 export const MAX_VIDEO_MS = 180_000;
 /** Soft onsets: when speech resumes, the cut end steps back at most this far. */
@@ -43,7 +45,7 @@ export const ONSET_MARGIN_DB = 3;
 // ── Sensitivity presets (Review sheet) ──────────────────────────────────────
 
 export type Sensitivity = "gentle" | "normal" | "tight";
-export const DEFAULT_SENSITIVITY: Sensitivity = "normal";
+export const DEFAULT_SENSITIVITY: Sensitivity = "tight";
 /**
  * Minimum silence length and loudness margin per preset. Tighter cuts shorter
  * pauses and counts slightly louder audio as silence. Normal equals the
@@ -53,9 +55,9 @@ export const SENSITIVITY_PRESETS: Record<
   Sensitivity,
   { minSilenceMs: number; thresholdMarginDb: number }
 > = {
-  gentle: { minSilenceMs: 1200, thresholdMarginDb: 6 },
+  gentle: { minSilenceMs: 800, thresholdMarginDb: 6 },
   normal: { minSilenceMs: MIN_SILENCE_MS, thresholdMarginDb: THRESHOLD_MARGIN_DB },
-  tight: { minSilenceMs: 600, thresholdMarginDb: 10 },
+  tight: { minSilenceMs: 300, thresholdMarginDb: 10 },
 };
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -87,6 +89,7 @@ export type SilenceDetectionOptions = {
   padBeforeSpeechMs?: number;
   minResultMs?: number;
   maxCuts?: number;
+  minKeepMs?: number;
   maxVideoMs?: number;
   /** 0 turns the soft-onset look-back off. */
   onsetLookBackMs?: number;
@@ -169,6 +172,7 @@ export function detectSilences(
   const padBeforeSpeechMs = options.padBeforeSpeechMs ?? PAD_BEFORE_SPEECH_MS;
   const minResultMs = options.minResultMs ?? MIN_RESULT_MS;
   const maxCuts = options.maxCuts ?? MAX_CUTS;
+  const minKeepMs = options.minKeepMs ?? MIN_KEEP_MS;
   const maxVideoMs = options.maxVideoMs ?? MAX_VIDEO_MS;
   const onsetLookBackMs = options.onsetLookBackMs ?? ONSET_LOOKBACK_MS;
 
@@ -263,6 +267,27 @@ export function detectSilences(
     chosen = chosen.filter((_, i) => i !== smallest);
   }
   chosen.sort((a, b) => a.cut.startMs - b.cut.startMs);
+
+  // 5b. Never keep a piece shorter than minKeepMs: drop the cut that created it
+  //     (the shorter of its two neighbours), which merges it into the next piece.
+  for (;;) {
+    let dropIndex = -1;
+    let cursorMs = 0;
+    for (let i = 0; i <= chosen.length; i++) {
+      const pieceEnd = i < chosen.length ? chosen[i]!.cut.startMs : durationMs;
+      if (pieceEnd - cursorMs < minKeepMs && pieceEnd > cursorMs) {
+        const before = i > 0 ? i - 1 : -1;
+        const after = i < chosen.length ? i : -1;
+        if (before < 0) dropIndex = after;
+        else if (after < 0) dropIndex = before;
+        else dropIndex = chosen[before]!.cut.lengthMs <= chosen[after]!.cut.lengthMs ? before : after;
+        break;
+      }
+      if (i < chosen.length) cursorMs = chosen[i]!.cut.endMs;
+    }
+    if (dropIndex < 0) break;
+    chosen = chosen.filter((_, i) => i !== dropIndex);
+  }
 
   // 6. Keep ranges are the complement of the cuts.
   const keepRanges: TimeRange[] = [];
