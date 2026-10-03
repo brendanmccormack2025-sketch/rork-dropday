@@ -24,7 +24,7 @@ import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
 import { VideoView, useVideoPlayer, createVideoPlayer, type VideoPlayer } from "expo-video";
 import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
-import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync } from "@/lib/fileSystemCompat";
+import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync, deleteAsync } from "@/lib/fileSystemCompat";
 import { waitForFileReady } from "@/lib/waitForFileReady";
 import * as Haptics from "expo-haptics";
 import {
@@ -44,7 +44,8 @@ import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
 import { OWNER_USER_ID } from "@/constants/debug";
-import { shouldRenderAtPost } from "@/lib/renderAtPost";
+import { renderForPost, shouldRenderAtPost, type RenderedEdit } from "@/lib/renderAtPost";
+import { cancelRender } from "@/modules/video-render";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
 import { keepRangesToClips } from "@/lib/editModel";
 import { SENSITIVITY_PRESETS, type Sensitivity } from "@/lib/silenceDetection";
@@ -1789,6 +1790,8 @@ export default function EditScreen() {
   // Root posts only, one untrimmed video clip, once per editor session. Never
   // blocks the editor or Post; every failure is log-only.
   const [autoEditRunning, setAutoEditRunning] = useState(false);
+  // 0-1 while the post is being rendered; null otherwise.
+  const [renderProgress, setRenderProgress] = useState<number | null>(null);
   const [autoEditNote, setAutoEditNote] = useState<string | null>(null);
   // Set once auto-edit changed the timeline. The bar's mode is derived from the
   // live clips, so undo/redo and manual edits need no extra bookkeeping.
@@ -2129,14 +2132,30 @@ export default function EditScreen() {
 
       const isWeb = Platform.OS === "web";
 
-      // Render-at-post gate: ROOT posts only (never reactions), and only when the
-      // timeline has cuts. Not wired to a render yet.
+      // Render-at-post: ROOT posts only (never reactions), and only when the
+      // timeline has cuts. Any problem (or Cancel) leaves `rendered` null and the
+      // post goes out the old way. A blocking "Preparing your video..." overlay
+      // with progress and Cancel is shown while it runs.
       const renderAtPost = shouldRenderAtPost({
         isRoot: !reactingTo && !rootDropId,
         userId: user?.id,
         clips,
       });
       if (__DEV__) console.log("[edit] render at post:", renderAtPost ? "yes" : "no");
+      let rendered: RenderedEdit | null = null;
+      if (renderAtPost) {
+        setRenderProgress(0);
+        try {
+          rendered = await renderForPost(clips, setRenderProgress);
+        } finally {
+          setRenderProgress(null);
+        }
+      }
+      if (rendered) {
+        // Not posted yet: discard the file and carry on the old way.
+        await deleteAsync(rendered.uri, { idempotent: true }).catch(() => {});
+        rendered = null;
+      }
 
       const copyClip = async (c: (typeof clips)[number], i: number) => {
           // On web there is no real filesystem — data:/blob: URIs hold the
@@ -2303,7 +2322,7 @@ export default function EditScreen() {
       // DO NOT re-throw and DO NOT navigate. Stay on the edit screen
       // so the user can retry or save as draft.
     }
-  }, [clips, draftId, textOverlays, isMature, followerVisibility, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId]);
+  }, [clips, draftId, textOverlays, isMature, followerVisibility, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId, user?.id]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
 
@@ -2843,6 +2862,18 @@ export default function EditScreen() {
       </View>
 
       {/* ── Text overlay editor modal ─────────────────────────────── */}
+      {renderProgress !== null && (
+        <View style={styles.renderOverlay}>
+          <ActivityIndicator color={theme.accent} />
+          <UiText style={styles.renderTitle}>Preparing your video...</UiText>
+          <View style={styles.renderTrack}>
+            <View style={[styles.renderFill, { width: `${Math.round(Math.min(1, renderProgress) * 100)}%` }]} />
+          </View>
+          <Pressable onPress={cancelRender} hitSlop={10}>
+            <UiText style={styles.renderCancel}>Cancel</UiText>
+          </Pressable>
+        </View>
+      )}
       <AutoEditReviewSheet
         visible={reviewOpen && !!reviewPlan}
         cuts={reviewPlan?.detection.cuts ?? []}
@@ -3043,6 +3074,18 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 6,
   },
+  renderOverlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    backgroundColor: "rgba(245,243,238,0.96)",
+    paddingHorizontal: 40,
+  },
+  renderTitle: { color: theme.text, fontSize: 16, fontWeight: "800" as const },
+  renderTrack: { width: "100%", height: 4, backgroundColor: theme.border },
+  renderFill: { height: 4, backgroundColor: theme.accent },
+  renderCancel: { color: theme.textMuted, fontSize: 14, fontWeight: "700" as const },
   autoBar: {
     flexDirection: "row",
     alignItems: "center",
