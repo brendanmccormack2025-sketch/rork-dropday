@@ -7,7 +7,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
-import { View } from "react-native";
+import { Appearance, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import {
   useFonts,
@@ -26,6 +26,9 @@ import { NotificationsProvider } from "@/providers/NotificationsProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { theme } from "@/constants/theme";
 
+
+// The app is cream-only: never follow the phone's Dark Mode.
+Appearance.setColorScheme("light");
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 

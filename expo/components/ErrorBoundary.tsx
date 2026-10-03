@@ -41,7 +41,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
     if (this.state.hasError) {
       return (
         <View style={styles.container}>
-          <StatusBar style="light" />
+          <StatusBar style="dark" />
           <View style={styles.card}>
             <View style={styles.iconWrap}>
               <AlertTriangle color={theme.danger} size={36} strokeWidth={1.5} />

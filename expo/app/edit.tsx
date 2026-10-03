@@ -2334,7 +2334,7 @@ export default function EditScreen() {
   if (draftId && !draftsLoaded) {
     return (
       <View style={[styles.screen, styles.centered]}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <ActivityIndicator color={theme.accent} size="large" />
         <UiText style={[styles.emptyText, { marginTop: 16 }]}>
           Loading draft…
@@ -2347,7 +2347,7 @@ export default function EditScreen() {
   if (clips.length === 0) {
     return (
       <View style={[styles.screen, styles.centered]}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <UiText style={styles.emptyText}>Nothing to preview</UiText>
         <Pressable onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.emptyBtn}>
           <UiText style={styles.emptyBtnText}>Go back</UiText>
@@ -2366,7 +2366,7 @@ export default function EditScreen() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={styles.screen}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
 
         {/* ── Top bar ────────────────────────────────────────────────── */}
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
@@ -2374,7 +2374,7 @@ export default function EditScreen() {
             onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
             style={styles.topBtn}
           >
-            <ArrowLeft size={20} color="#fff" strokeWidth={2.5} />
+            <ArrowLeft size={20} color={theme.text} strokeWidth={2.5} />
           </TouchableOpacity>
           <UiText style={styles.topTitle}>
             {draftId ? "Edit Draft" : "Edit Post"}
@@ -2385,14 +2385,14 @@ export default function EditScreen() {
               disabled={!canUndo}
               style={[styles.topBtn, !canUndo && styles.topBtnOff]}
             >
-              <Undo2 size={16} color="#fff" strokeWidth={2} />
+              <Undo2 size={16} color={theme.text} strokeWidth={2} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleRedo}
               disabled={!canRedo}
               style={[styles.topBtn, !canRedo && styles.topBtnOff]}
             >
-              <Redo2 size={16} color="#fff" strokeWidth={2} />
+              <Redo2 size={16} color={theme.text} strokeWidth={2} />
             </TouchableOpacity>
           </View>
         </View>
@@ -2482,7 +2482,7 @@ export default function EditScreen() {
                   justifyContent: "center",
                 }}
               >
-                <UiText style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>
+                <UiText style={{ color: theme.textDim, fontSize: 13 }}>
                   No preview
                 </UiText>
               </View>
@@ -2525,7 +2525,7 @@ export default function EditScreen() {
         {/* ── Timeline editor ────────────────────────────────────────── */}
         {autoEditRunning && (
           <View style={styles.autoEditRow}>
-            <ActivityIndicator size="small" color="rgba(255,255,255,0.7)" />
+            <ActivityIndicator size="small" color={theme.textMuted} />
             <UiText style={styles.autoEditText}>Auto-editing...</UiText>
           </View>
         )}
@@ -2582,7 +2582,7 @@ export default function EditScreen() {
           >
             <Scissors
               size={18}
-              color={selectedClipId ? theme.accent : "rgba(255,255,255,0.85)"}
+              color={selectedClipId ? theme.accent : theme.text}
             />
             <UiText
               style={[
@@ -2604,7 +2604,7 @@ export default function EditScreen() {
             <Split
               size={18}
               color={
-                !canSplit ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.85)"
+                !canSplit ? theme.textDim : theme.text
               }
             />
             <UiText
@@ -2630,7 +2630,7 @@ export default function EditScreen() {
               color={
                 selectedOverlayId || textEditorVisible
                   ? theme.accent
-                  : "rgba(255,255,255,0.85)"
+                  : theme.text
               }
             />
             <UiText
@@ -2655,8 +2655,8 @@ export default function EditScreen() {
               size={18}
               color={
                 !selectedClipId
-                  ? "rgba(255,255,255,0.25)"
-                  : "rgba(255,255,255,0.85)"
+                  ? theme.textDim
+                  : theme.text
               }
             />
             <UiText
@@ -2678,7 +2678,7 @@ export default function EditScreen() {
                 onPress={() => handleCycleBackgroundStyle(selectedOverlayId!)}
                 style={styles.textActionBtn}
               >
-                <RectangleEllipsis size={14} color="rgba(255,255,255,0.8)" />
+                <RectangleEllipsis size={14} color={theme.text} />
                 <UiText style={styles.textActionLabel}>Style</UiText>
               </Pressable>
               <Pressable
@@ -2691,14 +2691,14 @@ export default function EditScreen() {
                 }}
                 style={styles.textActionBtn}
               >
-                <Pencil size={14} color="rgba(255,255,255,0.8)" />
+                <Pencil size={14} color={theme.text} />
                 <UiText style={styles.textActionLabel}>Edit</UiText>
               </Pressable>
               <Pressable
                 onPress={handleDuplicateOverlay}
                 style={styles.textActionBtn}
               >
-                <Type size={14} color="rgba(255,255,255,0.8)" />
+                <Type size={14} color={theme.text} />
                 <UiText style={styles.textActionLabel}>Duplicate</UiText>
               </Pressable>
               <Pressable
@@ -2801,7 +2801,7 @@ export default function EditScreen() {
               color={
                 dragOverlayInfo.centerY > 0.88
                   ? "#E8291C"
-                  : "rgba(255,255,255,0.4)"
+                  : theme.textDim
               }
             />
             <UiText
@@ -2892,7 +2892,7 @@ const styles = StyleSheet.create({
   },
   topTitle: {
     flex: 1,
-    color: "rgba(255,255,255,0.55)",
+    color: theme.textMuted,
     fontSize: 13,
     fontWeight: "600" as const,
     letterSpacing: 0.4,
@@ -2992,13 +2992,13 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   toolLabel: {
-    color: "rgba(255,255,255,0.65)",
+    color: theme.textMuted,
     fontSize: 11,
     fontWeight: "700" as const,
     letterSpacing: 0.3,
   },
   toolLabelOff: {
-    color: "rgba(255,255,255,0.2)",
+    color: theme.textDim,
   },
 
   // ── Bottom section ──
@@ -3026,11 +3026,11 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(10,10,10,0.07)",
   },
   autoBarText: {
     flex: 1,
-    color: "#fff",
+    color: theme.text,
     fontSize: 13,
     fontWeight: "600" as const,
   },
@@ -3040,7 +3040,7 @@ const styles = StyleSheet.create({
     fontWeight: "800" as const,
   },
   autoEditText: {
-    color: "rgba(255,255,255,0.7)",
+    color: theme.textMuted,
     fontSize: 12,
     fontWeight: "600" as const,
   },
@@ -3112,7 +3112,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
   },
   uploadProgressText: {
-    color: "rgba(255,255,255,0.6)",
+    color: theme.textMuted,
     fontSize: 12,
     fontWeight: "700" as const,
     textAlign: "center",
@@ -3161,7 +3161,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(10,10,10,0.1)",
   },
   draftBtnText: {
-    color: "rgba(255,255,255,0.7)",
+    color: theme.text,
     fontSize: 15,
     fontWeight: "700" as const,
     letterSpacing: 0.2,
@@ -3196,7 +3196,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(232,41,28,0.08)",
   },
   textActionLabel: {
-    color: "rgba(255,255,255,0.8)",
+    color: theme.textMuted,
     fontSize: 11,
     fontWeight: "700" as const,
     letterSpacing: 0.2,
@@ -3225,7 +3225,7 @@ const styles = StyleSheet.create({
     borderTopColor: "rgba(232,41,28,0.35)",
   },
   trashLabel: {
-    color: "rgba(255,255,255,0.4)",
+    color: theme.textMuted,
     fontSize: 13,
     fontWeight: "700" as const,
   },
