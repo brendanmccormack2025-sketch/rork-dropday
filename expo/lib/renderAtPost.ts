@@ -8,12 +8,12 @@
 import { requireOptionalNativeModule } from "expo";
 import { Platform } from "react-native";
 
-import { OWNER_USER_ID } from "@/constants/debug";
+import { isInternalTester } from "@/constants/debug";
 import type { DraftClip } from "@/providers/PostsProvider";
 
 export const RENDER_AT_POST_ENABLED = true;
-/** When true, only the owner account renders at post time. */
-export const RENDER_OWNER_ONLY = true;
+/** When true, only the owner and internal testers render at post time. */
+export const RENDER_INTERNAL_ONLY = true;
 /** Base time allowed for a render (ms); longer videos get more (see renderTimeoutMs). */
 export const RENDER_TIMEOUT_MS = 20_000;
 
@@ -44,7 +44,7 @@ export function shouldRenderAtPost(args: {
   clips: DraftClip[];
 }): boolean {
   if (!RENDER_AT_POST_ENABLED || !args.isRoot) return false;
-  if (RENDER_OWNER_ONLY && (!args.userId || args.userId !== OWNER_USER_ID)) return false;
+  if (RENDER_INTERNAL_ONLY && !isInternalTester(args.userId)) return false;
   const { clips } = args;
   if (clips.length === 0) return false;
   if (clips.some((c) => c.type !== "video" || !(c.durationMs && c.durationMs > 0))) return false;

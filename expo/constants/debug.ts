@@ -12,3 +12,11 @@ export const OWNER_USER_ID = "aee21757-1ded-41a7-9392-bddbf0d657df";
 export function isDebugOwner(userId: string | null | undefined): boolean {
   return !!userId && userId === OWNER_USER_ID;
 }
+
+/** Accounts that get the render-at-post path and playback diagnostics, in addition to the owner. */
+export const INTERNAL_TESTER_IDS = ["aee21757-1ded-41a7-9392-bddbf0d657df", "519562a1-96a3-48cf-a755-783e61c96457"];
+
+/** True for the owner or any internal tester. */
+export function isInternalTester(userId: string | null | undefined): boolean {
+  return !!userId && (userId === OWNER_USER_ID || INTERNAL_TESTER_IDS.includes(userId));
+}
