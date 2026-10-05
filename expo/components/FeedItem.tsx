@@ -62,6 +62,16 @@ const SEAM_ARM_AHEAD_MS = 70;
 const SEAM_POLL_MS = 16;
 /** If the incoming player has not reached trimStart this long after its run-up started, swap anyway. */
 const SEAM_FALLBACK_MS = 150;
+/**
+ * Single-file posts: loop with a ping-pong of the two players (the idle one,
+ * parked at 0, muted and hidden, starts just before the end and takes over at
+ * the end) instead of the native seek-and-play loop. false = native loop only.
+ * The native loop is also the fallback when the idle player is not ready.
+ */
+const LOOP_PINGPONG = true;
+const LOOP_LEAD_INITIAL_MS = 60;
+/** The swap happens when the playing player is this close to the end of the file. */
+const LOOP_SWAP_BEFORE_END_MS = 20;
 /** Watch duration that qualifies a view for the exposure gate (posts.qualified_view_count). */
 const QUALIFIED_VIEW_MS = 3000;
 /** Session-level dedupe so scrolling back to a post doesn't re-record the same viewer. */
@@ -361,6 +371,12 @@ export const FeedItem = memo(function FeedItem({
     () => new Set(allSegments).size < allSegments.length,
     [allSegments],
   );
+  // A plain single-file post (no trim_data): it loops natively, or ping-pongs
+  // between the two players when LOOP_PINGPONG is on. Trimmed single clips keep
+  // the old JS loop at trimEnd.
+  const nativeLoopPost =
+    allSegments.length === 1 && !(post.trim_data && post.trim_data.length > 0);
+  const pingPongPost = LOOP_PINGPONG && nativeLoopPost;
   // Output-timeline position (after cuts), tracked only when an overlay has a
   // time window so posts without timed overlays never re-render for it.
   const hasTimedOverlays = !!post.text_overlays?.some(
@@ -393,10 +409,10 @@ export const FeedItem = memo(function FeedItem({
   // Internal-tester diagnostics need finer position reports to measure gaps.
   const diagEnabled = usePlaybackDiagnostics() && isInternalTester(user?.id);
   useEffect(() => {
-    const interval = diagEnabled ? 0.03 : hasSharedSegmentUrls ? 0.05 : 0.25;
+    const interval = diagEnabled ? 0.03 : hasSharedSegmentUrls || pingPongPost ? 0.05 : 0.25;
     playerA.timeUpdateEventInterval = interval;
     playerB.timeUpdateEventInterval = interval;
-  }, [hasSharedSegmentUrls, diagEnabled, playerA, playerB]);
+  }, [hasSharedSegmentUrls, pingPongPost, diagEnabled, playerA, playerB]);
 
   // Diagnostics: gaps measured for the last 3 loop restarts or seams.
   // toPlayingMs = playToEnd (loop) or seam swap -> player reports playing;
@@ -449,6 +465,10 @@ export const FeedItem = memo(function FeedItem({
   // flips visibility and sound; no seek, no play).
   const seamRunupActiveRef = useRef<boolean>(false);
   const lastSwapHardCutRef = useRef<boolean>(false);
+  // Ping-pong loop: how long before the end the idle player starts (its measured
+  // start-up time), and whether this cycle's swap has been armed.
+  const loopLeadMsRef = useRef<number>(LOOP_LEAD_INITIAL_MS);
+  const loopArmedRef = useRef<boolean>(false);
   // Debounce: prevent multiple advanceSegment calls within 500ms
   const lastAdvanceTimeRef = useRef<number>(0);
   // Track which URI each slot has loaded, so we can detect when a slot
@@ -477,7 +497,7 @@ export const FeedItem = memo(function FeedItem({
 
   // Only multi-segment posts need the preload player, and only when the
   // item is active/visible — off-screen items must not double up players.
-  const shouldMountPreload = isPlayableVideo && active && allSegments.length > 1;
+  const shouldMountPreload = isPlayableVideo && active && (allSegments.length > 1 || pingPongPost);
 
   // Keep player refs + activeVideoRef in sync with the active slot
   useEffect(() => {
@@ -550,13 +570,23 @@ export const FeedItem = memo(function FeedItem({
       playerA.pause();
     }
     playerB.muted = activeSlot === 1 ? !active : true;
-    playerB.loop = false;
+    playerB.loop = pingPongPost && activeSlot === 1;
     if (activeSlot === 1 && canPlay && shouldMountPreload) {
       playerB.play();
     } else {
       playerB.pause();
     }
-  }, [playerA, playerB, activeSlot, active, playbackReady, isPaused, shouldMountPreload, allSegments.length, isPlayableVideo, post._optimistic?.status]);
+  }, [playerA, playerB, activeSlot, active, playbackReady, isPaused, shouldMountPreload, allSegments.length, pingPongPost, isPlayableVideo, post._optimistic?.status]);
+
+  // Single-file posts: once playing, do not make play() wait to rebuffer, so the
+  // restart after a loop starts immediately (iOS automaticallyWaitsToMinimizeStalling).
+  // Before the first frame it stays at the default so the initial load is unchanged.
+  useEffect(() => {
+    if (!isPlayableVideo || allSegments.length !== 1) return;
+    const options = { waitsToMinimizeStalling: !playbackReady };
+    playerA.bufferOptions = options;
+    playerB.bufferOptions = options;
+  }, [isPlayableVideo, allSegments.length, playbackReady, playerA, playerB]);
 
   // Reset pre-buffer gate & pause state when the post changes
   // (segIdx changes are handled by advanceSegment's hot-swap logic)
@@ -963,6 +993,100 @@ export const FeedItem = memo(function FeedItem({
     }, SEAM_POLL_MS);
   }, [allSegments.length, post.trim_data, advanceSegment, parkPositionMs, stopSeamTimer]);
 
+  // Ping-pong loop for a single file. Armed shortly before the end of the file;
+  // polled every 16 ms. When the playing player is `lead` ms from the end the idle
+  // one (parked at 0) starts, muted and hidden; when the playing one is
+  // LOOP_SWAP_BEFORE_END_MS from the end, visibility and sound swap and the old
+  // player is parked at 0. If the idle player is not loaded or ready, or the
+  // playing one already looped by itself, nothing is swapped and the native loop
+  // (still on) does the restart.
+  const armLoop = useCallback(
+    (durationMs: number) => {
+      if (seamTimerRef.current) return;
+      const aPlaying = activeSlotRef.current === 0;
+      const outgoing = aPlaying ? videoRefA.current : videoRefB.current;
+      const incoming = aPlaying ? videoRefB.current : videoRefA.current;
+      const idleLoaded = aPlaying ? slotBLoadedUriRef.current : slotALoadedUriRef.current;
+      if (
+        !outgoing ||
+        !incoming ||
+        idleLoaded !== currentUri ||
+        incoming.status !== "readyToPlay" ||
+        incoming.currentTime * 1000 > 60
+      ) {
+        diagFallbackRef.current = true;
+        return;
+      }
+      const armedAt = Date.now();
+      let startedAt = 0;
+      let measured = false;
+      const abort = () => {
+        stopSeamTimer();
+        if (startedAt > 0) {
+          incoming.pause();
+          incoming.muted = true;
+          incoming.currentTime = 0;
+        }
+        diagFallbackRef.current = true;
+      };
+      seamTimerRef.current = setInterval(() => {
+        const now = Date.now();
+        const outMs = outgoing.currentTime * 1000;
+        if (outMs < durationMs / 2) {
+          abort(); // the playing player already looped on its own
+          return;
+        }
+        if (startedAt === 0) {
+          if (outMs >= durationMs - loopLeadMsRef.current) {
+            startedAt = now;
+            incoming.muted = true;
+            incoming.play();
+          } else if (now - armedAt > 1500) {
+            abort();
+          }
+          return;
+        }
+        if (!measured && incoming.currentTime * 1000 > 15) {
+          measured = true;
+          // Start-up time of the idle player = how early it has to start.
+          loopLeadMsRef.current = Math.min(
+            SEAM_LEAD_MAX_MS,
+            Math.max(0, loopLeadMsRef.current * 0.75 + (now - startedAt) * 0.25),
+          );
+        }
+        if (outMs < durationMs - LOOP_SWAP_BEFORE_END_MS) return;
+        stopSeamTimer();
+        if (!incoming.playing) {
+          abort();
+          return;
+        }
+        const newSlot: 0 | 1 = aPlaying ? 1 : 0;
+        outgoing.pause();
+        outgoing.muted = true;
+        incoming.muted = !active;
+        slotAOpacity.setValue(newSlot === 0 ? 1 : 0);
+        slotBOpacity.setValue(newSlot === 0 ? 0 : 1);
+        activeSlotRef.current = newSlot;
+        activeVideoRef.current = incoming;
+        slotSwapTimeRef.current = now;
+        setActiveSlot(newSlot);
+        outgoing.currentTime = 0; // park for the next cycle
+        loopArmedRef.current = false;
+        diagStart("loop", true, 0);
+        if (__DEV__) {
+          console.log(
+            `[loop:${post.id.slice(0, 8)}] swapped; idle started ${now - startedAt} ms ago at ${Math.round(incoming.currentTime * 1000)} ms (lead ${Math.round(loopLeadMsRef.current)} ms)`,
+          );
+        }
+        // Safety net: never leave both players paused.
+        setTimeout(() => {
+          if (activeVideoRef.current === incoming && !isPausedRef.current && !incoming.playing) incoming.play();
+        }, 200);
+      }, SEAM_POLL_MS);
+    },
+    [active, currentUri, post.id, stopSeamTimer, diagStart],
+  );
+
   // When video finishes, advance to next segment or loop
   const onSegmentStatus = useCallback(
     (status: VideoPlaybackStatus) => {
@@ -1045,6 +1169,22 @@ export const FeedItem = memo(function FeedItem({
         }
       }
 
+      // ── Single-file loop: arm the ping-pong shortly before the end of the file.
+      // Plain single-file posts have no JS early seek: the native loop (or the
+      // ping-pong) restarts them. ──
+      if (pingPongPost && sourceDur > 0) {
+        if (status.positionMillis < sourceDur / 2) {
+          loopArmedRef.current = false;
+        } else if (
+          !loopArmedRef.current &&
+          status.isPlaying &&
+          status.positionMillis >= sourceDur - (loopLeadMsRef.current + SEAM_ARM_AHEAD_MS)
+        ) {
+          loopArmedRef.current = true;
+          armLoop(sourceDur);
+        }
+      }
+
       // ── Stale position guard ──
       // After a slot swap, the outgoing slot's last position report can
       // arrive before the incoming slot's seek-to-0 completes. This stale
@@ -1057,7 +1197,7 @@ export const FeedItem = memo(function FeedItem({
       const isStalePosition = msSinceSwap < (lastSwapHardCutRef.current ? 40 : 400);
 
       // ── Unified end-of-segment detection ──
-      if (!isStalePosition && !status.didJustFinish && !trimEndHandledRef.current && sourceDur > 0) {
+      if (!isStalePosition && !status.didJustFinish && !trimEndHandledRef.current && sourceDur > 0 && !nativeLoopPost) {
         const effectiveTrimEnd =
           trimEndRef.current > 0
             ? Math.min(trimEndRef.current, sourceDur)
@@ -1089,7 +1229,7 @@ export const FeedItem = memo(function FeedItem({
         advanceSegment();
       }
     },
-    [allSegments, hasSharedSegmentUrls, hasTimedOverlays, post.trim_data, handleStallDetection, advanceSegment, armSeam, post.id, diagEnabled, diagStart],
+    [allSegments, hasSharedSegmentUrls, hasTimedOverlays, post.trim_data, handleStallDetection, advanceSegment, armSeam, armLoop, nativeLoopPost, pingPongPost, post.id, diagEnabled, diagStart],
   );
 
   // ── Error recovery: retry loading ──────────────────────────────────
