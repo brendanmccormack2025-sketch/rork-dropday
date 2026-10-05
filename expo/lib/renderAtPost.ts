@@ -92,7 +92,7 @@ function even(n: number): number {
 }
 
 /** Output size from the first clip's displayed (orientation-corrected) size, long side <= 1280. */
-async function renderSizeFor(first: DraftClip): Promise<{ width: number; height: number }> {
+export async function computeRenderSize(first: DraftClip): Promise<{ width: number; height: number }> {
   try {
     const { getThumbnailAsync } = await import("expo-video-thumbnails");
     const thumb = await getThumbnailAsync(first.uri, { time: first.trimStartMs ?? 0 });
@@ -104,6 +104,43 @@ async function renderSizeFor(first: DraftClip): Promise<{ width: number; height:
     // fall through to the default portrait size
   }
   return { width: 720, height: 1280 };
+}
+
+/** The clips as render instructions (cuts only), and the length of the finished video. */
+export function buildRenderEdit(clips: DraftClip[]): {
+  edit: Array<{ uri: string; trimStartMs: number; trimEndMs: number }>;
+  editMs: number;
+} {
+  const edit = clips.map((c) => ({
+    uri: c.uri,
+    trimStartMs: c.trimStartMs ?? 0,
+    trimEndMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0),
+  }));
+  const editMs = edit.reduce((sum, c) => sum + Math.max(0, c.trimEndMs - c.trimStartMs), 0);
+  return { edit, editMs };
+}
+
+/** The exact instructions JSON and options used for every render (post time and ahead of time). */
+export function renderRequest(
+  edit: Array<{ uri: string; trimStartMs: number; trimEndMs: number }>,
+  width: number,
+  height: number,
+) {
+  return {
+    json: JSON.stringify({ version: 1, clips: edit, overlays: [] }),
+    options: { width, height, reframe: "fit" as const, bitrate: RENDER_BITRATE, punchIn: false },
+  };
+}
+
+/** null when the native result is usable; otherwise the reason (fixed wording). */
+export function checkRenderResult(
+  result: { sizeBytes: number; actualDurationMs: number },
+  editMs: number,
+): string | null {
+  if (!(result.sizeBytes > 0) || result.actualDurationMs < editMs - DURATION_TOLERANCE_MS) {
+    return "output too short";
+  }
+  return null;
 }
 
 /**
@@ -121,15 +158,10 @@ export async function renderForPost(
   let timeoutSeconds = 0;
   try {
     const { addRenderProgressListener, cancelRender, renderAsync } = await import("@/modules/video-render");
-    const edit = clips.map((c) => ({
-      uri: c.uri,
-      trimStartMs: c.trimStartMs ?? 0,
-      trimEndMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0),
-    }));
-    const editMs = edit.reduce((sum, c) => sum + Math.max(0, c.trimEndMs - c.trimStartMs), 0);
+    const { edit, editMs } = buildRenderEdit(clips);
     if (editMs <= 0) return { ok: false, reason: "no cuts" };
 
-    const { width, height } = await renderSizeFor(clips[0]!);
+    const { width, height } = await computeRenderSize(clips[0]!);
     subscription = addRenderProgressListener((e) => onProgress(e.progress));
 
     const started = Date.now();
@@ -140,15 +172,10 @@ export async function renderForPost(
       cancelRender();
     }, timeoutMs);
 
-    const result = await renderAsync(JSON.stringify({ version: 1, clips: edit, overlays: [] }), {
-      width,
-      height,
-      reframe: "fit",
-      bitrate: RENDER_BITRATE,
-      punchIn: false,
-    });
+    const request = renderRequest(edit, width, height);
+    const result = await renderAsync(request.json, request.options);
     if (timedOut) return { ok: false, reason: `timeout after ${timeoutSeconds} s` };
-    if (!(result.sizeBytes > 0) || result.actualDurationMs < editMs - DURATION_TOLERANCE_MS) {
+    if (checkRenderResult(result, editMs)) {
       if (__DEV__) {
         console.log(
           `[render] rejected output: ${result.actualDurationMs} ms, ${result.sizeBytes} bytes, expected ${editMs} ms`,
