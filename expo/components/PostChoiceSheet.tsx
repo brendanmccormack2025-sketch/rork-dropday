@@ -55,8 +55,15 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
 
   // photoCompatible: the retry after an unreadable photo. Only photos are offered and
   // iOS converts them to a readable (JPEG) representation; video options are untouched.
+  // Cancel while "Getting your video..." is showing: the native pick cannot be
+  // aborted, so its result is ignored. pendingRef stops a new pick until it ends.
+  const cancelledRef = useRef(false);
+  const pendingRef = useRef(false);
+
   const openLibrary = useCallback(async (photoCompatible?: boolean) => {
-    if (isPicking) return;
+    if (isPicking || pendingRef.current) return;
+    cancelledRef.current = false;
+    pendingRef.current = true;
     setIsPicking(true);
     setIsRetrying(0);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -98,7 +105,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         // (NETWORK_ACCESS_REQUIRED) — the native default is false.
         shouldDownloadFromNetwork: true,
       }, (attempt) => setIsRetrying(attempt));
-      if (result.canceled || result.assets.length === 0) return;
+      if (cancelledRef.current || result.canceled || result.assets.length === 0) return;
 
       const asset = result.assets[0];
       const isVideo = asset.type === "video";
@@ -133,7 +140,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
     } catch (e) {
       if (__DEV__) console.log("[PostChoiceSheet] picker error:", e);
       const kind = classifyPickerError(e);
-      if (kind === "cancelled") return;
+      if (kind === "cancelled" || cancelledRef.current) return;
       const buttons =
         kind === "no_permission"
           ? [
@@ -155,6 +162,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
             ];
       Alert.alert("Library", PICKER_ERROR_MESSAGES[kind], buttons);
     } finally {
+      pendingRef.current = false;
       setIsPicking(false);
       setIsRetrying(0);
     }
@@ -225,6 +233,27 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
               </UiText>
             </View>
           </Pressable>
+
+          {isPicking && (
+            <View style={styles.gettingOverlay}>
+              <ActivityIndicator color={theme.accent} />
+              <UiText weight={700} style={styles.gettingText}>
+                Getting your video...
+              </UiText>
+              <Pressable
+                onPress={() => {
+                  cancelledRef.current = true;
+                  setIsPicking(false);
+                  setIsRetrying(0);
+                }}
+                hitSlop={10}
+              >
+                <UiText weight={700} style={styles.cancelText}>
+                  Cancel
+                </UiText>
+              </Pressable>
+            </View>
+          )}
 
           <Pressable
             onPress={onClose}
@@ -319,6 +348,19 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 16,
     minHeight: 48,
+  },
+  gettingOverlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    backgroundColor: theme.card,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  gettingText: {
+    fontSize: 16,
+    color: theme.text,
   },
   cancelText: {
     fontSize: 15,
