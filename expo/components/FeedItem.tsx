@@ -72,6 +72,19 @@ const LOOP_PINGPONG = true;
 const LOOP_LEAD_INITIAL_MS = 60;
 /** The swap happens when the playing player is this close to the end of the file. */
 const LOOP_SWAP_BEFORE_END_MS = 20;
+
+/**
+ * expo-video re-evaluates the iOS audio session on EVERY assignment to
+ * `player.muted`, even with the same value, so assign only on a change. play()
+ * is skipped when the player is already playing (a paused or waiting player still
+ * gets the call; pause() is left alone because "waiting to play" reads as not playing).
+ */
+function setMutedIfChanged(player: VideoPlayer | null | undefined, muted: boolean): void {
+  if (player && player.muted !== muted) player.muted = muted;
+}
+function playIfStopped(player: VideoPlayer | null | undefined): void {
+  if (player && !player.playing) player.play();
+}
 /** Watch duration that qualifies a view for the exposure gate (posts.qualified_view_count). */
 const QUALIFIED_VIEW_MS = 3000;
 /** Session-level dedupe so scrolling back to a post doesn't re-record the same viewer. */
@@ -562,17 +575,17 @@ export const FeedItem = memo(function FeedItem({
   useEffect(() => {
     if (!isPlayableVideo) return;
     const canPlay = active && playbackReady && !isPaused && post._optimistic?.status !== "failed";
-    playerA.muted = activeSlot === 0 ? !active : true;
+    setMutedIfChanged(playerA, activeSlot === 0 ? !active : true);
     playerA.loop = allSegments.length === 1 && activeSlot === 0;
     if (activeSlot === 0 && canPlay) {
-      playerA.play();
+      playIfStopped(playerA);
     } else {
       playerA.pause();
     }
-    playerB.muted = activeSlot === 1 ? !active : true;
+    setMutedIfChanged(playerB, activeSlot === 1 ? !active : true);
     playerB.loop = pingPongPost && activeSlot === 1;
     if (activeSlot === 1 && canPlay && shouldMountPreload) {
-      playerB.play();
+      playIfStopped(playerB);
     } else {
       playerB.pause();
     }
@@ -609,7 +622,7 @@ export const FeedItem = memo(function FeedItem({
     if (active) {
       setIsPaused(false);
       if (playbackReady) {
-        videoRef.current?.play();
+        playIfStopped(videoRef.current);
       }
     }
   }, [active, playbackReady]);
@@ -825,12 +838,12 @@ export const FeedItem = memo(function FeedItem({
       seamRunupActiveRef.current = false;
       if (outgoing) {
         outgoing.pause();
-        outgoing.muted = true;
+        setMutedIfChanged(outgoing, true);
       }
       if (newActiveRef) {
         if (!runupActive) newActiveRef.currentTime = seekTo / 1000;
-        newActiveRef.muted = !active;
-        if (active && !isPaused) newActiveRef.play();
+        setMutedIfChanged(newActiveRef, !active);
+        if (active && !isPaused) playIfStopped(newActiveRef);
       }
       slotAOpacity.setValue(newSlot === 0 ? 1 : 0);
       slotBOpacity.setValue(newSlot === 0 ? 0 : 1);
@@ -907,7 +920,7 @@ export const FeedItem = memo(function FeedItem({
       const target = parkPositionMs((segIdxRef.current + 1) % allSegments.length);
       if (Math.abs(idle.currentTime * 1000 - target) > 40) {
         idle.pause();
-        idle.muted = true;
+        setMutedIfChanged(idle, true);
         idle.currentTime = target / 1000;
       }
     }, 50);
@@ -952,15 +965,15 @@ export const FeedItem = memo(function FeedItem({
       const now = Date.now();
       // Cut-out footage is never audible: the outgoing player is muted the
       // moment it reaches its trimEnd, even if the swap is a few ms late.
-      if (outgoing.currentTime * 1000 >= outTrimEnd - 5) outgoing.muted = true;
+      if (outgoing.currentTime * 1000 >= outTrimEnd - 5) setMutedIfChanged(outgoing, true);
       if (runupStartedAt === 0) {
         if (outgoing.currentTime * 1000 >= outTrimEnd - seamLeadMsRef.current) {
           runupStartedAt = now;
           // Normally already parked; if not, seek there first (the fallback covers a slow seek).
           const parkAt = parkPositionMs(next);
           if (Math.abs(incoming.currentTime * 1000 - parkAt) > 40) incoming.currentTime = parkAt / 1000;
-          incoming.muted = true;
-          incoming.play();
+          setMutedIfChanged(incoming, true);
+          playIfStopped(incoming);
           seamRunupActiveRef.current = true;
         } else if (now - armedAt > 1000) {
           if (__DEV__) console.log(`[seam:${post.id.slice(0, 8)}] FALLBACK: outgoing never reached its lead point`);
@@ -1024,7 +1037,7 @@ export const FeedItem = memo(function FeedItem({
         stopSeamTimer();
         if (startedAt > 0) {
           incoming.pause();
-          incoming.muted = true;
+          setMutedIfChanged(incoming, true);
           incoming.currentTime = 0;
         }
         diagFallbackRef.current = true;
@@ -1039,8 +1052,8 @@ export const FeedItem = memo(function FeedItem({
         if (startedAt === 0) {
           if (outMs >= durationMs - loopLeadMsRef.current) {
             startedAt = now;
-            incoming.muted = true;
-            incoming.play();
+            setMutedIfChanged(incoming, true);
+            playIfStopped(incoming);
           } else if (now - armedAt > 1500) {
             abort();
           }
@@ -1062,8 +1075,8 @@ export const FeedItem = memo(function FeedItem({
         }
         const newSlot: 0 | 1 = aPlaying ? 1 : 0;
         outgoing.pause();
-        outgoing.muted = true;
-        incoming.muted = !active;
+        setMutedIfChanged(outgoing, true);
+        setMutedIfChanged(incoming, !active);
         slotAOpacity.setValue(newSlot === 0 ? 1 : 0);
         slotBOpacity.setValue(newSlot === 0 ? 0 : 1);
         activeSlotRef.current = newSlot;
@@ -1239,7 +1252,7 @@ export const FeedItem = memo(function FeedItem({
     if (!p) return;
     p.replace({ uri: currentUri });
     p.loop = allSegments.length === 1;
-    p.muted = !active;
+    setMutedIfChanged(p, !active);
     if (active) p.play();
   }, [currentUri, active, videoRef, allSegments.length]);
 
