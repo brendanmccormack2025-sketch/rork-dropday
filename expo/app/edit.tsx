@@ -44,7 +44,7 @@ import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
 import { OWNER_USER_ID, isInternalTester } from "@/constants/debug";
-import { renderForPost, renderSkipReason, type RenderedEdit } from "@/lib/renderAtPost";
+import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { reportRender } from "@/lib/renderReport";
 import { RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
@@ -2262,19 +2262,73 @@ export default function EditScreen() {
       // What the internal-tester message says about the render path.
       let renderNote: string = skipReason ? `Not rendered: ${skipReason}` : "";
       if (!skipReason) {
-        setRenderProgress(0);
-        try {
-          const outcome = await renderForPost(clips, setRenderProgress);
-          if (outcome.ok) {
-            rendered = outcome.edit;
-            renderNote = `Rendered in ${(outcome.renderMs / 1000).toFixed(1)} s, ${(
-              outcome.edit.sizeBytes / 1048576
-            ).toFixed(1)} MB, ${(outcome.edit.durationMs / 1000).toFixed(1)} s long`;
-          } else {
-            renderNote = `Not rendered: ${outcome.reason}`;
+        const mb = (bytes: number) => (bytes / 1048576).toFixed(1);
+        const ahead = aheadRef.current;
+        const signature = ahead?.signatureOf(clips) ?? null;
+        const { editMs } = buildRenderEdit(clips);
+        let handled = false;
+
+        if (ahead && signature) {
+          // 1. A finished render-ahead file for exactly this timeline: use it, no wait.
+          const taken = ahead.takeReady(signature);
+          if (taken) {
+            const info = await getInfoAsync(taken.uri).catch(() => null);
+            if (info?.exists && (info.size ?? 0) > 0 && taken.durationMs >= editMs - 300) {
+              rendered = { uri: taken.uri, durationMs: taken.durationMs, sizeBytes: taken.sizeBytes };
+              renderNote = `Rendered ahead in ${(taken.renderMs / 1000).toFixed(1)} s, ${mb(taken.sizeBytes)} MB, ${(taken.durationMs / 1000).toFixed(1)} s long`;
+            } else {
+              await deleteAsync(taken.uri, { idempotent: true }).catch(() => {});
+              renderNote = "Not rendered: output too short";
+            }
+            handled = true;
+          } else if (ahead.isRenderingFor(signature)) {
+            // 2. One for this timeline is running: wait for it (same overlay, progress,
+            //    timeout and Cancel as a render at post time).
+            setRenderProgress(0);
+            const off = ahead.subscribe((st) => {
+              if (st.kind === "rendering") setRenderProgress(st.progress);
+            });
+            let timedOutWaiting = false;
+            const timeout = setTimeout(() => {
+              timedOutWaiting = true;
+              cancelRender();
+            }, renderTimeoutMs(editMs));
+            try {
+              const outcome = await ahead.waitFor(signature);
+              if (outcome.ok) {
+                const r = outcome.ready;
+                rendered = { uri: r.uri, durationMs: r.durationMs, sizeBytes: r.sizeBytes };
+                renderNote = `Rendered ahead in ${(r.renderMs / 1000).toFixed(1)} s, ${mb(r.sizeBytes)} MB, ${(r.durationMs / 1000).toFixed(1)} s long`;
+              } else {
+                renderNote = timedOutWaiting
+                  ? `Not rendered: timeout after ${Math.round(renderTimeoutMs(editMs) / 1000)} s`
+                  : `Not rendered: ${outcome.reason}`;
+              }
+            } finally {
+              clearTimeout(timeout);
+              off();
+              setRenderProgress(null);
+            }
+            handled = true;
           }
-        } finally {
-          setRenderProgress(null);
+        }
+
+        if (!handled) {
+          // 3. Otherwise exactly as before: stop any render-ahead (one native render
+          //    at a time) and render now.
+          await ahead?.cancelAndSuspend();
+          setRenderProgress(0);
+          try {
+            const outcome = await renderForPost(clips, setRenderProgress);
+            if (outcome.ok) {
+              rendered = outcome.edit;
+              renderNote = `Rendered in ${(outcome.renderMs / 1000).toFixed(1)} s, ${mb(outcome.edit.sizeBytes)} MB, ${(outcome.edit.durationMs / 1000).toFixed(1)} s long`;
+            } else {
+              renderNote = `Not rendered: ${outcome.reason}`;
+            }
+          } finally {
+            setRenderProgress(null);
+          }
         }
       }
       if (rendered) {
