@@ -71,6 +71,7 @@ export class RenderAhead {
   private args: Args | null = null;
   private raw: string | null = null;
   private waitingForActive = false;
+  private immediateNext = false;
   private sizes = new Map<string, { width: number; height: number }>();
   /** The render in flight (and the settle promise of the last one). */
   private inflight: { promise: Promise<void>; cancel: () => void; done: Promise<AheadOutcome> } | null = null;
@@ -126,6 +127,11 @@ export class RenderAhead {
     this.invalidate();
     this.setState({ kind: "waiting" });
     this.startTimer();
+  }
+
+  /** The next render starts without the idle delay (the first one after auto-edit applies). */
+  startNextImmediately(): void {
+    this.immediateNext = true;
   }
 
   /** Hand the ready file for this signature to the caller (it must delete it). */
@@ -207,10 +213,12 @@ export class RenderAhead {
 
   private startTimer(): void {
     this.clearTimer();
+    const delay = this.immediateNext ? 0 : RENDER_AHEAD_IDLE_MS;
+    this.immediateNext = false;
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.begin();
-    }, RENDER_AHEAD_IDLE_MS);
+    }, delay);
   }
 
   private deleteLater(uri: string, delayMs: number): void {

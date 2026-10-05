@@ -2015,6 +2015,7 @@ export default function EditScreen() {
     const producedSig = clipsSignature(produced);
     if (producedSig !== clipsSignature(clips)) {
       pushSnapshot(clips, textOverlays);
+      aheadRef.current?.startNextImmediately();
       replaceClips(produced);
     }
     setAutoEditSession({
@@ -2080,6 +2081,7 @@ export default function EditScreen() {
         trimEndMs: c.trimEndMs,
       }));
       pushSnapshot(current, textOverlaysForUndoRef.current);
+      aheadRef.current?.startNextImmediately();
       replaceClips(produced);
       autoEditWindowsRef.current = result.windows;
       setAutoEditSession({
