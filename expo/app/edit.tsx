@@ -46,6 +46,7 @@ import { supabase } from "@/lib/supabase";
 import { OWNER_USER_ID, isInternalTester } from "@/constants/debug";
 import { renderForPost, renderSkipReason, type RenderedEdit } from "@/lib/renderAtPost";
 import { reportRender } from "@/lib/renderReport";
+import { RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
 import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
@@ -276,6 +277,37 @@ export default function EditScreen() {
   }, [activeSlot]);
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+
+  // ── Render-ahead (internal accounts): render the timeline in the background and
+  // play that ONE finished file in the preview while it matches the timeline.
+  const aheadRef = useRef<RenderAhead | null>(null);
+  const [aheadState, setAheadState] = useState<AheadState>({ kind: "idle" });
+  useEffect(() => {
+    const ahead = new RenderAhead();
+    aheadRef.current = ahead;
+    const off = ahead.subscribe(setAheadState);
+    return () => {
+      off();
+      ahead.dispose();
+      if (aheadRef.current === ahead) aheadRef.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    aheadRef.current?.update({ clips, isRoot: !reactingTo && !rootDropId, userId: user?.id });
+  }, [clips, reactingTo, rootDropId, user?.id]);
+  const aheadReady = aheadState.kind === "ready" ? aheadState : null;
+  const aheadSignature = aheadRef.current?.signatureOf(clips) ?? null;
+  const aheadMatches = !!aheadReady && aheadReady.signature === aheadSignature;
+  // The rendered file plays only while it matches the timeline and no clip is being trimmed.
+  const previewMode = aheadMatches && selectedClipId === null;
+  const previewModeRef = useRef(false);
+  previewModeRef.current = previewMode;
+  const isPlayingRef = useRef(false);
+  isPlayingRef.current = isPlaying;
+  const playerR = useVideoPlayer(null, (p) => {
+    p.loop = true;
+    p.timeUpdateEventInterval = 0.05;
+  });
   const [positionMs, setPositionMs] = useState<number>(0);
   const pendingSeekRef = useRef<number | null>(null);
   const segmentOffsetRef = useRef<number>(0);
@@ -595,18 +627,58 @@ export default function EditScreen() {
   // Playback control (mirrors the old shouldPlay/isMuted props)
   useEffect(() => {
     playerA.muted = activeSlot !== 0;
-    if (activeSlot === 0 && isPlaying && videoReady) {
+    if (activeSlot === 0 && isPlaying && videoReady && !previewMode) {
       playerA.play();
     } else {
       playerA.pause();
     }
     playerB.muted = activeSlot !== 1;
-    if (activeSlot === 1 && isPlaying && videoReady) {
+    if (activeSlot === 1 && isPlaying && videoReady && !previewMode) {
       playerB.play();
     } else {
       playerB.pause();
     }
-  }, [playerA, playerB, activeSlot, isPlaying, videoReady]);
+  }, [playerA, playerB, activeSlot, isPlaying, videoReady, previewMode]);
+
+  // Rendered-file preview: load/unload the file, play or pause it with the editor's
+  // play state, and report its position (= output time) as the playhead.
+  const previewUriRef = useRef<string | null>(null);
+  const positionMsRef = useRef(0);
+  positionMsRef.current = positionMs;
+  const previewUri = previewMode ? aheadReady!.uri : null;
+  useEffect(() => {
+    if (previewUri) {
+      if (previewUriRef.current !== previewUri) {
+        previewUriRef.current = previewUri;
+        playerR.replace({ uri: previewUri });
+      }
+      playerR.loop = true;
+      playerR.currentTime = Math.max(0, positionMsRef.current) / 1000;
+    } else if (previewUriRef.current) {
+      previewUriRef.current = null;
+      playerR.pause();
+      playerR.replace(null);
+    }
+  }, [previewUri, playerR]);
+  useEffect(() => {
+    if (!previewMode) return;
+    if (playerR.muted) playerR.muted = false;
+    if (isPlaying) {
+      if (!playerR.playing) playerR.play();
+    } else {
+      playerR.pause();
+    }
+  }, [previewMode, isPlaying, playerR]);
+  const lastPreviewPosRef = useRef(0);
+  useVideoStatusFeed(playerR, {
+    onStatus: (s) => {
+      if (!previewModeRef.current || !s.isLoaded) return;
+      const now = Date.now();
+      if (now - lastPreviewPosRef.current < 100) return;
+      lastPreviewPosRef.current = now;
+      setPositionMs(s.positionMillis);
+    },
+  });
 
   // Reset playback state whenever the Video component remounts due to an edit
   // (videoKey bump or activeClip.uri change) — prevents auto-play stutter on load.
@@ -1286,7 +1358,38 @@ export default function EditScreen() {
     }
   }, []);
 
+  // In rendered-file preview a seek moves that one player; otherwise the live seek.
+  const handleSeekAny = useCallback(
+    (targetMs: number) => {
+      if (previewModeRef.current) {
+        playerR.currentTime = Math.max(0, targetMs) / 1000;
+        setPositionMs(targetMs);
+        setIsPlaying(false);
+      } else {
+        handleSeek(targetMs);
+      }
+    },
+    [handleSeek, playerR],
+  );
+
+  // Leaving rendered-file preview (an edit, or a clip selected): put the live
+  // players at the same output time and keep the play state.
+  const wasPreviewRef = useRef(false);
+  useEffect(() => {
+    if (!previewMode && wasPreviewRef.current) {
+      const pos = positionMsRef.current;
+      const was = isPlayingRef.current;
+      handleSeek(pos);
+      setTimeout(() => setIsPlaying(was), 60);
+    }
+    wasPreviewRef.current = previewMode;
+  }, [previewMode, handleSeek]);
+
   const togglePlay = useCallback(() => {
+    if (previewModeRef.current) {
+      setIsPlaying((p) => !p);
+      return;
+    }
     if (!activeClip) return;
     if (!isPlaying) {
       if (selectedClipId !== null && selectedClipId === activeClip.id && isTrimmed) {
@@ -2515,6 +2618,13 @@ export default function EditScreen() {
         </View>
 
         {/* ── Preview area ───────────────────────────────────────────── */}
+        {isInternalTester(user?.id) && (aheadState.kind === "ready" || aheadState.kind === "waiting" || aheadState.kind === "rendering") && (
+          <View style={[styles.aheadChip, { top: insets.top + 62 }]} pointerEvents="none">
+            <UiText style={styles.aheadChipText}>
+              {aheadMatches ? "Preview ready" : "Updating preview..."}
+            </UiText>
+          </View>
+        )}
         <Pressable
           style={styles.previewArea}
           onLayout={(e) => {
@@ -2569,6 +2679,21 @@ export default function EditScreen() {
                     contentFit="contain"
                     nativeControls={false}
                     onFirstFrameRender={onReadySlot1}
+                    pointerEvents="none"
+                  />
+                )}
+                {previewMode && (
+                  <VideoView
+                    player={playerR}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                    }}
+                    contentFit="contain"
+                    nativeControls={false}
                     pointerEvents="none"
                   />
                 )}
@@ -2679,7 +2804,7 @@ export default function EditScreen() {
             positionMs={displayPosition}
             activeClipIndex={activeIndex}
             selectedClipId={selectedClipId}
-            onSeek={handleSeek}
+            onSeek={handleSeekAny}
             onSelectClip={handleSelectClip}
             onClipUpdate={handleClipUpdate}
             onTrimRelease={handleTrimRelease}
@@ -3148,6 +3273,15 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 6,
   },
+  aheadChip: {
+    position: "absolute",
+    left: 16,
+    zIndex: 5,
+    backgroundColor: theme.text,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  aheadChipText: { color: "#fff", fontSize: 11, fontWeight: "700" as const },
   renderOverlay: {
     ...StyleSheet.absoluteFill,
     alignItems: "center",
