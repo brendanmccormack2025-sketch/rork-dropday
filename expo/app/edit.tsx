@@ -940,6 +940,17 @@ export default function EditScreen() {
   // advances that skip clips.
   const isAdvancingRef = useRef<boolean>(false);
 
+  /**
+   * Guard time after a clip change: `maxMs`, but never longer than half of the
+   * shortest kept piece (minimum 60 ms), so pieces of 350 ms or more are
+   * handled on time.
+   */
+  const seamGuardMs = (maxMs: number): number => {
+    let shortest = Infinity;
+    for (const c of clipsRef.current) shortest = Math.min(shortest, effectiveDurationMs(c));
+    return Math.max(60, Math.min(maxMs, shortest / 2));
+  };
+
   const advanceToNextClip = useCallback(() => {
     if (isAdvancingRef.current) {
       return;
@@ -952,7 +963,7 @@ export default function EditScreen() {
       if (isAdvancingRef.current) {
         isAdvancingRef.current = false;
       }
-    }, 500);
+    }, seamGuardMs(500));
 
     const selIdx = selectedClipIdxRef.current;
     if (isIsolatedRef.current && selIdx >= 0 && selIdx < clipsRef.current.length && selIdx === activeIndexRef.current) {
@@ -1094,7 +1105,7 @@ export default function EditScreen() {
       // stale didJustFinish from the old player.
       setTimeout(() => {
         trimEndHandledRef.current = false;
-      }, 300);
+      }, seamGuardMs(300));
 
       activeIndexRef.current = nextIdx;
       setActiveIndex(nextIdx);
@@ -1206,7 +1217,7 @@ export default function EditScreen() {
       // check can fire for the new clip.
       setTimeout(() => {
         trimEndHandledRef.current = false;
-      }, 300);
+      }, seamGuardMs(300));
 
       activeIndexRef.current = 0;
       setActiveIndex(0);
