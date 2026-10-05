@@ -29,6 +29,8 @@ function getDeviceTimezone(): string {
 
 import { useAuth, ensureProfileById } from "@/providers/AuthProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
+import { isInternalTester } from "@/constants/debug";
+import { reportRender } from "@/lib/renderReport";
 
 export type OptimisticStatus = "uploading" | "failed";
 
@@ -2010,6 +2012,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
          if (!rawInput.renderedFallback) throw uploadErr;
          // The rendered file could not be uploaded: post the old way instead.
          if (__DEV__) console.log("[createPost] rendered upload failed, using the source clips:", (uploadErr as Error)?.message);
+         if (isInternalTester(user?.id)) reportRender("Not rendered: upload failed (used source clips)");
          input = { ...rawInput, ...rawInput.renderedFallback, renderedFallback: undefined };
          uploadUri = input.uri;
          segmentUrls = null;

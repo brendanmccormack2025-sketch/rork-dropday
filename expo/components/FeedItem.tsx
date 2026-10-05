@@ -41,6 +41,10 @@ import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDe
 import { useReportContent } from "@/hooks/useReportContent";
 import { supabase } from "@/lib/supabase";
 import { getOutputTimeMs } from "@/lib/editModel";
+import * as Updates from "expo-updates";
+import { isInternalTester } from "@/constants/debug";
+import { isVideoRenderAvailable } from "@/lib/renderAtPost";
+import { usePlaybackDiagnostics } from "@/lib/playbackDiagnostics";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
@@ -386,11 +390,46 @@ export const FeedItem = memo(function FeedItem({
   });
   // Shared-URL segments are cut inside one file, so overshooting trimEnd plays
   // footage that was cut out. Report position more often so the seam is tight.
+  // Internal-tester diagnostics need finer position reports to measure gaps.
+  const diagEnabled = usePlaybackDiagnostics() && isInternalTester(user?.id);
   useEffect(() => {
-    const interval = hasSharedSegmentUrls ? 0.05 : 0.25;
+    const interval = diagEnabled ? 0.03 : hasSharedSegmentUrls ? 0.05 : 0.25;
     playerA.timeUpdateEventInterval = interval;
     playerB.timeUpdateEventInterval = interval;
-  }, [hasSharedSegmentUrls, playerA, playerB]);
+  }, [hasSharedSegmentUrls, diagEnabled, playerA, playerB]);
+
+  // Diagnostics: gaps measured for the last 3 loop restarts or seams.
+  // toPlayingMs = playToEnd (loop) or seam swap -> player reports playing;
+  // toAdvanceMs = playing -> position first advances.
+  type DiagGap = { kind: "loop" | "seam"; toPlayingMs: number; toAdvanceMs: number; fallback: boolean };
+  const [diagGaps, setDiagGaps] = useState<DiagGap[]>([]);
+  const diagPendingRef = useRef<{
+    kind: "loop" | "seam";
+    t0: number;
+    playingAt: number;
+    pos0: number | null;
+    startPos: number;
+    sawStop: boolean;
+    fallback: boolean;
+  } | null>(null);
+  const diagFallbackRef = useRef<boolean>(false);
+  const diagStart = useCallback(
+    (kind: "loop" | "seam", alreadyPlaying: boolean, startPos = 0) => {
+      if (!diagEnabled) return;
+      const now = Date.now();
+      diagPendingRef.current = {
+        kind,
+        t0: now,
+        playingAt: alreadyPlaying ? now : 0,
+        pos0: null,
+        startPos,
+        sawStop: false,
+        fallback: diagFallbackRef.current,
+      };
+      diagFallbackRef.current = false;
+    },
+    [diagEnabled],
+  );
   const videoRefA = useRef<VideoPlayer | null>(null);
   const videoRefB = useRef<VideoPlayer | null>(null);
   const activeVideoRef = useRef<VideoPlayer | null>(null);
@@ -766,6 +805,8 @@ export const FeedItem = memo(function FeedItem({
       slotAOpacity.setValue(newSlot === 0 ? 1 : 0);
       slotBOpacity.setValue(newSlot === 0 ? 0 : 1);
       lastSwapHardCutRef.current = true;
+      if (!runupActive) diagFallbackRef.current = true;
+      diagStart("seam", !!newActiveRef && runupActive && newActiveRef.playing, 0);
       // Safety net: after a swap the incoming player must be playing. If both
       // players ended up paused (and the post should be playing), start it.
       if (active && !isPaused && newActiveRef) {
@@ -782,6 +823,8 @@ export const FeedItem = memo(function FeedItem({
     }
     lastSwapHardCutRef.current = false;
     seamRunupActiveRef.current = false;
+    diagFallbackRef.current = true;
+    diagStart("seam", false, 0);
 
     if (wasPreloadReady || slotAlreadyLoaded) {
       // Preload was ready OR the slot already has this URI loaded (wrap-around
@@ -810,7 +853,7 @@ export const FeedItem = memo(function FeedItem({
       setPlaybackReady(false);
       pendingCrossfadeRef.current = { incomingSlot: newSlot };
     }
-  }, [allSegments, shouldMountPreload, post.id, post.trim_data, hasSharedSegmentUrls, active, isPaused]);
+  }, [allSegments, shouldMountPreload, post.id, post.trim_data, hasSharedSegmentUrls, active, isPaused, diagStart]);
 
   // Shared-URL segments never trigger a preload load (the file is already in the
   // idle slot), so the idle player is parked by hand: paused, muted, hidden and
@@ -927,6 +970,43 @@ export const FeedItem = memo(function FeedItem({
 
       if (!status.isLoaded) return;
 
+      // Diagnostics (internal testers, switch on): time from the loop restart or
+      // seam swap to the player playing again, and from there to the position
+      // advancing.
+      const dp = diagPendingRef.current;
+      if (dp) {
+        const now = Date.now();
+        if (!status.isPlaying) dp.sawStop = true;
+        if (
+          dp.playingAt === 0 &&
+          status.isPlaying &&
+          (dp.kind === "seam" || dp.sawStop || status.positionMillis < dp.startPos - 1000)
+        ) {
+          dp.playingAt = now;
+        }
+        let finished: DiagGap | null = null;
+        if (dp.playingAt > 0 && dp.pos0 === null) {
+          dp.pos0 = status.positionMillis;
+        } else if (dp.playingAt > 0 && status.isPlaying && status.positionMillis > (dp.pos0 ?? 0) + 15) {
+          finished = {
+            kind: dp.kind,
+            toPlayingMs: dp.playingAt - dp.t0,
+            toAdvanceMs: now - dp.playingAt,
+            fallback: dp.fallback,
+          };
+        } else if (now - dp.t0 > 3000) {
+          finished = { kind: dp.kind, toPlayingMs: -1, toAdvanceMs: -1, fallback: dp.fallback };
+        }
+        if (finished) {
+          diagPendingRef.current = null;
+          const gap = finished;
+          setDiagGaps((prev) => [...prev.slice(-2), gap]);
+        }
+      }
+      if (diagEnabled && status.didJustFinish && allSegments.length === 1) {
+        diagStart("loop", false, status.positionMillis);
+      }
+
       if (hasTimedOverlays) {
         setOutputTimeMs(
           getOutputTimeMs(
@@ -1009,7 +1089,7 @@ export const FeedItem = memo(function FeedItem({
         advanceSegment();
       }
     },
-    [allSegments, hasSharedSegmentUrls, hasTimedOverlays, post.trim_data, handleStallDetection, advanceSegment, armSeam, post.id],
+    [allSegments, hasSharedSegmentUrls, hasTimedOverlays, post.trim_data, handleStallDetection, advanceSegment, armSeam, post.id, diagEnabled, diagStart],
   );
 
   // ── Error recovery: retry loading ──────────────────────────────────
@@ -1315,6 +1395,30 @@ export const FeedItem = memo(function FeedItem({
               bottom: bottomInset + BOTTOM_OVERLAY_HEIGHT,
             }}
           />
+
+          {/* Internal-tester playback diagnostics (Settings > Playback diagnostics) */}
+          {diagEnabled && (
+            <View style={styles.diagBox} pointerEvents="none">
+              <UiText style={styles.diagText}>url …{post.media_url.slice(-12)}</UiText>
+              <UiText style={styles.diagText}>
+                seg {post.segments?.length ?? 0} / distinct {new Set(post.segments ?? []).size} · trim{" "}
+                {post.trim_data?.length ?? 0}
+              </UiText>
+              <UiText style={styles.diagText}>
+                rt {Updates.runtimeVersion ?? "?"} · upd {Updates.updateId ? Updates.updateId.slice(0, 8) : "embedded"} ·
+                render {isVideoRenderAvailable() ? "yes" : "no"}
+              </UiText>
+              {diagGaps.length === 0 ? (
+                <UiText style={styles.diagText}>gaps: waiting for a loop or seam…</UiText>
+              ) : (
+                diagGaps.map((g, i) => (
+                  <UiText key={i} style={styles.diagText}>
+                    {g.kind} {g.toPlayingMs}+{g.toAdvanceMs} ms{g.fallback ? " FALLBACK" : ""}
+                  </UiText>
+                ))
+              )}
+            </View>
+          )}
 
           {/* Buffering indicator */}
           {stallState.isBuffering && active && (
@@ -1664,6 +1768,20 @@ const styles = StyleSheet.create({
   musicText: { color: "rgba(255,255,255,0.6)", fontSize: 12 },
 
   /* Buffering indicator */
+  diagBox: {
+    position: "absolute",
+    top: 72,
+    left: 8,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 2,
+  },
+  diagText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "600" as const,
+  },
   bufferingOverlay: {
     position: "absolute",
     top: "50%",

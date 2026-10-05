@@ -15,7 +15,8 @@ import { Ban, ChevronLeft, FileText, LogOut, Scissors, Shield, Trash2, User } fr
 
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
-import { isDebugOwner } from "@/constants/debug";
+import { isDebugOwner, isInternalTester } from "@/constants/debug";
+import { getPlaybackDiagnostics, setPlaybackDiagnostics } from "@/lib/playbackDiagnostics";
 import UiText from "@/components/UiText";
 import {
   getAutoEditEnabled,
@@ -30,7 +31,9 @@ export default function SettingsScreen() {
   const [deleting, setDeleting] = useState<boolean>(false);
   const [autoEdit, setAutoEdit] = useState<boolean>(true);
   const [saveEdited, setSaveEdited] = useState<boolean>(true);
+  const [diagnostics, setDiagnostics] = useState<boolean>(false);
   useEffect(() => {
+    getPlaybackDiagnostics().then(setDiagnostics);
     getAutoEditEnabled().then(setAutoEdit);
     getSaveEditedToRoll().then(setSaveEdited);
   }, []);
@@ -147,6 +150,25 @@ export default function SettingsScreen() {
                 ios_backgroundColor={theme.border}
               />
             </View>
+            {isInternalTester(user?.id) ? (
+              <>
+                <View style={styles.rowDivider} />
+                <View style={styles.row}>
+                  <Scissors color={theme.textMuted} size={18} strokeWidth={2} />
+                  <UiText style={styles.rowText}>Playback diagnostics</UiText>
+                  <Switch
+                    value={diagnostics}
+                    onValueChange={(v) => {
+                      setDiagnostics(v);
+                      setPlaybackDiagnostics(v);
+                    }}
+                    trackColor={{ false: theme.border, true: theme.accent }}
+                    thumbColor="#fff"
+                    ios_backgroundColor={theme.border}
+                  />
+                </View>
+              </>
+            ) : null}
           </View>
 
           {/* Safety section */}

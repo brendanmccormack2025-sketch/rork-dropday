@@ -43,8 +43,9 @@ import {
 import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
-import { OWNER_USER_ID } from "@/constants/debug";
-import { renderForPost, shouldRenderAtPost, type RenderedEdit } from "@/lib/renderAtPost";
+import { OWNER_USER_ID, isInternalTester } from "@/constants/debug";
+import { renderForPost, renderSkipReason, type RenderedEdit } from "@/lib/renderAtPost";
+import { reportRender } from "@/lib/renderReport";
 import { cancelRender } from "@/modules/video-render";
 import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
@@ -2137,17 +2138,27 @@ export default function EditScreen() {
       // timeline has cuts. Any problem (or Cancel) leaves `rendered` null and the
       // post goes out the old way. A blocking "Preparing your video..." overlay
       // with progress and Cancel is shown while it runs.
-      const renderAtPost = shouldRenderAtPost({
+      const skipReason = renderSkipReason({
         isRoot: !reactingTo && !rootDropId,
         userId: user?.id,
         clips,
       });
-      if (__DEV__) console.log("[edit] render at post:", renderAtPost ? "yes" : "no");
+      if (__DEV__) console.log("[edit] render at post:", skipReason ?? "yes");
       let rendered: RenderedEdit | null = null;
-      if (renderAtPost) {
+      // What the internal-tester message says about the render path.
+      let renderNote: string = skipReason ? `Not rendered: ${skipReason}` : "";
+      if (!skipReason) {
         setRenderProgress(0);
         try {
-          rendered = await renderForPost(clips, setRenderProgress);
+          const outcome = await renderForPost(clips, setRenderProgress);
+          if (outcome.ok) {
+            rendered = outcome.edit;
+            renderNote = `Rendered in ${(outcome.renderMs / 1000).toFixed(1)} s, ${(
+              outcome.edit.sizeBytes / 1048576
+            ).toFixed(1)} MB, ${(outcome.edit.durationMs / 1000).toFixed(1)} s long`;
+          } else {
+            renderNote = `Not rendered: ${outcome.reason}`;
+          }
         } finally {
           setRenderProgress(null);
         }
@@ -2179,6 +2190,7 @@ export default function EditScreen() {
         } catch (copyErr) {
           if (__DEV__) console.log("[render] could not stage the rendered file:", (copyErr as Error)?.message);
           rendered = null;
+          renderNote = "Not rendered: render error ERR_STAGE";
         }
         await deleteAsync(tempRender, { idempotent: true }).catch(() => {});
       }
@@ -2326,6 +2338,9 @@ export default function EditScreen() {
           updateOptimisticProgress(tempId, percent);
         },
       });
+
+      // Internal testers: say what the render path did (a fixed-wording message, ~6 s).
+      if (renderNote && isInternalTester(user?.id)) reportRender(renderNote);
 
       // ── 5. Navigate to the right screen (best-effort) ───────────────
       //    Root Drops → feed tab. Reactions & replies → reaction-tree

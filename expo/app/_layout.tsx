@@ -24,6 +24,7 @@ import { PostsProvider } from "@/providers/PostsProvider";
 import { GroupsProvider } from "@/providers/GroupsProvider";
 import { NotificationsProvider } from "@/providers/NotificationsProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import RenderReportToast from "@/components/RenderReportToast";
 import { theme } from "@/constants/theme";
 
 
@@ -228,6 +229,7 @@ export default function RootLayout() {
         <SafeAreaProvider>
           <View style={{ flex: 1, backgroundColor: theme.bg }}>
             <StatusBar style="dark" />
+            <RenderReportToast />
             <AuthProvider>
               <UserBlocksProvider>
                 <PostsProvider>

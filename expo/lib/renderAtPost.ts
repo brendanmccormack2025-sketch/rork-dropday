@@ -34,22 +34,33 @@ function isTrimmed(c: DraftClip): boolean {
 }
 
 /**
- * Whether to render this timeline at post time: a ROOT post (never a reaction),
- * not a draft save, all clips are video with a known length, and there is
- * something to render (more than one clip, or a trimmed clip).
+ * Why this timeline is NOT rendered at post time, in fixed wording, or null when
+ * it should be: a ROOT post (never a reaction), an internal account, a build with
+ * the native module, all clips video with a known length, and something to
+ * render (more than one clip, or a trimmed clip). Drafts never get here.
  */
+export function renderSkipReason(args: {
+  isRoot: boolean;
+  userId: string | null | undefined;
+  clips: DraftClip[];
+}): "module missing" | "not an internal account" | "reaction" | "no cuts" | null {
+  if (!RENDER_AT_POST_ENABLED) return "no cuts";
+  if (!args.isRoot) return "reaction";
+  if (RENDER_INTERNAL_ONLY && !isInternalTester(args.userId)) return "not an internal account";
+  const { clips } = args;
+  if (clips.length === 0) return "no cuts";
+  if (clips.some((c) => c.type !== "video" || !(c.durationMs && c.durationMs > 0))) return "no cuts";
+  if (!(clips.length > 1 || clips.some(isTrimmed))) return "no cuts";
+  if (!isVideoRenderAvailable()) return "module missing";
+  return null;
+}
+
 export function shouldRenderAtPost(args: {
   isRoot: boolean;
   userId: string | null | undefined;
   clips: DraftClip[];
 }): boolean {
-  if (!RENDER_AT_POST_ENABLED || !args.isRoot) return false;
-  if (RENDER_INTERNAL_ONLY && !isInternalTester(args.userId)) return false;
-  const { clips } = args;
-  if (clips.length === 0) return false;
-  if (clips.some((c) => c.type !== "video" || !(c.durationMs && c.durationMs > 0))) return false;
-  if (!(clips.length > 1 || clips.some(isTrimmed))) return false;
-  return isVideoRenderAvailable();
+  return renderSkipReason(args) === null;
 }
 
 /** Longest side of the rendered video; width and height are even. */
@@ -65,6 +76,11 @@ export type RenderedEdit = {
   durationMs: number;
   sizeBytes: number;
 };
+
+/** Result of renderForPost: the edit, or why there is none (fixed wording for the diagnostics message). */
+export type RenderOutcome =
+  | { ok: true; edit: RenderedEdit; renderMs: number }
+  | { ok: false; reason: string };
 
 /** Time allowed: RENDER_TIMEOUT_MS, or 0.6 x the edit's length if longer, capped at 60 s. */
 export function renderTimeoutMs(editDurationMs: number): number {
@@ -91,16 +107,18 @@ async function renderSizeFor(first: DraftClip): Promise<{ width: number; height:
 }
 
 /**
- * Render the clips (cuts only, no overlays) into one mp4. Resolves null on ANY
- * problem (module missing, ERR_RENDER_*, timeout, cancel, empty or short
- * output); the caller then posts the old way. Never throws.
+ * Render the clips (cuts only, no overlays) into one mp4. Resolves `ok: false`
+ * with a reason on ANY problem (module missing, ERR_RENDER_*, timeout, cancel,
+ * empty or short output); the caller then posts the old way. Never throws.
  */
 export async function renderForPost(
   clips: DraftClip[],
   onProgress: (progress: number) => void,
-): Promise<RenderedEdit | null> {
+): Promise<RenderOutcome> {
   let subscription: { remove(): void } | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+  let timeoutSeconds = 0;
   try {
     const { addRenderProgressListener, cancelRender, renderAsync } = await import("@/modules/video-render");
     const edit = clips.map((c) => ({
@@ -109,14 +127,14 @@ export async function renderForPost(
       trimEndMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0),
     }));
     const editMs = edit.reduce((sum, c) => sum + Math.max(0, c.trimEndMs - c.trimStartMs), 0);
-    if (editMs <= 0) return null;
+    if (editMs <= 0) return { ok: false, reason: "no cuts" };
 
     const { width, height } = await renderSizeFor(clips[0]!);
     subscription = addRenderProgressListener((e) => onProgress(e.progress));
 
     const started = Date.now();
     const timeoutMs = renderTimeoutMs(editMs);
-    let timedOut = false;
+    timeoutSeconds = Math.round(timeoutMs / 1000);
     timer = setTimeout(() => {
       timedOut = true;
       cancelRender();
@@ -129,27 +147,35 @@ export async function renderForPost(
       bitrate: RENDER_BITRATE,
       punchIn: false,
     });
-    if (timedOut) return null;
+    if (timedOut) return { ok: false, reason: `timeout after ${timeoutSeconds} s` };
     if (!(result.sizeBytes > 0) || result.actualDurationMs < editMs - DURATION_TOLERANCE_MS) {
       if (__DEV__) {
         console.log(
           `[render] rejected output: ${result.actualDurationMs} ms, ${result.sizeBytes} bytes, expected ${editMs} ms`,
         );
       }
-      return null;
+      return { ok: false, reason: "output too short" };
     }
     if (__DEV__) {
       console.log(
         `[render] ok in ${Date.now() - started} ms: ${width}x${height}, ${result.actualDurationMs} ms, ${(result.sizeBytes / 1048576).toFixed(2)} MB`,
       );
     }
-    return { uri: result.uri, durationMs: result.actualDurationMs, sizeBytes: result.sizeBytes };
+    return {
+      ok: true,
+      edit: { uri: result.uri, durationMs: result.actualDurationMs, sizeBytes: result.sizeBytes },
+      renderMs: Date.now() - started,
+    };
   } catch (e) {
     if (__DEV__) {
       const code = (e as { code?: string })?.code;
       console.log(`[render] failed, posting the old way: ${code ?? ""} ${(e as Error)?.message ?? e}`);
     }
-    return null;
+    const code = (e as { code?: string })?.code;
+    if (timedOut) return { ok: false, reason: `timeout after ${timeoutSeconds} s` };
+    if (code === "ERR_RENDER_CANCELLED") return { ok: false, reason: "cancelled" };
+    if (code === "ERR_RENDER_TRUNCATED") return { ok: false, reason: "output too short" };
+    return { ok: false, reason: `render error ${code ?? "unknown"}` };
   } finally {
     if (timer) clearTimeout(timer);
     subscription?.remove();
