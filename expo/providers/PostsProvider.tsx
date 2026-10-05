@@ -1825,6 +1825,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     try {
       if (rowId) await deleteRowConfirmed(rowId);
       if (paths.length > 0) await supabase.storage.from(BUCKET).remove(paths);
+      if (__DEV__) console.log("[createPost] cancelled upload cleaned up, row:", rowId, "storage removed:", paths);
     } catch (e) {
       console.warn("[createPost] cancelled upload cleanup failed", (e as Error)?.message);
     }
@@ -2768,8 +2769,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
 
       // 3. Delete from DB (cascade will handle child reactions via the FK)
+      let deletedRows = 0;
       try {
-        await deleteRowConfirmed(postId);
+        deletedRows = await deleteRowConfirmed(postId);
       } catch (delErr) {
         console.error("[deletePost] DB delete error", (delErr as Error)?.message);
         throw delErr;
@@ -2783,8 +2785,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           .remove(pathsToDelete);
         if (storageErr) {
           console.warn("[deletePost] storage cleanup error (non-fatal)", storageErr.message);
-        } else {
+        } else if (__DEV__) {
+          console.log("[deletePost] rows deleted:", deletedRows, "storage removed:", pathsToDelete);
         }
+      } else if (__DEV__) {
+        console.log("[deletePost] rows deleted:", deletedRows, "storage removed: none");
       }
 
     },
@@ -2876,8 +2881,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
 
       // 3. Delete from DB
+      let deletedRows = 0;
       try {
-        await deleteRowConfirmed(reactionId);
+        deletedRows = await deleteRowConfirmed(reactionId);
       } catch (delErr) {
         console.error("[deleteReaction] DB delete error", (delErr as Error)?.message);
         throw delErr;
@@ -2891,8 +2897,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           .remove(pathsToDelete);
         if (storageErr) {
           console.warn("[deleteReaction] storage cleanup error (non-fatal)", storageErr.message);
-        } else {
+        } else if (__DEV__) {
+          console.log("[deleteReaction] rows deleted:", deletedRows, "storage removed:", pathsToDelete);
         }
+      } else if (__DEV__) {
+        console.log("[deleteReaction] rows deleted:", deletedRows, "storage removed: none");
       }
 
 
