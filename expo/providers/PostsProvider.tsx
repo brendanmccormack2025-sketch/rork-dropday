@@ -316,6 +316,18 @@ export function resolveAvatarUrl(raw: string | null | undefined): string | null 
 }
 const OPTIMISTIC_POSTS_KEY = "dropday:optimisticPosts";
 
+/** Cancel handle of one in-flight upload, by optimistic temp id. */
+type UploadCancel = { cancelled: boolean; abort: (() => void) | null; paths: string[] };
+const uploadCancels = new Map<string, UploadCancel>();
+
+function uploadCancelledError(): Error {
+  return Object.assign(new Error("Upload cancelled"), { code: "ERR_UPLOAD_CANCELLED" });
+}
+
+function isUploadCancelled(e: unknown): boolean {
+  return (e as { code?: string } | null)?.code === "ERR_UPLOAD_CANCELLED";
+}
+
 type OptimisticRetryPayload = {
   uri: string;
   mediaType: "image" | "video";
@@ -369,9 +381,11 @@ async function uploadToStorage(
   sizeMB: string,
   attempt: number = 1,
   onProgress?: (loaded: number, total: number) => void,
+  cancel?: UploadCancel,
 ): Promise<void> {
   const maxRetries = 2;
 
+  if (cancel?.cancelled) throw uploadCancelledError();
 
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;
@@ -394,6 +408,8 @@ async function uploadToStorage(
       //    broken session.
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
+        if (cancel) cancel.abort = () => xhr.abort();
+        xhr.onabort = () => reject(uploadCancelledError());
         xhr.open("POST", uploadUrl);
         xhr.setRequestHeader("apikey", supabaseAnonKey);
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
@@ -537,6 +553,7 @@ async function uploadToStorage(
       if (onProgress) onProgress(1, 1);
     }
   } catch (err) {
+    if (isUploadCancelled(err) || cancel?.cancelled) throw uploadCancelledError();
     const durationMs = Date.now() - startTime;
     const durationSec = (durationMs / 1000).toFixed(1);
 
@@ -584,6 +601,7 @@ async function uploadToStorage(
         sizeMB,
         attempt + 1,
         onProgress,
+        cancel,
       );
     }
 
@@ -593,6 +611,14 @@ async function uploadToStorage(
       );
     }
     throw err;
+  }
+}
+
+/** Delete local temp files the app staged for an upload (never the user's own source clips). */
+async function deleteStagedFiles(uris: Array<string | undefined>): Promise<void> {
+  for (const u of new Set(uris)) {
+    if (!u || u.startsWith("http")) continue;
+    await deleteAsync(u, { idempotent: true }).catch(() => {});
   }
 }
 
@@ -1788,6 +1814,22 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     [user?.id, qc, persistOptimisticPosts]
   );
 
+  // After a cancelled upload: delete the created row (if any) and the uploaded storage
+  // files, only once the row is confirmed gone, and the local staged files.
+  const cleanupCancelledUpload = async (
+    v: { uri: string; segmentUris?: string[]; thumbnailUri?: string; cleanupUri?: string },
+    paths: string[],
+    rowId: string | null,
+  ): Promise<void> => {
+    await deleteStagedFiles([v.cleanupUri, v.thumbnailUri, v.uri, ...(v.segmentUris ?? [])]);
+    try {
+      if (rowId) await deleteRowConfirmed(rowId);
+      if (paths.length > 0) await supabase.storage.from(BUCKET).remove(paths);
+    } catch (e) {
+      console.warn("[createPost] cancelled upload cleanup failed", (e as Error)?.message);
+    }
+  };
+
   const createPost = useMutation({
     mutationFn: async (rawInput: {
       uri: string;
@@ -1819,6 +1861,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         console.error("[createPost] mutationFn ABORT — no user.id");
         throw new Error("Not signed in.");
       }
+
+      const cancel: UploadCancel = { cancelled: false, abort: null, paths: [] };
+      if (rawInput.optimisticTempId) uploadCancels.set(rawInput.optimisticTempId, cancel);
+      const throwIfCancelled = () => {
+        if (cancel.cancelled) throw uploadCancelledError();
+      };
 
       const baseTs = Date.now();
       const isRemoteUrl = input.uri.startsWith("http");
@@ -1932,6 +1980,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const urlByUri = new Map<string, string>();
         for (let i = 0; i < urisToUpload.length; i++) {
           const segUri = urisToUpload[i]!;
+          throwIfCancelled();
 
           // Verify the file exists on disk BEFORE attempting to upload.
           const fileInfo = await getInfoAsync(segUri);
@@ -1966,6 +2015,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           const contentType = mimeByExt[segExt] ?? (input.mediaType === "video" ? "video/quicktime" : "image/jpeg");
 
 
+          cancel.paths.push(segPath);
           // Track per-file progress and compute overall percentage
           await uploadToStorage(
             segUri,
@@ -1985,6 +2035,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
                 input.onProgress(Math.round(overall));
               }
             },
+            cancel,
           );
 
           // Mark this file as fully done (100% contribution of this file)
@@ -2009,7 +2060,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
        try {
          await uploadSegments();
        } catch (uploadErr) {
-         if (!rawInput.renderedFallback) throw uploadErr;
+         if (isUploadCancelled(uploadErr) || !rawInput.renderedFallback) throw uploadErr;
          // The rendered file could not be uploaded: post the old way instead.
          if (__DEV__) console.log("[createPost] rendered upload failed, using the source clips:", (uploadErr as Error)?.message);
          if (isInternalTester(user?.id)) reportRender("Not rendered: upload failed (used source clips)");
@@ -2022,8 +2073,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
       // Upload thumbnail if provided (always JPEG)
       let thumbnailUrl: string | null = null;
+      throwIfCancelled();
       if (input.thumbnailUri) {
         const thumbPath = `${user.id}/${baseTs}_thumb.jpg`;
+        cancel.paths.push(thumbPath);
         try {
           const thumbBody = await uriToBlob(input.thumbnailUri);
           const { error: thumbErr } = await supabase.storage
@@ -2084,6 +2137,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       // If ensureProfile was never called (e.g. INITIAL_SESSION event didn't
       // trigger it), the FK on posts.user_id → profiles.id will fail. This
       // call creates the profile on-the-fly so the post always succeeds.
+      throwIfCancelled();
       try {
         await ensureProfileById(user.id);
       } catch (profileErr) {
@@ -2172,6 +2226,13 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
       if (variables.optimisticTempId) {
         finalizeOptimisticPost(variables.optimisticTempId, newPost);
+        const late = uploadCancels.get(variables.optimisticTempId);
+        if (late?.cancelled) {
+          // Cancelled after the row was inserted: delete it again, with its files.
+          void cleanupCancelledUpload(variables, late.paths, newPost.id);
+          qc.invalidateQueries({ queryKey: ["posts", "mine"] });
+          return;
+        }
       }
 
       // Only insert into the main fyp feed cache for root Drops (no parent).
@@ -2236,7 +2297,15 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       lastPostCreatedAtRef.current = Date.now();
 
     },
+    onSettled: (_data, _err, variables) => {
+      if (variables.optimisticTempId) uploadCancels.delete(variables.optimisticTempId);
+    },
     onError: (err, variables) => {
+      if (isUploadCancelled(err)) {
+        const rec = variables.optimisticTempId ? uploadCancels.get(variables.optimisticTempId) : undefined;
+        void cleanupCancelledUpload(variables, rec?.paths ?? [], null);
+        return;
+      }
       const errAny = err as unknown as Record<string, unknown> | undefined;
       const errMeta = {
         message: (err as Error)?.message ?? String(err),
@@ -2355,6 +2424,20 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
    *  Called when the user dismisses a failed upload instead of retrying. */
   const removeOptimisticPost = useCallback(
     (tempId: string) => {
+      const live = uploadCancels.get(tempId);
+      if (live) {
+        live.cancelled = true;
+        live.abort?.();
+      }
+      const gone = optimisticPosts.find((p) => p._optimistic?.tempId === tempId);
+      if (gone?._optimistic) {
+        try {
+          const payload = JSON.parse(gone._optimistic.retryPayload ?? "{}") as OptimisticRetryPayload;
+          void deleteStagedFiles([payload.thumbnailUri, payload.uri, ...(payload.segmentUris ?? [])]);
+        } catch {
+          // The payload is only used for cleanup.
+        }
+      }
       setOptimisticPosts((prev) => {
         const next = prev.filter((p) => p._optimistic?.tempId !== tempId);
         persistOptimisticPosts(next);
@@ -2374,7 +2457,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return old.filter((p) => p._optimistic?.tempId !== tempId);
       });
     },
-    [user?.id, qc, persistOptimisticPosts]
+    [user?.id, qc, persistOptimisticPosts, optimisticPosts]
   );
 
   // ── DM: Conversations ─────────────────────────────────────────────────────
@@ -2642,7 +2725,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   const deletePost = useMutation({
     mutationFn: async (postId: string): Promise<void> => {
       if (!user?.id) throw new Error("Not signed in.");
-
+      if (postId.startsWith("opt_")) {
+        removeOptimisticPost(postId);
+        return;
+      }
 
       // 1. Fetch the post to get media_urls before deleting the row
       const { data: postRow, error: fetchErr } = await supabase
