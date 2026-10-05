@@ -2622,6 +2622,22 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     return null;
   }, []);
 
+  // Delete a posts row and return how many rows went. A delete that matches 0 rows
+  // (policy, wrong id) is a failure unless the row is already gone.
+  const deleteRowConfirmed = useCallback(async (id: string): Promise<number> => {
+    const { data, error } = await supabase.from("posts").delete().eq("id", id).select("id");
+    if (error) throw error;
+    if (data && data.length > 0) return data.length;
+    const { data: still, error: checkErr } = await supabase
+      .from("posts")
+      .select("id")
+      .eq("id", id)
+      .maybeSingle();
+    if (checkErr) throw checkErr;
+    if (still) throw new Error("Row not deleted");
+    return 0;
+  }, []);
+
   // ── Delete Post (Drop or reply) ─────────────────────────────────────
   const deletePost = useMutation({
     mutationFn: async (postId: string): Promise<void> => {
@@ -2666,13 +2682,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
 
       // 3. Delete from DB (cascade will handle child reactions via the FK)
-      const { error: delErr } = await supabase
-        .from("posts")
-        .delete()
-        .eq("id", postId);
-
-      if (delErr) {
-        console.error("[deletePost] DB delete error", delErr.message);
+      try {
+        await deleteRowConfirmed(postId);
+      } catch (delErr) {
+        console.error("[deletePost] DB delete error", (delErr as Error)?.message);
         throw delErr;
       }
 
@@ -2722,7 +2735,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
     onError: (err) => {
       console.error("[deletePost] onError", (err as Error)?.message ?? err);
-      showAlert("Delete Failed", (err as Error)?.message ?? "Could not delete the post.");
+      showAlert("Delete Failed", "Couldn't delete this post. Try again.");
     },
   });
 
@@ -2771,13 +2784,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
 
       // 3. Delete from DB
-      const { error: delErr } = await supabase
-        .from("posts")
-        .delete()
-        .eq("id", reactionId);
-
-      if (delErr) {
-        console.error("[deleteReaction] DB delete error", delErr.message);
+      try {
+        await deleteRowConfirmed(reactionId);
+      } catch (delErr) {
+        console.error("[deleteReaction] DB delete error", (delErr as Error)?.message);
         throw delErr;
       }
 
@@ -2822,7 +2832,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
     onError: (err) => {
       console.error("[deleteReaction] onError", (err as Error)?.message ?? err);
-      showAlert("Delete Failed", (err as Error)?.message ?? "Could not delete the reaction.");
+      showAlert("Delete Failed", "Couldn't delete this reaction. Try again.");
     },
   });
 
