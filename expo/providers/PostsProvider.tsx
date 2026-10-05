@@ -2814,6 +2814,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         return old.filter((p) => p.id !== postId);
       });
 
+      // A confirmed delete: refetch the profile list ("On Trial now") and other users' lists.
+      if (!postId.startsWith("opt_")) {
+        qc.invalidateQueries({ queryKey: ["posts", "mine"] });
+        qc.invalidateQueries({ queryKey: ["posts", "user"] });
+      }
+
       // Invalidate reaction & reply queries (cascade may have removed children)
       qc.invalidateQueries({ queryKey: ["reactions"] });
       qc.invalidateQueries({ queryKey: ["replies"] });
@@ -2908,6 +2914,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           return old.filter((p) => p.id !== reactionId);
         });
       }
+
+      qc.invalidateQueries({ queryKey: ["posts", "mine"] });
+      qc.invalidateQueries({ queryKey: ["posts", "user"] });
 
       // Invalidate reaction-related queries so counts update
       qc.invalidateQueries({ queryKey: ["reactions"] });
