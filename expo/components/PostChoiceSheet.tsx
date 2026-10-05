@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -18,6 +18,7 @@ import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
 import { launchLibraryWithRetry } from "@/lib/pickerRetry";
+import { PICKER_ERROR_MESSAGES, classifyPickerError } from "@/lib/pickerErrors";
 
 /** Mirrors the Clip shape the camera flow hands to /edit — same pipeline. */
 type PickedClip = {
@@ -48,6 +49,9 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
     onClose();
     router.push("/camera");
   }, [onClose, router]);
+
+  // The error alert's "Try again" reopens the picker.
+  const openLibraryRef = useRef<() => void>(() => {});
 
   const openLibrary = useCallback(async () => {
     if (isPicking) return;
@@ -119,13 +123,32 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         params: { clips: JSON.stringify([clip]) },
       });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Could not open your library.";
-      Alert.alert("Library", msg);
+      if (__DEV__) console.log("[PostChoiceSheet] picker error:", e);
+      const kind = classifyPickerError(e);
+      if (kind === "cancelled") return;
+      const buttons =
+        kind === "no_permission"
+          ? [
+              { text: "Cancel", style: "cancel" as const },
+              {
+                text: "Open Settings",
+                onPress: () => {
+                  if (Platform.OS === "ios") Linking.openURL("app-settings:").catch(() => {});
+                  else Linking.openSettings().catch(() => {});
+                },
+              },
+            ]
+          : [
+              { text: "Cancel", style: "cancel" as const },
+              { text: "Try again", onPress: () => openLibraryRef.current() },
+            ];
+      Alert.alert("Library", PICKER_ERROR_MESSAGES[kind], buttons);
     } finally {
       setIsPicking(false);
       setIsRetrying(0);
     }
   }, [isPicking, onClose, router]);
+  openLibraryRef.current = openLibrary;
 
   return (
     <Modal
