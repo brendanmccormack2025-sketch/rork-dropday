@@ -2677,7 +2677,11 @@ export default function EditScreen() {
         {isInternalTester(user?.id) && (aheadState.kind === "ready" || aheadState.kind === "waiting" || aheadState.kind === "rendering") && (
           <View style={[styles.aheadChip, { top: insets.top + 62 }]} pointerEvents="none">
             <UiText style={styles.aheadChipText}>
-              {aheadMatches ? "Preview ready" : "Updating preview..."}
+              {aheadMatches
+                ? "Preview ready"
+                : aheadState.kind === "rendering"
+                  ? `Making preview ${Math.round(aheadState.progress * 100)}%`
+                  : "Updating preview..."}
             </UiText>
           </View>
         )}
