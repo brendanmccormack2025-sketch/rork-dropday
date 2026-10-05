@@ -45,6 +45,7 @@ import * as Updates from "expo-updates";
 import { isInternalTester } from "@/constants/debug";
 import { isVideoRenderAvailable } from "@/lib/renderAtPost";
 import { usePlaybackDiagnostics } from "@/lib/playbackDiagnostics";
+import { formatRenderStats, useLastRenderStats } from "@/lib/renderReport";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const TAB_BAR_HEIGHT = 88;
@@ -421,6 +422,7 @@ export const FeedItem = memo(function FeedItem({
   // footage that was cut out. Report position more often so the seam is tight.
   // Internal-tester diagnostics need finer position reports to measure gaps.
   const diagEnabled = usePlaybackDiagnostics() && isInternalTester(user?.id);
+  const lastRenderStats = useLastRenderStats();
   useEffect(() => {
     const interval = diagEnabled ? 0.03 : hasSharedSegmentUrls || pingPongPost ? 0.05 : 0.25;
     playerA.timeUpdateEventInterval = interval;
@@ -1561,6 +1563,9 @@ export const FeedItem = memo(function FeedItem({
                 rt {Updates.runtimeVersion ?? "?"} · upd {Updates.updateId ? Updates.updateId.slice(0, 8) : "embedded"} ·
                 render {isVideoRenderAvailable() ? "yes" : "no"}
               </UiText>
+              {lastRenderStats && (
+                <UiText style={styles.diagText}>{formatRenderStats(lastRenderStats)}</UiText>
+              )}
               {diagGaps.length === 0 ? (
                 <UiText style={styles.diagText}>gaps: waiting for a loop or seam…</UiText>
               ) : (

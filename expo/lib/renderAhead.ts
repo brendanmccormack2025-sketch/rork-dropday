@@ -20,6 +20,7 @@ import {
   renderSkipReason,
   renderTimeoutMs,
 } from "@/lib/renderAtPost";
+import { recordRenderStats } from "@/lib/renderReport";
 import type { DraftClip } from "@/providers/PostsProvider";
 
 /** The timeline must be unchanged this long before a background render starts. */
@@ -294,6 +295,12 @@ export class RenderAhead {
           deleteAsync(result.uri, { idempotent: true }).catch(() => {});
           outcome = { ok: false, reason: "cancelled" };
         } else {
+          recordRenderStats({
+            kind: "ahead",
+            renderMs: Date.now() - started,
+            durationMs: result.actualDurationMs,
+            sizeBytes: result.sizeBytes,
+          });
           outcome = {
             ok: true,
             ready: {
