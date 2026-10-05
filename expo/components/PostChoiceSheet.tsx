@@ -51,9 +51,11 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
   }, [onClose, router]);
 
   // The error alert's "Try again" reopens the picker.
-  const openLibraryRef = useRef<() => void>(() => {});
+  const openLibraryRef = useRef<(photoCompatible?: boolean) => void>(() => {});
 
-  const openLibrary = useCallback(async () => {
+  // photoCompatible: the retry after an unreadable photo. Only photos are offered and
+  // iOS converts them to a readable (JPEG) representation; video options are untouched.
+  const openLibrary = useCallback(async (photoCompatible?: boolean) => {
     if (isPicking) return;
     setIsPicking(true);
     setIsRetrying(0);
@@ -82,7 +84,13 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
       }
 
       const result = await launchLibraryWithRetry({
-        mediaTypes: ["images", "videos"],
+        mediaTypes: photoCompatible ? ["images"] : ["images", "videos"],
+        ...(photoCompatible
+          ? {
+              preferredAssetRepresentationMode:
+                ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+            }
+          : {}),
         allowsMultipleSelection: false,
         quality: 1,
         videoMaxDuration: MAX_VIDEO_SECONDS,
@@ -140,7 +148,10 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
             ]
           : [
               { text: "Cancel", style: "cancel" as const },
-              { text: "Try again", onPress: () => openLibraryRef.current() },
+              {
+                text: "Try again",
+                onPress: () => openLibraryRef.current(kind === "unreadable_photo"),
+              },
             ];
       Alert.alert("Library", PICKER_ERROR_MESSAGES[kind], buttons);
     } finally {
@@ -183,7 +194,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
           </Pressable>
 
           <Pressable
-            onPress={openLibrary}
+            onPress={() => openLibrary()}
             disabled={isPicking}
             style={({ pressed }) => [
               styles.option,
