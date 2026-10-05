@@ -304,6 +304,33 @@ export default function EditScreen() {
   previewModeRef.current = previewMode;
   const isPlayingRef = useRef(false);
   isPlayingRef.current = isPlaying;
+  // Play while the render-ahead is waiting or rendering: do not start the glitchy
+  // live playback; wait for the rendered file (or "Play rough preview").
+  const [pendingPlay, setPendingPlay] = useState(false);
+  const [roughPlay, setRoughPlay] = useState(false);
+  const aheadBusy = aheadState.kind === "waiting" || aheadState.kind === "rendering";
+  const waitForPreview = aheadBusy && !aheadMatches && selectedClipId === null && !roughPlay;
+  const waitForPreviewRef = useRef(false);
+  waitForPreviewRef.current = waitForPreview;
+  const renderStartedAtRef = useRef(0);
+  useEffect(() => {
+    if (aheadState.kind === "rendering" && aheadState.progress === 0) renderStartedAtRef.current = Date.now();
+  }, [aheadState]);
+  useEffect(() => {
+    if (waitForPreview && isPlaying) {
+      setIsPlaying(false);
+      setPendingPlay(true);
+    }
+  }, [waitForPreview, isPlaying]);
+  useEffect(() => {
+    if (pendingPlay && !waitForPreview) {
+      setPendingPlay(false);
+      setIsPlaying(true);
+    }
+  }, [pendingPlay, waitForPreview]);
+  useEffect(() => {
+    if (!isPlaying) setRoughPlay(false);
+  }, [isPlaying]);
   const playerR = useVideoPlayer(null, (p) => {
     p.loop = true;
     p.timeUpdateEventInterval = 0.05;
@@ -1386,6 +1413,14 @@ export default function EditScreen() {
   }, [previewMode, handleSeek]);
 
   const togglePlay = useCallback(() => {
+    if (pendingPlay) {
+      setPendingPlay(false);
+      return;
+    }
+    if (!isPlaying && waitForPreviewRef.current) {
+      setPendingPlay(true);
+      return;
+    }
     if (previewModeRef.current) {
       setIsPlaying((p) => !p);
       return;
@@ -1404,7 +1439,7 @@ export default function EditScreen() {
       }
     }
     setIsPlaying((p) => !p);
-  }, [activeClip, isPlaying, selectedClipId, isTrimmed, displayPosition, totalDurationMs, handleSeek]);
+  }, [activeClip, isPlaying, pendingPlay, selectedClipId, isTrimmed, displayPosition, totalDurationMs, handleSeek]);
 
   // ── Clip operations ───────────────────────────────────────────────────────
   const handleClipUpdate = useCallback(
@@ -2791,7 +2826,31 @@ export default function EditScreen() {
             )}
 
             {/* Play overlay — video only; photos render as a static image */}
-            {isVideo && !isPlaying && (
+            {isVideo && pendingPlay && waitForPreview && (
+              <View style={styles.waitOverlay}>
+                <ActivityIndicator color="#fff" />
+                <UiText style={styles.waitText}>
+                  {(() => {
+                    if (aheadState.kind !== "rendering" || aheadState.progress < 0.05) return "Making your preview...";
+                    const elapsed = Date.now() - renderStartedAtRef.current;
+                    const secs = Math.max(1, Math.round((elapsed * (1 - aheadState.progress)) / aheadState.progress / 1000));
+                    return `Preview ready in about ${secs} s`;
+                  })()}
+                </UiText>
+                <Pressable
+                  onPress={() => {
+                    setPendingPlay(false);
+                    setRoughPlay(true);
+                    setIsPlaying(true);
+                  }}
+                  hitSlop={8}
+                  style={styles.waitRoughBtn}
+                >
+                  <UiText style={styles.waitRoughText}>Play rough preview</UiText>
+                </Pressable>
+              </View>
+            )}
+            {isVideo && !isPlaying && !pendingPlay && (
               <Pressable onPress={togglePlay} style={styles.playOverlay}>
                 <View style={styles.playCircle}>
                   <Play
@@ -3241,6 +3300,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  waitOverlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  waitText: { color: "#fff", fontSize: 14, fontWeight: "700" as const },
+  waitRoughBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.5)",
+  },
+  waitRoughText: { color: "#fff", fontSize: 12, fontWeight: "700" as const },
   playCircle: {
     width: 64,
     height: 64,
