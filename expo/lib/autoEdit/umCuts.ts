@@ -16,6 +16,8 @@
  */
 import { SOUND_CLASSIFIER_CONFIG, type ClassifiedSound, type SoundClassifierConfig } from "./classifySound.ts";
 import {
+  mergePlan,
+  setStates,
   effectiveCutRanges,
   effectivePieces,
   keepRangesOf,
@@ -34,7 +36,7 @@ export type UmCutReport = {
   seamLimit: { allowed: number; editedMs: number; capped: boolean };
 };
 
-type Um = { sound: ClassifiedSound; startMs: number; endMs: number };
+type Um = { sound: ClassifiedSound; startMs: number; endMs: number; user?: boolean };
 type Final = { um: Um; startMs: number; endMs: number; merged: boolean };
 
 function seamsOf(state: EditState, durationMs: number): number {
@@ -70,7 +72,11 @@ function finalize(base: EditState, ums: Um[], config: SoundClassifierConfig): Fi
   const prot = protectedRangesOf(base);
   for (let pass = 0; pass < 20; pass++) {
     // Slivers are judged on what is really removed, so protected laughs stay out of it.
-    const pieces = finals.map((f) => ({ f, pieces: effectivePieces({ startMs: f.startMs, endMs: f.endMs }, prot) }));
+    // A cut the creator made is not held back by protection, so it is judged whole.
+    const pieces = finals.map((f) => ({
+      f,
+      pieces: effectivePieces({ startMs: f.startMs, endMs: f.endMs }, f.um.user ? [] : prot),
+    }));
     const all = [...others, ...pieces.flatMap((x) => x.pieces)].sort((a, b) => a.startMs - b.startMs);
     const union: Array<{ startMs: number; endMs: number }> = [];
     for (const r of all) {
@@ -187,4 +193,50 @@ export function planUmCuts(
       seamLimit: { allowed, editedMs, capped: skipped.some((x) => x.reason.startsWith("seam limit")) },
     },
   };
+}
+
+/**
+ * "Cut this sound": the creator decides about one method-2 candidate (um?, unsure or
+ * laugh). It becomes an APPLIED umCut decision with origin 'user': same edge padding,
+ * same merge with an adjacent silence cut and same no-slivers rule as an auto um cut.
+ * It is allowed inside a laugh episode (the user wins), is never blocked by an earlier
+ * reversal, and survives re-planning. Restore reverts it like any cut.
+ */
+export function addUserSoundCut(
+  state: EditState,
+  sound: { startMs: number; endMs: number; lengthMs: number } & Partial<Pick<ClassifiedSound, "cls" | "features" | "why">>,
+  sourceDurationMs: number,
+  config: SoundClassifierConfig = SOUND_CLASSIFIER_CONFIG,
+): EditState {
+  const classified: ClassifiedSound = {
+    startMs: sound.startMs,
+    endMs: sound.endMs,
+    lengthMs: sound.lengthMs,
+    cls: sound.cls ?? "unsure",
+    features: sound.features ?? { durationMs: sound.lengthMs, peakVsSpeechDb: 0, steadiness: 0, burstCount: 0, nearEmphasis: false, midSpeech: false },
+    why: sound.why ?? [],
+  };
+  let startMs = sound.startMs + config.umEdgePaddingMs;
+  let endMs = sound.endMs - config.umEdgePaddingMs;
+  // A very short sound the creator picked is cut whole rather than padded away.
+  if (endMs - startMs < 60) {
+    startMs = sound.startMs;
+    endMs = sound.endMs;
+  }
+  const [final] = finalize(state, [{ sound: classified, startMs, endMs, user: true }], config);
+  const decision = makeDecision("umCut", final!.startMs, final!.endMs, {
+    origin: "user",
+    payload: {
+      text: "um",
+      cls: classified.cls,
+      features: classified.features,
+      mergedWithSilence: final!.merged,
+      original: { startMs: sound.startMs, endMs: sound.endMs },
+      user: true,
+    },
+  });
+  // An auto um cut with the very same range gives way to the creator's own.
+  const without = { ...state, decisions: state.decisions.filter((d) => d.id !== decision.id || d.origin === "user") };
+  const merged = mergePlan(without, [decision], []);
+  return setStates(merged.state, { [decision.id]: "applied" });
 }

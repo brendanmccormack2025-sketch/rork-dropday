@@ -79,7 +79,7 @@ export function describeDecision(d: Decision): MarkerItem {
       label = `Filler '${payload.text ?? "filler"}'`;
       break;
     case "umCut":
-      label = "Um";
+      label = d.origin === "user" ? `Cut sound (${payload.cls === "um" ? "um?" : (payload.cls ?? "sound")})` : "Um";
       break;
     case "hookTrim":
       label =
@@ -243,7 +243,8 @@ export function buildDebugMarkers(
     });
   });
   candidates.forEach((c, i) => {
-    if (c.cls === "um" && cutUms.has(c.startMs)) return;
+    // A candidate that became a cut (auto um or the creator's own) shows as a cut marker instead.
+    if (cutUms.has(c.startMs)) return;
     const outputMs = sourceToOutputMs(clips, c.startMs, sourceUri);
     if (outputMs === null) return;
     const kind: MarkerKind = c.cls === "laugh" ? "laugh" : c.cls === "um" ? "um" : "filler2";

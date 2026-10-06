@@ -86,7 +86,7 @@ import {
 import { buildAiEditState } from "@/lib/autoEdit/plan";
 import { checkAlignment, type Alignment } from "@/lib/autoEdit/alignment";
 import { planLaughProtection } from "@/lib/autoEdit/laughProtection";
-import { planUmCuts, type UmCutReport } from "@/lib/autoEdit/umCuts";
+import { addUserSoundCut, planUmCuts, type UmCutReport } from "@/lib/autoEdit/umCuts";
 import { analyzeUnexplained, silenceThresholdDb, speechMedianDb, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
 import { planFillerCuts } from "@/lib/autoEdit/fillerCuts";
 import { emphasisLogEntries, planEmphasis } from "@/lib/autoEdit/emphasisMoments";
@@ -2473,24 +2473,50 @@ export default function EditScreen() {
     [handleSeekAny],
   );
 
-  const handleShareAiDebug = useCallback(() => {
+  // "Cut this sound": the creator decides about one method-2 candidate.
+  const handleCutSound = useCallback(
+    (marker: TimelineMarker) => {
+      const sound = aiDebug?.candidates.find((c) => c.startMs === marker.srcStartMs);
+      if (!sound) return;
+      userEdit((s) => addUserSoundCut(s, sound, editStateRef.current?.durationMs ?? 0));
+      setMarkerSheet(null);
+    },
+    [aiDebug, userEdit],
+  );
+
+  const handleShareAiDebug = useCallback(async () => {
     const model = editStateRef.current;
     if (!model) return;
+    // The transcript alignment summary: from the planning run, or worked out now from the cached analysis.
+    let alignment = aiDebug?.alignment ?? null;
+    let speechBaselineDb = aiDebug?.speechBaselineDb;
+    const words = captions.words;
+    const uri = captions.transcribedUri;
+    if ((!alignment || speechBaselineDb === undefined) && words && uri) {
+      const loud = await analysis.loudness(uri);
+      if (loud) {
+        const thresholdDb = silenceThresholdDb(loud.windows, 20, loud.durationMs);
+        alignment = alignment ?? checkAlignment(loud.windows, 20, words, thresholdDb);
+        speechBaselineDb =
+          speechBaselineDb ?? speechMedianDb({ windows: loud.windows, windowMs: 20, words, thresholdDb });
+      }
+    }
     const text = formatAiDebug({
       sourceDurationMs: model.durationMs,
       clips: renderClipsOf(model.state, model.durationMs),
       sourceUri: model.state.sourceUri,
       proposals: aiDebug?.proposals ?? [],
       candidates: aiDebug?.candidates ?? [],
-      alignment: aiDebug?.alignment ?? null,
+      alignment,
       umReport: aiDebug?.umReport,
       protection: protectionReport(model.state),
-      speechBaselineDb: aiDebug?.speechBaselineDb,
+      userCuts: model.state.decisions.filter((d) => d.type === "umCut" && d.origin === "user"),
+      speechBaselineDb,
       hookTrims: model.state.decisions.filter((d) => d.type === "hookTrim" && d.state === "applied"),
       fillers: model.state.decisions.filter((d) => d.type === "fillerCut" && d.state === "applied"),
     });
     Share.share({ message: text }).catch(() => {});
-  }, [aiDebug]);
+  }, [aiDebug, captions.words, captions.transcribedUri]);
 
   // ── Auto-edit v2 (owner): decisions planned from the transcript ──────────────
   // Hook trim and filler cuts join the decision model (applied, each reversible) and
@@ -3719,6 +3745,7 @@ export default function EditScreen() {
           userEdit((s) => reapplyMarker(s, m));
           setMarkerSheet(null);
         }}
+        onCutSound={isOwnerAccount ? handleCutSound : undefined}
         onClose={() => setMarkerSheet(null)}
       />
       <AutoEditReviewSheet

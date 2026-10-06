@@ -49,8 +49,8 @@ export type EditState = {
 
 export const DECISION_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "umCut", "laughProtect", "zoom", "caption", "audio"];
 
-/** Laugh protection: padding, merge distance (see planLaughProtection) and the smallest cut piece worth keeping. */
-export const LAUGH_PROTECT_CONFIG = { padMs: 150, mergeGapMs: 400, minCutMs: 120 };
+/** Laugh protection: padding, how far apart laugh sounds may be to stay one episode (see planLaughProtection), and the smallest cut piece worth keeping. */
+export const LAUGH_PROTECT_CONFIG = { padMs: 150, mergeGapMs: 1200, minCutMs: 120 };
 export const CUT_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "umCut"];
 
 export function isCutType(type: DecisionType): boolean {
@@ -148,11 +148,14 @@ export function effectiveCutRanges(state: EditState, type?: DecisionType): Range
   const prot = protectedRangesOf(state);
   return state.decisions
     .filter((d) => isActiveCut(state, d) && (!type || d.type === type))
-    .flatMap((d) => effectivePieces({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }, prot));
+    // A cut the creator made by hand is never held back: the user wins.
+    .flatMap((d) =>
+      effectivePieces({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }, d.origin === "user" ? [] : prot),
+    );
 }
 
 export type ProtectionReport = {
-  ranges: Array<{ startMs: number; endMs: number; laughs: number }>;
+  ranges: Array<{ startMs: number; endMs: number; laughs: number; others: number }>;
   affected: Array<{
     id: string;
     type: DecisionType;
@@ -172,10 +175,11 @@ export function protectionReport(state: EditState): ProtectionReport {
       startMs: d.sourceStartMs,
       endMs: d.sourceEndMs,
       laughs: ((d.payload ?? {}) as { laughs?: number }).laughs ?? 1,
+      others: ((d.payload ?? {}) as { others?: number }).others ?? 0,
     }));
   const affected: ProtectionReport["affected"] = [];
   for (const d of state.decisions) {
-    if (!isActiveCut(state, d)) continue;
+    if (!isActiveCut(state, d) || d.origin === "user") continue;
     const pieces = effectivePieces({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }, prot);
     const unchanged = pieces.length === 1 && pieces[0]!.startMs === d.sourceStartMs && pieces[0]!.endMs === d.sourceEndMs;
     if (unchanged) continue;
@@ -327,7 +331,8 @@ export function mergePlan(
   const resolved = planned.map((p) => {
     const same = kept.find((k) => k.id === p.id);
     if (same) return same;
-    const blocked = blockers(p).some((t) => overlapRatio(p, t) >= 0.5);
+    // The creator's own decisions are never blocked by an earlier reversal.
+    const blocked = p.origin !== "user" && blockers(p).some((t) => overlapRatio(p, t) >= 0.5);
     return blocked ? { ...p, state: "reverted" as const } : p;
   });
   return {

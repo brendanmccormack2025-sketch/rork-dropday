@@ -10,11 +10,13 @@ type Props = {
   marker: TimelineMarker | null;
   onRestore: (marker: TimelineMarker) => void;
   onReapply: (marker: TimelineMarker) => void;
+  /** Owner debug candidates (um?, unsure, laugh): cut this sound. */
+  onCutSound?: (marker: TimelineMarker) => void;
   onClose: () => void;
 };
 
 /** What a marker stands for: removed footage (Restore), a restored cut (Re-apply) or a debug note. */
-export default function MarkerSheet({ marker, onRestore, onReapply, onClose }: Props) {
+export default function MarkerSheet({ marker, onRestore, onReapply, onCutSound, onClose }: Props) {
   const title =
     marker?.kind === "cut"
       ? "Removed here"
@@ -70,6 +72,11 @@ export default function MarkerSheet({ marker, onRestore, onReapply, onClose }: P
             {marker?.kind === "cut" && (
               <Pressable onPress={() => onRestore(marker)} hitSlop={8}>
                 <UiText style={styles.primary}>Restore</UiText>
+              </Pressable>
+            )}
+            {onCutSound && (marker?.kind === "um" || marker?.kind === "filler2" || marker?.kind === "laugh") && (
+              <Pressable onPress={() => onCutSound(marker)} hitSlop={8}>
+                <UiText style={styles.primary}>Cut this sound</UiText>
               </Pressable>
             )}
             {marker?.kind === "restored" && (

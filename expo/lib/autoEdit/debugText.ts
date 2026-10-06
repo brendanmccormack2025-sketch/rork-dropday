@@ -39,6 +39,8 @@ export type AiDebugInput = {
   umReport?: UmCutReport;
   /** Protected laugh ranges and the cuts they shortened or dropped. */
   protection?: ProtectionReport;
+  /** Sounds the creator cut by hand ("Cut this sound"). */
+  userCuts?: Decision[];
 };
 
 function outputTime(clips: EditClip[], uri: string, sourceMs: number): string {
@@ -51,7 +53,7 @@ export function formatAiDebug(input: AiDebugInput): string {
   const editedMs = clips.reduce((sum, c) => sum + Math.max(0, c.trimEndMs - c.trimStartMs), 0);
   const lines: string[] = [];
   lines.push("Trial AI debug");
-  lines.push(`Clip duration: ${formatClock(input.sourceDurationMs)} (edited ${formatClock(editedMs)})`);
+  // The transcript alignment summary comes first.
   const a = input.alignment;
   if (a) {
     const pct = (n: number) => `${Math.round(n * 100)}%`;
@@ -60,10 +62,13 @@ export function formatAiDebug(input: AiDebugInput): string {
       `Timeline check: ${a.wordCount} words ${formatClock(a.firstWordMs)}-${formatClock(a.lastWordMs)}, loudness ${formatClock(a.loudnessMs)}; ` +
         `word time on sound ${pct(a.shareAtZero)} as is, best ${pct(a.bestShare)} at ${shift}`,
     );
+  } else if (input.alignment === null) {
+    lines.push("Timeline check: unavailable (no transcript words)");
   }
   if (input.speechBaselineDb !== undefined) {
     lines.push(`Speech baseline: ${input.speechBaselineDb.toFixed(1)} dB`);
   }
+  lines.push(`Clip duration: ${formatClock(input.sourceDurationMs)} (edited ${formatClock(editedMs)})`);
 
   lines.push("", `Emphasis proposals (not applied): ${input.proposals.length}`);
   for (const d of input.proposals) {
@@ -92,7 +97,10 @@ export function formatAiDebug(input: AiDebugInput): string {
   if (prot) {
     lines.push("", `Protected laughs: ${prot.ranges.length}`);
     for (const r of prot.ranges) {
-      lines.push(`source ${formatClock(r.startMs)}-${formatClock(r.endMs)}  ${r.laughs} laugh sound${r.laughs === 1 ? "" : "s"}`);
+      lines.push(
+        `source ${formatClock(r.startMs)}-${formatClock(r.endMs)}  ${r.laughs} laugh sound${r.laughs === 1 ? "" : "s"}` +
+          (r.others > 0 ? ` (+${r.others} other sound${r.others === 1 ? "" : "s"} in the episode)` : ""),
+      );
     }
     lines.push(`Cuts changed by protection: ${prot.affected.length}`);
     for (const a of prot.affected) {
@@ -101,6 +109,17 @@ export function formatAiDebug(input: AiDebugInput): string {
           ? "dropped"
           : `${a.result} to ${a.pieces.map((p) => `${formatClock(p.startMs)}-${formatClock(p.endMs)}`).join(" + ")}`;
       lines.push(`${a.type}  source ${formatClock(a.startMs)}-${formatClock(a.endMs)}  ${what}`);
+    }
+  }
+
+  const mine = input.userCuts ?? [];
+  if (mine.length > 0) {
+    lines.push("", `Sounds you cut: ${mine.length}`);
+    for (const d of mine) {
+      const p = (d.payload ?? {}) as { cls?: string; mergedWithSilence?: boolean };
+      lines.push(
+        `source ${formatClock(d.sourceStartMs)}-${formatClock(d.sourceEndMs)}  ${p.cls === "um" ? "um?" : (p.cls ?? "sound")}  merged with silence: ${p.mergedWithSilence ? "yes" : "no"}  ${d.state}`,
+      );
     }
   }
 

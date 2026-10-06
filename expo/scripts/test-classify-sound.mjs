@@ -10,7 +10,7 @@ import {
 } from "../lib/autoEdit/classifySound.ts";
 import { checkAlignment } from "../lib/autoEdit/alignment.ts";
 import { appliedCutRanges, effectiveCutRanges, keepRangesOf, mapNonCutDecisions, protectedRangesOf, protectionReport, makeDecision, mergePlan, newEditState, restoreRange, setCategoryEnabled, setDecisionState } from "../lib/autoEdit/decisions.ts";
-import { planUmCuts } from "../lib/autoEdit/umCuts.ts";
+import { addUserSoundCut, planUmCuts } from "../lib/autoEdit/umCuts.ts";
 import { planLaughProtection } from "../lib/autoEdit/laughProtection.ts";
 import { buildCutMarkers, buildDebugMarkers, describeDecision } from "../lib/autoEdit/markers.ts";
 import { loudnessJumpScorer, planEmphasis, scoreEmphasis } from "../lib/autoEdit/emphasisMoments.ts";
@@ -289,8 +289,22 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   // planning: padding and merging
   eq("a laugh is padded 150 ms on each side", planLaughProtection([laugh(5000, 5300)]).map((d) => [d.type, d.sourceStartMs, d.sourceEndMs]), [["laughProtect", 4850, 5450]]);
   eq("laugh sounds within 400 ms of each other are one protected range", planLaughProtection([laugh(3000, 3200), laugh(3500, 3700)]).map((d) => [d.sourceStartMs, d.sourceEndMs, d.payload.laughs]), [[2850, 3850, 2]]);
-  eq("...but sounds more than 400 ms apart are separate ranges", planLaughProtection([laugh(3000, 3200), laugh(3700, 3900)]).length, 2);
+  eq("laugh sounds 1 s apart are still one episode (the gap is 1200 ms)", planLaughProtection([laugh(3000, 3200), laugh(4200, 4400)]).length, 1);
+  eq("...but sounds more than 1200 ms apart are separate episodes", planLaughProtection([laugh(3000, 3200), laugh(4500, 4700)]).length, 2);
   eq("only laughs are protected", planLaughProtection([{ ...laugh(1000, 1200), cls: "um" }, { ...laugh(2000, 2200), cls: "unsure" }]), []);
+
+  // an episode: pulses with 0.6 s and 0.8 s gaps (breathing) are ONE protected range, no seams
+  const pulses3 = [laugh(3000, 3200), laugh(3800, 4000), laugh(4800, 5000)];
+  const between1 = { ...laugh(3400, 3500), cls: "unsure" };
+  const episodePlan = planLaughProtection([...pulses3, between1, { ...laugh(4300, 4400), cls: "um" }]);
+  eq("three pulses with 0.6 s and 0.8 s gaps are one episode", episodePlan.map((d) => [d.sourceStartMs, d.sourceEndMs, d.payload.laughs]), [[2850, 5150, 3]]);
+  eq("an unsure and a um sound between the pulses belong to the episode", episodePlan[0].payload.others, 2);
+  const episode = newEditState(URI, [...episodePlan, cutOf("silenceCut", 3230, 3770), cutOf("silenceCut", 4030, 4770), cutOf("silenceCut", 1000, 1500)]);
+  eq("the silence cuts in the breathing gaps are dropped", ranges(effectiveCutRanges(episode)), [[1000, 1500]]);
+  eq("...so the episode is one unbroken stretch: no seams inside it", keepRangesOf(episode, D).filter((k) => k.endMs > 2850 && k.startMs < 5150).map((k) => [k.startMs, k.endMs]), [[1500, D]]);
+  eq("the report says the episode has 2 other sounds", protectionReport(episode).ranges.map((r) => [r.laughs, r.others]), [[3, 2]]);
+  const umInEpisode = planUmCuts(newEditState(URI, episodePlan), [{ ...laugh(3380, 3640), cls: "um" }], D);
+  eq("a um inside an episode is not cut", [umInEpisode.decisions.length, umInEpisode.report.skipped.map((x) => x.reason)], [0, ["inside a protected laugh"]]);
 
   // a silence cut between two laugh pulses is removed
   const between = stateOf([laugh(3000, 3200), laugh(3500, 3700)], cutOf("silenceCut", 3250, 3450));
@@ -361,6 +375,72 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   ], [true, true, true, true]);
   const dropText = formatAiDebug({ sourceDurationMs: D, clips: keepClips, sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [], protection: protectionReport(between) });
   eq("debug text says dropped", /silenceCut  source 0:03.3-0:03.5  dropped/.test(dropText), true);
+}
+
+// ── "Cut this sound": the creator decides ──
+{
+  const D = 20000;
+  const feature = { durationMs: 350, peakVsSpeechDb: 1, steadiness: 0.5, burstCount: 1, nearEmphasis: false, midSpeech: true };
+  const sound = (startMs, endMs, cls) => ({ startMs, endMs, lengthMs: endMs - startMs, cls, features: feature, why: [] });
+  const sil = (a, b) => makeDecision("silenceCut", a, b);
+  const ranges = (r) => r.map((x) => [x.startMs, x.endMs]);
+  const base = newEditState(URI, [sil(1000, 2000), sil(6000, 7000)]);
+  const baseKeep = ranges(keepRangesOf(base, D));
+
+  // applies: origin user, same padding, applied, in the Ums category
+  const cut = addUserSoundCut(base, sound(3000, 3350, "unsure"), D);
+  const mine = cut.decisions.find((d) => d.origin === "user");
+  eq("a user cut is an applied umCut decision with origin 'user', padded 30 ms each side", [mine.type, mine.origin, mine.state, mine.sourceStartMs, mine.sourceEndMs], ["umCut", "user", "applied", 3030, 3320]);
+  eq("it removes that time (one more seam)", ranges(keepRangesOf(cut, D)), [[0, 1000], [2000, 3030], [3320, 6000], [7000, D]]);
+  eq("it works for any class: um?, unsure and laugh", ["um", "unsure", "laugh"].map((c) => addUserSoundCut(base, sound(3000, 3350, c), D).decisions.filter((d) => d.origin === "user").length), [1, 1, 1]);
+  eq("its marker is a cut marker with the class in the label", buildCutMarkers(cut, D).flatMap((m) => m.items.map((i) => i.label)).filter((l) => l.startsWith("Cut sound")), ["Cut sound (unsure)"]);
+  eq("the sound's debug marker is gone once it is cut", buildDebugMarkers([], [sound(3000, 3350, "unsure")], keepRangesToClips(URI, keepRangesOf(cut, D)), URI, cut.decisions.filter((d) => d.type === "umCut")), []);
+
+  // merges with a nearby silence cut
+  const near = addUserSoundCut(base, sound(5600, 5950, "um"), D);
+  eq("next to a pause it merges: one cut, one seam", [near.decisions.find((d) => d.origin === "user").sourceEndMs, near.decisions.find((d) => d.origin === "user").payload.mergedWithSilence, ranges(keepRangesOf(near, D))], [6000, true, [[0, 1000], [2000, 5630], [7000, D]]]);
+  const sliver = addUserSoundCut(base, sound(2170, 2500, "um"), D);
+  eq("no slivers: a 200 ms piece next to a pause is bridged", ranges(keepRangesOf(sliver, D)).every((k) => k[1] - k[0] >= 250), true);
+
+  // restores exactly
+  const id = mine.id;
+  eq("Restore brings the keep ranges back exactly", ranges(keepRangesOf(setDecisionState(cut, id, "reverted"), D)), baseKeep);
+  eq("restoreRange over the sound does the same", ranges(keepRangesOf(restoreRange(cut, 3100, 3200), D)), baseKeep);
+  const again = addUserSoundCut(setDecisionState(cut, id, "reverted"), sound(3000, 3350, "unsure"), D);
+  eq("cutting it again after a restore applies it again", again.decisions.find((d) => d.id === id).state, "applied");
+
+  // survives re-planning, and beats earlier reversals
+  const replan = mergePlan(cut, [], ["umCut"]);
+  eq("it survives re-planning (user decisions are kept)", replan.state.decisions.some((d) => d.id === id && d.state === "applied"), true);
+  const aiPlan = planUmCuts(cut, [sound(10000, 10400, "um")], D);
+  eq("...when the um planner runs again", mergePlan(cut, aiPlan.decisions, ["umCut"]).state.decisions.filter((d) => d.origin === "user").length, 1);
+  const withTomb = setDecisionState(newEditState(URI, [makeDecision("umCut", 3030, 3320)]), "umCut:3030-3320", "reverted");
+  eq("an earlier reversal never blocks the creator's cut", addUserSoundCut(withTomb, sound(3000, 3350, "um"), D).decisions.filter((d) => d.state === "applied" && d.origin === "user").length, 1);
+
+  // allowed inside a laugh episode: the user wins
+  const episode = newEditState(URI, [makeDecision("laughProtect", 2850, 5150), sil(1000, 2000)]);
+  const inside = addUserSoundCut(episode, sound(3400, 3750, "laugh"), D);
+  eq("a user cut inside a laugh episode is NOT held back", ranges(effectiveCutRanges(inside)).some(([a, b]) => a === 3430 && b === 3720), true);
+  eq("...and the keep ranges show it", ranges(keepRangesOf(inside, D)).some(([a, b]) => b === 3430) && ranges(keepRangesOf(inside, D)).some(([a]) => a === 3720), true);
+  eq("auto cuts are still held back there", ranges(effectiveCutRanges({ ...inside, decisions: [...inside.decisions, makeDecision("silenceCut", 3000, 3300)] })).some(([a, b]) => a === 3000 && b === 3300), false);
+  eq("the protection report does not list the user's cut", protectionReport(inside).affected, []);
+  eq("Ums off hides user cuts with the other um cuts", ranges(keepRangesOf(setCategoryEnabled(inside, "umCut", false), D)).some(([a]) => a === 3720), false);
+
+  // debug text: alignment at the top
+  const clips = keepRangesToClips(URI, keepRangesOf(cut, D));
+  const alignment = { wordCount: 41, firstWordMs: 1200, lastWordMs: 47800, loudnessMs: 48800, shareAtZero: 0.64, bestShiftMs: 300, bestShare: 0.91 };
+  const text = formatAiDebug({ sourceDurationMs: D, clips, sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [], alignment, speechBaselineDb: -25.8, userCuts: cut.decisions.filter((d) => d.origin === "user") });
+  const lines = text.split("\n");
+  eq("the alignment summary and baseline are at the top of the share text", lines.slice(0, 4), [
+    "Trial AI debug",
+    "Timeline check: 41 words 0:01.2-0:47.8, loudness 0:48.8; word time on sound 64% as is, best 91% at +300 ms",
+    "Speech baseline: -25.8 dB",
+    "Clip duration: 0:20.0 (edited 0:17.7)",
+  ]);
+  eq("the cuts you made are listed", text.includes("Sounds you cut: 1") && /source 0:03.0-0:03.3  unsure  merged with silence: no  applied/.test(text), true);
+  eq("with no transcript the share text says so", formatAiDebug({ sourceDurationMs: D, clips, sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [], alignment: null }).split("\n")[1], "Timeline check: unavailable (no transcript words)");
+  const withOthers = formatAiDebug({ sourceDurationMs: D, clips, sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [], protection: { ranges: [{ startMs: 2850, endMs: 5150, laughs: 3, others: 2 }], affected: [] } });
+  eq("an episode is listed with its other sounds", withOthers.includes("source 0:02.9-0:05.2  3 laugh sounds (+2 other sounds in the episode)"), true);
 }
 
 // ── regression: the speech baseline and the timeline ──
