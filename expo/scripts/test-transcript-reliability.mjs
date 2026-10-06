@@ -6,7 +6,7 @@
  *
  *   node --experimental-strip-types scripts/test-transcript-reliability.mjs
  */
-import { createAnalysisCache, EMPTY_TRANSCRIPT_MIN_SOUND_MS, nonSilentMs } from "../lib/autoEdit/analysisCache.ts";
+import { createAnalysisCache, EMPTY_TRANSCRIPT_MIN_SOUND_MS, MIN_WORDS_PER_SOUND_SECOND, nonSilentMs } from "../lib/autoEdit/analysisCache.ts";
 import { mapTranscribeError, mapTranscription } from "../lib/transcription/map.ts";
 import { formatAiDebug } from "../lib/autoEdit/debugText.ts";
 import { keepRangesToClips } from "../lib/editModel.ts";
@@ -19,6 +19,8 @@ function eq(name, actual, expected) {
 }
 const URI = "file:///a.mov";
 const word = (text, startMs, endMs) => ({ text, startMs, endMs });
+/** n words, one per second: enough for a clip with 30 s of sound when n >= 15. */
+const many = (n) => Array.from({ length: n }, (_, i) => word(`w${i}`, i * 1000, i * 1000 + 300));
 
 /** 20 ms windows: `speechMs` of speech at -25 dB, the rest quiet (-80). */
 const loudness = (totalMs, speechMs) => ({
@@ -58,18 +60,66 @@ eq("the threshold is 2 s", EMPTY_TRANSCRIPT_MIN_SOUND_MS, 2000);
 {
   const storage = memoryStorage();
   let n = 0;
-  const { cache, calls } = makeCache({ loud: SPEECH_CLIP, storage, transcribe: async () => (++n < 3 ? { status: "ok", words: [] } : { status: "ok", words: [word("hi", 0, 300)] }) });
+  const { cache, calls } = makeCache({ loud: SPEECH_CLIP, storage, transcribe: async () => (++n < 3 ? { status: "ok", words: [] } : { status: "ok", words: many(20) }) });
   const first = await cache.transcriptWithInfo(URI);
   eq("ok + [] with 30 s of sound becomes an error", [first.result.status, first.result.code, first.fromCache], ["error", "EMPTY_TRANSCRIPT_WITH_SPEECH", false]);
   eq("...and nothing is stored", [...storage.store.keys()].filter((k) => k.includes("transcript:")), []);
   const second = await cache.transcriptWithInfo(URI);
   eq("it is retried next time (the recognizer runs again)", [second.result.status, calls.transcribe], ["error", 2]);
   const third = await cache.transcriptWithInfo(URI);
-  eq("a later good transcript is used and cached", [third.result.status, third.result.words.length, third.fromCache], ["ok", 1, false]);
+  eq("a later good transcript is used and cached", [third.result.status, third.result.words.length, third.fromCache], ["ok", 20, false]);
   const fourth = await cache.transcriptWithInfo(URI);
-  eq("...then reused from the cache", [fourth.result.words.length, fourth.fromCache, calls.transcribe], [1, true, 3]);
+  eq("...then reused from the cache", [fourth.result.words.length, fourth.fromCache, calls.transcribe], [20, true, 3]);
   eq("the cache key is reported", fourth.key, `${URI}|1000|5`);
 }
+// ── a sparse transcript (fewer words than half the seconds of sound) is not trusted ──
+{
+  const words = (n) => Array.from({ length: n }, (_, i) => word(`w${i}`, i * 1000, i * 1000 + 300));
+  eq("the rule: fewer than 1 word per 2 s of sound", MIN_WORDS_PER_SOUND_SECOND, 0.5);
+
+  const storage = memoryStorage();
+  let n = 0;
+  const { cache, calls } = makeCache({ loud: SPEECH_CLIP, storage, transcribe: async () => ({ status: "ok", words: words(++n < 3 ? 4 : 20) }) });
+  const first = await cache.transcriptWithInfo(URI);
+  eq("4 words for 30 s of sound -> SPARSE_TRANSCRIPT_WITH_SPEECH", [first.result.status, first.result.code, first.fromCache], ["error", "SPARSE_TRANSCRIPT_WITH_SPEECH", false]);
+  eq("the message says how sparse it is", first.result.message.startsWith("only 4 words for 30.0 s of sound"), true);
+  eq("...and it is not stored", [...storage.store.keys()].filter((k) => k.includes("transcript:")), []);
+  const second = await cache.transcriptWithInfo(URI);
+  eq("it is retried next time", [second.result.code, calls.transcribe], ["SPARSE_TRANSCRIPT_WITH_SPEECH", 2]);
+  const third = await cache.transcriptWithInfo(URI);
+  eq("20 words for 30 s of sound is fine and cached", [third.result.status, third.result.words.length, third.fromCache], ["ok", 20, false]);
+  const fourth = await cache.transcriptWithInfo(URI);
+  eq("...then reused", [fourth.fromCache, calls.transcribe], [true, 3]);
+
+  const exact = makeCache({ loud: SPEECH_CLIP, transcribe: async () => ({ status: "ok", words: words(15) }) });
+  eq("exactly sound-seconds / 2 words (15 for 30 s) is accepted", (await exact.cache.transcript(URI)).status, "ok");
+  const justUnder = makeCache({ loud: SPEECH_CLIP, transcribe: async () => ({ status: "ok", words: words(14) }) });
+  eq("one word fewer (14 for 30 s) is sparse", (await justUnder.cache.transcript(URI)).code, "SPARSE_TRANSCRIPT_WITH_SPEECH");
+
+  const short = makeCache({ loud: loudness(10000, 3000), transcribe: async () => ({ status: "ok", words: words(1) }) });
+  eq("1 word for 3 s of sound is below 1.5: sparse", (await short.cache.transcript(URI)).code, "SPARSE_TRANSCRIPT_WITH_SPEECH");
+  const shortOk = makeCache({ loud: loudness(10000, 3000), transcribe: async () => ({ status: "ok", words: words(2) }) });
+  eq("2 words for 3 s of sound is accepted", (await shortOk.cache.transcript(URI)).status, "ok");
+  const quiet = makeCache({ loud: SILENT_CLIP, transcribe: async () => ({ status: "ok", words: words(1) }) });
+  eq("a silent clip with one stray word is accepted", (await quiet.cache.transcript(URI)).status, "ok");
+
+  // a sparse transcript cached earlier is dropped for a clip with speech
+  const old = memoryStorage();
+  old.store.set(`trial:analysis:v1:transcript:${URI}|1000|5`, JSON.stringify(words(3)));
+  const redo = makeCache({ loud: SPEECH_CLIP, storage: old, transcribe: async () => ({ status: "ok", words: words(25) }) });
+  const r = await redo.cache.transcriptWithInfo(URI);
+  eq("a stale sparse transcript in storage is dropped and redone", [r.result.words.length, r.fromCache, redo.calls.transcribe], [25, false, 1]);
+
+  // the empty rule is unchanged
+  const empty = makeCache({ loud: SPEECH_CLIP, transcribe: async () => ({ status: "ok", words: [] }) });
+  eq("the empty-transcript rule still applies", (await empty.cache.transcript(URI)).code, "EMPTY_TRANSCRIPT_WITH_SPEECH");
+
+  // the code reaches the debug text
+  const clips = keepRangesToClips(URI, [{ startMs: 0, endMs: 10000 }]);
+  const text = formatAiDebug({ sourceDurationMs: 10000, clips, sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [], transcription: { status: "error", code: first.result.code, message: first.result.message, wordCount: 0, fromCache: false, key: first.key } });
+  eq("the debug text shows the SPARSE code", text.split("\n")[1].startsWith("Transcription: error (SPARSE_TRANSCRIPT_WITH_SPEECH: only 4 words for 30.0 s of sound"), true);
+}
+
 // ── a genuinely silent clip may be cached empty ──
 {
   const { cache, calls } = makeCache({ loud: SILENT_CLIP, storage: memoryStorage(), transcribe: async () => ({ status: "ok", words: [] }) });
@@ -81,10 +131,10 @@ eq("the threshold is 2 s", EMPTY_TRANSCRIPT_MIN_SOUND_MS, 2000);
 {
   const storage = memoryStorage();
   storage.store.set(`trial:analysis:v1:transcript:${URI}|1000|5`, "[]");
-  const { cache, calls } = makeCache({ loud: SPEECH_CLIP, storage, transcribe: async () => ({ status: "ok", words: [word("a", 0, 100), word("b", 200, 300)] }) });
+  const { cache, calls } = makeCache({ loud: SPEECH_CLIP, storage, transcribe: async () => ({ status: "ok", words: many(20) }) });
   const r = await cache.transcriptWithInfo(URI);
-  eq("a stale empty transcript is dropped and the clip is transcribed again", [r.result.status, r.result.words.length, r.fromCache, calls.transcribe], ["ok", 2, false, 1]);
-  eq("the new transcript replaced it in storage", storage.store.get(`trial:analysis:v1:transcript:${URI}|1000|5`), JSON.stringify([word("a", 0, 100), word("b", 200, 300)]));
+  eq("a stale empty transcript is dropped and the clip is transcribed again", [r.result.status, r.result.words.length, r.fromCache, calls.transcribe], ["ok", 20, false, 1]);
+  eq("the new transcript replaced it in storage", storage.store.get(`trial:analysis:v1:transcript:${URI}|1000|5`), JSON.stringify(many(20)));
 }
 // ── other results are untouched ──
 {
@@ -116,7 +166,7 @@ eq("the threshold is 2 s", EMPTY_TRANSCRIPT_MIN_SOUND_MS, 2000);
 // ── clearing the cache forces re-analysis ──
 {
   const storage = memoryStorage();
-  const { cache, calls } = makeCache({ loud: SPEECH_CLIP, storage, transcribe: async () => ({ status: "ok", words: [word("hi", 0, 300)] }) });
+  const { cache, calls } = makeCache({ loud: SPEECH_CLIP, storage, transcribe: async () => ({ status: "ok", words: many(20) }) });
   await cache.loudness(URI);
   await cache.transcript(URI);
   await cache.transcript(URI);
@@ -128,7 +178,7 @@ eq("the threshold is 2 s", EMPTY_TRANSCRIPT_MIN_SOUND_MS, 2000);
   await cache.loudness(URI);
   const again = await cache.transcriptWithInfo(URI);
   eq("after clear, loudness and transcript are analysed again", [calls.loudness, calls.transcribe, again.fromCache], [2, 2, false]);
-  const other = makeCache({ loud: SPEECH_CLIP, storage, transcribe: async () => ({ status: "ok", words: [word("hi", 0, 300)] }) });
+  const other = makeCache({ loud: SPEECH_CLIP, storage, transcribe: async () => ({ status: "ok", words: many(20) }) });
   await other.cache.transcript("file:///other.mov");
   await cache.clear(URI);
   eq("clearing one clip leaves another clip's cache alone", [...storage.store.keys()].some((k) => k.includes("other.mov")), true);

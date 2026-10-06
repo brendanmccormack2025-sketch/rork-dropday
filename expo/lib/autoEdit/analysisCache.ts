@@ -31,6 +31,12 @@ export type AnalysisDeps = {
  */
 export const EMPTY_TRANSCRIPT_MIN_SOUND_MS = 2000;
 
+/**
+ * A transcript with fewer words than this many per second of sound is sparse: the
+ * recognizer almost certainly missed speech (fewer than 1 word per 2 s of sound).
+ */
+export const MIN_WORDS_PER_SOUND_SECOND = 0.5;
+
 /** Milliseconds of audio above the silence detector's threshold. */
 export function nonSilentMs(loud: LoudnessData | null): number {
   if (!loud || loud.windows.length === 0) return 0;
@@ -141,10 +147,30 @@ export function createAnalysisCache(deps: AnalysisDeps) {
     }
   }
 
-  /** True when the audio of this source has real sound (so an empty transcript cannot be right). */
-  async function hasSpeechSound(uri: string): Promise<boolean> {
+  /**
+   * Why a transcript cannot be right for this audio, or null. Empty with more than
+   * EMPTY_TRANSCRIPT_MIN_SOUND_MS of sound, or fewer words than half the seconds of
+   * sound, is not believed (and never cached).
+   */
+  async function transcriptProblem(uri: string, words: Word[]): Promise<{ code: string; message: string } | null> {
     const loud = await loudness(uri).catch(() => null);
-    return nonSilentMs(loud) > EMPTY_TRANSCRIPT_MIN_SOUND_MS;
+    const soundMs = nonSilentMs(loud);
+    if (words.length === 0) {
+      return soundMs > EMPTY_TRANSCRIPT_MIN_SOUND_MS
+        ? {
+            code: "EMPTY_TRANSCRIPT_WITH_SPEECH",
+            message: "the recognizer returned no words, but the audio has sound; not cached, will retry next time",
+          }
+        : null;
+    }
+    const soundSeconds = soundMs / 1000;
+    if (words.length < soundSeconds * MIN_WORDS_PER_SOUND_SECOND) {
+      return {
+        code: "SPARSE_TRANSCRIPT_WITH_SPEECH",
+        message: `only ${words.length} words for ${soundSeconds.toFixed(1)} s of sound (fewer than one per 2 s); the recognizer probably missed speech; not cached, will retry next time`,
+      };
+    }
+    return null;
   }
 
   type TranscriptOutcome = { result: TranscriptResult; fromCache: boolean; key: string | null };
@@ -161,9 +187,9 @@ export function createAnalysisCache(deps: AnalysisDeps) {
       if (key) {
         const cached = transcriptMem.get(key) ?? (await readStored<Word[]>("transcript", key)) ?? undefined;
         if (cached) {
-          // A cached EMPTY transcript is trusted only if the audio is silent (it may
-          // have been stored by an older build, or after a recognizer that heard nothing).
-          if (cached.length > 0 || !(await hasSpeechSound(uri))) {
+          // A cached transcript that is empty or sparse for audio with sound is not
+          // trusted (an older build may have stored it): it is dropped and redone.
+          if (!(await transcriptProblem(uri, cached))) {
             transcriptMem.set(key, cached);
             return { result: { status: "ok", words: cached }, fromCache: true, key };
           }
@@ -174,16 +200,9 @@ export function createAnalysisCache(deps: AnalysisDeps) {
         runs.transcript++;
         return deps.transcribe(uri);
       });
-      if (result.status === "ok" && result.words.length === 0 && (await hasSpeechSound(uri))) {
-        return {
-          result: {
-            status: "error",
-            code: "EMPTY_TRANSCRIPT_WITH_SPEECH",
-            message: "the recognizer returned no words, but the audio has sound; not cached, will retry next time",
-          },
-          fromCache: false,
-          key,
-        };
+      if (result.status === "ok") {
+        const problem = await transcriptProblem(uri, result.words);
+        if (problem) return { result: { status: "error", ...problem }, fromCache: false, key };
       }
       if (result.status === "ok" && key) {
         transcriptMem.set(key, result.words);
