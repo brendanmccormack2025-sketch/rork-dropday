@@ -45,7 +45,8 @@ import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
 import { OWNER_USER_ID, isDebugOwner, isInternalTester } from "@/constants/debug";
 import CaptionsExplainer from "@/components/CaptionsExplainer";
-import { useOwnerTranscript } from "@/lib/transcription/useOwnerTranscript";
+import CaptionPreview from "@/components/CaptionPreview";
+import { useCaptions } from "@/lib/transcription/useCaptions";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { formatRenderStats, recordRenderStats, reportRender } from "@/lib/renderReport";
 import { RenderAhead, type AheadState } from "@/lib/renderAhead";
@@ -284,7 +285,28 @@ export default function EditScreen() {
   // play that ONE finished file in the preview while it matches the timeline.
   const aheadRef = useRef<RenderAhead | null>(null);
   const [aheadState, setAheadState] = useState<AheadState>({ kind: "idle" });
-  const transcript = useOwnerTranscript(isDebugOwner(user?.id), clips);
+  // Auto-captions (owner only): after silence detection finishes, transcribe on-device,
+  // then render-ahead starts with the captions in it.
+  const [autoEditRunning, setAutoEditRunning] = useState(false);
+  const [autoEditFinished, setAutoEditFinished] = useState(false);
+  const firstClip0 = clips[0];
+  const autoEditPossible =
+    AUTO_EDIT_ENABLED &&
+    !reactingTo &&
+    !rootDropId &&
+    !draftId &&
+    clips.length === 1 &&
+    firstClip0?.type === "video" &&
+    (firstClip0.durationMs ?? 0) > 0 &&
+    (firstClip0.trimStartMs ?? 0) === 0 &&
+    !((firstClip0.trimEndMs ?? 0) > 0 && (firstClip0.trimEndMs ?? 0) < (firstClip0.durationMs ?? 0) - 50);
+  const captions = useCaptions(
+    isDebugOwner(user?.id),
+    clips,
+    !autoEditRunning && (autoEditFinished || !autoEditPossible),
+  );
+  const captionOverlaysRef = useRef(captions.overlays);
+  captionOverlaysRef.current = captions.overlays;
   useEffect(() => {
     const ahead = new RenderAhead();
     aheadRef.current = ahead;
@@ -296,10 +318,16 @@ export default function EditScreen() {
     };
   }, []);
   useEffect(() => {
-    aheadRef.current?.update({ clips, isRoot: !reactingTo && !rootDropId, userId: user?.id });
-  }, [clips, reactingTo, rootDropId, user?.id]);
+    aheadRef.current?.update({
+      clips,
+      isRoot: !reactingTo && !rootDropId,
+      userId: user?.id,
+      captions: captions.overlays,
+      hold: captions.pending,
+    });
+  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captions.pending]);
   const aheadReady = aheadState.kind === "ready" ? aheadState : null;
-  const aheadSignature = aheadRef.current?.signatureOf(clips) ?? null;
+  const aheadSignature = aheadRef.current?.signatureOf(clips, captions.overlays) ?? null;
   const aheadMatches = !!aheadReady && aheadReady.signature === aheadSignature;
   // The rendered file plays only while it matches the timeline and no clip is being trimmed.
   const previewMode = aheadMatches && selectedClipId === null;
@@ -1943,7 +1971,6 @@ export default function EditScreen() {
   // ── Auto-edit: background silence analysis ───────────────────────────
   // Root posts only, one untrimmed video clip, once per editor session. Never
   // blocks the editor or Post; every failure is log-only.
-  const [autoEditRunning, setAutoEditRunning] = useState(false);
   // 0-1 while the post is being rendered; null otherwise.
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
   const [autoEditNote, setAutoEditNote] = useState<string | null>(null);
@@ -2134,7 +2161,10 @@ export default function EditScreen() {
     })()
       .catch((e) => console.warn("[edit] autoEdit failed", (e as Error)?.message ?? e))
       .finally(() => {
-        if (mountedRef.current) setAutoEditRunning(false);
+        if (mountedRef.current) {
+          setAutoEditRunning(false);
+          setAutoEditFinished(true);
+        }
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clips, user?.id, reactingTo, rootDropId, draftId]);
@@ -2303,7 +2333,7 @@ export default function EditScreen() {
       let renderNote: string = skipReason ? `Not rendered: ${skipReason}` : "";
       if (!skipReason) {
         const ahead = aheadRef.current;
-        const signature = ahead?.signatureOf(clips) ?? null;
+        const signature = ahead?.signatureOf(clips, captionOverlaysRef.current) ?? null;
         const { editMs } = buildRenderEdit(clips);
         let handled = false;
 
@@ -2358,7 +2388,7 @@ export default function EditScreen() {
           await ahead?.cancelAndSuspend();
           setRenderProgress(0);
           try {
-            const outcome = await renderForPost(clips, setRenderProgress);
+            const outcome = await renderForPost(clips, setRenderProgress, captionOverlaysRef.current);
             if (outcome.ok) {
               rendered = outcome.edit;
               const stats = { kind: "post" as const, renderMs: outcome.renderMs, durationMs: outcome.edit.durationMs, sizeBytes: outcome.edit.sizeBytes };
@@ -2724,6 +2754,17 @@ export default function EditScreen() {
             </UiText>
           </View>
         )}
+        {isDebugOwner(user?.id) && (
+          <Pressable
+            onPress={() => captions.setCaptionsOn(!captions.captionsOn)}
+            style={[styles.captionToggle, { top: insets.top + 62 }]}
+            hitSlop={8}
+          >
+            <UiText style={styles.aheadChipText}>
+              {captions.captionsOn ? (captions.pending ? "Captions: transcribing..." : "Captions: on") : "Captions: off"}
+            </UiText>
+          </Pressable>
+        )}
         <Pressable
           style={styles.previewArea}
           onLayout={(e) => {
@@ -2865,6 +2906,18 @@ export default function EditScreen() {
                   />
                 </View>
               </Pressable>
+            )}
+
+            {isVideo && isDebugOwner(user?.id) && captions.captionsOn && (
+              <CaptionPreview
+                lines={captions.lines}
+                positionMs={displayPosition}
+                frameW={frameDims.w}
+                frameH={frameDims.h}
+                invisible={previewMode}
+                onEditStart={() => setIsPlaying(false)}
+                onEdit={captions.editLine}
+              />
             )}
 
             {/* Draggable text overlays */}
@@ -3184,9 +3237,9 @@ export default function EditScreen() {
       </View>
 
       <CaptionsExplainer
-        visible={transcript.explainerVisible}
-        onContinue={transcript.onContinue}
-        onNotNow={transcript.onNotNow}
+        visible={captions.explainerVisible}
+        onContinue={captions.onContinue}
+        onNotNow={captions.onNotNow}
       />
 
       {/* ── Text overlay editor modal ─────────────────────────────── */}
@@ -3420,6 +3473,14 @@ const styles = StyleSheet.create({
   aheadChip: {
     position: "absolute",
     left: 16,
+    zIndex: 5,
+    backgroundColor: theme.text,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  captionToggle: {
+    position: "absolute",
+    right: 16,
     zIndex: 5,
     backgroundColor: theme.text,
     paddingHorizontal: 10,
