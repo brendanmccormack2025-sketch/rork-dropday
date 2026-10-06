@@ -7,6 +7,8 @@ import { sourceToOutputMs, type EditClip } from "../editModel.ts";
 import type { Decision } from "./decisions.ts";
 import type { Alignment } from "./alignment.ts";
 import { formatFeatures, type ClassifiedSound } from "./classifySound.ts";
+import { outputPositionOfSource } from "./markers.ts";
+import type { UmCutReport } from "./umCuts.ts";
 import type { UnexplainedSound } from "./fillerCuts.ts";
 
 /** m:ss.s, rounded to tenths first so 59.96 s reads 1:00.0. */
@@ -32,6 +34,8 @@ export type AiDebugInput = {
   /** Timeline check (words vs loudness) and the speech baseline, to tune from real clips. */
   alignment?: Alignment | null;
   speechBaselineDb?: number;
+  /** The applied and skipped method-2 um cuts, with the seam counts. */
+  umReport?: UmCutReport;
 };
 
 function outputTime(clips: EditClip[], uri: string, sourceMs: number): string {
@@ -79,6 +83,27 @@ export function formatAiDebug(input: AiDebugInput): string {
         ? `${outputTime(clips, uri, c.startMs)}  ${c.cls === "um" ? "um?" : c.cls}  ${formatFeatures(c.features)}`
         : `${outputTime(clips, uri, c.startMs)}  ${Math.round(c.lengthMs)} ms  sound with no transcript word`,
     );
+  }
+
+  const report = input.umReport;
+  if (report) {
+    const keep = clips.filter((c) => c.uri === uri).map((c) => ({ startMs: c.trimStartMs, endMs: c.trimEndMs }));
+    lines.push("", `Um cuts, method 2 (applied): ${report.applied.length}`);
+    for (const u of report.applied) {
+      lines.push(
+        `${formatClock(outputPositionOfSource(keep, u.startMs))}  ${Math.round(u.lengthMs)} ms  merged with silence: ${u.mergedWithSilence ? "yes" : "no"}`,
+      );
+    }
+    lines.push(`Um candidates skipped: ${report.skipped.length}`);
+    for (const u of report.skipped) {
+      lines.push(`${outputTime(clips, uri, u.startMs)}  ${Math.round(u.lengthMs)} ms  ${u.reason}`);
+    }
+    lines.push(`Seams: ${report.finalSeams} final vs ${report.silenceOnlySeams} silence-only`);
+    if (report.seamLimit.capped) {
+      lines.push(
+        `Seam limit hit: at most ${report.seamLimit.allowed} new seams for ${formatClock(report.seamLimit.editedMs)} edited; only the longest ums were applied`,
+      );
+    }
   }
 
   lines.push("", `Hook trim (applied): ${input.hookTrims.length}`);

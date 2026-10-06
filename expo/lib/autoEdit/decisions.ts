@@ -17,7 +17,7 @@ import {
 } from "../editModel.ts";
 
 /** 'audio' is reserved for future text-to-speech; nothing implements it yet. */
-export type DecisionType = "silenceCut" | "hookTrim" | "fillerCut" | "zoom" | "caption" | "audio";
+export type DecisionType = "silenceCut" | "hookTrim" | "fillerCut" | "umCut" | "zoom" | "caption" | "audio";
 
 export type Decision = {
   /** Stable: derived from type + rounded source range. */
@@ -38,8 +38,8 @@ export type EditState = {
   categoryEnabled: Record<DecisionType, boolean>;
 };
 
-export const DECISION_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "zoom", "caption", "audio"];
-export const CUT_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut"];
+export const DECISION_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "umCut", "zoom", "caption", "audio"];
+export const CUT_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "umCut"];
 
 export function isCutType(type: DecisionType): boolean {
   return CUT_TYPES.includes(type);
@@ -86,7 +86,8 @@ function sortDecisions(list: Decision[]): Decision[] {
 }
 
 function isActiveCut(state: EditState, d: Decision): boolean {
-  return isCutType(d.type) && d.state === "applied" && state.categoryEnabled[d.type];
+  // A category missing from an older saved state counts as on.
+  return isCutType(d.type) && d.state === "applied" && state.categoryEnabled[d.type] !== false;
 }
 
 // ── Render derivation ───────────────────────────────────────────────────────

@@ -74,7 +74,10 @@ export function describeDecision(d: Decision): MarkerItem {
       label = `Silence ${seconds(lengthMs)}`;
       break;
     case "fillerCut":
-      label = payload.method === 2 ? `Filler (${payload.text ?? "um"})` : `Filler '${payload.text ?? "filler"}'`;
+      label = `Filler '${payload.text ?? "filler"}'`;
+      break;
+    case "umCut":
+      label = "Um";
       break;
     case "hookTrim":
       label =
@@ -94,7 +97,7 @@ export function describeDecision(d: Decision): MarkerItem {
       label = d.type;
   }
   const sound =
-    payload.method === 2 && payload.cls && payload.features
+    d.type === "umCut" && payload.cls && payload.features
       ? { cls: payload.cls, features: payload.features }
       : undefined;
   return { decisionId: d.id, type: d.type, label, lengthMs, ...(sound ? { sound } : {}) };
@@ -212,7 +215,12 @@ export function buildDebugMarkers(
   candidates: Array<UnexplainedSound & Partial<Pick<ClassifiedSound, "cls" | "features" | "why">>>,
   clips: EditClip[],
   sourceUri: string,
+  /** The um cuts in the state (any state): a candidate that became one shows as a cut marker instead. */
+  umDecisions: Decision[] = [],
 ): TimelineMarker[] {
+  const cutUms = new Set(
+    umDecisions.map((d) => (d.payload as { original?: { startMs: number } } | undefined)?.original?.startMs),
+  );
   const out: TimelineMarker[] = [];
   proposals.forEach((d, i) => {
     const outputMs = sourceToOutputMs(clips, d.sourceStartMs, sourceUri);
@@ -229,6 +237,7 @@ export function buildDebugMarkers(
     });
   });
   candidates.forEach((c, i) => {
+    if (c.cls === "um" && cutUms.has(c.startMs)) return;
     const outputMs = sourceToOutputMs(clips, c.startMs, sourceUri);
     if (outputMs === null) return;
     const kind: MarkerKind = c.cls === "laugh" ? "laugh" : c.cls === "um" ? "um" : "filler2";

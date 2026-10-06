@@ -9,8 +9,9 @@ import {
   speechMedianDb,
 } from "../lib/autoEdit/classifySound.ts";
 import { checkAlignment } from "../lib/autoEdit/alignment.ts";
-import { appliedCutRanges, keepRangesOf, newEditState, setCategoryEnabled } from "../lib/autoEdit/decisions.ts";
-import { buildDebugMarkers } from "../lib/autoEdit/markers.ts";
+import { appliedCutRanges, keepRangesOf, makeDecision, mergePlan, newEditState, restoreRange, setCategoryEnabled, setDecisionState } from "../lib/autoEdit/decisions.ts";
+import { planUmCuts } from "../lib/autoEdit/umCuts.ts";
+import { buildCutMarkers, buildDebugMarkers, describeDecision } from "../lib/autoEdit/markers.ts";
 import { loudnessJumpScorer, planEmphasis, scoreEmphasis } from "../lib/autoEdit/emphasisMoments.ts";
 import { buildAiEditState } from "../lib/autoEdit/plan.ts";
 import { formatAiDebug } from "../lib/autoEdit/debugText.ts";
@@ -43,11 +44,7 @@ const ctxOf = (windows, words = speechWords) => ({ windows, windowMs: WIN, words
 const classOf = (windows, c, words) => classifySound(c, ctxOf(windows, words), []).cls;
 
 // ── config ──
-eq("every threshold lives in one exported config", Object.keys(SOUND_CLASSIFIER_CONFIG).sort(), [
-  "burstMinGapMs", "burstMinPulseMs", "burstThresholdFraction", "laughMinBursts", "laughPeakAboveSpeechDb", "laughPeakMinBursts",
-  "midSpeechOverlapSlackMs", "midSpeechWindowMs", "minWordsForBaseline", "nearEmphasisMs", "umMaxCv", "umMaxMs", "umMaxPeakAboveSpeechDb",
-  "umMinMs", "umRequiresMidSpeech",
-]);
+eq("every threshold lives in one exported config", Object.keys(SOUND_CLASSIFIER_CONFIG).sort(), ["burstMinGapMs", "burstMinPulseMs", "burstThresholdFraction", "laughMinBursts", "laughPeakAboveSpeechDb", "laughPeakMinBursts", "midSpeechOverlapSlackMs", "midSpeechWindowMs", "minWordsForBaseline", "nearEmphasisMs", "umEdgePaddingMs", "umMaxCv", "umMaxMs", "umMaxPeakAboveSpeechDb", "umMergeGapMs", "umMinCutMs", "umMinKeepMs", "umMinMs", "umRequiresMidSpeech", "umSecondsPerNewSeam"]);
 
 // ── um: flat, short, mid-speech ──
 {
@@ -55,6 +52,7 @@ eq("every threshold lives in one exported config", Object.keys(SOUND_CLASSIFIER_
   const windows = windowsOf(12000, [...speechStretches, [1160, 1460, -31]]);
   const r = classifySound(um, ctxOf(windows), []);
   eq("synthetic um -> um", r.cls, "um");
+eq("the um cut settings", [SOUND_CLASSIFIER_CONFIG.umEdgePaddingMs, SOUND_CLASSIFIER_CONFIG.umMinCutMs, SOUND_CLASSIFIER_CONFIG.umMergeGapMs, SOUND_CLASSIFIER_CONFIG.umMinKeepMs, SOUND_CLASSIFIER_CONFIG.umSecondsPerNewSeam, SOUND_CLASSIFIER_CONFIG.umMaxCv], [30, 150, 120, 250, 3, 0.35]);
 eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFIER_CONFIG.laughPeakAboveSpeechDb, SOUND_CLASSIFIER_CONFIG.laughPeakMinBursts, SOUND_CLASSIFIER_CONFIG.umMaxMs, SOUND_CLASSIFIER_CONFIG.umMaxPeakAboveSpeechDb], [3, 6, 2, 900, 3]);
   eq("um features", [r.features.durationMs, Math.round(r.features.peakVsSpeechDb * 10) / 10, Math.round(r.features.steadiness * 1000) / 1000, r.features.burstCount, r.features.nearEmphasis, r.features.midSpeech], [300, -3, 0, 1, false, true]);
   const far = classifySound(cand(10000, 10300), ctxOf(windowsOf(12000, [...speechStretches, [10000, 10300, -31]])), []);
@@ -114,53 +112,120 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   eq("shorter than 150 ms is not a um", tooShort.cls, "unsure");
 }
 
-// ── method 2 is display only ──
+// ── method 2: ums are cut (owner), laughs and unsure sounds never ──
 {
   const pulses = (i) => (i % 8 < 5 ? -20 : -45);
   const windows = windowsOf(12000, [...speechStretches, [1160, 1460, -31], [2720, 3180, pulses], [4560, 4860, -24]]);
   const sounds = analyzeUnexplained(windows, WIN, 12000, speechWords);
-  eq("end to end: one um?, one laugh, one unsure", sounds.map((s) => [s.startMs, s.cls]), [[1160, "um"], [2720, "laugh"], [4560, "unsure"]]);
+  eq("end to end: one um, one laugh, one unsure", sounds.map((s) => [s.startMs, s.cls]), [[1160, "um"], [2720, "laugh"], [4560, "unsure"]]);
   const state = buildAiEditState({ uri: URI, durationMs: 12000, windows, words: speechWords });
-  eq("no method-2 classification creates a filler cut", state.decisions.filter((d) => d.type === "fillerCut"), []);
-  eq("...none of them is an applied decision at all", state.decisions.filter((d) => [1160, 2720, 4560].includes(d.sourceStartMs)), []);
+  const ums = state.decisions.filter((d) => d.type === "umCut");
+  eq("the um becomes one applied cut decision in the Ums category, padded 30 ms each side", ums.map((d) => [d.sourceStartMs, d.sourceEndMs, d.state, d.origin]), [[1190, 1430, "applied", "ai"]]);
+  eq("the laugh and the unsure sound are never cut", state.decisions.filter((d) => d.sourceStartMs < 4860 && d.sourceEndMs > 2720 && d.sourceStartMs !== 0), []);
   const keep = keepRangesOf(state, 12000);
-  eq("the um? footage is kept", keep.some((k) => k.startMs <= 1160 && k.endMs >= 1460), true);
   eq("the laugh footage is kept", keep.some((k) => k.startMs <= 2720 && k.endMs >= 3180), true);
   eq("the unsure footage is kept", keep.some((k) => k.startMs <= 4560 && k.endMs >= 4860), true);
+  eq("the um footage is cut, its edges are kept", [keep.some((k) => k.startMs < 1430 && k.endMs > 1190 && !(k.endMs <= 1190)), keep.some((k) => k.endMs === 1190), keep.some((k) => k.startMs === 1430)], [false, true, true]);
+  eq("Ums off: the keep ranges have no um seam", keepRangesOf(setCategoryEnabled(state, "umCut", false), 12000).some((k) => k.endMs === 1190), false);
   // laughs feed zooms
   const zooms = planEmphasis({ windows, windowMs: WIN, words: speechWords, durationMs: 12000, laughs: sounds.filter((s) => s.cls === "laugh") });
   const laugh = zooms.find((z) => z.payload.reasons.includes("laugh"));
   eq("a laugh is an emphasis moment with a strong score", [!!laugh, laugh.sourceStartMs, laugh.payload.score >= 2, laugh.state], [true, 2720, true, "reverted"]);
   eq("without laughs there is no laugh reason", planEmphasis({ windows, windowMs: WIN, words: speechWords, durationMs: 12000 }).some((z) => z.payload.reasons.includes("laugh")), false);
 
-  // markers: um? gets its own display-only marker
-  const clips = keepRangesToClips(URI, [{ startMs: 0, endMs: 12000 }]);
-  const markers = buildDebugMarkers([], sounds, clips, URI);
-  eq("debug markers: um? (blue), laugh (orange), unsure (green)", markers.map((m) => [m.kind, m.outputMs, m.detail.cls, m.items[0].label]), [
-    ["um", 1160, "um", "um?"],
-    ["laugh", 2720, "laugh", "Laugh (never cut)"],
-    ["filler2", 4560, "unsure", "Unexplained sound"],
-  ]);
-  eq("tapping shows the class and features", [markers[0].detail.cls, markers[0].detail.features.durationMs], ["um", 300]);
+  // markers: the applied um is a cut marker labeled Um; laugh/unsure stay debug markers
+  const clips = keepRangesToClips(URI, keep);
+  const cutMarkers = buildCutMarkers(state, 12000);
+  eq("an applied um cut shows as a cut marker labeled Um", cutMarkers.filter((m) => m.items.some((i) => i.label === "Um")).length, 1);
+  eq("its marker carries the class and features", describeDecision(ums[0]).sound.cls, "um");
+  const markers = buildDebugMarkers([], sounds, clips, URI, ums);
+  eq("debug markers: no um? for a um that was cut; laugh (orange), unsure (green)", markers.map((m) => [m.kind, m.detail.cls]), [["laugh", "laugh"], ["filler2", "unsure"]]);
+  const uncut = buildDebugMarkers([], sounds, keepRangesToClips(URI, [{ startMs: 0, endMs: 12000 }]), URI, []);
+  eq("a um that was NOT cut still shows as um?", uncut.filter((m) => m.kind === "um").map((m) => m.items[0].label), ["um?"]);
+  // reversible, user wins, Restore works
+  const umId = ums[0].id;
+  const reverted = setDecisionState(state, umId, "reverted");
+  const again = planUmCuts(reverted, sounds, 12000);
+  eq("a reverted um stays reverted when planning runs again", mergePlan(reverted, again.decisions, ["umCut"]).resolved.map((d) => d.state), ["reverted"]);
+  eq("Restore on the um's seam reverts it", restoreRange(state, 1200, 1300).decisions.find((d) => d.id === umId).state, "reverted");
+}
 
-  // debug text: counts per class, and the features of every um?
-  const text = formatAiDebug({ sourceDurationMs: 12000, clips, sourceUri: URI, proposals: [], candidates: sounds, hookTrims: [], fillers: [] });
-  eq("debug text counts per class and lists each candidate's features", [
-    text.includes("(display only, never cut): 3 (um? 1, laugh 1, unsure 1)"),
-    text.split("\n").filter((l) => /^\d:\d\d\.\d  (um\?|laugh|unsure)/.test(l)),
-  ], [true, [
-    `0:01.2  um?  ${formatFeatures(sounds[0].features)}`,
-    `0:02.7  laugh  ${formatFeatures(sounds[1].features)}`,
-    `0:04.6  unsure  ${formatFeatures(sounds[2].features)}`,
-  ]]);
-  eq("there is no applied method-2 section any more", text.includes("method 2 (applied)"), false);
-  eq("features format", formatFeatures({ durationMs: 300, peakVsSpeechDb: -2.14, steadiness: 0.1849, burstCount: 1, nearEmphasis: false, midSpeech: true }), "300 ms  peak vs speech -2.1 dB  steadiness 0.18  bursts 1  near emphasis no  mid-speech yes");
+// ── um cut rules: padding, merging, slivers, safety cap ──
+{
+  const D = 20000;
+  const feature = (len) => ({ durationMs: len, peakVsSpeechDb: -3, steadiness: 0.1, burstCount: 1, nearEmphasis: false, midSpeech: true });
+  const um = (startMs, endMs, cls = "um") => ({ startMs, endMs, lengthMs: endMs - startMs, cls, features: feature(endMs - startMs), why: [] });
+  const sil = (a, b) => makeDecision("silenceCut", a, b);
+  const baseOf = (...ds) => newEditState(URI, ds);
+  const plan = (base, sounds) => planUmCuts(base, sounds, D);
+  const ranges = (r) => r.map((x) => [x.startMs, x.endMs]);
+
+  // padding
+  const padded = plan(baseOf(), [um(5000, 5400)]);
+  eq("padding: starts 30 ms after the candidate begins, ends 30 ms before it ends", padded.decisions.map((d) => [d.sourceStartMs, d.sourceEndMs]), [[5030, 5370]]);
+  const keepP = keepRangesOf(mergePlan(baseOf(), padded.decisions, ["umCut"]).state, D);
+  eq("padding keeps the neighbouring words intact (their edges survive)", [keepP.some((k) => k.startMs <= 5000 && k.endMs === 5030), keepP.some((k) => k.startMs === 5370 && k.endMs >= 5400)], [true, true]);
+  eq("a um of 210 ms leaves 150 ms: cut", plan(baseOf(), [um(5000, 5210)]).decisions.length, 1);
+  const short = plan(baseOf(), [um(5000, 5200)]);
+  eq("a um shorter than 150 ms after padding is skipped, with the reason", [short.decisions.length, short.report.skipped.map((x) => x.reason)], [0, ["shorter than 150 ms after padding"]]);
+  eq("laugh and unsure sounds are never planned as cuts", plan(baseOf(), [um(5000, 5400, "laugh"), um(7000, 7400, "unsure")]).decisions, []);
+
+  // merge with pauses: one seam, not two
+  const withPause = baseOf(sil(6000, 7000));
+  const merged = plan(withPause, [um(5600, 5950)]);
+  eq("a um within 120 ms of a silence cut is stretched to touch it", merged.decisions.map((d) => [d.sourceStartMs, d.sourceEndMs, d.payload.mergedWithSilence]), [[5630, 6000, true]]);
+  const mergedState = mergePlan(withPause, merged.decisions, ["umCut"]).state;
+  eq("...so the keep ranges have one seam, not two", ranges(keepRangesOf(mergedState, D)), [[0, 5630], [7000, D]]);
+  eq("...and the seam count equals the silence-only count", [merged.report.finalSeams, merged.report.silenceOnlySeams], [1, 1]);
+  const near = plan(withPause, [um(5500, 5850)]);
+  eq("a um 180 ms before a pause leaves a 180 ms sliver, so it is bridged to the pause (one seam)", [near.decisions[0].sourceEndMs, near.report.finalSeams], [6000, 1]);
+  const apart = plan(withPause, [um(5200, 5550)]);
+  eq("a um 480 ms before a pause is its own cut (a second seam)", [apart.decisions[0].payload.mergedWithSilence, apart.report.finalSeams], [false, 2]);
+  const between = plan(baseOf(sil(4000, 5000), sil(5600, 7000)), [um(5100, 5500)]);
+  eq("a um between two pauses merges with both", [between.decisions[0].sourceStartMs, between.decisions[0].sourceEndMs], [5000, 5600]);
+
+  // slivers
+  const sliverBase = baseOf(sil(8000, 9000));
+  const sliver = plan(sliverBase, [um(9170, 9500)]);
+  eq("two cuts leaving a 200 ms piece are merged: the um stretches over it", sliver.decisions.map((d) => [d.sourceStartMs, d.sourceEndMs]), [[9000, 9470]]);
+  eq("...no kept piece is shorter than 250 ms", keepRangesOf(mergePlan(sliverBase, sliver.decisions, ["umCut"]).state, D).every((k) => k.endMs - k.startMs >= 250), true);
+  const ok = plan(sliverBase, [um(9230, 9560)]);
+  eq("a 260 ms piece is kept (not a sliver)", ok.decisions.map((d) => [d.sourceStartMs, d.sourceEndMs]), [[9260, 9530]]);
+  const twoUms = plan(baseOf(), [um(10000, 10330), um(10450, 10780)]);
+  eq("a sliver between two ums merges them into one cut", ranges(keepRangesOf(mergePlan(baseOf(), twoUms.decisions, ["umCut"]).state, D)), [[0, 10030], [10750, D]]);
+  const silenceSlivers = plan(baseOf(sil(1000, 2000), sil(2100, 3000)), [um(9000, 9300)]);
+  eq("a short piece between two silence cuts is not touched", ranges(keepRangesOf(mergePlan(baseOf(sil(1000, 2000), sil(2100, 3000)), silenceSlivers.decisions, ["umCut"]).state, D)).slice(0, 2), [[0, 1000], [2000, 2100]]);
+
+  // safety cap: 1 new seam per 3 s of edited duration (20 s -> 6)
+  const many = Array.from({ length: 10 }, (_, i) => um(1000 + i * 1800, 1000 + i * 1800 + 300 + i * 20));
+  const capped = plan(baseOf(), many);
+  eq("the safety cap holds: 6 new seams for 20 s", [capped.decisions.length, capped.report.finalSeams, capped.report.seamLimit.allowed, capped.report.seamLimit.capped], [6, 6, 6, true]);
+  eq("the longest ums are the ones applied", capped.decisions.map((d) => d.payload.original.startMs).sort((a, b) => a - b), many.slice(4).map((m) => m.startMs));
+  eq("the others are skipped with the reason", capped.report.skipped.map((x) => x.reason), Array(4).fill("seam limit (6 new seams allowed)"));
+  const fine = plan(baseOf(), many.slice(0, 5));
+  eq("under the limit nothing is skipped", [fine.decisions.length, fine.report.seamLimit.capped], [5, false]);
+  const merges = plan(baseOf(sil(1000, 2000)), [um(2060, 2400)]);
+  eq("a merged um adds no seam, so it never counts against the cap", [merges.report.finalSeams, merges.report.silenceOnlySeams], [1, 1]);
+
+  // the debug text
+  const clips2 = keepRangesToClips(URI, keepRangesOf(mergePlan(baseOf(), capped.decisions, ["umCut"]).state, D));
+  const text = formatAiDebug({ sourceDurationMs: D, clips: clips2, sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [], umReport: capped.report });
+  eq("debug text: applied ums (time, length, merged), skipped with reasons, seam counts, the cap note", [
+    text.includes("Um cuts, method 2 (applied): 6"),
+    text.includes("Um candidates skipped: 4"),
+    text.includes("seam limit (6 new seams allowed)"),
+    text.includes("Seams: 6 final vs 0 silence-only"),
+    text.includes("Seam limit hit: at most 6 new seams for 0:20.0 edited"),
+    /\d:\d\d\.\d  \d+ ms  merged with silence: no/.test(text),
+  ], [true, true, true, true, true, true]);
+  const mergedText = formatAiDebug({ sourceDurationMs: D, clips: keepRangesToClips(URI, keepRangesOf(mergedState, D)), sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [], umReport: merged.report });
+  eq("debug text: merged with silence yes", /merged with silence: yes/.test(mergedText), true);
 }
 
 // ── silence cuts are exactly the silence detector's, on a realistic multi-pause clip ──
 {
   // 20 speech bursts (1.2-1.6 s) separated by pauses of 0.5-1.2 s; the longer pauses hold a
-  // flat 300 ms um-like blip in the middle (the sounds method 2 used to turn into cuts).
+  // flat 300 ms um-like blip in the middle.
   const stretches = [];
   const words = [];
   const blips = [];
@@ -190,21 +255,24 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   eq("silence-only keep ranges equal the detector's own", ranges(base), ranges(detection.keepRanges));
 
   const sounds = analyzeUnexplained(windows, WIN, total, words);
-  eq("fixture: method 2 does find um-like sounds here", sounds.filter((s) => s.cls === "um").length > 0, true);
+  eq("fixture: method 2 finds um-like sounds here", sounds.filter((s) => s.cls === "um").length > 0, true);
 
   const owner = buildAiEditState({ uri: URI, durationMs: total, windows, silenceOptions: options, words });
-  eq("the owner's AI edit has silence cuts only (no hook or filler decisions on this clip)", [...new Set(owner.decisions.map((d) => d.type))], ["silenceCut"]);
-  eq("keep ranges are IDENTICAL to silence-only", ranges(keepRangesOf(owner, total)), ranges(base));
-  eq("same number of seams", keepRangesOf(owner, total).length, base.length);
-  eq("no decision is a method-2 cut", owner.decisions.some((d) => d.payload && d.payload.method === 2), false);
+  eq("the owner's AI edit has silence cuts and um cuts only", [...new Set(owner.decisions.map((d) => d.type))].sort(), ["silenceCut", "umCut"]);
+  eq("Ums off: the keep ranges are IDENTICAL to silence-only", ranges(keepRangesOf(setCategoryEnabled(owner, "umCut", false), total)), ranges(base));
+  eq("Ums off: same number of seams", keepRangesOf(setCategoryEnabled(owner, "umCut", false), total).length, base.length);
+  eq("the silence decisions are exactly the silence planner's", owner.decisions.filter((d) => d.type === "silenceCut").map((d) => d.id), silenceOnly.decisions.map((d) => d.id));
+  const withUms = keepRangesOf(owner, total);
+  eq("the um cuts stay within the safety cap", withUms.length - base.length <= Math.floor((base.reduce((n, k) => n + k.endMs - k.startMs, 0) / 1000) / 3), true);
+  eq("no kept piece next to a um is shorter than 250 ms", withUms.every((k) => k.endMs - k.startMs >= 250 || base.some((b) => b.startMs === k.startMs && b.endMs === k.endMs)), true);
+  eq("the applied cuts include the silence cuts", appliedCutRanges(owner).length >= detection.cuts.length, true);
 
-  // method-1 transcript fillers: with Fillers off the keep ranges are identical again
+  // method-1 transcript fillers: with Fillers off the keep ranges differ only by the ums
   const withUm = [...words, w("um", words[3].endMs - 60, words[3].endMs - 10)].sort((x, y) => x.startMs - y.startMs);
   const ownerUm = buildAiEditState({ uri: URI, durationMs: total, windows, silenceOptions: options, words: withUm });
-  eq("a method-1 um is the only added cut", ownerUm.decisions.filter((d) => d.type === "fillerCut").length, planFillerCuts(withUm).length);
-  eq("with Fillers off the keep ranges are identical to silence-only", ranges(keepRangesOf(setCategoryEnabled(ownerUm, "fillerCut", false), total)), ranges(base));
-  eq("silence cuts are unchanged by the other decisions", ownerUm.decisions.filter((d) => d.type === "silenceCut").map((d) => [d.sourceStartMs, d.sourceEndMs]), owner.decisions.map((d) => [d.sourceStartMs, d.sourceEndMs]));
-  eq("applied cut ranges are the silence cuts", appliedCutRanges(owner).map((r) => [r.startMs, r.endMs]), detection.cuts.map((c) => [c.startMs, c.endMs]));
+  eq("a method-1 um is the only added filler cut", ownerUm.decisions.filter((d) => d.type === "fillerCut").length, planFillerCuts(withUm).length);
+  const off = setCategoryEnabled(setCategoryEnabled(ownerUm, "fillerCut", false), "umCut", false);
+  eq("with Fillers and Ums off the keep ranges are identical to silence-only", ranges(keepRangesOf(off, total)), ranges(base));
 }
 
 // ── regression: the speech baseline and the timeline ──

@@ -5,7 +5,7 @@
  */
 import { DECISION_TYPES, type DecisionType, type EditState } from "./decisions.ts";
 
-export type CategoryId = "cuts" | "hook" | "fillers" | "zooms" | "captions";
+export type CategoryId = "cuts" | "hook" | "fillers" | "ums" | "zooms" | "captions";
 
 export type CategoryRow = {
   id: CategoryId;
@@ -20,6 +20,7 @@ const ROWS: Array<{ id: CategoryId; label: string; type: DecisionType; ownerOnly
   { id: "cuts", label: "Cuts", type: "silenceCut", ownerOnly: false },
   { id: "hook", label: "Hook", type: "hookTrim", ownerOnly: true },
   { id: "fillers", label: "Fillers", type: "fillerCut", ownerOnly: true },
+  { id: "ums", label: "Ums", type: "umCut", ownerOnly: true },
   { id: "zooms", label: "Zooms", type: "zoom", ownerOnly: true },
   { id: "captions", label: "Captions", type: "caption", ownerOnly: true },
 ];
@@ -41,7 +42,7 @@ export function categoryRows(
       r.id === "captions"
         ? options.captionLines
         : state.decisions.filter((d) => d.type === r.type && d.state === "applied").length,
-    enabled: r.id === "captions" ? options.captionsOn : state.categoryEnabled[r.type],
+    enabled: r.id === "captions" ? options.captionsOn : state.categoryEnabled[r.type] !== false,
   }));
 }
 

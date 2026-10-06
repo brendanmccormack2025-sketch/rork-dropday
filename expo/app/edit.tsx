@@ -83,6 +83,7 @@ import {
 } from "@/lib/autoEdit/markers";
 import { buildAiEditState } from "@/lib/autoEdit/plan";
 import { checkAlignment, type Alignment } from "@/lib/autoEdit/alignment";
+import { planUmCuts, type UmCutReport } from "@/lib/autoEdit/umCuts";
 import { analyzeUnexplained, silenceThresholdDb, speechMedianDb, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
 import { planFillerCuts } from "@/lib/autoEdit/fillerCuts";
 import { emphasisLogEntries, planEmphasis } from "@/lib/autoEdit/emphasisMoments";
@@ -252,6 +253,7 @@ export default function EditScreen() {
     candidates: ClassifiedSound[];
     alignment: Alignment | null;
     speechBaselineDb: number;
+    umReport: UmCutReport;
   } | null>(null);
 
   useEffect(() => {
@@ -2312,7 +2314,13 @@ export default function EditScreen() {
     const rendered = renderClipsOf(editModel.state, editModel.durationMs);
     return [
       ...cuts,
-      ...buildDebugMarkers(aiDebug.proposals, aiDebug.candidates, rendered, editModel.state.sourceUri),
+      ...buildDebugMarkers(
+        aiDebug.proposals,
+        aiDebug.candidates,
+        rendered,
+        editModel.state.sourceUri,
+        editModel.state.decisions.filter((d) => d.type === "umCut"),
+      ),
     ];
   }, [aiEditsEnabled, editModel, modelInSync, isOwnerAccount, aiDebug]);
   const panelRows = useMemo<CategoryRow[]>(
@@ -2465,6 +2473,7 @@ export default function EditScreen() {
       proposals: aiDebug?.proposals ?? [],
       candidates: aiDebug?.candidates ?? [],
       alignment: aiDebug?.alignment ?? null,
+      umReport: aiDebug?.umReport,
       speechBaselineDb: aiDebug?.speechBaselineDb,
       hookTrims: model.state.decisions.filter((d) => d.type === "hookTrim" && d.state === "applied"),
       fillers: model.state.decisions.filter((d) => d.type === "fillerCut" && d.state === "applied"),
@@ -2492,13 +2501,16 @@ export default function EditScreen() {
           current.every((c) => c.uri === uri) &&
           sameRanges(current, renderClipsOf(model.state, model.durationMs), durationMs);
 
-        // Method 2 (unexplained sounds) is display only: nothing here becomes a cut.
+        // Method 2: the 'um' sounds become reversible cuts (category Ums); laughs and
+        // unsure sounds are display only.
         const sounds = analyzeUnexplained(loud.windows, 20, durationMs, words);
         const planned = [...planHookTrim(words, durationMs), ...planFillerCuts(words)];
-        const merged = mergePlan(model.state, planned, ["hookTrim", "fillerCut"]);
+        const afterMethod1 = mergePlan(model.state, planned, ["hookTrim", "fillerCut"]);
+        const umPlan = planUmCuts(afterMethod1.state, sounds, durationMs);
+        const merged = mergePlan(afterMethod1.state, umPlan.decisions, ["umCut"]);
         // AI planning is not an undo step: saved snapshots are re-planned, not extended.
         historyRef.current = mapHistory(historyRef.current, (snap) =>
-          mergePlan(snap, planned, ["hookTrim", "fillerCut"]).state,
+          mergePlan(mergePlan(snap, planned, ["hookTrim", "fillerCut"]).state, umPlan.decisions, ["umCut"]).state,
         );
         setEditModel({ state: merged.state, durationMs });
 
@@ -2543,7 +2555,8 @@ export default function EditScreen() {
           "[emphasis]",
           JSON.stringify(emphasisLogEntries(proposals, renderClipsOf(merged.state, durationMs), uri)),
         );
-        setAiDebug({ proposals, candidates, alignment, speechBaselineDb });
+        console.log("[ums]", JSON.stringify(umPlan.report));
+        setAiDebug({ proposals, candidates, alignment, speechBaselineDb, umReport: umPlan.report });
       } catch (e) {
         console.warn("[edit] hook/filler planning failed", (e as Error)?.message ?? e);
       } finally {

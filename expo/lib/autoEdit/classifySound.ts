@@ -1,10 +1,10 @@
 /**
  * Classify method-2 filler candidates ("unexplained sound": loud, but no transcript
  * word) from the cached loudness data. Display only: NOTHING here creates a cut
- * decision (only method-1 transcript fillers do).
- *   um     a short, steady, quiet-ish hesitation: shown as "um?"
- *   laugh  pulsed (or loud with pulses): shown, and a zoom signal
- *   unsure anything else: shown
+ * decision itself; umCuts.ts turns the 'um' ones into reversible cuts (owner only).
+ *   um     a short, steady, quiet-ish hesitation: cut by umCuts.ts, else shown as "um?"
+ *   laugh  pulsed (or loud with pulses): never cut; a zoom signal
+ *   unsure anything else: shown, never cut
  * Every threshold is in SOUND_CLASSIFIER_CONFIG so it can be tuned from real clips.
  *
  * Pure; erasable TypeScript only (see decisions.ts).
@@ -38,6 +38,16 @@ export const SOUND_CLASSIFIER_CONFIG = {
   midSpeechWindowMs: 400,
   /** ...allowing the word timing to overlap the candidate by this much (ms). */
   midSpeechOverlapSlackMs: 100,
+  /** Um cuts (see umCuts.ts): each cut starts this long after the candidate begins and ends this long before it ends (ms). */
+  umEdgePaddingMs: 30,
+  /** ...and a um shorter than this after padding is skipped (ms). */
+  umMinCutMs: 150,
+  /** A um cut within this long of a silence cut is merged into it: one seam (ms). */
+  umMergeGapMs: 120,
+  /** No kept piece between two cuts may be shorter than this once a um is involved (ms). */
+  umMinKeepMs: 250,
+  /** Safety cap: at most one new seam per this many seconds of edited duration. */
+  umSecondsPerNewSeam: 3,
   /** pulses: a window counts as part of a pulse above this fraction of the peak (linear). */
   burstThresholdFraction: 0.5,
   /** pulses closer than this are one pulse (ms). */

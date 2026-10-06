@@ -7,8 +7,10 @@
  */
 import type { SilenceDetectionOptions } from "../silenceDetection.ts";
 import type { Word } from "../transcription/types.ts";
-import { newEditState, type EditState } from "./decisions.ts";
+import { mergePlan, newEditState, type EditState } from "./decisions.ts";
+import { analyzeUnexplained } from "./classifySound.ts";
 import { planFillerCuts } from "./fillerCuts.ts";
+import { planUmCuts } from "./umCuts.ts";
 import { planHookTrim } from "./hookTrim.ts";
 import { planSilenceCuts } from "./silenceCuts.ts";
 
@@ -29,5 +31,9 @@ export function buildAiEditState(input: {
   if (input.words) {
     decisions.push(...planHookTrim(input.words, input.durationMs), ...planFillerCuts(input.words));
   }
-  return newEditState(input.uri, decisions);
+  const base = newEditState(input.uri, decisions);
+  if (!input.words) return base;
+  // Method-2 ums (owner only, with a transcript): reversible cuts in the Ums category.
+  const sounds = analyzeUnexplained(input.windows, WINDOW_MS, input.durationMs, input.words);
+  return mergePlan(base, planUmCuts(base, sounds, input.durationMs).decisions, ["umCut"]).state;
 }
