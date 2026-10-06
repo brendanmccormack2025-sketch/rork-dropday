@@ -9,17 +9,17 @@ import type { Word } from "./types.ts";
 
 /**
  * keptRanges are the parts of the source that survive the edit (ms on the source;
- * silence cuts keep source order, so output order is source order). A word is kept only if it lies entirely inside the kept
- * footage, and its times are shifted onto the output timeline. Touching or
- * overlapping kept ranges count as one continuous stretch.
+ * silence cuts keep source order, so output order is source order). Touching or
+ * overlapping kept ranges count as one continuous stretch. Words are shifted onto
+ * the output timeline; any other fields on a word are kept.
  *
- * A word that straddles a cut is DROPPED, not clamped. Silence cuts are placed in
- * silence, so a straddling word is a recognizer timing error or speech that was
- * really cut. A clamped caption would show a word whose audio is partly gone and
- * would flash for a few milliseconds; a dropped word is deterministic and never
- * shows text the viewer cannot hear.
+ * A word that straddles a cut is kept when at least 50% of its duration lies in one
+ * kept range, and is then clamped to that range's edges; otherwise it is dropped.
+ * Cuts are tight and recognizer word edges are imprecise, so dropping every
+ * straddler would lose the first and last word of segments. A word that is mostly
+ * cut away is dropped: its audio is mostly gone.
  */
-export function mapWordsToEdit(words: Word[], keptRanges: KeepRange[]): Word[] {
+export function mapWordsToEdit<T extends Word>(words: T[], keptRanges: KeepRange[]): T[] {
   const sorted = keptRanges
     .filter((r) => r.endMs > r.startMs)
     .map((r) => ({ startMs: r.startMs, endMs: r.endMs }))
@@ -40,12 +40,26 @@ export function mapWordsToEdit(words: Word[], keptRanges: KeepRange[]): Word[] {
     outputOffsetMs += r.endMs - r.startMs;
   }
 
-  const out: Word[] = [];
+  const out: T[] = [];
   for (const w of words) {
-    const range = merged.find((r) => w.startMs >= r.startMs && w.endMs <= r.endMs);
-    if (!range) continue;
-    const shift = range.outputOffsetMs - range.startMs;
-    out.push({ ...w, startMs: w.startMs + shift, endMs: w.endMs + shift });
+    const duration = w.endMs - w.startMs;
+    let best: (typeof merged)[number] | null = null;
+    let bestOverlap = -1;
+    for (const r of merged) {
+      const overlap = Math.min(w.endMs, r.endMs) - Math.max(w.startMs, r.startMs);
+      if (overlap > bestOverlap) {
+        best = r;
+        bestOverlap = overlap;
+      }
+    }
+    if (!best) continue;
+    const keep =
+      duration > 0 ? bestOverlap >= duration * 0.5 : w.startMs >= best.startMs && w.startMs <= best.endMs;
+    if (!keep) continue;
+    const shift = best.outputOffsetMs - best.startMs;
+    const startMs = Math.max(w.startMs, best.startMs) + shift;
+    const endMs = Math.min(Math.max(w.endMs, w.startMs), best.endMs) + shift;
+    out.push({ ...w, startMs, endMs: Math.max(endMs, startMs) });
   }
   return out;
 }

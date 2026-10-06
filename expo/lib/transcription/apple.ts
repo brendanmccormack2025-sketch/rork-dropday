@@ -6,7 +6,7 @@
  */
 import { Platform } from "react-native";
 
-import { transcribeAsync } from "@/modules/speech-captions";
+import { speechCaptionsInBuild, transcribeAsync } from "@/modules/speech-captions";
 import type { TranscriptResult } from "./types";
 
 const UNAVAILABLE_CODES = new Set([
@@ -17,8 +17,12 @@ const UNAVAILABLE_CODES = new Set([
 
 export async function transcribeWithApple(sourceUri: string): Promise<TranscriptResult> {
   if (Platform.OS !== "ios") return { status: "unavailable", message: "iOS only" };
+  if (!speechCaptionsInBuild) {
+    return { status: "unavailable", message: "speech-captions not in this build" };
+  }
   try {
     const result = await transcribeAsync(sourceUri);
+    // With the module present, null means the clip has no audio track: genuinely silent.
     if (!result) return { status: "ok", words: [] };
     if (!result.onDevice) return { status: "unavailable", message: "not on-device" };
     return {

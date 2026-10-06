@@ -14,6 +14,9 @@ type SpeechCaptionsNative = {
 const native: SpeechCaptionsNative | null =
   Platform.OS === "ios" ? requireOptionalNativeModule<SpeechCaptionsNative>("SpeechCaptions") : null;
 
+/** False when this build has no SpeechCaptions native module (and always on Android and web). */
+export const speechCaptionsInBuild: boolean = native !== null;
+
 /**
  * On-device speech-to-text with word timings for a local video/audio file.
  *
