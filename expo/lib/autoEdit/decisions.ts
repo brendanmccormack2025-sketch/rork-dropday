@@ -117,6 +117,13 @@ export function keepRangesOf(state: EditState, sourceDurationMs: number): KeepRa
   return keep;
 }
 
+/** Source ranges the applied, enabled cut decisions remove (may overlap). */
+export function appliedCutRanges(state: EditState): Array<{ startMs: number; endMs: number }> {
+  return state.decisions
+    .filter((d) => isActiveCut(state, d))
+    .map((d) => ({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }));
+}
+
 /** The clips to render for this state: what the render path consumes today. */
 export function renderClipsOf(state: EditState, sourceDurationMs: number): EditClip[] {
   return keepRangesToClips(state.sourceUri, keepRangesOf(state, sourceDurationMs));

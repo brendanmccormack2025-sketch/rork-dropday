@@ -17,17 +17,21 @@ import { findUnexplainedSounds, type UnexplainedSound } from "./fillerCuts.ts";
 export const SOUND_CLASSIFIER_CONFIG = {
   /** laugh: this many separate loudness pulses inside the candidate or more. */
   laughMinBursts: 3,
-  /** laugh: peak at least this far above the median loudness of speech (dB). */
-  laughPeakAboveSpeechDb: 3,
-  /** laugh: a loudness-jump emphasis moment within this long of the candidate (ms). */
+  /** laugh: ...or a peak at least this far above the median speech loudness (dB)... */
+  laughPeakAboveSpeechDb: 6,
+  /** ...together with at least this many pulses. */
+  laughPeakMinBursts: 2,
+  /** Only reported (the nearEmphasis feature); being near a loudness jump never makes a laugh. */
   nearEmphasisMs: 1000,
   /** um: duration range (ms). */
   umMinMs: 150,
-  umMaxMs: 800,
+  umMaxMs: 900,
   /** um: steady = coefficient of variation of the linear loudness at most this. */
   umMaxCv: 0.35,
-  /** um: peak at most this far above the median speech loudness (dB); 0 = "at speech level". */
-  umMaxPeakAboveSpeechDb: 1,
+  /** um: peak at most this far above the median speech loudness (dB). */
+  umMaxPeakAboveSpeechDb: 3,
+  /** Speech baseline: fewer transcript words than this falls back to all non-silent frames. */
+  minWordsForBaseline: 10,
   /** um: also require a word just before and just after (off: it is only reported). */
   umRequiresMidSpeech: false,
   /** midSpeech: a word ends this close before, and another starts this close after (ms). */
@@ -67,10 +71,20 @@ export type SoundContext = {
   /** RMS dBFS per window (modules/audio-loudness). */
   windows: number[];
   windowMs: number;
+  /** Transcript words. Every time here (words, windows, candidates) is SOURCE time. */
   words: Word[];
+  /** The silence detector's threshold (dB); computed from the windows when missing. */
+  thresholdDb?: number;
 };
 
-const SPEECH_FLOOR_DB = -55;
+/** The silence detector's threshold for these windows: below it a frame is silence. */
+export function silenceThresholdDb(windows: number[], windowMs: number, durationMs: number): number {
+  return detectSilences(windows, windowMs, { durationMs }).thresholdDb;
+}
+
+function thresholdOf(ctx: SoundContext): number {
+  return ctx.thresholdDb ?? silenceThresholdDb(ctx.windows, ctx.windowMs, ctx.windows.length * ctx.windowMs);
+}
 
 function median(values: number[]): number {
   if (values.length === 0) return 0;
@@ -79,16 +93,29 @@ function median(values: number[]): number {
   return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
-/** Median loudness over the windows that fall inside transcript words. */
-export function speechMedianDb(ctx: SoundContext): number {
-  const inside: number[] = [];
-  for (const w of ctx.words) {
-    const from = Math.max(0, Math.floor(w.startMs / ctx.windowMs));
-    const to = Math.min(ctx.windows.length, Math.ceil(w.endMs / ctx.windowMs));
-    for (let i = from; i < to; i++) if (Number.isFinite(ctx.windows[i]!)) inside.push(ctx.windows[i]!);
+/**
+ * The typical loudness of speech: the median over the windows inside transcript
+ * words (source time), counting only frames above the silence threshold, so word
+ * edges that spill into silence never pull it down. With fewer than
+ * minWordsForBaseline words (or no sound inside them) it falls back to the median
+ * of all non-silent frames.
+ */
+export function speechMedianDb(
+  ctx: SoundContext,
+  config: SoundClassifierConfig = SOUND_CLASSIFIER_CONFIG,
+): number {
+  const threshold = thresholdOf(ctx);
+  const sound = (v: number) => Number.isFinite(v) && v > threshold;
+  if (ctx.words.length >= config.minWordsForBaseline) {
+    const inside: number[] = [];
+    for (const w of ctx.words) {
+      const from = Math.max(0, Math.floor(w.startMs / ctx.windowMs));
+      const to = Math.min(ctx.windows.length, Math.ceil(w.endMs / ctx.windowMs));
+      for (let i = from; i < to; i++) if (sound(ctx.windows[i]!)) inside.push(ctx.windows[i]!);
+    }
+    if (inside.length > 0) return median(inside);
   }
-  if (inside.length > 0) return median(inside);
-  return median(ctx.windows.filter((v) => Number.isFinite(v) && v > SPEECH_FLOOR_DB));
+  return median(ctx.windows.filter(sound));
 }
 
 function linear(db: number): number {
@@ -146,7 +173,7 @@ export function soundFeatures(
 
   return {
     durationMs: candidate.lengthMs,
-    peakVsSpeechDb: peakDb - speechMedianDb(ctx),
+    peakVsSpeechDb: peakDb - speechMedianDb(ctx, config),
     steadiness: mean > 0 ? Math.sqrt(variance) / mean : 0,
     burstCount: countBursts(amps, ctx.windowMs, config),
     nearEmphasis,
@@ -160,8 +187,9 @@ export function classifyFeatures(
 ): { cls: SoundClass; why: string[] } {
   const laughWhy: string[] = [];
   if (f.burstCount >= config.laughMinBursts) laughWhy.push(`${f.burstCount} pulses`);
-  if (f.peakVsSpeechDb >= config.laughPeakAboveSpeechDb) laughWhy.push("louder than speech");
-  if (f.nearEmphasis) laughWhy.push("near a loudness jump");
+  if (f.peakVsSpeechDb >= config.laughPeakAboveSpeechDb && f.burstCount >= config.laughPeakMinBursts) {
+    laughWhy.push(`louder than speech with ${f.burstCount} pulses`);
+  }
   if (laughWhy.length > 0) return { cls: "laugh", why: laughWhy };
 
   const isUm =
@@ -190,11 +218,13 @@ export function classifySounds(
   ctx: SoundContext,
   config: SoundClassifierConfig = SOUND_CLASSIFIER_CONFIG,
 ): ClassifiedSound[] {
+  // Loudness-jump moments only: the laugh scorer is added after classification, never before.
   const jumps = loudnessJumpScorer({
     windows: ctx.windows,
     windowMs: ctx.windowMs,
     words: ctx.words,
     durationMs: ctx.windows.length * ctx.windowMs,
+    silenceThresholdDb: thresholdOf(ctx),
   }).map((c) => c.sourceMs);
   return candidates.map((c) => classifySound(c, ctx, jumps, config));
 }
@@ -207,9 +237,9 @@ export function analyzeUnexplained(
   words: Word[],
   config: SoundClassifierConfig = SOUND_CLASSIFIER_CONFIG,
 ): ClassifiedSound[] {
-  const threshold = detectSilences(windows, windowMs, { durationMs }).thresholdDb;
+  const threshold = silenceThresholdDb(windows, windowMs, durationMs);
   const found = findUnexplainedSounds(windows, windowMs, words, threshold);
-  return classifySounds(found, { windows, windowMs, words }, config);
+  return classifySounds(found, { windows, windowMs, words, thresholdDb: threshold }, config);
 }
 
 /** Only ums are cut (applied fillerCut decisions); laughs and unsure sounds never are. */

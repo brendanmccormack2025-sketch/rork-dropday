@@ -5,6 +5,7 @@
  */
 import { sourceToOutputMs, type EditClip } from "../editModel.ts";
 import type { Decision } from "./decisions.ts";
+import type { Alignment } from "./alignment.ts";
 import { formatFeatures, type ClassifiedSound } from "./classifySound.ts";
 import type { UnexplainedSound } from "./fillerCuts.ts";
 
@@ -30,6 +31,9 @@ export type AiDebugInput = {
   fillers: Decision[];
   /** Applied method-2 um cuts. */
   ums?: Decision[];
+  /** Timeline check (words vs loudness) and the speech baseline, to tune from real clips. */
+  alignment?: Alignment | null;
+  speechBaselineDb?: number;
 };
 
 function outputTime(clips: EditClip[], uri: string, sourceMs: number): string {
@@ -43,6 +47,18 @@ export function formatAiDebug(input: AiDebugInput): string {
   const lines: string[] = [];
   lines.push("Trial AI debug");
   lines.push(`Clip duration: ${formatClock(input.sourceDurationMs)} (edited ${formatClock(editedMs)})`);
+  const a = input.alignment;
+  if (a) {
+    const pct = (n: number) => `${Math.round(n * 100)}%`;
+    const shift = `${a.bestShiftMs >= 0 ? "+" : ""}${a.bestShiftMs} ms`;
+    lines.push(
+      `Timeline check: ${a.wordCount} words ${formatClock(a.firstWordMs)}-${formatClock(a.lastWordMs)}, loudness ${formatClock(a.loudnessMs)}; ` +
+        `word time on sound ${pct(a.shareAtZero)} as is, best ${pct(a.bestShare)} at ${shift}`,
+    );
+  }
+  if (input.speechBaselineDb !== undefined) {
+    lines.push(`Speech baseline: ${input.speechBaselineDb.toFixed(1)} dB`);
+  }
 
   lines.push("", `Emphasis proposals (not applied): ${input.proposals.length}`);
   for (const d of input.proposals) {

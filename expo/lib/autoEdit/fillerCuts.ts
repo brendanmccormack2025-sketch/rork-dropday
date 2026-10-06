@@ -23,7 +23,7 @@ export function planFillerCuts(words: Word[]): Decision[] {
 }
 
 export const UNEXPLAINED_MIN_MS = 150;
-export const UNEXPLAINED_MAX_MS = 800;
+export const UNEXPLAINED_MAX_MS = 900;
 /** Word timings are imprecise: a sound this close to a word still belongs to it. */
 export const WORD_SLACK_MS = 120;
 

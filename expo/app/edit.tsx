@@ -62,6 +62,7 @@ import {
   newEditState,
   renderClipsOf,
   setCategoryEnabled,
+  appliedCutRanges,
   setStates,
   type Decision,
   type EditState,
@@ -81,7 +82,8 @@ import {
   type TimelineMarker,
 } from "@/lib/autoEdit/markers";
 import { buildAiEditState } from "@/lib/autoEdit/plan";
-import { analyzeUnexplained, planUmCuts, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
+import { checkAlignment, type Alignment } from "@/lib/autoEdit/alignment";
+import { analyzeUnexplained, planUmCuts, silenceThresholdDb, speechMedianDb, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
 import { planFillerCuts } from "@/lib/autoEdit/fillerCuts";
 import { emphasisLogEntries, planEmphasis } from "@/lib/autoEdit/emphasisMoments";
 import { planHookTrim } from "@/lib/autoEdit/hookTrim";
@@ -245,7 +247,12 @@ export default function EditScreen() {
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [markerSheet, setMarkerSheet] = useState<TimelineMarker | null>(null);
   // Owner debug: emphasis proposals and method-2 filler candidates (never applied).
-  const [aiDebug, setAiDebug] = useState<{ proposals: Decision[]; candidates: ClassifiedSound[] } | null>(null);
+  const [aiDebug, setAiDebug] = useState<{
+    proposals: Decision[];
+    candidates: ClassifiedSound[];
+    alignment: Alignment | null;
+    speechBaselineDb: number;
+  } | null>(null);
 
   useEffect(() => {
     if (draftId) {
@@ -2457,6 +2464,8 @@ export default function EditScreen() {
       sourceUri: model.state.sourceUri,
       proposals: aiDebug?.proposals ?? [],
       candidates: aiDebug?.candidates ?? [],
+      alignment: aiDebug?.alignment ?? null,
+      speechBaselineDb: aiDebug?.speechBaselineDb,
       hookTrims: model.state.decisions.filter((d) => d.type === "hookTrim" && d.state === "applied"),
       fillers: model.state.decisions.filter(
         (d) => d.type === "fillerCut" && d.state === "applied" && (d.payload as { method?: number } | undefined)?.method !== 2,
@@ -2518,6 +2527,9 @@ export default function EditScreen() {
           );
         }
 
+        // After classification: confirmed laughs join the emphasis signals. The loudness
+        // baseline skips silence and the footage the edit removes.
+        const thresholdDb = silenceThresholdDb(loud.windows, 20, durationMs);
         const candidates = sounds;
         const proposals = planEmphasis({
           windows: loud.windows,
@@ -2525,13 +2537,18 @@ export default function EditScreen() {
           words,
           durationMs,
           laughs: sounds.filter((s) => s.cls === "laugh"),
+          silenceThresholdDb: thresholdDb,
+          cuts: appliedCutRanges(merged.state),
         });
+        const alignment = checkAlignment(loud.windows, 20, words, thresholdDb);
+        const speechBaselineDb = speechMedianDb({ windows: loud.windows, windowMs: 20, words, thresholdDb });
+        console.log("[timeline]", JSON.stringify({ alignment, speechBaselineDb, thresholdDb }));
         console.log("[fillers] method2:", JSON.stringify(candidates));
         console.log(
           "[emphasis]",
           JSON.stringify(emphasisLogEntries(proposals, renderClipsOf(merged.state, durationMs), uri)),
         );
-        setAiDebug({ proposals, candidates });
+        setAiDebug({ proposals, candidates, alignment, speechBaselineDb });
       } catch (e) {
         console.warn("[edit] hook/filler planning failed", (e as Error)?.message ?? e);
       } finally {
