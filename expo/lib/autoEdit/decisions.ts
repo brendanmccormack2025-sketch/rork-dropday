@@ -50,7 +50,7 @@ export type EditState = {
 export const DECISION_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "umCut", "laughProtect", "zoom", "caption", "audio"];
 
 /** Laugh protection: padding, how far apart laugh sounds may be to stay one episode (see planLaughProtection), and the smallest cut piece worth keeping. */
-export const LAUGH_PROTECT_CONFIG = { padMs: 150, mergeGapMs: 3000, minCutMs: 120 };
+export const LAUGH_PROTECT_CONFIG = { padMs: 150, mergeGapMs: 4000, minCutMs: 120 };
 export const CUT_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "umCut"];
 
 export function isCutType(type: DecisionType): boolean {

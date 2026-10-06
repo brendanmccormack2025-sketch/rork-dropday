@@ -155,6 +155,7 @@ eq("the threshold is 2 s", EMPTY_TRANSCRIPT_MIN_SOUND_MS, 2000);
   eq("a non-error throw -> error", mapTranscribeError("weird").status, "error");
   eq("no permission -> denied (with the code)", mapTranscribeError(Object.assign(new Error("x"), { code: "ERR_SPEECH_NOT_AUTHORIZED" })), { status: "denied", code: "ERR_SPEECH_NOT_AUTHORIZED", message: "x" });
   eq("no on-device model -> unavailable (with the code)", mapTranscribeError(Object.assign(new Error("x"), { code: "ERR_SPEECH_ON_DEVICE_UNAVAILABLE" })).status, "unavailable");
+  eq("no speech detected in audio with sound -> error with its own code", mapTranscribeError(Object.assign(new Error("the recognizer heard no speech in audio that has sound"), { code: "ERR_SPEECH_NO_SPEECH_DETECTED" })), { status: "error", code: "ERR_SPEECH_NO_SPEECH_DETECTED", message: "the recognizer heard no speech in audio that has sound" });
   for (const code of ["ERR_SPEECH_RECOGNITION_FAILED", "ERR_SPEECH_TIMEOUT", "ERR_SPEECH_FAILED", "ERR_SPEECH_BAD_ARGUMENT", "ERR_SPEECH_FILE_NOT_FOUND"]) {
     eq(`${code} is never an empty ok`, mapTranscribeError(Object.assign(new Error("x"), { code })).status !== "ok", true);
   }

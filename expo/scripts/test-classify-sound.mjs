@@ -290,9 +290,9 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   eq("a laugh is padded 150 ms on each side", planLaughProtection([laugh(5000, 5300)]).map((d) => [d.type, d.sourceStartMs, d.sourceEndMs]), [["laughProtect", 4850, 5450]]);
   eq("laugh sounds within 400 ms of each other are one protected range", planLaughProtection([laugh(3000, 3200), laugh(3500, 3700)]).map((d) => [d.sourceStartMs, d.sourceEndMs, d.payload.laughs]), [[2850, 3850, 2]]);
   eq("laugh sounds 1 s apart are one episode", planLaughProtection([laugh(3000, 3200), laugh(4200, 4400)]).length, 1);
-  eq("laugh sounds 2.8 s apart are still one episode (the gap is 3000 ms)", planLaughProtection([laugh(3000, 3200), laugh(6000, 6200)]).length, 1);
-  eq("...but sounds more than 3000 ms apart are separate episodes", planLaughProtection([laugh(3000, 3200), laugh(6500, 6700)]).length, 2);
-  eq("the merge gap is 3000 ms in the config", LAUGH_PROTECT_CONFIG.mergeGapMs, 3000);
+  eq("laugh sounds 3.6 s apart are still one episode (the gap is 4000 ms)", planLaughProtection([laugh(3000, 3200), laugh(6800, 7000)]).length, 1);
+  eq("...but sounds more than 4000 ms apart are separate episodes", planLaughProtection([laugh(3000, 3200), laugh(7500, 7700)]).length, 2);
+  eq("the merge gap is 4000 ms in the config", LAUGH_PROTECT_CONFIG.mergeGapMs, 4000);
   eq("only laughs are protected", planLaughProtection([{ ...laugh(1000, 1200), cls: "um" }, { ...laugh(2000, 2200), cls: "unsure" }]), []);
 
   // an episode: pulses with 0.6 s and 0.8 s gaps (breathing) are ONE protected range, no seams
@@ -338,7 +338,7 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   const protId = withCuts.decisions.find((d) => d.type === "laughProtect").id;
   const revertedProt = setDecisionState(withCuts, protId, "reverted");
   eq("a protection the user reverted protects nothing", protectedRangesOf(revertedProt).some((r) => r.startMs <= 4850 && r.endMs >= 5450), false);
-  eq("...and stays reverted when planning runs again", mergePlan(revertedProt, planLaughProtection([laugh(5000, 5300), laugh(9000, 9200)]), ["laughProtect"]).resolved.map((d) => d.state), ["reverted", "applied"]);
+  eq("...and stays reverted when planning runs again", mergePlan(revertedProt, planLaughProtection([laugh(5000, 5300), laugh(9500, 9700)]), ["laughProtect"]).resolved.map((d) => d.state), ["reverted", "applied"]);
   const revertedCut = setDecisionState(withCuts, withCuts.decisions.find((d) => d.type === "silenceCut").id, "reverted");
   eq("a reverted cut does not revert a protection", mergePlan(revertedCut, planLaughProtection([laugh(3000, 3100)]), ["laughProtect"]).resolved.map((d) => d.state), ["applied"]);
 
