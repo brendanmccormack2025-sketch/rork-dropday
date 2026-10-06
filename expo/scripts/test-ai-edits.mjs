@@ -212,11 +212,9 @@ eq("clock format", [formatClock(0), formatClock(7234), formatClock(59960), forma
     "",
     "Fillers, method 1 (applied): 1",
     "'um'  source 0:05.0-0:05.3",
-    "",
-    "Um cuts, method 2 (applied): 0",
   ].join("\n"));
   eq("debug text with nothing found", formatAiDebug({ sourceDurationMs: 5000, clips: keepRangesToClips(URI, [{ startMs: 0, endMs: 5000 }]), sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [] }).split("\n"), [
-    "Trial AI debug", "Clip duration: 0:05.0 (edited 0:05.0)", "", "Emphasis proposals (not applied): 0", "", "Filler candidates, method 2 (not applied): 0", "", "Hook trim (applied): 0", "", "Fillers, method 1 (applied): 0", "", "Um cuts, method 2 (applied): 0",
+    "Trial AI debug", "Clip duration: 0:05.0 (edited 0:05.0)", "", "Emphasis proposals (not applied): 0", "", "Filler candidates, method 2 (not applied): 0", "", "Hook trim (applied): 0", "", "Fillers, method 1 (applied): 0",
   ]);
   const dm = buildDebugMarkers(proposals, [{ startMs: 1000, endMs: 1300, lengthMs: 300 }, { startMs: 3200, endMs: 3400, lengthMs: 200 }], clips, URI);
   eq("debug markers: proposals and candidates, cut-out moments skipped", dm.map((m) => [m.kind, m.outputMs, m.detail.reasons]), [

@@ -5,16 +5,19 @@
  *   node --experimental-strip-types scripts/test-classify-sound.mjs
  */
 import {
-  analyzeUnexplained, classifySound, classifySounds, formatFeatures, planUmCuts, silenceThresholdDb, SOUND_CLASSIFIER_CONFIG,
+  analyzeUnexplained, classifySound, classifySounds, formatFeatures, silenceThresholdDb, SOUND_CLASSIFIER_CONFIG,
   speechMedianDb,
 } from "../lib/autoEdit/classifySound.ts";
 import { checkAlignment } from "../lib/autoEdit/alignment.ts";
-import { keepRangesOf, mergePlan, newEditState, restoreRange, setDecisionState } from "../lib/autoEdit/decisions.ts";
-import { describeDecision, buildDebugMarkers } from "../lib/autoEdit/markers.ts";
+import { appliedCutRanges, keepRangesOf, newEditState, setCategoryEnabled } from "../lib/autoEdit/decisions.ts";
+import { buildDebugMarkers } from "../lib/autoEdit/markers.ts";
 import { loudnessJumpScorer, planEmphasis, scoreEmphasis } from "../lib/autoEdit/emphasisMoments.ts";
 import { buildAiEditState } from "../lib/autoEdit/plan.ts";
 import { formatAiDebug } from "../lib/autoEdit/debugText.ts";
 import { keepRangesToClips } from "../lib/editModel.ts";
+import { planSilenceCuts } from "../lib/autoEdit/silenceCuts.ts";
+import { planFillerCuts } from "../lib/autoEdit/fillerCuts.ts";
+import { SENSITIVITY_PRESETS, detectSilences } from "../lib/silenceDetection.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -111,53 +114,97 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   eq("shorter than 150 ms is not a um", tooShort.cls, "unsure");
 }
 
-// ── apply: only ums are cut ──
+// ── method 2 is display only ──
 {
   const pulses = (i) => (i % 8 < 5 ? -20 : -45);
   const windows = windowsOf(12000, [...speechStretches, [1160, 1460, -31], [2720, 3180, pulses], [4560, 4860, -24]]);
   const sounds = analyzeUnexplained(windows, WIN, 12000, speechWords);
-  eq("end to end: one um, one laugh, one unsure", sounds.map((s) => [s.startMs, s.cls]), [[1160, "um"], [2720, "laugh"], [4560, "unsure"]]);
-  const cuts = planUmCuts(sounds);
-  eq("only the um becomes a cut decision", cuts.map((d) => [d.type, d.sourceStartMs, d.sourceEndMs, d.state, d.origin]), [["fillerCut", 1160, 1460, "applied", "ai"]]);
-  eq("laughs and unsure sounds never produce cut decisions", planUmCuts(sounds.filter((s) => s.cls !== "um")), []);
+  eq("end to end: one um?, one laugh, one unsure", sounds.map((s) => [s.startMs, s.cls]), [[1160, "um"], [2720, "laugh"], [4560, "unsure"]]);
   const state = buildAiEditState({ uri: URI, durationMs: 12000, windows, words: speechWords });
-  const covers = (range) => state.decisions.filter((d) => d.state === "applied" && d.sourceStartMs < range[1] && d.sourceEndMs > range[0]);
-  eq("the ai edit cuts the um", covers([1160, 1460]).map((d) => [d.type, d.payload.method]), [["fillerCut", 2]]);
-  eq("the ai edit leaves the laugh alone", covers([2720, 3180]), []);
-  eq("the ai edit leaves the unsure sound alone", covers([4560, 4860]), []);
+  eq("no method-2 classification creates a filler cut", state.decisions.filter((d) => d.type === "fillerCut"), []);
+  eq("...none of them is an applied decision at all", state.decisions.filter((d) => [1160, 2720, 4560].includes(d.sourceStartMs)), []);
   const keep = keepRangesOf(state, 12000);
+  eq("the um? footage is kept", keep.some((k) => k.startMs <= 1160 && k.endMs >= 1460), true);
   eq("the laugh footage is kept", keep.some((k) => k.startMs <= 2720 && k.endMs >= 3180), true);
-  eq("the um footage is cut", keep.some((k) => k.startMs < 1460 && k.endMs > 1160), false);
-  // reversible, user wins, Restore works
-  const umId = cuts[0].id;
-  const reverted = setDecisionState(state, umId, "reverted");
-  eq("a reverted um stays reverted when the plan runs again", mergePlan(reverted, cuts, ["hookTrim", "fillerCut"]).resolved[0].state, "reverted");
-  eq("Restore reverts a um cut", restoreRange(state, 1200, 1300).decisions.find((d) => d.id === umId).state, "reverted");
-  eq("the um is a Fillers decision", state.decisions.find((d) => d.id === umId).type, "fillerCut");
+  eq("the unsure footage is kept", keep.some((k) => k.startMs <= 4560 && k.endMs >= 4860), true);
   // laughs feed zooms
   const zooms = planEmphasis({ windows, windowMs: WIN, words: speechWords, durationMs: 12000, laughs: sounds.filter((s) => s.cls === "laugh") });
   const laugh = zooms.find((z) => z.payload.reasons.includes("laugh"));
   eq("a laugh is an emphasis moment with a strong score", [!!laugh, laugh.sourceStartMs, laugh.payload.score >= 2, laugh.state], [true, 2720, true, "reverted"]);
   eq("without laughs there is no laugh reason", planEmphasis({ windows, windowMs: WIN, words: speechWords, durationMs: 12000 }).some((z) => z.payload.reasons.includes("laugh")), false);
 
-  // markers
-  eq("a method-2 um cut is labeled Filler (um)", describeDecision(cuts[0]).label, "Filler (um)");
-  eq("a method-1 filler keeps its label", describeDecision({ ...cuts[0], payload: { text: "uh" } }).label, "Filler 'uh'");
-  eq("the um cut marker carries its class and features", describeDecision(cuts[0]).sound.cls, "um");
+  // markers: um? gets its own display-only marker
   const clips = keepRangesToClips(URI, [{ startMs: 0, endMs: 12000 }]);
   const markers = buildDebugMarkers([], sounds, clips, URI);
-  eq("debug markers: laugh orange kind, unsure green kind, um is a normal cut marker instead", markers.map((m) => [m.kind, m.outputMs, m.detail.cls]), [["laugh", 2720, "laugh"], ["filler2", 4560, "unsure"]]);
-  eq("tapping shows the features", markers[0].detail.features.durationMs, 460);
+  eq("debug markers: um? (blue), laugh (orange), unsure (green)", markers.map((m) => [m.kind, m.outputMs, m.detail.cls, m.items[0].label]), [
+    ["um", 1160, "um", "um?"],
+    ["laugh", 2720, "laugh", "Laugh (never cut)"],
+    ["filler2", 4560, "unsure", "Unexplained sound"],
+  ]);
+  eq("tapping shows the class and features", [markers[0].detail.cls, markers[0].detail.features.durationMs], ["um", 300]);
 
-  // debug text
-  const text = formatAiDebug({ sourceDurationMs: 12000, clips, sourceUri: URI, proposals: [], candidates: sounds, hookTrims: [], fillers: [], ums: cuts });
-  eq("debug text lists every candidate with class and features", text.split("\n").filter((l) => /^\d:\d\d\.\d  (um|laugh|unsure)/.test(l)), [
-    `0:01.2  um  ${formatFeatures(sounds[0].features)}`,
+  // debug text: counts per class, and the features of every um?
+  const text = formatAiDebug({ sourceDurationMs: 12000, clips, sourceUri: URI, proposals: [], candidates: sounds, hookTrims: [], fillers: [] });
+  eq("debug text counts per class and lists each candidate's features", [
+    text.includes("(display only, never cut): 3 (um? 1, laugh 1, unsure 1)"),
+    text.split("\n").filter((l) => /^\d:\d\d\.\d  (um\?|laugh|unsure)/.test(l)),
+  ], [true, [
+    `0:01.2  um?  ${formatFeatures(sounds[0].features)}`,
     `0:02.7  laugh  ${formatFeatures(sounds[1].features)}`,
     `0:04.6  unsure  ${formatFeatures(sounds[2].features)}`,
-  ]);
-  eq("debug text counts the classes and lists the applied ums", [text.includes("method 2: 3 (um 1, laugh 1, unsure 1)"), text.includes("Um cuts, method 2 (applied): 1"), text.includes("um  source 0:01.2-0:01.5")], [true, true, true]);
+  ]]);
+  eq("there is no applied method-2 section any more", text.includes("method 2 (applied)"), false);
   eq("features format", formatFeatures({ durationMs: 300, peakVsSpeechDb: -2.14, steadiness: 0.1849, burstCount: 1, nearEmphasis: false, midSpeech: true }), "300 ms  peak vs speech -2.1 dB  steadiness 0.18  bursts 1  near emphasis no  mid-speech yes");
+}
+
+// ── silence cuts are exactly the silence detector's, on a realistic multi-pause clip ──
+{
+  // 20 speech bursts (1.2-1.6 s) separated by pauses of 0.5-1.2 s; the longer pauses hold a
+  // flat 300 ms um-like blip in the middle (the sounds method 2 used to turn into cuts).
+  const stretches = [];
+  const words = [];
+  const blips = [];
+  let t = 0;
+  for (let k = 0; k < 20; k++) {
+    const speech = 1200 + ((k * 37) % 400);
+    const speechEnd = t + Math.floor(speech / WIN) * WIN;
+    stretches.push([t, speechEnd, SPEECH + ((k * 7) % 5) * 0.4]);
+    words.push(w(`w${k}`, t, speechEnd));
+    t = speechEnd;
+    const pause = Math.floor((500 + ((k * 131) % 700)) / WIN) * WIN;
+    if (pause >= 900) {
+      const from = t + Math.floor((pause - 300) / 2 / WIN) * WIN;
+      blips.push([from, from + 300]);
+      stretches.push([from, from + 300, -33]);
+    }
+    t += pause;
+  }
+  const total = Math.ceil((words[words.length - 1].endMs + 200) / WIN) * WIN;
+  const windows = windowsOf(total, stretches);
+  const options = SENSITIVITY_PRESETS.tight;
+  const detection = detectSilences(windows, WIN, { durationMs: total, ...options });
+  const silenceOnly = newEditState(URI, planSilenceCuts(windows, WIN, total, options).decisions);
+  const base = keepRangesOf(silenceOnly, total);
+  const ranges = (r) => r.map((x) => [x.startMs, x.endMs]);
+  eq("fixture: a realistic clip with many pauses", [detection.cuts.length >= 10, blips.length >= 5], [true, true]);
+  eq("silence-only keep ranges equal the detector's own", ranges(base), ranges(detection.keepRanges));
+
+  const sounds = analyzeUnexplained(windows, WIN, total, words);
+  eq("fixture: method 2 does find um-like sounds here", sounds.filter((s) => s.cls === "um").length > 0, true);
+
+  const owner = buildAiEditState({ uri: URI, durationMs: total, windows, silenceOptions: options, words });
+  eq("the owner's AI edit has silence cuts only (no hook or filler decisions on this clip)", [...new Set(owner.decisions.map((d) => d.type))], ["silenceCut"]);
+  eq("keep ranges are IDENTICAL to silence-only", ranges(keepRangesOf(owner, total)), ranges(base));
+  eq("same number of seams", keepRangesOf(owner, total).length, base.length);
+  eq("no decision is a method-2 cut", owner.decisions.some((d) => d.payload && d.payload.method === 2), false);
+
+  // method-1 transcript fillers: with Fillers off the keep ranges are identical again
+  const withUm = [...words, w("um", words[3].endMs - 60, words[3].endMs - 10)].sort((x, y) => x.startMs - y.startMs);
+  const ownerUm = buildAiEditState({ uri: URI, durationMs: total, windows, silenceOptions: options, words: withUm });
+  eq("a method-1 um is the only added cut", ownerUm.decisions.filter((d) => d.type === "fillerCut").length, planFillerCuts(withUm).length);
+  eq("with Fillers off the keep ranges are identical to silence-only", ranges(keepRangesOf(setCategoryEnabled(ownerUm, "fillerCut", false), total)), ranges(base));
+  eq("silence cuts are unchanged by the other decisions", ownerUm.decisions.filter((d) => d.type === "silenceCut").map((d) => [d.sourceStartMs, d.sourceEndMs]), owner.decisions.map((d) => [d.sourceStartMs, d.sourceEndMs]));
+  eq("applied cut ranges are the silence cuts", appliedCutRanges(owner).map((r) => [r.startMs, r.endMs]), detection.cuts.map((c) => [c.startMs, c.endMs]));
 }
 
 // ── regression: the speech baseline and the timeline ──

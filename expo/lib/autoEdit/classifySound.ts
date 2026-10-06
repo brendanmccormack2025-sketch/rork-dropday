@@ -1,16 +1,16 @@
 /**
  * Classify method-2 filler candidates ("unexplained sound": loud, but no transcript
- * word) from the cached loudness data:
- *   um     a short, steady, quiet-ish hesitation: cut it
- *   laugh  pulsed, or louder than speech, or next to a loudness jump: never cut it
- *   unsure anything else: not cut, still shown
+ * word) from the cached loudness data. Display only: NOTHING here creates a cut
+ * decision (only method-1 transcript fillers do).
+ *   um     a short, steady, quiet-ish hesitation: shown as "um?"
+ *   laugh  pulsed (or loud with pulses): shown, and a zoom signal
+ *   unsure anything else: shown
  * Every threshold is in SOUND_CLASSIFIER_CONFIG so it can be tuned from real clips.
  *
  * Pure; erasable TypeScript only (see decisions.ts).
  */
 import type { Word } from "../transcription/types.ts";
 import { detectSilences } from "../silenceDetection.ts";
-import { makeDecision, type Decision } from "./decisions.ts";
 import { loudnessJumpScorer } from "./emphasisMoments.ts";
 import { findUnexplainedSounds, type UnexplainedSound } from "./fillerCuts.ts";
 
@@ -27,7 +27,7 @@ export const SOUND_CLASSIFIER_CONFIG = {
   umMinMs: 150,
   umMaxMs: 900,
   /** um: steady = coefficient of variation of the linear loudness at most this. */
-  umMaxCv: 0.55,
+  umMaxCv: 0.35,
   /** um: peak at most this far above the median speech loudness (dB). */
   umMaxPeakAboveSpeechDb: 3,
   /** Speech baseline: fewer transcript words than this falls back to all non-silent frames. */
@@ -240,17 +240,6 @@ export function analyzeUnexplained(
   const threshold = silenceThresholdDb(windows, windowMs, durationMs);
   const found = findUnexplainedSounds(windows, windowMs, words, threshold);
   return classifySounds(found, { windows, windowMs, words, thresholdDb: threshold }, config);
-}
-
-/** Only ums are cut (applied fillerCut decisions); laughs and unsure sounds never are. */
-export function planUmCuts(sounds: ClassifiedSound[]): Decision[] {
-  return sounds
-    .filter((s) => s.cls === "um")
-    .map((s) =>
-      makeDecision("fillerCut", s.startMs, s.endMs, {
-        payload: { text: "um", method: 2, cls: s.cls, features: s.features },
-      }),
-    );
 }
 
 /** "300 ms  peak vs speech -2.1 dB  steadiness 0.18  bursts 1  near emphasis no  mid-speech yes" */

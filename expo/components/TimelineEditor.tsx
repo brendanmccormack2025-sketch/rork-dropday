@@ -89,6 +89,7 @@ const MARKER_LOOK: Record<MarkerKind, { glyph: object; bottom: boolean }> = {
   proposal: { glyph: { backgroundColor: theme.trending, borderWidth: 1, borderColor: theme.text, borderRadius: 6 }, bottom: false },
   filler2: { glyph: { borderWidth: 1.5, borderColor: theme.success, borderRadius: 6 }, bottom: true },
   laugh: { glyph: { backgroundColor: "#F28C28", borderRadius: 6 }, bottom: true },
+  um: { glyph: { borderWidth: 1.5, borderColor: "#4C6EF5", transform: [{ rotate: "45deg" }] }, bottom: true },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

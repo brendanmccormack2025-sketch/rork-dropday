@@ -26,7 +26,9 @@ export default function MarkerSheet({ marker, onRestore, onReapply, onClose }: P
             ? "Filler candidate (not applied)"
             : marker?.kind === "laugh"
               ? "Laugh (never cut)"
-              : "";
+              : marker?.kind === "um"
+                ? "um? (not cut)"
+                : "";
   return (
     <Modal visible={!!marker} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>

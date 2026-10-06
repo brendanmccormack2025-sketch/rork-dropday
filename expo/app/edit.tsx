@@ -83,7 +83,7 @@ import {
 } from "@/lib/autoEdit/markers";
 import { buildAiEditState } from "@/lib/autoEdit/plan";
 import { checkAlignment, type Alignment } from "@/lib/autoEdit/alignment";
-import { analyzeUnexplained, planUmCuts, silenceThresholdDb, speechMedianDb, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
+import { analyzeUnexplained, silenceThresholdDb, speechMedianDb, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
 import { planFillerCuts } from "@/lib/autoEdit/fillerCuts";
 import { emphasisLogEntries, planEmphasis } from "@/lib/autoEdit/emphasisMoments";
 import { planHookTrim } from "@/lib/autoEdit/hookTrim";
@@ -2447,7 +2447,7 @@ export default function EditScreen() {
 
   const handleMarkerPress = useCallback(
     (marker: TimelineMarker) => {
-      if (marker.kind === "proposal" || marker.kind === "filler2" || marker.kind === "laugh") {
+      if (marker.kind === "proposal" || marker.kind === "filler2" || marker.kind === "laugh" || marker.kind === "um") {
         handleSeekAny(Math.max(0, marker.outputMs - 1000));
       }
       setMarkerSheet(marker);
@@ -2467,12 +2467,7 @@ export default function EditScreen() {
       alignment: aiDebug?.alignment ?? null,
       speechBaselineDb: aiDebug?.speechBaselineDb,
       hookTrims: model.state.decisions.filter((d) => d.type === "hookTrim" && d.state === "applied"),
-      fillers: model.state.decisions.filter(
-        (d) => d.type === "fillerCut" && d.state === "applied" && (d.payload as { method?: number } | undefined)?.method !== 2,
-      ),
-      ums: model.state.decisions.filter(
-        (d) => d.type === "fillerCut" && d.state === "applied" && (d.payload as { method?: number } | undefined)?.method === 2,
-      ),
+      fillers: model.state.decisions.filter((d) => d.type === "fillerCut" && d.state === "applied"),
     });
     Share.share({ message: text }).catch(() => {});
   }, [aiDebug]);
@@ -2497,9 +2492,9 @@ export default function EditScreen() {
           current.every((c) => c.uri === uri) &&
           sameRanges(current, renderClipsOf(model.state, model.durationMs), durationMs);
 
-        // Method 2: classify the unexplained sounds; only ums are cut, laughs never are.
+        // Method 2 (unexplained sounds) is display only: nothing here becomes a cut.
         const sounds = analyzeUnexplained(loud.windows, 20, durationMs, words);
-        const planned = [...planHookTrim(words, durationMs), ...planFillerCuts(words), ...planUmCuts(sounds)];
+        const planned = [...planHookTrim(words, durationMs), ...planFillerCuts(words)];
         const merged = mergePlan(model.state, planned, ["hookTrim", "fillerCut"]);
         // AI planning is not an undo step: saved snapshots are re-planned, not extended.
         historyRef.current = mapHistory(historyRef.current, (snap) =>

@@ -29,8 +29,6 @@ export type AiDebugInput = {
   /** Applied hook trim decisions and applied method-1 filler decisions. */
   hookTrims: Decision[];
   fillers: Decision[];
-  /** Applied method-2 um cuts. */
-  ums?: Decision[];
   /** Timeline check (words vs loudness) and the speech baseline, to tune from real clips. */
   alignment?: Alignment | null;
   speechBaselineDb?: number;
@@ -72,13 +70,13 @@ export function formatAiDebug(input: AiDebugInput): string {
   lines.push(
     "",
     input.candidates.some((c) => c.cls)
-      ? `Filler candidates, method 2: ${input.candidates.length} (um ${count("um")}, laugh ${count("laugh")}, unsure ${count("unsure")})`
+      ? `Filler candidates, method 2 (display only, never cut): ${input.candidates.length} (um? ${count("um")}, laugh ${count("laugh")}, unsure ${count("unsure")})`
       : `Filler candidates, method 2 (not applied): ${input.candidates.length}`,
   );
   for (const c of input.candidates) {
     lines.push(
       c.cls && c.features
-        ? `${outputTime(clips, uri, c.startMs)}  ${c.cls}  ${formatFeatures(c.features)}`
+        ? `${outputTime(clips, uri, c.startMs)}  ${c.cls === "um" ? "um?" : c.cls}  ${formatFeatures(c.features)}`
         : `${outputTime(clips, uri, c.startMs)}  ${Math.round(c.lengthMs)} ms  sound with no transcript word`,
     );
   }
@@ -96,8 +94,6 @@ export function formatAiDebug(input: AiDebugInput): string {
     const p = (d.payload ?? {}) as { text?: string };
     lines.push(`'${p.text ?? ""}'  source ${formatClock(d.sourceStartMs)}-${formatClock(d.sourceEndMs)}`);
   }
-  const ums = input.ums ?? [];
-  lines.push("", `Um cuts, method 2 (applied): ${ums.length}`);
-  for (const d of ums) lines.push(`um  source ${formatClock(d.sourceStartMs)}-${formatClock(d.sourceEndMs)}`);
+
   return lines.join("\n");
 }

@@ -28,8 +28,8 @@ import {
   type KeepRange,
 } from "../editModel.ts";
 
-/** cut/restored: cut decisions. zoom: reserved for future zoom decisions. proposal/filler2/laugh: owner debug. */
-export type MarkerKind = "cut" | "restored" | "zoom" | "proposal" | "filler2" | "laugh";
+/** cut/restored: cut decisions. zoom: reserved for future zoom decisions. proposal/filler2/laugh/um: owner debug (never applied). */
+export type MarkerKind = "cut" | "restored" | "zoom" | "proposal" | "filler2" | "laugh" | "um";
 
 export type MarkerItem = {
   decisionId: string;
@@ -229,20 +229,18 @@ export function buildDebugMarkers(
     });
   });
   candidates.forEach((c, i) => {
-    // Ums are cut: they show as ordinary cut markers, not here.
-    if (c.cls === "um") return;
     const outputMs = sourceToOutputMs(clips, c.startMs, sourceUri);
     if (outputMs === null) return;
-    const laugh = c.cls === "laugh";
+    const kind: MarkerKind = c.cls === "laugh" ? "laugh" : c.cls === "um" ? "um" : "filler2";
     out.push({
-      id: `${laugh ? "laugh" : "filler2"}:${i}`,
-      kind: laugh ? "laugh" : "filler2",
+      id: `${kind}:${i}`,
+      kind,
       outputMs,
       items: [
         {
           decisionId: `filler2:${c.startMs}`,
           type: "fillerCut",
-          label: laugh ? "Laugh (never cut)" : "Unexplained sound",
+          label: kind === "laugh" ? "Laugh (never cut)" : kind === "um" ? "um?" : "Unexplained sound",
           lengthMs: c.lengthMs,
         },
       ],
