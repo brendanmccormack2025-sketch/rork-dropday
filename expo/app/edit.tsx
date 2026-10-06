@@ -43,7 +43,9 @@ import {
 import { getThumbnailAsync } from "expo-video-thumbnails";
 import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
-import { OWNER_USER_ID, isInternalTester } from "@/constants/debug";
+import { OWNER_USER_ID, isDebugOwner, isInternalTester } from "@/constants/debug";
+import CaptionsExplainer from "@/components/CaptionsExplainer";
+import { useOwnerTranscript } from "@/lib/transcription/useOwnerTranscript";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { formatRenderStats, recordRenderStats, reportRender } from "@/lib/renderReport";
 import { RenderAhead, type AheadState } from "@/lib/renderAhead";
@@ -282,6 +284,7 @@ export default function EditScreen() {
   // play that ONE finished file in the preview while it matches the timeline.
   const aheadRef = useRef<RenderAhead | null>(null);
   const [aheadState, setAheadState] = useState<AheadState>({ kind: "idle" });
+  const transcript = useOwnerTranscript(isDebugOwner(user?.id), clips);
   useEffect(() => {
     const ahead = new RenderAhead();
     aheadRef.current = ahead;
@@ -3179,6 +3182,12 @@ export default function EditScreen() {
           </View>
         )}
       </View>
+
+      <CaptionsExplainer
+        visible={transcript.explainerVisible}
+        onContinue={transcript.onContinue}
+        onNotNow={transcript.onNotNow}
+      />
 
       {/* ── Text overlay editor modal ─────────────────────────────── */}
       {renderProgress !== null && (
