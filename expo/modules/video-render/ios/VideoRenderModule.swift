@@ -281,6 +281,40 @@ private func visibilityAnimation(
   return animation
 }
 
+// Shown from start to end with no fade at all: a discrete animation holds each value
+// until the next key time, so the overlay appears and disappears on exactly those frames.
+private func hardCutAnimation(
+  totalSeconds: Double,
+  startSeconds: Double,
+  endSeconds: Double
+) -> CAKeyframeAnimation? {
+  let start = min(max(0, startSeconds), totalSeconds)
+  let end = min(max(start, endSeconds), totalSeconds)
+  var times: [NSNumber] = []
+  var values: [Double] = []
+  if start > 0 {
+    times.append(0)
+    values.append(0)
+  }
+  times.append(NSNumber(value: start / totalSeconds))
+  values.append(1)
+  if end < totalSeconds {
+    times.append(NSNumber(value: end / totalSeconds))
+    values.append(0)
+  }
+  // Visible for the whole video: no animation needed.
+  if times.count == 1 { return nil }
+  let animation = CAKeyframeAnimation(keyPath: "opacity")
+  animation.values = values
+  animation.keyTimes = times
+  animation.calculationMode = .discrete
+  animation.duration = totalSeconds
+  animation.beginTime = AVCoreAnimationBeginTimeAtZero
+  animation.fillMode = .both
+  animation.isRemovedOnCompletion = false
+  return animation
+}
+
 private func addTimed(
   _ layer: CALayer,
   overlay: OverlaySpec,
@@ -288,6 +322,18 @@ private func addTimed(
 ) {
   let start = (overlay.startMs ?? 0) / 1000
   let end = (overlay.endMs ?? (totalSeconds * 1000)) / 1000
+  // Both fades given as exactly 0: a true hard cut. A missing fade keeps the default.
+  if let fadeInMs = number(overlay.style["fadeInMs"]),
+     let fadeOutMs = number(overlay.style["fadeOutMs"]),
+     fadeInMs == 0, fadeOutMs == 0 {
+    if let animation = hardCutAnimation(totalSeconds: totalSeconds, startSeconds: start, endSeconds: end) {
+      layer.opacity = 0
+      layer.add(animation, forKey: "visibility")
+    } else {
+      layer.opacity = 1
+    }
+    return
+  }
   let fadeIn = (number(overlay.style["fadeInMs"]) ?? 0) / 1000
   let fadeOut = (number(overlay.style["fadeOutMs"]) ?? 0) / 1000
   layer.opacity = 0
