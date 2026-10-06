@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
+  Alert,
   PanResponder,
   Platform,
   Pressable,
@@ -67,6 +68,7 @@ import {
 } from "@/lib/autoEdit/decisions";
 import AiEditsSheet from "@/components/AiEditsSheet";
 import MarkerSheet from "@/components/MarkerSheet";
+import { MANUAL_EDIT_CONFIRM_MESSAGE, guardManualEdits, timelineMatchesState } from "@/lib/autoEdit/confirm";
 import { allCategoriesOff, categoryRows, type CategoryRow } from "@/lib/autoEdit/editPanel";
 import { formatAiDebug } from "@/lib/autoEdit/debugText";
 import { canRedo as canRedoDecisions, canUndo as canUndoDecisions, emptyHistory, mapHistory, pushEdit, redoEdit, undoEdit, type EditHistory } from "@/lib/autoEdit/history";
@@ -2293,8 +2295,10 @@ export default function EditScreen() {
       sameRanges(clips, renderClipsOf(editModel.state, editModel.durationMs), editModel.durationMs, 60),
     [editModel, clips],
   );
+  // Temporary: the AI edits button, panel and cut markers are for internal testers only.
+  const aiEditsEnabled = isInternalTester(user?.id);
   const timelineMarkers = useMemo<TimelineMarker[]>(() => {
-    if (!editModel || !modelInSync) return [];
+    if (!aiEditsEnabled || !editModel || !modelInSync) return [];
     const cuts = buildCutMarkers(editModel.state, editModel.durationMs);
     if (!isOwnerAccount || !aiDebug) return cuts;
     const rendered = renderClipsOf(editModel.state, editModel.durationMs);
@@ -2302,7 +2306,7 @@ export default function EditScreen() {
       ...cuts,
       ...buildDebugMarkers(aiDebug.proposals, aiDebug.candidates, rendered, editModel.state.sourceUri),
     ];
-  }, [editModel, modelInSync, isOwnerAccount, aiDebug]);
+  }, [aiEditsEnabled, editModel, modelInSync, isOwnerAccount, aiDebug]);
   const panelRows = useMemo<CategoryRow[]>(
     () =>
       editModel
@@ -2347,39 +2351,60 @@ export default function EditScreen() {
     [setEditModel, replaceClips, handleSeek],
   );
 
+  // With manual edits the model does not contain, an AI-edit action asks first.
+  const guardAction = useCallback((apply: () => void) => {
+    const model = editStateRef.current;
+    if (!model) return;
+    guardManualEdits(
+      timelineMatchesState(clipsForUndoRef.current, model.state, model.durationMs),
+      (onContinue) =>
+        Alert.alert("AI edit", MANUAL_EDIT_CONFIRM_MESSAGE, [
+          { text: "Cancel", style: "cancel" },
+          { text: "Continue", onPress: onContinue },
+        ]),
+      apply,
+    );
+  }, []);
+
   // A creator action: one undo step, then show it.
   const userEdit = useCallback(
     (produce: (s: EditState) => EditState) => {
-      const model = editStateRef.current;
-      if (!model) return;
-      const next = produce(model.state);
-      if (next === model.state) return;
-      historyRef.current = pushEdit(historyRef.current, model.state);
-      setHistoryTick((n) => n + 1);
-      commitDecisions(next);
+      guardAction(() => {
+        const model = editStateRef.current;
+        if (!model) return;
+        const next = produce(model.state);
+        if (next === model.state) return;
+        historyRef.current = pushEdit(historyRef.current, model.state);
+        setHistoryTick((n) => n + 1);
+        commitDecisions(next);
+      });
     },
-    [commitDecisions],
+    [commitDecisions, guardAction],
   );
 
   const handleUndoDecisions = useCallback(() => {
-    const model = editStateRef.current;
-    if (!model) return;
-    const r = undoEdit(historyRef.current, model.state);
-    if (!r) return;
-    historyRef.current = r.history;
-    setHistoryTick((n) => n + 1);
-    commitDecisions(r.state);
-  }, [commitDecisions]);
+    guardAction(() => {
+      const model = editStateRef.current;
+      if (!model) return;
+      const r = undoEdit(historyRef.current, model.state);
+      if (!r) return;
+      historyRef.current = r.history;
+      setHistoryTick((n) => n + 1);
+      commitDecisions(r.state);
+    });
+  }, [commitDecisions, guardAction]);
 
   const handleRedoDecisions = useCallback(() => {
-    const model = editStateRef.current;
-    if (!model) return;
-    const r = redoEdit(historyRef.current, model.state);
-    if (!r) return;
-    historyRef.current = r.history;
-    setHistoryTick((n) => n + 1);
-    commitDecisions(r.state);
-  }, [commitDecisions]);
+    guardAction(() => {
+      const model = editStateRef.current;
+      if (!model) return;
+      const r = redoEdit(historyRef.current, model.state);
+      if (!r) return;
+      historyRef.current = r.history;
+      setHistoryTick((n) => n + 1);
+      commitDecisions(r.state);
+    });
+  }, [commitDecisions, guardAction]);
 
   const handleToggleCategory = useCallback(
     (row: CategoryRow, value: boolean) => {
@@ -3417,7 +3442,7 @@ export default function EditScreen() {
           </Pressable>
 
           {/* AI edits: every automatic edit, each reversible */}
-          {isVideo && editModel && (
+          {isVideo && editModel && aiEditsEnabled && (
             <Pressable onPress={() => setAiPanelOpen(true)} style={styles.toolBtn}>
               <Sparkles size={18} color={theme.text} />
               <UiText style={styles.toolLabel}>AI edits</UiText>
@@ -3615,7 +3640,7 @@ export default function EditScreen() {
         </View>
       )}
       <AiEditsSheet
-        visible={aiPanelOpen && !!editModel}
+        visible={aiPanelOpen && !!editModel && aiEditsEnabled}
         rows={panelRows}
         canUndo={canUndoDecisions(historyRef.current)}
         canRedo={canRedoDecisions(historyRef.current)}

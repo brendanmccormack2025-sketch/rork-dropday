@@ -16,6 +16,7 @@ import {
 } from "../lib/autoEdit/markers.ts";
 import { formatAiDebug, formatClock } from "../lib/autoEdit/debugText.ts";
 import { buildAiEditState } from "../lib/autoEdit/plan.ts";
+import { guardManualEdits, MANUAL_EDIT_CONFIRM_MESSAGE, timelineMatchesState } from "../lib/autoEdit/confirm.ts";
 import { planEmphasis } from "../lib/autoEdit/emphasisMoments.ts";
 import { createAnalysisCache } from "../lib/autoEdit/analysisCache.ts";
 import { keepRangesToClips, outputToSourceMs } from "../lib/editModel.ts";
@@ -220,6 +221,42 @@ eq("clock format", [formatClock(0), formatClock(7234), formatClock(59960), forma
     ["filler2", 500, ["sound with no word, 300 ms"]],
     ["proposal", 4500, ["loud jump", "after pause"]],
   ]);
+}
+
+// ── confirm before replacing manual edits ──
+{
+  const state = st(cut("silenceCut", 1000, 2000), cut("fillerCut", 5000, 5300));
+  const modelClips = () => renderClipsOf(state, D).map((c, i) => ({ id: `c${i}`, ...c }));
+  eq("a timeline equal to the model matches", timelineMatchesState(modelClips(), state, D), true);
+  eq("edges within 60 ms still match", timelineMatchesState(modelClips().map((c) => ({ ...c, trimEndMs: c.trimEndMs - 40 })), state, D), true);
+  const manual = [{ id: "m", uri: URI, trimStartMs: 0, trimEndMs: 3000 }, { id: "n", uri: URI, trimStartMs: 6000, trimEndMs: 8000 }];
+  eq("hand-edited clips do not match", timelineMatchesState(manual, state, D), false);
+  eq("a split the model does not know about does not match", timelineMatchesState([...modelClips().slice(0, 1), { id: "x", uri: URI, trimStartMs: 1500, trimEndMs: 1600 }, ...modelClips().slice(1)], state, D), false);
+  eq("the confirm text", MANUAL_EDIT_CONFIRM_MESSAGE, "This will replace your manual edits with the AI edit. Continue?");
+
+  // The editor's action: apply = show the model's render in place of the timeline.
+  const run = (timeline, answer) => {
+    let clips = timeline;
+    let asked = 0;
+    let model = state;
+    const ask = (onContinue) => {
+      asked++;
+      if (answer === "continue") onContinue();
+    };
+    guardManualEdits(timelineMatchesState(clips, model, D), ask, () => {
+      model = setCategoryEnabled(model, "fillerCut", false);
+      clips = renderClipsOf(model, D);
+    });
+    return { clips, asked, model };
+  };
+  const cancelled = run(manual, "cancel");
+  eq("Cancel leaves the manual timeline unchanged", cancelled.clips, manual);
+  eq("Cancel leaves the model unchanged", cancelled.model, state);
+  eq("the creator was asked once", cancelled.asked, 1);
+  const confirmed = run(manual, "continue");
+  eq("Continue replaces the manual edits with the model's render", ranges(confirmed.clips.map((c) => ({ startMs: c.trimStartMs, endMs: c.trimEndMs }))), [[0, 1000], [2000, D]]);
+  const inSync = run(modelClips(), "cancel");
+  eq("no dialog when the timeline matches the model", [inSync.asked, ranges(inSync.clips.map((c) => ({ startMs: c.trimStartMs, endMs: c.trimEndMs })))], [0, [[0, 1000], [2000, D]]]);
 }
 
 if (failed) {
