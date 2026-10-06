@@ -125,24 +125,39 @@ private final class OnceFlag {
 //  - A result whose first segment starts at the same time as the previous result's is
 //    the same utterance, grown or revised: it replaces it.
 //  - Any other result (earlier or later first segment) is a restart: the previous
-//    segments are kept and the new ones are appended.
+//    segments are kept and the new ones are appended. If the restart begins before the
+//    end of what was collected, its times are relative to the restart: they are shifted
+//    forward by the previous last segment's end. Otherwise they are already absolute.
+private struct CollectedSegment {
+  let substring: String
+  let timestamp: Double
+  let duration: Double
+  let confidence: Float
+}
+
 private final class SegmentCollector: @unchecked Sendable {
   private let lock = NSLock()
-  private var committed: [SFTranscriptionSegment] = []
-  private var current: [SFTranscriptionSegment] = []
+  private var committed: [CollectedSegment] = []
+  private var current: [CollectedSegment] = []
   private var polling = false
 
   func add(_ segments: [SFTranscriptionSegment]) {
     lock.lock()
     defer { lock.unlock() }
     guard let first = segments.first else { return }
+    var shift = 0.0
     if let previousFirst = current.first, abs(first.timestamp - previousFirst.timestamp) > 0.05 {
       committed.append(contentsOf: current)
+      if let last = committed.last, first.timestamp < last.timestamp + last.duration {
+        shift = last.timestamp + last.duration
+      }
     }
-    current = segments
+    current = segments.map {
+      CollectedSegment(substring: $0.substring, timestamp: $0.timestamp + shift, duration: $0.duration, confidence: $0.confidence)
+    }
   }
 
-  func all() -> [SFTranscriptionSegment] {
+  func all() -> [CollectedSegment] {
     lock.lock()
     defer { lock.unlock() }
     return committed + current
@@ -198,7 +213,7 @@ private func recognize(
   url: URL,
   recognizer: SFSpeechRecognizer,
   hasSound: Bool
-) async throws -> [SFTranscriptionSegment] {
+) async throws -> [CollectedSegment] {
   return try await withCheckedThrowingContinuation { continuation in
     let request = SFSpeechURLRecognitionRequest(url: url)
     // Never fall back to Apple's servers.
