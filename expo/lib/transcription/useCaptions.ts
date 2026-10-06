@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { EditOverlay } from "@/lib/editModel";
 import { analysis } from "@/lib/autoEdit/analysis";
-import type { Word } from "@/lib/transcription";
+import type { TranscriptionInfo, Word } from "@/lib/transcription/types";
 import {
   applyLineEdit,
   buildCaptionLines,
@@ -28,6 +28,7 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
   const [status, setStatus] = useState<Status>("waiting");
   const [transcript, setTranscript] = useState<{ uri: string; words: Word[] } | null>(null);
   const [edits, setEdits] = useState<WordEdits>({});
+  const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionInfo | null>(null);
   const startedUriRef = useRef<string | null>(null);
 
   const first = clips[0];
@@ -41,11 +42,16 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
 
   const run = useCallback(async (uri: string) => {
     setStatus("running");
-    const result = await analysis.transcript(uri);
+    const { result, fromCache, key } = await analysis.transcriptWithInfo(uri);
+    setTranscriptionInfo(
+      result.status === "ok"
+        ? { status: "ok", wordCount: result.words.length, fromCache, key }
+        : { status: result.status, code: result.code, message: result.message, wordCount: 0, fromCache, key },
+    );
     if (result.status === "ok") {
       setTranscript({ uri, words: result.words });
-    } else if (__DEV__) {
-      console.log("[captions] no transcript:", result.status, result.message ?? "");
+    } else {
+      console.log("[captions] no transcript:", result.status, result.code ?? "", result.message ?? "");
     }
     setStatus("done");
   }, []);
@@ -53,6 +59,13 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
   useEffect(() => {
     if (!enabled || !ready || status !== "waiting") return;
     if (!sourceUri) {
+      setTranscriptionInfo({
+        status: "skipped",
+        message: "the timeline is not one local video file",
+        wordCount: 0,
+        fromCache: false,
+        key: null,
+      });
       setStatus("done");
       return;
     }
@@ -72,7 +85,18 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
     if (startedUriRef.current) void run(startedUriRef.current);
     else setStatus("done");
   }, [run]);
-  const onNotNow = useCallback(() => setStatus("done"), []);
+  const onNotNow = useCallback(() => {
+    setTranscriptionInfo({ status: "skipped", message: "the creator chose Not now", wordCount: 0, fromCache: false, key: null });
+    setStatus("done");
+  }, []);
+
+  /** Run the transcription again from scratch (after the analysis cache was cleared). */
+  const restart = useCallback(() => {
+    setTranscript(null);
+    setTranscriptionInfo(null);
+    startedUriRef.current = null;
+    setStatus("waiting");
+  }, []);
 
   const keptKey = JSON.stringify(clips.map((c) => [c.trimStartMs ?? 0, c.trimEndMs ?? 0, c.durationMs ?? 0]));
   const lines: EditorCaptionLine[] = useMemo(() => {
@@ -108,6 +132,8 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
   return {
     /** The transcript (source timeline) and the file it belongs to, once there is one. */
     words: transcript?.words ?? null,
+    transcriptionInfo,
+    restart,
     transcribedUri: transcript?.uri ?? null,
     explainerVisible: status === "asking",
     onContinue,

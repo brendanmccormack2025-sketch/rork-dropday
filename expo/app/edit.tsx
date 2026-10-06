@@ -2473,6 +2473,19 @@ export default function EditScreen() {
     [handleSeekAny],
   );
 
+  // Owner: forget everything cached for this clip and analyse it again (transcript, loudness).
+  const handleClearAnalysisCache = useCallback(async () => {
+    const model = editStateRef.current;
+    const uri = model?.state.sourceUri ?? captions.transcribedUri;
+    if (!uri) return;
+    const key = await analysis.clear(uri);
+    console.log("[analysis] cleared", key);
+    setAiDebug(null);
+    setPlanDone(false);
+    captions.restart();
+    setAiPanelOpen(false);
+  }, [captions]);
+
   // "Cut this sound": the creator decides about one method-2 candidate.
   const handleCutSound = useCallback(
     (marker: TimelineMarker) => {
@@ -2511,12 +2524,13 @@ export default function EditScreen() {
       umReport: aiDebug?.umReport,
       protection: protectionReport(model.state),
       userCuts: model.state.decisions.filter((d) => d.type === "umCut" && d.origin === "user"),
+      transcription: captions.transcriptionInfo,
       speechBaselineDb,
       hookTrims: model.state.decisions.filter((d) => d.type === "hookTrim" && d.state === "applied"),
       fillers: model.state.decisions.filter((d) => d.type === "fillerCut" && d.state === "applied"),
     });
     Share.share({ message: text }).catch(() => {});
-  }, [aiDebug, captions.words, captions.transcribedUri]);
+  }, [aiDebug, captions.words, captions.transcribedUri, captions.transcriptionInfo]);
 
   // ── Auto-edit v2 (owner): decisions planned from the transcript ──────────────
   // Hook trim and filler cuts join the decision model (applied, each reversible) and
@@ -3733,6 +3747,7 @@ export default function EditScreen() {
         onReset={handleResetAi}
         onOriginal={handleOriginalVideo}
         onShareDebug={isOwnerAccount ? handleShareAiDebug : undefined}
+        onClearCache={isOwnerAccount ? handleClearAnalysisCache : undefined}
         onClose={() => setAiPanelOpen(false)}
       />
       <MarkerSheet

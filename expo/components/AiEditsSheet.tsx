@@ -17,6 +17,8 @@ type Props = {
   onOriginal: () => void;
   /** Owner only; the button is hidden when this is undefined. */
   onShareDebug?: () => void;
+  /** Owner only: forget the cached analysis of this clip and analyse it again. */
+  onClearCache?: () => void;
   onClose: () => void;
 };
 
@@ -32,6 +34,7 @@ export default function AiEditsSheet({
   onReset,
   onOriginal,
   onShareDebug,
+  onClearCache,
   onClose,
 }: Props) {
   return (
@@ -79,6 +82,12 @@ export default function AiEditsSheet({
           {onShareDebug && (
             <Pressable onPress={onShareDebug} hitSlop={8} style={styles.debugBtn}>
               <UiText style={styles.actionSecondary}>Share AI debug</UiText>
+            </Pressable>
+          )}
+
+          {onClearCache && (
+            <Pressable onPress={onClearCache} hitSlop={8} style={styles.debugBtn}>
+              <UiText style={styles.actionSecondary}>Clear analysis cache for this clip</UiText>
             </Pressable>
           )}
 

@@ -5,6 +5,7 @@
  */
 import { sourceToOutputMs, type EditClip } from "../editModel.ts";
 import type { Decision } from "./decisions.ts";
+import type { TranscriptionInfo } from "../transcription/types.ts";
 import type { Alignment } from "./alignment.ts";
 import type { ProtectionReport } from "./decisions.ts";
 import { formatFeatures, type ClassifiedSound } from "./classifySound.ts";
@@ -41,6 +42,8 @@ export type AiDebugInput = {
   protection?: ProtectionReport;
   /** Sounds the creator cut by hand ("Cut this sound"). */
   userCuts?: Decision[];
+  /** How the transcription of this clip went. */
+  transcription?: TranscriptionInfo | null;
 };
 
 function outputTime(clips: EditClip[], uri: string, sourceMs: number): string {
@@ -53,7 +56,16 @@ export function formatAiDebug(input: AiDebugInput): string {
   const editedMs = clips.reduce((sum, c) => sum + Math.max(0, c.trimEndMs - c.trimStartMs), 0);
   const lines: string[] = [];
   lines.push("Trial AI debug");
-  // The transcript alignment summary comes first.
+  // How the transcription went comes first, then the alignment summary.
+  const t = input.transcription;
+  if (t) {
+    const why = t.status === "ok" ? "" : ` (${t.code ?? "no code"}${t.message ? `: ${t.message}` : ""})`;
+    lines.push(`Transcription: ${t.status}${why}; ${t.wordCount} words; from cache: ${t.fromCache ? "yes" : "no"}`);
+    lines.push(`Cache key: ${t.key ?? "none (file could not be read)"}`);
+  } else if (input.transcription === null) {
+    lines.push("Transcription: not run");
+  }
+  // The transcript alignment summary.
   const a = input.alignment;
   if (a) {
     const pct = (n: number) => `${Math.round(n * 100)}%`;

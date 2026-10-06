@@ -8,6 +8,7 @@
  *
  * Pure apart from the injected deps; erasable TypeScript only (see decisions.ts).
  */
+import { detectSilences } from "../silenceDetection.ts";
 import type { TranscriptResult, Word } from "./../transcription/types.ts";
 
 export type SourceStat = { uri: string; size: number; mtime: number };
@@ -24,6 +25,22 @@ export type AnalysisDeps = {
   };
 };
 
+/**
+ * An empty transcript is believed only if the audio really is (almost) silent: with
+ * more than this much sound it is an 'error' and is never cached.
+ */
+export const EMPTY_TRANSCRIPT_MIN_SOUND_MS = 2000;
+
+/** Milliseconds of audio above the silence detector's threshold. */
+export function nonSilentMs(loud: LoudnessData | null): number {
+  if (!loud || loud.windows.length === 0) return 0;
+  const windowMs = loud.durationMs / loud.windows.length;
+  const threshold = detectSilences(loud.windows, windowMs, { durationMs: loud.durationMs }).thresholdDb;
+  let n = 0;
+  for (const v of loud.windows) if (Number.isFinite(v) && v > threshold) n++;
+  return n * windowMs;
+}
+
 const PREFIX = "trial:analysis:v1:";
 const INDEX_KEY = `${PREFIX}index`;
 const MAX_STORED = 6;
@@ -36,7 +53,7 @@ export function createAnalysisCache(deps: AnalysisDeps) {
   const loudnessMem = new Map<string, LoudnessData | null>();
   const transcriptMem = new Map<string, Word[]>();
   const loudnessFlight = new Map<string, Promise<LoudnessData | null>>();
-  const transcriptFlight = new Map<string, Promise<TranscriptResult>>();
+  const transcriptFlight = new Map<string, Promise<{ result: TranscriptResult; fromCache: boolean; key: string | null }>>();
   const runs = { loudness: 0, transcript: 0 };
   let tail: Promise<unknown> = Promise.resolve();
 
@@ -108,33 +125,71 @@ export function createAnalysisCache(deps: AnalysisDeps) {
     }
   }
 
-  async function transcript(uri: string): Promise<TranscriptResult> {
+  async function forget(key: string, kinds: string[]): Promise<void> {
+    for (const kind of kinds) {
+      if (kind === "transcript") transcriptMem.delete(key);
+      if (kind === "loudness") loudnessMem.delete(key);
+    }
+    if (!deps.storage) return;
+    try {
+      for (const kind of kinds) await deps.storage.remove(`${PREFIX}${kind}:${key}`);
+      const rawIndex = await deps.storage.get(INDEX_KEY);
+      const index: string[] = rawIndex ? (JSON.parse(rawIndex) as string[]) : [];
+      await deps.storage.set(INDEX_KEY, JSON.stringify(index.filter((e) => !kinds.some((k) => e === `${k}:${key}`))));
+    } catch {
+      // Nothing to clean up is fine.
+    }
+  }
+
+  /** True when the audio of this source has real sound (so an empty transcript cannot be right). */
+  async function hasSpeechSound(uri: string): Promise<boolean> {
+    const loud = await loudness(uri).catch(() => null);
+    return nonSilentMs(loud) > EMPTY_TRANSCRIPT_MIN_SOUND_MS;
+  }
+
+  type TranscriptOutcome = { result: TranscriptResult; fromCache: boolean; key: string | null };
+
+  async function transcriptWithInfo(uri: string): Promise<TranscriptOutcome> {
     const key = await keyFor(uri);
     if (key) {
-      const words = transcriptMem.get(key);
-      if (words) return { status: "ok", words };
       const flying = transcriptFlight.get(key);
       if (flying) return flying;
     }
-    const job = (async (): Promise<TranscriptResult> => {
+    const job = (async (): Promise<TranscriptOutcome> => {
       // Silence detection first when it is running for this source.
       if (key) await loudnessFlight.get(key)?.catch(() => null);
       if (key) {
-        const stored = await readStored<Word[]>("transcript", key);
-        if (stored) {
-          transcriptMem.set(key, stored);
-          return { status: "ok", words: stored };
+        const cached = transcriptMem.get(key) ?? (await readStored<Word[]>("transcript", key)) ?? undefined;
+        if (cached) {
+          // A cached EMPTY transcript is trusted only if the audio is silent (it may
+          // have been stored by an older build, or after a recognizer that heard nothing).
+          if (cached.length > 0 || !(await hasSpeechSound(uri))) {
+            transcriptMem.set(key, cached);
+            return { result: { status: "ok", words: cached }, fromCache: true, key };
+          }
+          await forget(key, ["transcript"]);
         }
       }
       const result = await serial(async () => {
         runs.transcript++;
         return deps.transcribe(uri);
       });
+      if (result.status === "ok" && result.words.length === 0 && (await hasSpeechSound(uri))) {
+        return {
+          result: {
+            status: "error",
+            code: "EMPTY_TRANSCRIPT_WITH_SPEECH",
+            message: "the recognizer returned no words, but the audio has sound; not cached, will retry next time",
+          },
+          fromCache: false,
+          key,
+        };
+      }
       if (result.status === "ok" && key) {
         transcriptMem.set(key, result.words);
         await writeStored("transcript", key, result.words);
       }
-      return result;
+      return { result, fromCache: false, key };
     })();
     if (key) transcriptFlight.set(key, job);
     try {
@@ -144,5 +199,16 @@ export function createAnalysisCache(deps: AnalysisDeps) {
     }
   }
 
-  return { loudness, transcript, runs };
+  async function transcript(uri: string): Promise<TranscriptResult> {
+    return (await transcriptWithInfo(uri)).result;
+  }
+
+  /** Forget everything cached for this source (memory and storage): the next analysis runs again. */
+  async function clear(uri: string): Promise<string | null> {
+    const key = await keyFor(uri);
+    if (key) await forget(key, ["loudness", "transcript"]);
+    return key;
+  }
+
+  return { loudness, transcript, transcriptWithInfo, clear, runs };
 }

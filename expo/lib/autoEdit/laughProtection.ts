@@ -1,6 +1,6 @@
 /**
  * Laughs are never cut. Every method-2 candidate classified 'laugh' becomes a
- * protected range, padded on each side; laugh candidates within mergeGapMs (1.2 s)
+ * protected range, padded on each side; laugh candidates within mergeGapMs (3 s)
  * of each other are ONE episode (a laugh is several pulses with breaths between).
  * An 'unsure' or 'um' candidate lying between laugh candidates of an episode belongs
  * to it: the episode runs from its first laugh to its last, so they are inside.
