@@ -9,6 +9,8 @@ import { requireOptionalNativeModule } from "expo";
 import { Platform } from "react-native";
 
 import { isInternalTester } from "@/constants/debug";
+import type { EditOverlay } from "@/lib/editModel";
+import { toRenderJson } from "@/lib/editStyles";
 import type { DraftClip } from "@/providers/PostsProvider";
 
 export const RENDER_AT_POST_ENABLED = true;
@@ -125,9 +127,10 @@ export function renderRequest(
   edit: Array<{ uri: string; trimStartMs: number; trimEndMs: number }>,
   width: number,
   height: number,
+  overlays: EditOverlay[] = [],
 ) {
   return {
-    json: JSON.stringify({ version: 1, clips: edit, overlays: [] }),
+    json: toRenderJson({ version: 1, clips: edit, overlays }),
     options: { width, height, reframe: "fit" as const, bitrate: RENDER_BITRATE, punchIn: false },
   };
 }
@@ -151,6 +154,7 @@ export function checkRenderResult(
 export async function renderForPost(
   clips: DraftClip[],
   onProgress: (progress: number) => void,
+  overlays: EditOverlay[] = [],
 ): Promise<RenderOutcome> {
   let subscription: { remove(): void } | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -172,7 +176,7 @@ export async function renderForPost(
       cancelRender();
     }, timeoutMs);
 
-    const request = renderRequest(edit, width, height);
+    const request = renderRequest(edit, width, height, overlays);
     const result = await renderAsync(request.json, request.options);
     if (timedOut) return { ok: false, reason: `timeout after ${timeoutSeconds} s` };
     if (checkRenderResult(result, editMs)) {

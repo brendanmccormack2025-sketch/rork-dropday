@@ -21,10 +21,13 @@ import {
   renderTimeoutMs,
 } from "@/lib/renderAtPost";
 import { recordRenderStats } from "@/lib/renderReport";
+import type { EditOverlay } from "@/lib/editModel";
 import type { DraftClip } from "@/providers/PostsProvider";
 
 /** The timeline must be unchanged this long before a background render starts. */
 export const RENDER_AHEAD_IDLE_MS = 1200;
+/** Same for a change that only touches the captions. */
+export const RENDER_AHEAD_CAPTION_IDLE_MS = 800;
 /** Longest timeline rendered ahead. */
 export const RENDER_AHEAD_MAX_EDIT_MS = 180_000;
 /** Failures in one editor session before it stops trying. */
@@ -52,7 +55,19 @@ export type AheadOutcome =
   | { ok: true; ready: AheadReady }
   | { ok: false; reason: string };
 
-type Args = { clips: DraftClip[]; isRoot: boolean; userId: string | null | undefined };
+type Args = {
+  clips: DraftClip[];
+  isRoot: boolean;
+  userId: string | null | undefined;
+  /** Caption (and other) overlays on the output timeline, burned into every render. */
+  captions?: EditOverlay[];
+  /** True while captions are still being transcribed: no render starts until it clears. */
+  hold?: boolean;
+};
+
+function captionsKeyOf(captions: EditOverlay[] | undefined): string {
+  return JSON.stringify(captions ?? []);
+}
 
 function rawKeyOf(clips: DraftClip[]): string {
   return JSON.stringify(
@@ -73,6 +88,8 @@ export class RenderAhead {
   private raw: string | null = null;
   private waitingForActive = false;
   private immediateNext = false;
+  private hold = false;
+  private clipsKey: string | null = null;
   private sizes = new Map<string, { width: number; height: number }>();
   /** The render in flight (and the settle promise of the last one). */
   private inflight: { promise: Promise<void>; cancel: () => void; done: Promise<AheadOutcome> } | null = null;
@@ -105,16 +122,20 @@ export class RenderAhead {
    * The signature of a timeline: its clips (uri, trimStartMs, trimEndMs) and the
    * render size. null until the size for the first clip is known.
    */
-  signatureOf(clips: DraftClip[]): string | null {
+  signatureOf(clips: DraftClip[], captions?: EditOverlay[]): string | null {
     const first = clips[0];
     const size = first ? this.sizes.get(first.uri) : undefined;
-    return size ? `${rawKeyOf(clips)}|${size.width}x${size.height}` : null;
+    return size ? `${rawKeyOf(clips)}~${captionsKeyOf(captions)}|${size.width}x${size.height}` : null;
   }
 
   /** Call whenever the timeline (or who is editing) changes. */
   update(args: Args): void {
     if (this.disposed || this.suspended) return;
     this.args = args;
+    const hold = !!args.hold;
+    const released = this.hold && !hold;
+    this.hold = hold;
+    if (hold) this.clearTimer();
     if (this.eligible(args) !== null) {
       this.raw = null;
       this.clearTimer();
@@ -122,12 +143,24 @@ export class RenderAhead {
       this.setState({ kind: "idle" });
       return;
     }
-    const raw = rawKeyOf(args.clips);
-    if (raw === this.raw) return; // same timeline: nothing to redo
+    const clipsKey = rawKeyOf(args.clips);
+    const raw = `${clipsKey}~${captionsKeyOf(args.captions)}`;
+    if (raw === this.raw) {
+      // Same timeline and captions: nothing to redo, except start once the hold clears.
+      if (released && this.state.kind === "waiting") {
+        this.immediateNext = true;
+        this.startTimer();
+      }
+      return;
+    }
+    const captionsOnly = clipsKey === this.clipsKey;
     this.raw = raw;
+    this.clipsKey = clipsKey;
     this.invalidate();
     this.setState({ kind: "waiting" });
-    this.startTimer();
+    if (hold) return; // the timer starts when the hold clears
+    if (released) this.immediateNext = true;
+    this.startTimer(captionsOnly ? RENDER_AHEAD_CAPTION_IDLE_MS : RENDER_AHEAD_IDLE_MS);
   }
 
   /** The next render starts without the idle delay (the first one after auto-edit applies). */
@@ -212,9 +245,9 @@ export class RenderAhead {
     }
   }
 
-  private startTimer(): void {
+  private startTimer(idleMs: number = RENDER_AHEAD_IDLE_MS): void {
     this.clearTimer();
-    const delay = this.immediateNext ? 0 : RENDER_AHEAD_IDLE_MS;
+    const delay = this.immediateNext ? 0 : idleMs;
     this.immediateNext = false;
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -257,6 +290,7 @@ export class RenderAhead {
     }
     if (this.disposed || this.suspended || this.raw !== raw) return;
     const signature = `${raw}|${size.width}x${size.height}`;
+    const captions = args.captions;
     const { edit, editMs } = buildRenderEdit(args.clips);
 
     let cancelled = false;
@@ -285,7 +319,7 @@ export class RenderAhead {
           timedOut = true;
           cancelRender();
         }, renderTimeoutMs(editMs));
-        const request = renderRequest(edit, size!.width, size!.height);
+        const request = renderRequest(edit, size!.width, size!.height, captions);
         const result = await renderAsync(request.json, request.options);
         const bad = checkRenderResult(result, editMs);
         if (bad) {
