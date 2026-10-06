@@ -111,6 +111,75 @@ private final class OnceFlag {
     used = true
     return true
   }
+  func isUsed() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return used
+  }
+}
+
+// Collects the segments of EVERY recognition result of one request. On-device
+// recognition can deliver several final results (one per utterance, after a pause)
+// and starts a new transcription each time, so keeping only one result loses every
+// word but the first utterance's.
+//  - A result whose first segment starts at the same time as the previous result's is
+//    the same utterance, grown or revised: it replaces it.
+//  - Any other result (earlier or later first segment) is a restart: the previous
+//    segments are kept and the new ones are appended.
+private final class SegmentCollector: @unchecked Sendable {
+  private let lock = NSLock()
+  private var committed: [SFTranscriptionSegment] = []
+  private var current: [SFTranscriptionSegment] = []
+  private var polling = false
+
+  func add(_ segments: [SFTranscriptionSegment]) {
+    lock.lock()
+    defer { lock.unlock() }
+    guard let first = segments.first else { return }
+    if let previousFirst = current.first, abs(first.timestamp - previousFirst.timestamp) > 0.05 {
+      committed.append(contentsOf: current)
+    }
+    current = segments
+  }
+
+  func all() -> [SFTranscriptionSegment] {
+    lock.lock()
+    defer { lock.unlock() }
+    return committed + current
+  }
+
+  // True the first time only: one completion poll per request.
+  func startPolling() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    if polling { return false }
+    polling = true
+    return true
+  }
+}
+
+// True when the audio file has at least minSeconds of speech-level sound (100 ms
+// windows with an RMS above about -40 dBFS).
+private func hasSpeechLevelSound(url: URL, minSeconds: Double = 2.0) -> Bool {
+  guard let file = try? AVAudioFile(forReading: url) else { return false }
+  let format = file.processingFormat
+  let windowFrames = AVAudioFrameCount(max(1, format.sampleRate / 10))
+  guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: windowFrames) else { return false }
+  var loudWindows = 0
+  while file.framePosition < file.length {
+    do {
+      try file.read(into: buffer, frameCount: windowFrames)
+    } catch {
+      break
+    }
+    guard buffer.frameLength > 0, let channel = buffer.floatChannelData?[0] else { break }
+    var sum: Float = 0
+    for i in 0..<Int(buffer.frameLength) {
+      sum += channel[i] * channel[i]
+    }
+    if (sum / Float(buffer.frameLength)).squareRoot() > 0.01 { loudWindows += 1 }
+  }
+  return Double(loudWindows) * 0.1 >= minSeconds
 }
 
 // Holds the recognition task so the timeout closure can cancel it without
@@ -125,7 +194,11 @@ private func isNoSpeech(_ error: Error) -> Bool {
   return e.domain == "kAFAssistantErrorDomain" && e.code == 1110
 }
 
-private func recognize(url: URL, recognizer: SFSpeechRecognizer) async throws -> [SFTranscriptionSegment] {
+private func recognize(
+  url: URL,
+  recognizer: SFSpeechRecognizer,
+  hasSound: Bool
+) async throws -> [SFTranscriptionSegment] {
   return try await withCheckedThrowingContinuation { continuation in
     let request = SFSpeechURLRecognitionRequest(url: url)
     // Never fall back to Apple's servers.
@@ -135,16 +208,42 @@ private func recognize(url: URL, recognizer: SFSpeechRecognizer) async throws ->
 
     let once = OnceFlag()
     let box = TaskBox()
-    box.task = recognizer.recognitionTask(with: request) { result, error in
-      if let result = result, result.isFinal {
-        if once.claim() {
-          continuation.resume(returning: result.bestTranscription.segments)
+    let collector = SegmentCollector()
+
+    // After a final result the request may still deliver the next utterance, so it is
+    // finished only once the task itself is completed.
+    func finishWhenCompleted() {
+      DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) {
+        guard let task = box.task else { return }
+        if task.state == .completed || task.state == .canceling {
+          if once.claim() {
+            continuation.resume(returning: collector.all())
+          }
+        } else if !once.isUsed() {
+          finishWhenCompleted()
         }
-        return
+      }
+    }
+
+    box.task = recognizer.recognitionTask(with: request) { result, error in
+      if let result = result {
+        collector.add(result.bestTranscription.segments)
+        if result.isFinal && collector.startPolling() {
+          finishWhenCompleted()
+        }
       }
       if let error = error, once.claim() {
-        if isNoSpeech(error) {
-          continuation.resume(returning: [])
+        let segments = collector.all()
+        if !segments.isEmpty {
+          // Words were recognized before the request ended with an error: keep them.
+          continuation.resume(returning: segments)
+        } else if isNoSpeech(error) {
+          if hasSound {
+            // "No speech detected" for audio that has sound is a failure, not an empty transcript.
+            continuation.resume(throwing: fail("ERR_SPEECH_NO_SPEECH_DETECTED", "the recognizer heard no speech in audio that has sound (\(error.localizedDescription))"))
+          } else {
+            continuation.resume(returning: [])
+          }
         } else {
           continuation.resume(throwing: fail("ERR_SPEECH_RECOGNITION_FAILED", error.localizedDescription))
         }
@@ -217,7 +316,8 @@ private func transcribe(uri: String, localeId: String?) async throws -> [String:
     let audioURL = try await exportAudio(asset: asset, startSeconds: start, lengthSeconds: length)
     defer { try? FileManager.default.removeItem(at: audioURL) }
 
-    let segments = try await recognize(url: audioURL, recognizer: recognizer)
+    let hasSound = hasSpeechLevelSound(url: audioURL)
+    let segments = try await recognize(url: audioURL, recognizer: recognizer, hasSound: hasSound)
     for segment in segments {
       let startMs = Int(((start + segment.timestamp) * 1000).rounded())
       let endMs = Int(((start + segment.timestamp + segment.duration) * 1000).rounded())
@@ -231,8 +331,22 @@ private func transcribe(uri: String, localeId: String?) async throws -> [String:
     }
   }
 
+  // The same word can come back from two results (or two chunks): keep it once.
+  words.sort { ($0["startMs"] as? Int ?? 0) < ($1["startMs"] as? Int ?? 0) }
+  var unique: [[String: Any]] = []
+  for word in words {
+    if let last = unique.last,
+       let lastText = last["text"] as? String,
+       let text = word["text"] as? String,
+       lastText.lowercased() == text.lowercased(),
+       abs((last["startMs"] as? Int ?? 0) - (word["startMs"] as? Int ?? 0)) < 150 {
+      continue
+    }
+    unique.append(word)
+  }
+
   return [
-    "words": words,
+    "words": unique,
     "durationMs": Int((durationSeconds * 1000).rounded()),
     "locale": recognizer.locale.identifier,
     "onDevice": true,
