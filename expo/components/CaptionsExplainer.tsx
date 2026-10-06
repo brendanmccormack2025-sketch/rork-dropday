@@ -13,10 +13,10 @@ export default function CaptionsExplainer({ visible, onContinue, onNotNow }: Pro
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <UiText weight={800} style={styles.title}>
-            Captions, on your phone
+            Editing, on your phone
           </UiText>
           <UiText style={styles.body}>
-            Trial transcribes your video on your device to create captions. Your audio never leaves your phone.
+            Trial analyzes your speech on your phone to edit your video. Nothing is uploaded.
           </UiText>
           <Pressable onPress={onContinue} style={styles.primary}>
             <UiText weight={700} style={styles.primaryText}>
