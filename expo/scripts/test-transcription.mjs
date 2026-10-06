@@ -7,6 +7,7 @@
  * (From expo/. Node 22.6+; the flag is a no-op on newer Node.)
  */
 import { mapWordsToEdit } from "../lib/transcription/mapWords.ts";
+import { applyLineEdit, buildCaptionLines, captionLinesToEditOverlays } from "../lib/transcription/captionLines.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -77,6 +78,52 @@ eq(
   ]),
   [w("j", 900, 1100)],
 );
+
+// ── caption lines ──
+const talk = [w("one", 0, 300), w("two", 350, 650), w("three", 700, 1000), w("four", 1050, 1350), w("five", 1400, 1700)];
+const whole = [{ startMs: 0, endMs: 5000 }];
+eq("max 3 words per line", buildCaptionLines(talk, {}, whole).map((l) => l.text), ["one two three", "four five"]);
+eq(
+  "no line longer than 1.5 s",
+  buildCaptionLines([w("a", 0, 600), w("b", 650, 1250), w("c", 1300, 1900)], {}, whole).map((l) => l.text),
+  ["a b", "c"],
+);
+eq(
+  "a pause over 400 ms breaks the line",
+  buildCaptionLines([w("a", 0, 300), w("b", 800, 1100)], {}, whole).map((l) => l.text),
+  ["a", "b"],
+);
+eq("line times and source indexes", buildCaptionLines(talk, {}, whole).map((l) => [l.startMs, l.endMs, l.srcIndexes]), [
+  [0, 1000, [0, 1, 2]],
+  [1050, 1700, [3, 4]],
+]);
+const cutKept = [
+  { startMs: 0, endMs: 700 },
+  { startMs: 1050, endMs: 5000 },
+];
+eq(
+  "words are mapped onto the edited timeline before grouping",
+  buildCaptionLines(talk, {}, cutKept).map((l) => [l.text, l.startMs, l.endMs]),
+  [["one two four", 0, 1000], ["five", 1050, 1350]],
+);
+eq("overlays", captionLinesToEditOverlays(buildCaptionLines([w("hi", 100, 400)], {}, whole)), [
+  { kind: "caption", text: "hi", startMs: 100, endMs: 400, style: "trial" },
+]);
+
+// ── edits are stored against source words and survive cut changes ──
+const base = buildCaptionLines(talk, {}, whole);
+const edited = applyLineEdit(talk, {}, base[0], "ONE 2 THREE");
+eq("edit keyed by source word index", edited, { 0: "ONE", 1: "2", 2: "THREE" });
+eq("edited text shows", buildCaptionLines(talk, edited, whole)[0].text, "ONE 2 THREE");
+eq(
+  "edits survive when the cuts change",
+  buildCaptionLines(talk, edited, cutKept).map((l) => l.text),
+  ["ONE 2 four", "five"],
+);
+eq("unchanged words lose their edit", applyLineEdit(talk, edited, base[0], "one two three"), {});
+eq("fewer words typed deletes the rest", applyLineEdit(talk, {}, base[0], "hello"), { 0: "hello", 1: "", 2: "" });
+eq("deleted words leave the line", buildCaptionLines(talk, { 0: "hello", 1: "", 2: "" }, whole).map((l) => l.text), ["hello", "four five"]);
+eq("extra typed words join the last word", applyLineEdit(talk, {}, base[1], "a b c d"), { 3: "a", 4: "b c d" });
 
 if (failed) {
   console.log(`\n${failed} failed`);

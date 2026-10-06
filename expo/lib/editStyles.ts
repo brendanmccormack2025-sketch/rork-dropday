@@ -62,6 +62,15 @@ export const CAPTION_STYLES: OverlayStylePreset[] = [
     spec: { fontSize: 42, fontWeight: "medium", color: "#FFFFFFE6", yCenter: 0.84, shadow: true, fadeInMs: 120, fadeOutMs: 120 },
   },
   {
+    id: "trial",
+    label: "Trial",
+    spec: {
+      fontSize: 60, fontWeight: "heavy", color: "#FFFFFF", backgroundColor: "#000000",
+      backgroundPadding: 14, cornerRadius: 0, yCenter: 0.7, maxWidth: 0.86, uppercase: true,
+      fadeInMs: 0, fadeOutMs: 0,
+    },
+  },
+  {
     id: "creator",
     label: "Creator",
     spec: {
