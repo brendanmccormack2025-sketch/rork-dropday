@@ -8,6 +8,7 @@
 import type { SilenceDetectionOptions } from "../silenceDetection.ts";
 import type { Word } from "../transcription/types.ts";
 import { newEditState, type EditState } from "./decisions.ts";
+import { analyzeUnexplained, planUmCuts } from "./classifySound.ts";
 import { planFillerCuts } from "./fillerCuts.ts";
 import { planHookTrim } from "./hookTrim.ts";
 import { planSilenceCuts } from "./silenceCuts.ts";
@@ -27,7 +28,11 @@ export function buildAiEditState(input: {
   const silence = planSilenceCuts(input.windows, WINDOW_MS, input.durationMs, input.silenceOptions);
   const decisions = silence.detection.savedMs >= AI_EDIT_MIN_SAVED_MS ? silence.decisions : [];
   if (input.words) {
-    decisions.push(...planHookTrim(input.words, input.durationMs), ...planFillerCuts(input.words));
+    decisions.push(
+      ...planHookTrim(input.words, input.durationMs),
+      ...planFillerCuts(input.words),
+      ...planUmCuts(analyzeUnexplained(input.windows, WINDOW_MS, input.durationMs, input.words)),
+    );
   }
   return newEditState(input.uri, decisions);
 }

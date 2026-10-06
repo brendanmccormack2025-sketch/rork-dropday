@@ -5,6 +5,7 @@
  */
 import { sourceToOutputMs, type EditClip } from "../editModel.ts";
 import type { Decision } from "./decisions.ts";
+import { formatFeatures, type ClassifiedSound } from "./classifySound.ts";
 import type { UnexplainedSound } from "./fillerCuts.ts";
 
 /** m:ss.s, rounded to tenths first so 59.96 s reads 1:00.0. */
@@ -22,11 +23,13 @@ export type AiDebugInput = {
   sourceUri: string;
   /** Emphasis proposals (zoom decisions with score and reasons); not applied. */
   proposals: Decision[];
-  /** Fillers method 2; not applied. */
-  candidates: UnexplainedSound[];
+  /** Every method-2 candidate, classified (um candidates are cut; laugh and unsure are not). */
+  candidates: Array<UnexplainedSound & Partial<Pick<ClassifiedSound, "cls" | "features">>>;
   /** Applied hook trim decisions and applied method-1 filler decisions. */
   hookTrims: Decision[];
   fillers: Decision[];
+  /** Applied method-2 um cuts. */
+  ums?: Decision[];
 };
 
 function outputTime(clips: EditClip[], uri: string, sourceMs: number): string {
@@ -49,9 +52,19 @@ export function formatAiDebug(input: AiDebugInput): string {
     );
   }
 
-  lines.push("", `Filler candidates, method 2 (not applied): ${input.candidates.length}`);
+  const count = (cls: string) => input.candidates.filter((c) => c.cls === cls).length;
+  lines.push(
+    "",
+    input.candidates.some((c) => c.cls)
+      ? `Filler candidates, method 2: ${input.candidates.length} (um ${count("um")}, laugh ${count("laugh")}, unsure ${count("unsure")})`
+      : `Filler candidates, method 2 (not applied): ${input.candidates.length}`,
+  );
   for (const c of input.candidates) {
-    lines.push(`${outputTime(clips, uri, c.startMs)}  ${Math.round(c.lengthMs)} ms  sound with no transcript word`);
+    lines.push(
+      c.cls && c.features
+        ? `${outputTime(clips, uri, c.startMs)}  ${c.cls}  ${formatFeatures(c.features)}`
+        : `${outputTime(clips, uri, c.startMs)}  ${Math.round(c.lengthMs)} ms  sound with no transcript word`,
+    );
   }
 
   lines.push("", `Hook trim (applied): ${input.hookTrims.length}`);
@@ -67,5 +80,8 @@ export function formatAiDebug(input: AiDebugInput): string {
     const p = (d.payload ?? {}) as { text?: string };
     lines.push(`'${p.text ?? ""}'  source ${formatClock(d.sourceStartMs)}-${formatClock(d.sourceEndMs)}`);
   }
+  const ums = input.ums ?? [];
+  lines.push("", `Um cuts, method 2 (applied): ${ums.length}`);
+  for (const d of ums) lines.push(`um  source ${formatClock(d.sourceStartMs)}-${formatClock(d.sourceEndMs)}`);
   return lines.join("\n");
 }

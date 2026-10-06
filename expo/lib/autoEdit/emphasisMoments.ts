@@ -18,6 +18,8 @@ export type EmphasisContext = {
   windowMs: number;
   words: Word[];
   durationMs: number;
+  /** Sounds classified as laughs (never cut): a strong zoom signal. */
+  laughs?: Array<{ startMs: number; endMs: number }>;
 };
 export type EmphasisCandidate = { sourceMs: number; score: number; reason: string };
 export type EmphasisScorer = (ctx: EmphasisContext) => EmphasisCandidate[];
@@ -29,6 +31,8 @@ export const EMPHASIS_PAUSE_MS = 500;
 export const EMPHASIS_MIN_GAP_MS = 3500;
 export const EMPHASIS_ONE_PER_MS = 5000;
 export const EMPHASIS_ZOOM_MS = 1200;
+/** A laugh scores this much, on a scale where a loudness jump or a pause is at most 1. */
+export const EMPHASIS_LAUGH_SCORE = 2;
 /** Windows quieter than this are not speech and do not count toward the baseline. */
 const SPEECH_FLOOR_DB = -55;
 const STEP_MS = 100;
@@ -81,7 +85,11 @@ export const pauseStartScorer: EmphasisScorer = ({ words }) => {
   return out;
 };
 
-export const DEFAULT_EMPHASIS_SCORERS: EmphasisScorer[] = [loudnessJumpScorer, pauseStartScorer];
+/** (c) A laugh the classifier found: strong weight. */
+export const laughScorer: EmphasisScorer = ({ laughs }) =>
+  (laughs ?? []).map((l) => ({ sourceMs: l.startMs, score: EMPHASIS_LAUGH_SCORE, reason: "laugh" }));
+
+export const DEFAULT_EMPHASIS_SCORERS: EmphasisScorer[] = [loudnessJumpScorer, pauseStartScorer, laughScorer];
 
 type Moment = { sourceMs: number; score: number; reasons: string[] };
 

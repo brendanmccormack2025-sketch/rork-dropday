@@ -3,6 +3,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
+import { formatFeatures } from "@/lib/autoEdit/classifySound";
 import type { TimelineMarker } from "@/lib/autoEdit/markers";
 
 type Props = {
@@ -23,7 +24,9 @@ export default function MarkerSheet({ marker, onRestore, onReapply, onClose }: P
           ? "Emphasis moment (not applied)"
           : marker?.kind === "filler2"
             ? "Filler candidate (not applied)"
-            : "";
+            : marker?.kind === "laugh"
+              ? "Laugh (never cut)"
+              : "";
   return (
     <Modal visible={!!marker} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
@@ -31,12 +34,22 @@ export default function MarkerSheet({ marker, onRestore, onReapply, onClose }: P
           <UiText style={styles.title}>{title}</UiText>
           <ScrollView style={styles.list}>
             {marker?.items.map((item) => (
-              <UiText key={item.decisionId} style={styles.item}>
-                {item.label}
-              </UiText>
+              <React.Fragment key={item.decisionId}>
+                <UiText style={styles.item}>{item.label}</UiText>
+                {item.sound && (
+                  <>
+                    <UiText style={styles.detail}>Class: {item.sound.cls}</UiText>
+                    <UiText style={styles.detail}>{formatFeatures(item.sound.features)}</UiText>
+                  </>
+                )}
+              </React.Fragment>
             ))}
             {marker?.detail && (
               <>
+                {marker.detail.cls && <UiText style={styles.detail}>Class: {marker.detail.cls}</UiText>}
+                {marker.detail.features && (
+                  <UiText style={styles.detail}>{formatFeatures(marker.detail.features)}</UiText>
+                )}
                 {marker.detail.score > 0 && (
                   <UiText style={styles.detail}>Score {marker.detail.score.toFixed(2)}</UiText>
                 )}

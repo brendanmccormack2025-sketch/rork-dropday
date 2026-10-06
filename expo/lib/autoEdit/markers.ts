@@ -19,6 +19,7 @@ import {
   type DecisionType,
   type EditState,
 } from "./decisions.ts";
+import type { ClassifiedSound, SoundClass, SoundFeatures } from "./classifySound.ts";
 import type { UnexplainedSound } from "./fillerCuts.ts";
 import {
   outputToSourceMs,
@@ -27,10 +28,17 @@ import {
   type KeepRange,
 } from "../editModel.ts";
 
-/** cut/restored: cut decisions. zoom: reserved for future zoom decisions. proposal/filler2: owner debug. */
-export type MarkerKind = "cut" | "restored" | "zoom" | "proposal" | "filler2";
+/** cut/restored: cut decisions. zoom: reserved for future zoom decisions. proposal/filler2/laugh: owner debug. */
+export type MarkerKind = "cut" | "restored" | "zoom" | "proposal" | "filler2" | "laugh";
 
-export type MarkerItem = { decisionId: string; type: DecisionType; label: string; lengthMs: number };
+export type MarkerItem = {
+  decisionId: string;
+  type: DecisionType;
+  label: string;
+  lengthMs: number;
+  /** A method-2 um cut: its class and the features it was judged on. */
+  sound?: { cls: SoundClass; features: SoundFeatures };
+};
 
 export type TimelineMarker = {
   id: string;
@@ -42,7 +50,7 @@ export type TimelineMarker = {
   srcStartMs: number;
   srcEndMs: number;
   /** Debug markers only. */
-  detail?: { score: number; reasons: string[] };
+  detail?: { score: number; reasons: string[]; cls?: SoundClass; features?: SoundFeatures };
 };
 
 function seconds(ms: number): string {
@@ -52,14 +60,21 @@ function seconds(ms: number): string {
 /** "Silence 0.6s", "Filler 'um'", "Hook trim 0.8s"... */
 export function describeDecision(d: Decision): MarkerItem {
   const lengthMs = Math.max(0, d.sourceEndMs - d.sourceStartMs);
-  const payload = (d.payload ?? {}) as { text?: string; edge?: string; reason?: string };
+  const payload = (d.payload ?? {}) as {
+    text?: string;
+    edge?: string;
+    reason?: string;
+    method?: number;
+    cls?: SoundClass;
+    features?: SoundFeatures;
+  };
   let label: string;
   switch (d.type) {
     case "silenceCut":
       label = `Silence ${seconds(lengthMs)}`;
       break;
     case "fillerCut":
-      label = `Filler '${payload.text ?? "filler"}'`;
+      label = payload.method === 2 ? `Filler (${payload.text ?? "um"})` : `Filler '${payload.text ?? "filler"}'`;
       break;
     case "hookTrim":
       label =
@@ -78,7 +93,11 @@ export function describeDecision(d: Decision): MarkerItem {
     default:
       label = d.type;
   }
-  return { decisionId: d.id, type: d.type, label, lengthMs };
+  const sound =
+    payload.method === 2 && payload.cls && payload.features
+      ? { cls: payload.cls, features: payload.features }
+      : undefined;
+  return { decisionId: d.id, type: d.type, label, lengthMs, ...(sound ? { sound } : {}) };
 }
 
 /** Output time of a source moment: all kept footage before it. A cut moment lands on its seam. */
@@ -190,7 +209,7 @@ export function mapOutputPosition(
  */
 export function buildDebugMarkers(
   proposals: Decision[],
-  candidates: UnexplainedSound[],
+  candidates: Array<UnexplainedSound & Partial<Pick<ClassifiedSound, "cls" | "features" | "why">>>,
   clips: EditClip[],
   sourceUri: string,
 ): TimelineMarker[] {
@@ -210,16 +229,30 @@ export function buildDebugMarkers(
     });
   });
   candidates.forEach((c, i) => {
+    // Ums are cut: they show as ordinary cut markers, not here.
+    if (c.cls === "um") return;
     const outputMs = sourceToOutputMs(clips, c.startMs, sourceUri);
     if (outputMs === null) return;
+    const laugh = c.cls === "laugh";
     out.push({
-      id: `filler2:${i}`,
-      kind: "filler2",
+      id: `${laugh ? "laugh" : "filler2"}:${i}`,
+      kind: laugh ? "laugh" : "filler2",
       outputMs,
-      items: [{ decisionId: `filler2:${c.startMs}`, type: "fillerCut", label: "Unexplained sound", lengthMs: c.lengthMs }],
+      items: [
+        {
+          decisionId: `filler2:${c.startMs}`,
+          type: "fillerCut",
+          label: laugh ? "Laugh (never cut)" : "Unexplained sound",
+          lengthMs: c.lengthMs,
+        },
+      ],
       srcStartMs: c.startMs,
       srcEndMs: c.endMs,
-      detail: { score: 0, reasons: [`sound with no word, ${Math.round(c.lengthMs)} ms`] },
+      detail: {
+        score: 0,
+        reasons: c.cls ? (c.why ?? []) : [`sound with no word, ${Math.round(c.lengthMs)} ms`],
+        ...(c.cls ? { cls: c.cls, features: c.features } : {}),
+      },
     });
   });
   return out.sort((a, b) => a.outputMs - b.outputMs);

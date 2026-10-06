@@ -81,7 +81,8 @@ import {
   type TimelineMarker,
 } from "@/lib/autoEdit/markers";
 import { buildAiEditState } from "@/lib/autoEdit/plan";
-import { findUnexplainedSounds, planFillerCuts, type UnexplainedSound } from "@/lib/autoEdit/fillerCuts";
+import { analyzeUnexplained, planUmCuts, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
+import { planFillerCuts } from "@/lib/autoEdit/fillerCuts";
 import { emphasisLogEntries, planEmphasis } from "@/lib/autoEdit/emphasisMoments";
 import { planHookTrim } from "@/lib/autoEdit/hookTrim";
 import { silenceCutsFromDetection } from "@/lib/autoEdit/silenceCuts";
@@ -244,7 +245,7 @@ export default function EditScreen() {
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [markerSheet, setMarkerSheet] = useState<TimelineMarker | null>(null);
   // Owner debug: emphasis proposals and method-2 filler candidates (never applied).
-  const [aiDebug, setAiDebug] = useState<{ proposals: Decision[]; candidates: UnexplainedSound[] } | null>(null);
+  const [aiDebug, setAiDebug] = useState<{ proposals: Decision[]; candidates: ClassifiedSound[] } | null>(null);
 
   useEffect(() => {
     if (draftId) {
@@ -2439,7 +2440,7 @@ export default function EditScreen() {
 
   const handleMarkerPress = useCallback(
     (marker: TimelineMarker) => {
-      if (marker.kind === "proposal" || marker.kind === "filler2") {
+      if (marker.kind === "proposal" || marker.kind === "filler2" || marker.kind === "laugh") {
         handleSeekAny(Math.max(0, marker.outputMs - 1000));
       }
       setMarkerSheet(marker);
@@ -2457,7 +2458,12 @@ export default function EditScreen() {
       proposals: aiDebug?.proposals ?? [],
       candidates: aiDebug?.candidates ?? [],
       hookTrims: model.state.decisions.filter((d) => d.type === "hookTrim" && d.state === "applied"),
-      fillers: model.state.decisions.filter((d) => d.type === "fillerCut" && d.state === "applied"),
+      fillers: model.state.decisions.filter(
+        (d) => d.type === "fillerCut" && d.state === "applied" && (d.payload as { method?: number } | undefined)?.method !== 2,
+      ),
+      ums: model.state.decisions.filter(
+        (d) => d.type === "fillerCut" && d.state === "applied" && (d.payload as { method?: number } | undefined)?.method === 2,
+      ),
     });
     Share.share({ message: text }).catch(() => {});
   }, [aiDebug]);
@@ -2482,7 +2488,9 @@ export default function EditScreen() {
           current.every((c) => c.uri === uri) &&
           sameRanges(current, renderClipsOf(model.state, model.durationMs), durationMs);
 
-        const planned = [...planHookTrim(words, durationMs), ...planFillerCuts(words)];
+        // Method 2: classify the unexplained sounds; only ums are cut, laughs never are.
+        const sounds = analyzeUnexplained(loud.windows, 20, durationMs, words);
+        const planned = [...planHookTrim(words, durationMs), ...planFillerCuts(words), ...planUmCuts(sounds)];
         const merged = mergePlan(model.state, planned, ["hookTrim", "fillerCut"]);
         // AI planning is not an undo step: saved snapshots are re-planned, not extended.
         historyRef.current = mapHistory(historyRef.current, (snap) =>
@@ -2510,9 +2518,14 @@ export default function EditScreen() {
           );
         }
 
-        const threshold = detectSilences(loud.windows, 20, { durationMs }).thresholdDb;
-        const candidates = findUnexplainedSounds(loud.windows, 20, words, threshold);
-        const proposals = planEmphasis({ windows: loud.windows, windowMs: 20, words, durationMs });
+        const candidates = sounds;
+        const proposals = planEmphasis({
+          windows: loud.windows,
+          windowMs: 20,
+          words,
+          durationMs,
+          laughs: sounds.filter((s) => s.cls === "laugh"),
+        });
         console.log("[fillers] method2:", JSON.stringify(candidates));
         console.log(
           "[emphasis]",
