@@ -15,7 +15,7 @@ import {
   type SilenceDetectionOptions,
   type SilenceDetectionResult,
 } from "@/lib/silenceDetection";
-import { getLoudnessAsync } from "@/modules/audio-loudness";
+import { getLoudnessAsync, type LoudnessResult } from "@/modules/audio-loudness";
 
 /** Loudness window size read from the native module. */
 export const AUTO_EDIT_WINDOW_MS = 20;
@@ -56,13 +56,16 @@ export { mergeKeepRanges } from "@/lib/silenceDetection";
 export async function autoEdit(
   input: AutoEditInput,
   options: SilenceDetectionOptions = {},
+  /** Where the loudness comes from; the editor passes the analysis cache. */
+  loadLoudness: (uri: string) => Promise<LoudnessResult | null> = (uri) =>
+    getLoudnessAsync(uri, AUTO_EDIT_WINDOW_MS),
 ): Promise<AutoEditResult> {
   try {
     let result: AutoEditResult = { changed: false, reason: "disabled" };
 
     // ── Step 1: silence trimming ──
     if (FEATURES.autoTrim) {
-      const loudness = await getLoudnessAsync(input.uri, AUTO_EDIT_WINDOW_MS);
+      const loudness = await loadLoudness(input.uri);
       if (!loudness) return { changed: false, reason: "no_audio" };
       const plan = planSilenceTrim(
         { uri: input.uri, durationMs: loudness.durationMs },

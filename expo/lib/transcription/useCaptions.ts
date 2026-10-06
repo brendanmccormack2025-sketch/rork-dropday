@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { EditOverlay } from "@/lib/editModel";
-import { transcribeClip, type Word } from "@/lib/transcription";
+import { analysis } from "@/lib/autoEdit/analysis";
+import type { Word } from "@/lib/transcription";
 import {
   applyLineEdit,
   buildCaptionLines,
@@ -40,7 +41,7 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
 
   const run = useCallback(async (uri: string) => {
     setStatus("running");
-    const result = await transcribeClip(uri);
+    const result = await analysis.transcript(uri);
     if (result.status === "ok") {
       setTranscript({ uri, words: result.words });
     } else if (__DEV__) {
@@ -105,6 +106,9 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
   );
 
   return {
+    /** The transcript (source timeline) and the file it belongs to, once there is one. */
+    words: transcript?.words ?? null,
+    transcribedUri: transcript?.uri ?? null,
     explainerVisible: status === "asking",
     onContinue,
     onNotNow,

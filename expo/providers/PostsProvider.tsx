@@ -1,3 +1,4 @@
+import type { EditState } from "@/lib/autoEdit/decisions";
 import createContextHook from "@nkzw/create-context-hook";
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -288,6 +289,8 @@ export type TextOverlay = {
 export type DraftProject = {
   id: string;
   clips: DraftClip[];
+  /** The auto-edit decisions behind `clips`; used only while `clipsSig` still matches them. */
+  editState?: { state: EditState; durationMs: number; clipsSig: string };
   caption: string;
   coverThumbnailUri?: string;
   coverThumbnailMs?: number;

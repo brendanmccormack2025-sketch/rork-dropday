@@ -53,8 +53,20 @@ import { RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
 import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
+import { analysis } from "@/lib/autoEdit/analysis";
+import {
+  mergePlan,
+  newEditState,
+  renderClipsOf,
+  setStates,
+  type EditState,
+} from "@/lib/autoEdit/decisions";
+import { findUnexplainedSounds, planFillerCuts } from "@/lib/autoEdit/fillerCuts";
+import { emphasisLogEntries, planEmphasis } from "@/lib/autoEdit/emphasisMoments";
+import { planHookTrim } from "@/lib/autoEdit/hookTrim";
+import { silenceCutsFromDetection } from "@/lib/autoEdit/silenceCuts";
 import { keepRangesToClips } from "@/lib/editModel";
-import { SENSITIVITY_PRESETS, type Sensitivity } from "@/lib/silenceDetection";
+import { SENSITIVITY_PRESETS, detectSilences, type Sensitivity } from "@/lib/silenceDetection";
 import { getAutoEditEnabled, getAutoEditSensitivity, getSaveEditedToRoll, setAutoEditSensitivity } from "@/lib/autoEditSettings";
 import AutoEditReviewSheet from "@/components/AutoEditReviewSheet";
 import { theme } from "@/constants/theme";
@@ -104,6 +116,23 @@ function clipsSignature(list: DraftClip[]): string {
   return JSON.stringify(
     list.map((c) => [c.uri, c.trimStartMs ?? 0, c.trimEndMs ?? c.durationMs ?? 0]),
   );
+}
+
+/** True when the clips play the same source ranges as `expected` (within tolMs on each edge). */
+function sameRanges(
+  list: DraftClip[],
+  expected: Array<{ trimStartMs: number; trimEndMs: number }>,
+  fallbackEndMs: number,
+  tolMs = 60,
+): boolean {
+  if (list.length !== expected.length) return false;
+  return list.every((c, i) => {
+    const start = c.trimStartMs ?? 0;
+    const end = c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? fallbackEndMs);
+    return (
+      Math.abs(start - expected[i]!.trimStartMs) <= tolMs && Math.abs(end - expected[i]!.trimEndMs) <= tolMs
+    );
+  });
 }
 
 /** Minimum ms from either trim edge required to allow a split */
@@ -182,11 +211,16 @@ export default function EditScreen() {
   }, [clipsJson, nativeVideoUrl, draftId, draftProjects]);
 
   const [clips, setClips] = useState<DraftClip[]>(initialClips);
+  // The auto-edit decisions behind the clips (see lib/autoEdit/decisions.ts).
+  const editStateRef = useRef<{ state: EditState; durationMs: number } | null>(null);
 
   useEffect(() => {
     if (draftId) {
       const draft = draftProjects.find((d) => d.id === draftId);
       if (draft?.clips.length) setClips(draft.clips);
+      if (draft?.editState && clipsSignature(draft.clips) === draft.editState.clipsSig) {
+        editStateRef.current = { state: draft.editState.state, durationMs: draft.editState.durationMs };
+      }
     }
   }, [draftId, draftProjects]);
 
@@ -300,6 +334,8 @@ export default function EditScreen() {
     (firstClip0.durationMs ?? 0) > 0 &&
     (firstClip0.trimStartMs ?? 0) === 0 &&
     !((firstClip0.trimEndMs ?? 0) > 0 && (firstClip0.trimEndMs ?? 0) < (firstClip0.durationMs ?? 0) - 50);
+  // Hook trim and filler cuts are planned from the transcript; render-ahead waits for them.
+  const [planDone, setPlanDone] = useState(false);
   const captions = useCaptions(
     isDebugOwner(user?.id),
     clips,
@@ -323,9 +359,9 @@ export default function EditScreen() {
       isRoot: !reactingTo && !rootDropId,
       userId: user?.id,
       captions: captions.overlays,
-      hold: captions.pending,
+      hold: captions.pending || (isDebugOwner(user?.id) && !!captions.words && !planDone),
     });
-  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captions.pending]);
+  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captions.pending, captions.words, planDone]);
   const aheadReady = aheadState.kind === "ready" ? aheadState : null;
   const aheadSignature = aheadRef.current?.signatureOf(clips, captions.overlays) ?? null;
   const aheadMatches = !!aheadReady && aheadReady.signature === aheadSignature;
@@ -2038,12 +2074,31 @@ export default function EditScreen() {
     );
   }, [reviewOpen, autoEditSession, reviewSens]);
 
+  // The Review sheet's switches from the decision model: a cut the user reverted
+  // earlier stays off, even when the sensitivity moves its edges.
+  const reviewEnabledFor = useCallback(
+    (sens: Sensitivity, session: NonNullable<typeof autoEditSession>): boolean[] => {
+      const plan = planSilenceTrim(
+        { uri: session.original.uri, durationMs: session.analysisDurationMs },
+        autoEditWindowsRef.current,
+        SENSITIVITY_PRESETS[sens],
+      );
+      const model = editStateRef.current;
+      if (!model) return plan.detection.cuts.map(() => true);
+      const { resolved } = mergePlan(model.state, silenceCutsFromDetection(plan.detection), ["silenceCut"]);
+      return resolved.map((d) => d.state === "applied");
+    },
+    [],
+  );
+
   const handleOpenReview = useCallback(() => {
     if (!autoEditSession) return;
     setReviewSens(autoEditSession.sensitivity);
-    setReviewEnabled(autoEditSession.cutEnabled);
+    setReviewEnabled(
+      editStateRef.current ? reviewEnabledFor(autoEditSession.sensitivity, autoEditSession) : autoEditSession.cutEnabled,
+    );
     setReviewOpen(true);
-  }, [autoEditSession]);
+  }, [autoEditSession, reviewEnabledFor]);
 
   const handleReviewSensitivity = useCallback(
     (value: Sensitivity) => {
@@ -2055,9 +2110,11 @@ export default function EditScreen() {
         SENSITIVITY_PRESETS[value],
       );
       setReviewSens(value);
-      setReviewEnabled(plan.detection.cuts.map(() => true));
+      setReviewEnabled(
+        editStateRef.current ? reviewEnabledFor(value, autoEditSession) : plan.detection.cuts.map(() => true),
+      );
     },
-    [autoEditSession],
+    [autoEditSession, reviewEnabledFor],
   );
 
   const handleReviewToggle = useCallback((index: number, value: boolean) => {
@@ -2068,10 +2125,24 @@ export default function EditScreen() {
     setReviewOpen(false);
     if (!autoEditSession || !reviewPlan) return;
     const { original } = autoEditSession;
-    const produced = keepRangesToClips(
+    // Each switch is one decision; the render is derived from the model. Without a
+    // model (should not happen) the detector's ranges are used as before.
+    const model = editStateRef.current;
+    let keepClips = keepRangesToClips(
       original.uri,
       mergeKeepRanges(reviewPlan.detection.keepRanges, reviewEnabled, reviewPlan.detection.cuts),
-    ).map((c) => ({
+    );
+    if (model) {
+      const merged = mergePlan(model.state, silenceCutsFromDetection(reviewPlan.detection), ["silenceCut"]);
+      const states: Record<string, "applied" | "reverted"> = {};
+      merged.resolved.forEach((d, i) => {
+        states[d.id] = reviewEnabled[i] ? "applied" : "reverted";
+      });
+      const next = setStates(merged.state, states);
+      editStateRef.current = { state: next, durationMs: model.durationMs };
+      keepClips = renderClipsOf(next, model.durationMs);
+    }
+    const produced = keepClips.map((c) => ({
       ...original,
       id: newClipId(),
       trimStartMs: c.trimStartMs,
@@ -2122,6 +2193,7 @@ export default function EditScreen() {
       const result = await autoEdit(
         { uri: clip.uri, durationMs: clip.durationMs! },
         SENSITIVITY_PRESETS[sensitivity],
+        (uri) => analysis.loudness(uri),
       );
       console.log("[edit] autoEdit result:", result.changed ? "changed" : result.reason);
       if (
@@ -2139,7 +2211,14 @@ export default function EditScreen() {
       const current = clipsForUndoRef.current;
       if (current.length !== 1 || clipsSignature(current) !== clipsSignature([clip])) return;
       const original = { ...current[0]!, trimStartMs: 0, trimEndMs: current[0]!.trimEndMs || clip.durationMs };
-      const produced = result.clips.map((c) => ({
+      // The render comes from the decision model: every silence cut is one decision.
+      const modelState = newEditState(clip.uri, silenceCutsFromDetection(result.detection));
+      editStateRef.current = { state: modelState, durationMs: result.durationMs };
+      const derived = renderClipsOf(modelState, result.durationMs);
+      if (__DEV__ && JSON.stringify(derived) !== JSON.stringify(result.clips)) {
+        console.warn("[edit] decision model and silence detector disagree");
+      }
+      const produced = derived.map((c) => ({
         ...original,
         id: newClipId(),
         trimStartMs: c.trimStartMs,
@@ -2168,6 +2247,71 @@ export default function EditScreen() {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clips, user?.id, reactingTo, rootDropId, draftId]);
+
+  // ── Auto-edit v2 (owner): decisions planned from the transcript ──────────────
+  // Hook trim and filler cuts join the decision model (applied, each reversible) and
+  // the render is derived again. Unexplained sounds and emphasis moments are only
+  // logged. Skipped when the user already edited the timeline by hand.
+  useEffect(() => {
+    const words = captions.words;
+    const uri = captions.transcribedUri;
+    if (!isDebugOwner(user?.id) || !words || !uri || planDone) return;
+    (async () => {
+      try {
+        const loud = await analysis.loudness(uri);
+        if (!loud || !mountedRef.current) return;
+        const durationMs = loud.durationMs;
+        const model = editStateRef.current ?? { state: newEditState(uri), durationMs };
+        const current = clipsForUndoRef.current;
+        const untouched =
+          current.length > 0 &&
+          current.every((c) => c.uri === uri) &&
+          sameRanges(current, renderClipsOf(model.state, model.durationMs), durationMs);
+
+        const planned = [...planHookTrim(words, durationMs), ...planFillerCuts(words)];
+        const merged = mergePlan(model.state, planned, ["hookTrim", "fillerCut"]);
+        editStateRef.current = { state: merged.state, durationMs };
+
+        const derived = renderClipsOf(merged.state, durationMs);
+        if (untouched && !uploadingRef.current && derived.length > 0 && !sameRanges(current, derived, durationMs, 0)) {
+          const base = current[0]!;
+          const produced = derived.map((c) => ({
+            ...base,
+            id: newClipId(),
+            trimStartMs: c.trimStartMs,
+            trimEndMs: c.trimEndMs,
+          }));
+          pushSnapshot(current, textOverlaysForUndoRef.current);
+          aheadRef.current?.startNextImmediately();
+          replaceClips(produced);
+          const keptMs = derived.reduce((sum, c) => sum + (c.trimEndMs - c.trimStartMs), 0);
+          setAutoEditSession((prev) =>
+            prev
+              ? { ...prev, producedSig: clipsSignature(produced), savedMs: Math.max(0, prev.analysisDurationMs - keptMs) }
+              : prev,
+          );
+        }
+
+        const threshold = detectSilences(loud.windows, 20, { durationMs }).thresholdDb;
+        console.log("[fillers] method2:", JSON.stringify(findUnexplainedSounds(loud.windows, 20, words, threshold)));
+        console.log(
+          "[emphasis]",
+          JSON.stringify(
+            emphasisLogEntries(
+              planEmphasis({ windows: loud.windows, windowMs: 20, words, durationMs }),
+              renderClipsOf(merged.state, durationMs),
+              uri,
+            ),
+          ),
+        );
+      } catch (e) {
+        console.warn("[edit] hook/filler planning failed", (e as Error)?.message ?? e);
+      } finally {
+        if (mountedRef.current) setPlanDone(true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captions.words, captions.transcribedUri, planDone, user?.id]);
 
   // ── Thumbnail generation helper ────────────────────────────────────────────
 
@@ -2261,9 +2405,24 @@ export default function EditScreen() {
         }),
       );
 
+      // The decisions behind the clips, only while they still match (no hand edits since).
+      const model = editStateRef.current;
+      const sourceUri = permanentClips[0]?.uri;
+      const savedEditState =
+        model &&
+        sourceUri &&
+        permanentClips.every((c) => c.uri === sourceUri) &&
+        sameRanges(permanentClips, renderClipsOf(model.state, model.durationMs), model.durationMs)
+          ? {
+              state: { ...model.state, sourceUri },
+              durationMs: model.durationMs,
+              clipsSig: clipsSignature(permanentClips),
+            }
+          : undefined;
       const project: DraftProject = {
         id: draftIdFinal,
         clips: permanentClips,
+        editState: savedEditState,
         caption: "",
         textOverlays,
         coverThumbnailUri: thumbnailUri ?? undefined,
