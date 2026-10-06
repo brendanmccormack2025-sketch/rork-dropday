@@ -9,8 +9,9 @@ import {
   speechMedianDb,
 } from "../lib/autoEdit/classifySound.ts";
 import { checkAlignment } from "../lib/autoEdit/alignment.ts";
-import { appliedCutRanges, keepRangesOf, makeDecision, mergePlan, newEditState, restoreRange, setCategoryEnabled, setDecisionState } from "../lib/autoEdit/decisions.ts";
+import { appliedCutRanges, effectiveCutRanges, keepRangesOf, mapNonCutDecisions, protectedRangesOf, protectionReport, makeDecision, mergePlan, newEditState, restoreRange, setCategoryEnabled, setDecisionState } from "../lib/autoEdit/decisions.ts";
 import { planUmCuts } from "../lib/autoEdit/umCuts.ts";
+import { planLaughProtection } from "../lib/autoEdit/laughProtection.ts";
 import { buildCutMarkers, buildDebugMarkers, describeDecision } from "../lib/autoEdit/markers.ts";
 import { loudnessJumpScorer, planEmphasis, scoreEmphasis } from "../lib/autoEdit/emphasisMoments.ts";
 import { buildAiEditState } from "../lib/autoEdit/plan.ts";
@@ -121,7 +122,8 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   const state = buildAiEditState({ uri: URI, durationMs: 12000, windows, words: speechWords });
   const ums = state.decisions.filter((d) => d.type === "umCut");
   eq("the um becomes one applied cut decision in the Ums category, padded 30 ms each side", ums.map((d) => [d.sourceStartMs, d.sourceEndMs, d.state, d.origin]), [[1190, 1430, "applied", "ai"]]);
-  eq("the laugh and the unsure sound are never cut", state.decisions.filter((d) => d.sourceStartMs < 4860 && d.sourceEndMs > 2720 && d.sourceStartMs !== 0), []);
+  eq("the laugh and the unsure sound are never cut", state.decisions.filter((d) => ["silenceCut", "hookTrim", "fillerCut", "umCut"].includes(d.type) && d.sourceStartMs < 4860 && d.sourceEndMs > 2720 && d.sourceStartMs !== 0), []);
+  eq("the laugh becomes a protected range, padded 150 ms each side", state.decisions.filter((d) => d.type === "laughProtect").map((d) => [d.sourceStartMs, d.sourceEndMs]), [[2570, 3330]]);
   const keep = keepRangesOf(state, 12000);
   eq("the laugh footage is kept", keep.some((k) => k.startMs <= 2720 && k.endMs >= 3180), true);
   eq("the unsure footage is kept", keep.some((k) => k.startMs <= 4560 && k.endMs >= 4860), true);
@@ -273,6 +275,92 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   eq("a method-1 um is the only added filler cut", ownerUm.decisions.filter((d) => d.type === "fillerCut").length, planFillerCuts(withUm).length);
   const off = setCategoryEnabled(setCategoryEnabled(ownerUm, "fillerCut", false), "umCut", false);
   eq("with Fillers and Ums off the keep ranges are identical to silence-only", ranges(keepRangesOf(off, total)), ranges(base));
+}
+
+// ── laughs are protected: no cut may remove time inside one ──
+{
+  const D = 20000;
+  const feature = { durationMs: 200, peakVsSpeechDb: 8, steadiness: 0.6, burstCount: 3, nearEmphasis: false, midSpeech: false };
+  const laugh = (startMs, endMs) => ({ startMs, endMs, lengthMs: endMs - startMs, cls: "laugh", features: feature, why: [] });
+  const cutOf = (type, a, b) => makeDecision(type, a, b);
+  const stateOf = (laughs, ...cuts) => newEditState(URI, [...planLaughProtection(laughs), ...cuts]);
+  const ranges = (r) => r.map((x) => [x.startMs, x.endMs]);
+
+  // planning: padding and merging
+  eq("a laugh is padded 150 ms on each side", planLaughProtection([laugh(5000, 5300)]).map((d) => [d.type, d.sourceStartMs, d.sourceEndMs]), [["laughProtect", 4850, 5450]]);
+  eq("laugh sounds within 400 ms of each other are one protected range", planLaughProtection([laugh(3000, 3200), laugh(3500, 3700)]).map((d) => [d.sourceStartMs, d.sourceEndMs, d.payload.laughs]), [[2850, 3850, 2]]);
+  eq("...but sounds more than 400 ms apart are separate ranges", planLaughProtection([laugh(3000, 3200), laugh(3700, 3900)]).length, 2);
+  eq("only laughs are protected", planLaughProtection([{ ...laugh(1000, 1200), cls: "um" }, { ...laugh(2000, 2200), cls: "unsure" }]), []);
+
+  // a silence cut between two laugh pulses is removed
+  const between = stateOf([laugh(3000, 3200), laugh(3500, 3700)], cutOf("silenceCut", 3250, 3450));
+  eq("a silence cut between two laugh pulses is removed", effectiveCutRanges(between), []);
+  eq("...so the laugh is one unbroken stretch", ranges(keepRangesOf(between, D)), [[0, D]]);
+  eq("the report says it was dropped", protectionReport(between).affected.map((a) => [a.type, a.result]), [["silenceCut", "dropped"]]);
+
+  // a cut overlapping a laugh edge is trimmed to the edge
+  const edges = stateOf([laugh(5000, 5300)], cutOf("silenceCut", 4500, 5000), cutOf("silenceCut", 5400, 6000));
+  eq("cuts that overlap the protected range stop at its edges", ranges(effectiveCutRanges(edges)), [[4500, 4850], [5450, 6000]]);
+  eq("the laugh and its padding are kept", ranges(keepRangesOf(edges, D)), [[0, 4500], [4850, 5450], [6000, D]]);
+  eq("the report says shortened", protectionReport(edges).affected.map((a) => a.result), ["shortened", "shortened"]);
+  eq("a leftover under 120 ms is dropped", ranges(effectiveCutRanges(stateOf([laugh(5000, 5300)], cutOf("silenceCut", 4800, 4900)))), []);
+  eq("a leftover of exactly 120 ms is kept", ranges(effectiveCutRanges(stateOf([laugh(5000, 5300)], cutOf("silenceCut", 4730, 4900)))), [[4730, 4850]]);
+  const span = stateOf([laugh(5000, 5300)], cutOf("silenceCut", 4000, 6000));
+  eq("a cut spanning a laugh is split around it", [ranges(effectiveCutRanges(span)), protectionReport(span).affected[0].result], [[[4000, 4850], [5450, 6000]], "split"]);
+  eq("every cut type is held back", effectiveCutRanges(stateOf([laugh(5000, 5300)], cutOf("hookTrim", 0, 5000), cutOf("fillerCut", 5200, 5400), cutOf("umCut", 5300, 5500))).every((r) => r.endMs <= 4850 || r.startMs >= 5450), true);
+  eq("a cut that does not touch a laugh is untouched, even a tiny one", ranges(effectiveCutRanges(stateOf([laugh(5000, 5300)], cutOf("fillerCut", 1000, 1050)))), [[1000, 1050]]);
+
+  // protection off: the original cuts come back exactly
+  const withCuts = stateOf([laugh(5000, 5300), laugh(8000, 8200)], cutOf("silenceCut", 4500, 5000), cutOf("silenceCut", 3250, 3450), cutOf("fillerCut", 8100, 8150), cutOf("umCut", 9000, 9300));
+  const noProtection = { ...withCuts, decisions: withCuts.decisions.filter((d) => d.type !== "laughProtect") };
+  eq("protection changes the keep ranges", JSON.stringify(keepRangesOf(withCuts, D)) !== JSON.stringify(keepRangesOf(noProtection, D)), true);
+  eq("Protect laughs off: the keep ranges are identical to before", JSON.stringify(keepRangesOf(setCategoryEnabled(withCuts, "laughProtect", false), D)), JSON.stringify(keepRangesOf(noProtection, D)));
+  eq("...and nothing is protected", protectedRangesOf(setCategoryEnabled(withCuts, "laughProtect", false)), []);
+  eq("without any protection decisions the cuts are exactly as stored", ranges(effectiveCutRanges(noProtection)), ranges(noProtection.decisions.map((d) => ({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }))));
+
+  // reversible and user wins
+  const protId = withCuts.decisions.find((d) => d.type === "laughProtect").id;
+  const revertedProt = setDecisionState(withCuts, protId, "reverted");
+  eq("a protection the user reverted protects nothing", protectedRangesOf(revertedProt).some((r) => r.startMs <= 4850 && r.endMs >= 5450), false);
+  eq("...and stays reverted when planning runs again", mergePlan(revertedProt, planLaughProtection([laugh(5000, 5300), laugh(8000, 8200)]), ["laughProtect"]).resolved.map((d) => d.state), ["reverted", "applied"]);
+  const revertedCut = setDecisionState(withCuts, withCuts.decisions.find((d) => d.type === "silenceCut").id, "reverted");
+  eq("a reverted cut does not revert a protection", mergePlan(revertedCut, planLaughProtection([laugh(3000, 3100)]), ["laughProtect"]).resolved.map((d) => d.state), ["applied"]);
+
+  // markers and bands
+  const keepClips = keepRangesToClips(URI, keepRangesOf(edges, D));
+  const cutMarkers = buildCutMarkers(edges, D);
+  eq("shortened cuts have a marker at their real seam", cutMarkers.map((m) => [m.kind, m.outputMs]), [["cut", 4500], ["cut", 5100]]);
+  eq("a cut that protection dropped has no marker", buildCutMarkers(between, D), []);
+  const bands = mapNonCutDecisions(edges, keepClips).filter((m) => m.decision.type === "laughProtect").flatMap((m) => m.pieces);
+  eq("the protected range is a band on the output timeline", bands, [{ startMs: 4500, endMs: 5100 }]);
+  eq("with the category off there is no band", mapNonCutDecisions(setCategoryEnabled(edges, "laughProtect", false), keepClips).length, 0);
+
+  // end to end: a laugh followed closely by a um-like sound
+  const words = [[0, 1000], [1600, 2400], [4200, 5200], [5800, 6800], [7400, 8400], [9000, 10000], [10600, 11600], [12200, 13200], [13800, 14800], [15400, 16400]].map(([a, b], i) => w(`w${i}`, a, b));
+  const pulses = (i) => (i % 8 < 5 ? -20 : -45);
+  const windows = windowsOf(17000, [...words.map((x) => [x.startMs, x.endMs, SPEECH]), [2700, 3200, pulses], [3300, 3600, -31]]);
+  const sounds = analyzeUnexplained(windows, WIN, 17000, words);
+  eq("fixture: a laugh then a um-like sound", sounds.map((s) => [s.startMs, s.cls]), [[2700, "laugh"], [3300, "um"]]);
+  const owner = buildAiEditState({ uri: URI, durationMs: 17000, windows, silenceOptions: SENSITIVITY_PRESETS.tight, words });
+  const prot = protectedRangesOf(owner);
+  eq("the laugh is protected (2550-3350)", ranges(prot), [[2550, 3350]]);
+  const um = owner.decisions.find((d) => d.type === "umCut");
+  eq("the um is planned from 3330 (merged with the next pause) and held back to 3350 by protection", [um.sourceStartMs, ranges(effectiveCutRanges(owner, "umCut"))[0][0], um.payload.mergedWithSilence], [3330, 3350, true]);
+  eq("no applied cut of any type removes time inside the protected laugh", effectiveCutRanges(owner).every((r) => r.endMs <= 2550 || r.startMs >= 3350), true);
+  const keepOwner = keepRangesOf(owner, 17000);
+  eq("the whole protected range is kept in one piece", keepOwner.some((k) => k.startMs <= 2550 && k.endMs >= 3350), true);
+  eq("no kept piece between two cuts is shorter than 250 ms", keepOwner.slice(1, -1).every((k) => k.endMs - k.startMs >= 250), true);
+  const off = keepRangesOf(setCategoryEnabled(owner, "laughProtect", false), 17000);
+  eq("Protect laughs off: the laugh is cut up again where silence cuts apply", JSON.stringify(off) !== JSON.stringify(keepOwner), true);
+  const text = formatAiDebug({ sourceDurationMs: 17000, clips: keepRangesToClips(URI, keepOwner), sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [], protection: protectionReport(owner) });
+  eq("debug text lists the protected range and the cut it shortened", [
+    text.includes("Protected laughs: 1"),
+    text.includes("source 0:02.6-0:03.4  1 laugh sound"),
+    text.includes(`Cuts changed by protection: ${protectionReport(owner).affected.length}`),
+    /umCut  source 0:03.3-0:03.6  shortened to 0:03.4-0:03.6/.test(text),
+  ], [true, true, true, true]);
+  const dropText = formatAiDebug({ sourceDurationMs: D, clips: keepClips, sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [], protection: protectionReport(between) });
+  eq("debug text says dropped", /silenceCut  source 0:03.3-0:03.5  dropped/.test(dropText), true);
 }
 
 // ── regression: the speech baseline and the timeline ──

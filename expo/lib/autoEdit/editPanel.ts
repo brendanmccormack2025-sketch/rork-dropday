@@ -5,7 +5,7 @@
  */
 import { DECISION_TYPES, type DecisionType, type EditState } from "./decisions.ts";
 
-export type CategoryId = "cuts" | "hook" | "fillers" | "ums" | "zooms" | "captions";
+export type CategoryId = "cuts" | "hook" | "fillers" | "ums" | "protect" | "zooms" | "captions";
 
 export type CategoryRow = {
   id: CategoryId;
@@ -21,6 +21,7 @@ const ROWS: Array<{ id: CategoryId; label: string; type: DecisionType; ownerOnly
   { id: "hook", label: "Hook", type: "hookTrim", ownerOnly: true },
   { id: "fillers", label: "Fillers", type: "fillerCut", ownerOnly: true },
   { id: "ums", label: "Ums", type: "umCut", ownerOnly: true },
+  { id: "protect", label: "Protect laughs", type: "laughProtect", ownerOnly: true },
   { id: "zooms", label: "Zooms", type: "zoom", ownerOnly: true },
   { id: "captions", label: "Captions", type: "caption", ownerOnly: true },
 ];

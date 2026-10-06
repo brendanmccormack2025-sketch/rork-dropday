@@ -15,7 +15,15 @@
  * Pure; erasable TypeScript only (see decisions.ts).
  */
 import { SOUND_CLASSIFIER_CONFIG, type ClassifiedSound, type SoundClassifierConfig } from "./classifySound.ts";
-import { keepRangesOf, makeDecision, type Decision, type EditState } from "./decisions.ts";
+import {
+  effectiveCutRanges,
+  effectivePieces,
+  keepRangesOf,
+  makeDecision,
+  protectedRangesOf,
+  type Decision,
+  type EditState,
+} from "./decisions.ts";
 
 export type UmCutReport = {
   applied: Array<{ startMs: number; endMs: number; lengthMs: number; mergedWithSilence: boolean }>;
@@ -33,15 +41,9 @@ function seamsOf(state: EditState, durationMs: number): number {
   return Math.max(0, keepRangesOf(state, durationMs).length - 1);
 }
 
+/** What the applied cuts really remove (protected laughs already taken out). */
 function activeRanges(state: EditState, type?: Decision["type"]): Array<{ startMs: number; endMs: number }> {
-  return state.decisions
-    .filter(
-      (d) =>
-        d.state === "applied" &&
-        state.categoryEnabled[d.type] !== false &&
-        (type ? d.type === type : ["silenceCut", "hookTrim", "fillerCut", "umCut"].includes(d.type)),
-    )
-    .map((d) => ({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }));
+  return effectiveCutRanges(state, type);
 }
 
 /** Stretch each um to touch a silence cut within the merge gap, then over slivers. */
@@ -65,10 +67,11 @@ function finalize(base: EditState, ums: Um[], config: SoundClassifierConfig): Fi
   });
 
   const others = activeRanges(base);
+  const prot = protectedRangesOf(base);
   for (let pass = 0; pass < 20; pass++) {
-    const all = [...others, ...finals.map((f) => ({ startMs: f.startMs, endMs: f.endMs }))].sort(
-      (a, b) => a.startMs - b.startMs,
-    );
+    // Slivers are judged on what is really removed, so protected laughs stay out of it.
+    const pieces = finals.map((f) => ({ f, pieces: effectivePieces({ startMs: f.startMs, endMs: f.endMs }, prot) }));
+    const all = [...others, ...pieces.flatMap((x) => x.pieces)].sort((a, b) => a.startMs - b.startMs);
     const union: Array<{ startMs: number; endMs: number }> = [];
     for (const r of all) {
       const last = union[union.length - 1];
@@ -79,12 +82,12 @@ function finalize(base: EditState, ums: Um[], config: SoundClassifierConfig): Fi
     for (let k = 0; k + 1 < union.length && !changed; k++) {
       const gap = union[k + 1]!.startMs - union[k]!.endMs;
       if (gap <= 0 || gap >= config.umMinKeepMs) continue;
-      const left = finals.find((f) => f.endMs === union[k]!.endMs);
-      const right = finals.find((f) => f.startMs === union[k + 1]!.startMs);
-      if (left) {
+      const left = pieces.find((x) => x.pieces.some((p) => p.endMs === union[k]!.endMs))?.f;
+      const right = pieces.find((x) => x.pieces.some((p) => p.startMs === union[k + 1]!.startMs))?.f;
+      if (left && left.endMs < union[k + 1]!.startMs) {
         left.endMs = union[k + 1]!.startMs;
         changed = true;
-      } else if (right) {
+      } else if (right && right.startMs > union[k]!.endMs) {
         right.startMs = union[k]!.endMs;
         changed = true;
       }
@@ -134,6 +137,10 @@ export function planUmCuts(
     const um = { sound: s, startMs: s.startMs + config.umEdgePaddingMs, endMs: s.endMs - config.umEdgePaddingMs };
     if (um.endMs - um.startMs < config.umMinCutMs) {
       skip(s, `shorter than ${config.umMinCutMs} ms after padding`);
+      continue;
+    }
+    if (effectivePieces(um, protectedRangesOf(base)).length === 0) {
+      skip(s, "inside a protected laugh");
       continue;
     }
     const covered = activeRanges(base).some((r) => r.startMs <= um.startMs && r.endMs >= um.endMs);

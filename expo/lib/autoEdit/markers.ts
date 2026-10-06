@@ -10,8 +10,10 @@
  * Pure; erasable TypeScript only (see decisions.ts).
  */
 import {
+  effectivePieces,
   isCutType,
   keepRangesOf,
+  protectedRangesOf,
   overlapMs,
   restoreRange,
   setStates,
@@ -160,9 +162,13 @@ export function buildCutMarkers(state: EditState, sourceDurationMs: number): Tim
   const keep = keepRangesOf(state, sourceDurationMs);
   const applied: Array<{ outputMs: number; decision: Decision }> = [];
   const restored: Array<{ outputMs: number; decision: Decision }> = [];
+  const prot = protectedRangesOf(state);
   for (const d of state.decisions) {
-    if (!isCutType(d.type) || !state.categoryEnabled[d.type]) continue;
-    const outputMs = outputPositionOfSource(keep, d.sourceStartMs);
+    if (!isCutType(d.type) || state.categoryEnabled[d.type] === false) continue;
+    // A cut that protection dropped removes nothing: no marker. A shortened one sits at its real seam.
+    const pieces = effectivePieces({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }, prot);
+    if (d.state === "applied" && pieces.length === 0) continue;
+    const outputMs = outputPositionOfSource(keep, d.state === "applied" ? pieces[0]!.startMs : d.sourceStartMs);
     if (d.state === "applied") {
       applied.push({ outputMs, decision: d });
     } else if (keep.some((k) => overlapMs({ sourceStartMs: k.startMs, sourceEndMs: k.endMs }, d) > 0)) {

@@ -63,6 +63,8 @@ import {
   renderClipsOf,
   setCategoryEnabled,
   appliedCutRanges,
+  mapNonCutDecisions,
+  protectionReport,
   setStates,
   type Decision,
   type EditState,
@@ -83,6 +85,7 @@ import {
 } from "@/lib/autoEdit/markers";
 import { buildAiEditState } from "@/lib/autoEdit/plan";
 import { checkAlignment, type Alignment } from "@/lib/autoEdit/alignment";
+import { planLaughProtection } from "@/lib/autoEdit/laughProtection";
 import { planUmCuts, type UmCutReport } from "@/lib/autoEdit/umCuts";
 import { analyzeUnexplained, silenceThresholdDb, speechMedianDb, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
 import { planFillerCuts } from "@/lib/autoEdit/fillerCuts";
@@ -2323,6 +2326,13 @@ export default function EditScreen() {
       ),
     ];
   }, [aiEditsEnabled, editModel, modelInSync, isOwnerAccount, aiDebug]);
+  const protectionBands = useMemo(() => {
+    if (!aiEditsEnabled || !editModel || !modelInSync) return [];
+    const rendered = renderClipsOf(editModel.state, editModel.durationMs);
+    return mapNonCutDecisions(editModel.state, rendered)
+      .filter((m) => m.decision.type === "laughProtect")
+      .flatMap((m) => m.pieces);
+  }, [aiEditsEnabled, editModel, modelInSync]);
   const panelRows = useMemo<CategoryRow[]>(
     () =>
       editModel
@@ -2474,6 +2484,7 @@ export default function EditScreen() {
       candidates: aiDebug?.candidates ?? [],
       alignment: aiDebug?.alignment ?? null,
       umReport: aiDebug?.umReport,
+      protection: protectionReport(model.state),
       speechBaselineDb: aiDebug?.speechBaselineDb,
       hookTrims: model.state.decisions.filter((d) => d.type === "hookTrim" && d.state === "applied"),
       fillers: model.state.decisions.filter((d) => d.type === "fillerCut" && d.state === "applied"),
@@ -2506,11 +2517,18 @@ export default function EditScreen() {
         const sounds = analyzeUnexplained(loud.windows, 20, durationMs, words);
         const planned = [...planHookTrim(words, durationMs), ...planFillerCuts(words)];
         const afterMethod1 = mergePlan(model.state, planned, ["hookTrim", "fillerCut"]);
-        const umPlan = planUmCuts(afterMethod1.state, sounds, durationMs);
-        const merged = mergePlan(afterMethod1.state, umPlan.decisions, ["umCut"]);
+        // Laughs are protected first: no cut may remove time inside one.
+        const protectPlan = planLaughProtection(sounds);
+        const protectedState = mergePlan(afterMethod1.state, protectPlan, ["laughProtect"]);
+        const umPlan = planUmCuts(protectedState.state, sounds, durationMs);
+        const merged = mergePlan(protectedState.state, umPlan.decisions, ["umCut"]);
         // AI planning is not an undo step: saved snapshots are re-planned, not extended.
         historyRef.current = mapHistory(historyRef.current, (snap) =>
-          mergePlan(mergePlan(snap, planned, ["hookTrim", "fillerCut"]).state, umPlan.decisions, ["umCut"]).state,
+          mergePlan(
+            mergePlan(mergePlan(snap, planned, ["hookTrim", "fillerCut"]).state, protectPlan, ["laughProtect"]).state,
+            umPlan.decisions,
+            ["umCut"],
+          ).state,
         );
         setEditModel({ state: merged.state, durationMs });
 
@@ -3400,6 +3418,7 @@ export default function EditScreen() {
             onReorderClips={handleReorderClips}
             markers={timelineMarkers}
             onMarkerPress={handleMarkerPress}
+            bands={protectionBands}
           />
         )}
 

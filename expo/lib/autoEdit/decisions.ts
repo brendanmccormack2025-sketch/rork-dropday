@@ -17,7 +17,16 @@ import {
 } from "../editModel.ts";
 
 /** 'audio' is reserved for future text-to-speech; nothing implements it yet. */
-export type DecisionType = "silenceCut" | "hookTrim" | "fillerCut" | "umCut" | "zoom" | "caption" | "audio";
+/** laughProtect is not a cut: a source range no cut may remove time from (a laugh). */
+export type DecisionType =
+  | "silenceCut"
+  | "hookTrim"
+  | "fillerCut"
+  | "umCut"
+  | "laughProtect"
+  | "zoom"
+  | "caption"
+  | "audio";
 
 export type Decision = {
   /** Stable: derived from type + rounded source range. */
@@ -38,7 +47,10 @@ export type EditState = {
   categoryEnabled: Record<DecisionType, boolean>;
 };
 
-export const DECISION_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "umCut", "zoom", "caption", "audio"];
+export const DECISION_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "umCut", "laughProtect", "zoom", "caption", "audio"];
+
+/** Laugh protection: padding, merge distance (see planLaughProtection) and the smallest cut piece worth keeping. */
+export const LAUGH_PROTECT_CONFIG = { padMs: 150, mergeGapMs: 400, minCutMs: 120 };
 export const CUT_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "umCut"];
 
 export function isCutType(type: DecisionType): boolean {
@@ -90,6 +102,95 @@ function isActiveCut(state: EditState, d: Decision): boolean {
   return isCutType(d.type) && d.state === "applied" && state.categoryEnabled[d.type] !== false;
 }
 
+// ── Laugh protection ────────────────────────────────────────────────────────
+
+type Range = { startMs: number; endMs: number };
+
+/** The protected laugh ranges in force (applied, category on), merged and sorted. */
+export function protectedRangesOf(state: EditState): Range[] {
+  const sorted = state.decisions
+    .filter((d) => d.type === "laughProtect" && d.state === "applied" && state.categoryEnabled.laughProtect !== false)
+    .map((d) => ({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }))
+    .sort((a, b) => a.startMs - b.startMs);
+  const merged: Range[] = [];
+  for (const r of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && r.startMs <= last.endMs) last.endMs = Math.max(last.endMs, r.endMs);
+    else merged.push({ ...r });
+  }
+  return merged;
+}
+
+/**
+ * What is left of a cut once protected ranges are taken out: it stops at a protected
+ * range's edge. Only a cut that touches a protected range is changed, and pieces
+ * shorter than minPieceMs are dropped.
+ */
+export function effectivePieces(
+  range: Range,
+  protectedRanges: Range[],
+  minPieceMs: number = LAUGH_PROTECT_CONFIG.minCutMs,
+): Range[] {
+  if (!protectedRanges.some((p) => p.startMs < range.endMs && p.endMs > range.startMs)) return [range];
+  const pieces: Range[] = [];
+  let cursor = range.startMs;
+  for (const p of protectedRanges) {
+    if (p.endMs <= cursor || p.startMs >= range.endMs) continue;
+    if (p.startMs > cursor) pieces.push({ startMs: cursor, endMs: p.startMs });
+    cursor = Math.max(cursor, p.endMs);
+  }
+  if (cursor < range.endMs) pieces.push({ startMs: cursor, endMs: range.endMs });
+  return pieces.filter((x) => x.endMs - x.startMs >= minPieceMs);
+}
+
+/** The ranges the applied, enabled cuts really remove: protection already taken out. */
+export function effectiveCutRanges(state: EditState, type?: DecisionType): Range[] {
+  const prot = protectedRangesOf(state);
+  return state.decisions
+    .filter((d) => isActiveCut(state, d) && (!type || d.type === type))
+    .flatMap((d) => effectivePieces({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }, prot));
+}
+
+export type ProtectionReport = {
+  ranges: Array<{ startMs: number; endMs: number; laughs: number }>;
+  affected: Array<{
+    id: string;
+    type: DecisionType;
+    startMs: number;
+    endMs: number;
+    result: "shortened" | "split" | "dropped";
+    pieces: Range[];
+  }>;
+};
+
+/** Which protected ranges are in force and which cuts they shortened, split or dropped. */
+export function protectionReport(state: EditState): ProtectionReport {
+  const prot = protectedRangesOf(state);
+  const ranges = state.decisions
+    .filter((d) => d.type === "laughProtect" && d.state === "applied" && state.categoryEnabled.laughProtect !== false)
+    .map((d) => ({
+      startMs: d.sourceStartMs,
+      endMs: d.sourceEndMs,
+      laughs: ((d.payload ?? {}) as { laughs?: number }).laughs ?? 1,
+    }));
+  const affected: ProtectionReport["affected"] = [];
+  for (const d of state.decisions) {
+    if (!isActiveCut(state, d)) continue;
+    const pieces = effectivePieces({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }, prot);
+    const unchanged = pieces.length === 1 && pieces[0]!.startMs === d.sourceStartMs && pieces[0]!.endMs === d.sourceEndMs;
+    if (unchanged) continue;
+    affected.push({
+      id: d.id,
+      type: d.type,
+      startMs: d.sourceStartMs,
+      endMs: d.sourceEndMs,
+      result: pieces.length === 0 ? "dropped" : pieces.length === 1 ? "shortened" : "split",
+      pieces,
+    });
+  }
+  return { ranges, affected };
+}
+
 // ── Render derivation ───────────────────────────────────────────────────────
 
 /**
@@ -99,11 +200,10 @@ function isActiveCut(state: EditState, d: Decision): boolean {
  */
 export function keepRangesOf(state: EditState, sourceDurationMs: number): KeepRange[] {
   if (!(sourceDurationMs > 0)) return [];
-  const cuts = state.decisions
-    .filter((d) => isActiveCut(state, d))
+  const cuts = effectiveCutRanges(state)
     .map((d) => ({
-      startMs: Math.max(0, d.sourceStartMs),
-      endMs: Math.min(sourceDurationMs, d.sourceEndMs),
+      startMs: Math.max(0, d.startMs),
+      endMs: Math.min(sourceDurationMs, d.endMs),
     }))
     .filter((c) => c.endMs > c.startMs)
     .sort((a, b) => a.startMs - b.startMs);
@@ -120,9 +220,7 @@ export function keepRangesOf(state: EditState, sourceDurationMs: number): KeepRa
 
 /** Source ranges the applied, enabled cut decisions remove (may overlap). */
 export function appliedCutRanges(state: EditState): Array<{ startMs: number; endMs: number }> {
-  return state.decisions
-    .filter((d) => isActiveCut(state, d))
-    .map((d) => ({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }));
+  return effectiveCutRanges(state);
 }
 
 /** The clips to render for this state: what the render path consumes today. */
@@ -220,13 +318,16 @@ export function mergePlan(
   types: DecisionType[],
 ): { state: EditState; resolved: Decision[] } {
   const tombstones = state.decisions.filter((d) => d.state === "reverted");
+  // A reverted cut blocks a planned cut; a protection is only blocked by a reverted protection.
+  const blockers = (p: Decision) =>
+    tombstones.filter((t) => (isCutType(p.type) ? isCutType(t.type) : t.type === p.type));
   const kept = state.decisions.filter(
     (d) => d.origin === "user" || d.state === "reverted" || !types.includes(d.type),
   );
   const resolved = planned.map((p) => {
     const same = kept.find((k) => k.id === p.id);
     if (same) return same;
-    const blocked = tombstones.some((t) => overlapRatio(p, t) >= 0.5);
+    const blocked = blockers(p).some((t) => overlapRatio(p, t) >= 0.5);
     return blocked ? { ...p, state: "reverted" as const } : p;
   });
   return {

@@ -76,6 +76,8 @@ interface TimelineEditorProps {
   /** AI edit markers on the output timeline (see lib/autoEdit/markers.ts). */
   markers?: TimelineMarker[];
   onMarkerPress?: (marker: TimelineMarker) => void;
+  /** Output-timeline ranges drawn as a subtle band (protected laughs). */
+  bands?: Array<{ startMs: number; endMs: number }>;
 }
 
 /** One look per marker kind. "zoom" is reserved for future zoom decisions. */
@@ -254,6 +256,7 @@ export default function TimelineEditor({
   onReorderClips,
   markers,
   onMarkerPress,
+  bands,
 }: TimelineEditorProps) {
   const scrollRef = useRef<ScrollView>(null);
   const containerW = useRef(1);
@@ -1015,6 +1018,18 @@ export default function TimelineEditor({
               );
             })}
 
+            {/* Protected laughs: a subtle orange band over the clips */}
+            {bands?.map((b, i) => (
+              <View
+                key={`band${i}`}
+                pointerEvents="none"
+                style={[
+                  styles.protectBand,
+                  { left: EDGE_PAD + msToPx(b.startMs), width: Math.max(2, msToPx(b.endMs - b.startMs)) },
+                ]}
+              />
+            ))}
+
             {/* AI edit markers: a small tappable glyph at the seam (top) or the restored spot (bottom) */}
             {markers?.map((m) => {
               const look = MARKER_LOOK[m.kind];
@@ -1136,6 +1151,7 @@ const styles = StyleSheet.create({
     zIndex: 6,
   },
   markerGlyph: { width: 10, height: 10 },
+  protectBand: { position: "absolute", top: 0, height: TIMELINE_H, backgroundColor: "rgba(242,140,40,0.28)", zIndex: 4 },
   container: {
     height: TIMELINE_H + 12,
     position: "relative",

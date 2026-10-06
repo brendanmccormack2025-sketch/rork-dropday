@@ -6,6 +6,7 @@
 import { sourceToOutputMs, type EditClip } from "../editModel.ts";
 import type { Decision } from "./decisions.ts";
 import type { Alignment } from "./alignment.ts";
+import type { ProtectionReport } from "./decisions.ts";
 import { formatFeatures, type ClassifiedSound } from "./classifySound.ts";
 import { outputPositionOfSource } from "./markers.ts";
 import type { UmCutReport } from "./umCuts.ts";
@@ -36,6 +37,8 @@ export type AiDebugInput = {
   speechBaselineDb?: number;
   /** The applied and skipped method-2 um cuts, with the seam counts. */
   umReport?: UmCutReport;
+  /** Protected laugh ranges and the cuts they shortened or dropped. */
+  protection?: ProtectionReport;
 };
 
 function outputTime(clips: EditClip[], uri: string, sourceMs: number): string {
@@ -83,6 +86,22 @@ export function formatAiDebug(input: AiDebugInput): string {
         ? `${outputTime(clips, uri, c.startMs)}  ${c.cls === "um" ? "um?" : c.cls}  ${formatFeatures(c.features)}`
         : `${outputTime(clips, uri, c.startMs)}  ${Math.round(c.lengthMs)} ms  sound with no transcript word`,
     );
+  }
+
+  const prot = input.protection;
+  if (prot) {
+    lines.push("", `Protected laughs: ${prot.ranges.length}`);
+    for (const r of prot.ranges) {
+      lines.push(`source ${formatClock(r.startMs)}-${formatClock(r.endMs)}  ${r.laughs} laugh sound${r.laughs === 1 ? "" : "s"}`);
+    }
+    lines.push(`Cuts changed by protection: ${prot.affected.length}`);
+    for (const a of prot.affected) {
+      const what =
+        a.result === "dropped"
+          ? "dropped"
+          : `${a.result} to ${a.pieces.map((p) => `${formatClock(p.startMs)}-${formatClock(p.endMs)}`).join(" + ")}`;
+      lines.push(`${a.type}  source ${formatClock(a.startMs)}-${formatClock(a.endMs)}  ${what}`);
+    }
   }
 
   const report = input.umReport;

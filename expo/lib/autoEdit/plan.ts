@@ -8,6 +8,7 @@
 import type { SilenceDetectionOptions } from "../silenceDetection.ts";
 import type { Word } from "../transcription/types.ts";
 import { mergePlan, newEditState, type EditState } from "./decisions.ts";
+import { planLaughProtection } from "./laughProtection.ts";
 import { analyzeUnexplained } from "./classifySound.ts";
 import { planFillerCuts } from "./fillerCuts.ts";
 import { planUmCuts } from "./umCuts.ts";
@@ -33,7 +34,9 @@ export function buildAiEditState(input: {
   }
   const base = newEditState(input.uri, decisions);
   if (!input.words) return base;
-  // Method-2 ums (owner only, with a transcript): reversible cuts in the Ums category.
+  // Owner only, with a transcript: laughs are protected, then method-2 ums are cut
+  // (never inside a protected laugh).
   const sounds = analyzeUnexplained(input.windows, WINDOW_MS, input.durationMs, input.words);
-  return mergePlan(base, planUmCuts(base, sounds, input.durationMs).decisions, ["umCut"]).state;
+  const protectedState = mergePlan(base, planLaughProtection(sounds), ["laughProtect"]).state;
+  return mergePlan(protectedState, planUmCuts(protectedState, sounds, input.durationMs).decisions, ["umCut"]).state;
 }
