@@ -2,7 +2,7 @@
   "expo": {
     "name": "Trial",
     "slug": "fgum9ff0goqjv4vh7u4xf",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/trial-icon-mark.png",
     "scheme": "rork-fgum9ff0goqjv4vh7u4xf",
@@ -17,7 +17,7 @@
           "remote-notification"
         ],
         "NSCameraUsageDescription": "Trial uses your camera to record your videos and reactions.",
-        "NSSpeechRecognitionUsageDescription": "Trial transcribes your video on your device to create captions. Your audio never leaves your phone.",
+        "NSSpeechRecognitionUsageDescription": "Trial analyzes your speech on your phone to edit your video. Nothing is uploaded.",
         "NSMicrophoneUsageDescription": "Trial uses your microphone to record sound with your videos.",
         "NSPhotoLibraryUsageDescription": "Trial needs access to your photo library so you can choose videos to put on Trial.",
         "NSPhotoLibraryAddUsageDescription": "Trial saves the videos you record to your photo library."
