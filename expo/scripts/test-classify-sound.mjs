@@ -104,7 +104,7 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   eq("borderline: +4 dB (above um, below laugh) -> unsure", [at(-24).cls, Math.round(at(-24).features.peakVsSpeechDb)], ["unsure", 4]);
   const long = (ms) => classifySound(cand(1160, 1160 + ms), ctxOf(windowsOf(12000, [...speechStretches, [1160, 1160 + ms, -31]])), []).cls;
   eq("a um may last 900 ms but not 1000", [long(900), long(1000)], ["um", "unsure"]);
-  const ramp = windowsOf(12000, [...speechStretches, [1160, 1460, (i) => -45 + i]]);
+  const ramp = windowsOf(12000, [...speechStretches, [1160, 1460, (i) => -70 + 2.5 * i]]);
   const b = classifySound(cand(1160, 1460), ctxOf(ramp), []);
   eq("borderline: not steady, not pulsed, not loud -> unsure", [b.cls, b.features.steadiness > SOUND_CLASSIFIER_CONFIG.umMaxCv, b.features.burstCount], ["unsure", true, 1]);
   const tooShort = classifySound(cand(1160, 1250), ctxOf(windowsOf(12000, [...speechStretches, [1160, 1250, -31]])), []);

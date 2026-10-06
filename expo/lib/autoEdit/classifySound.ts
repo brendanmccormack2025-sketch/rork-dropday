@@ -27,7 +27,7 @@ export const SOUND_CLASSIFIER_CONFIG = {
   umMinMs: 150,
   umMaxMs: 900,
   /** um: steady = coefficient of variation of the linear loudness at most this. */
-  umMaxCv: 0.35,
+  umMaxCv: 0.55,
   /** um: peak at most this far above the median speech loudness (dB). */
   umMaxPeakAboveSpeechDb: 3,
   /** Speech baseline: fewer transcript words than this falls back to all non-silent frames. */
