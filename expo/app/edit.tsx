@@ -11,6 +11,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Share,
   Switch,
   TouchableOpacity,
   View,
@@ -38,6 +39,7 @@ import {
   Undo2,
   Redo2,
   Pencil,
+  Sparkles,
 } from "lucide-react-native";
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
@@ -58,10 +60,26 @@ import {
   mergePlan,
   newEditState,
   renderClipsOf,
+  setCategoryEnabled,
   setStates,
+  type Decision,
   type EditState,
 } from "@/lib/autoEdit/decisions";
-import { findUnexplainedSounds, planFillerCuts } from "@/lib/autoEdit/fillerCuts";
+import AiEditsSheet from "@/components/AiEditsSheet";
+import MarkerSheet from "@/components/MarkerSheet";
+import { allCategoriesOff, categoryRows, type CategoryRow } from "@/lib/autoEdit/editPanel";
+import { formatAiDebug } from "@/lib/autoEdit/debugText";
+import { canRedo as canRedoDecisions, canUndo as canUndoDecisions, emptyHistory, mapHistory, pushEdit, redoEdit, undoEdit, type EditHistory } from "@/lib/autoEdit/history";
+import {
+  buildCutMarkers,
+  buildDebugMarkers,
+  mapOutputPosition,
+  reapplyMarker,
+  restoreMarker,
+  type TimelineMarker,
+} from "@/lib/autoEdit/markers";
+import { buildAiEditState } from "@/lib/autoEdit/plan";
+import { findUnexplainedSounds, planFillerCuts, type UnexplainedSound } from "@/lib/autoEdit/fillerCuts";
 import { emphasisLogEntries, planEmphasis } from "@/lib/autoEdit/emphasisMoments";
 import { planHookTrim } from "@/lib/autoEdit/hookTrim";
 import { silenceCutsFromDetection } from "@/lib/autoEdit/silenceCuts";
@@ -213,16 +231,28 @@ export default function EditScreen() {
   const [clips, setClips] = useState<DraftClip[]>(initialClips);
   // The auto-edit decisions behind the clips (see lib/autoEdit/decisions.ts).
   const editStateRef = useRef<{ state: EditState; durationMs: number } | null>(null);
+  const [editModel, setEditModelView] = useState<{ state: EditState; durationMs: number } | null>(null);
+  const setEditModel = useCallback((m: { state: EditState; durationMs: number } | null) => {
+    editStateRef.current = m;
+    setEditModelView(m);
+  }, []);
+  // Undo/redo of the creator's own AI-edit actions (see lib/autoEdit/history.ts).
+  const historyRef = useRef<EditHistory>(emptyHistory());
+  const [, setHistoryTick] = useState(0);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [markerSheet, setMarkerSheet] = useState<TimelineMarker | null>(null);
+  // Owner debug: emphasis proposals and method-2 filler candidates (never applied).
+  const [aiDebug, setAiDebug] = useState<{ proposals: Decision[]; candidates: UnexplainedSound[] } | null>(null);
 
   useEffect(() => {
     if (draftId) {
       const draft = draftProjects.find((d) => d.id === draftId);
       if (draft?.clips.length) setClips(draft.clips);
       if (draft?.editState && clipsSignature(draft.clips) === draft.editState.clipsSig) {
-        editStateRef.current = { state: draft.editState.state, durationMs: draft.editState.durationMs };
+        setEditModel({ state: draft.editState.state, durationMs: draft.editState.durationMs });
       }
     }
-  }, [draftId, draftProjects]);
+  }, [draftId, draftProjects, setEditModel]);
 
   // ── Text overlays ────────────────────────────────────────────────────────
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>(() => {
@@ -2139,7 +2169,11 @@ export default function EditScreen() {
         states[d.id] = reviewEnabled[i] ? "applied" : "reverted";
       });
       const next = setStates(merged.state, states);
-      editStateRef.current = { state: next, durationMs: model.durationMs };
+      if (JSON.stringify(next) !== JSON.stringify(model.state)) {
+        historyRef.current = pushEdit(historyRef.current, model.state);
+        setHistoryTick((n) => n + 1);
+      }
+      setEditModel({ state: next, durationMs: model.durationMs });
       keepClips = renderClipsOf(next, model.durationMs);
     }
     const produced = keepClips.map((c) => ({
@@ -2213,7 +2247,7 @@ export default function EditScreen() {
       const original = { ...current[0]!, trimStartMs: 0, trimEndMs: current[0]!.trimEndMs || clip.durationMs };
       // The render comes from the decision model: every silence cut is one decision.
       const modelState = newEditState(clip.uri, silenceCutsFromDetection(result.detection));
-      editStateRef.current = { state: modelState, durationMs: result.durationMs };
+      setEditModel({ state: modelState, durationMs: result.durationMs });
       const derived = renderClipsOf(modelState, result.durationMs);
       if (__DEV__ && JSON.stringify(derived) !== JSON.stringify(result.clips)) {
         console.warn("[edit] decision model and silence detector disagree");
@@ -2248,6 +2282,161 @@ export default function EditScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clips, user?.id, reactingTo, rootDropId, draftId]);
 
+  // ── AI edits panel, timeline markers, undo/redo (lib/autoEdit/) ───────────────
+  const isOwnerAccount = isDebugOwner(user?.id);
+  // Markers and the panel's counts describe the model; they are drawn only while the
+  // timeline still is what the model renders (no hand edits since).
+  const modelInSync = useMemo(
+    () =>
+      !!editModel &&
+      clips.length > 0 &&
+      sameRanges(clips, renderClipsOf(editModel.state, editModel.durationMs), editModel.durationMs, 60),
+    [editModel, clips],
+  );
+  const timelineMarkers = useMemo<TimelineMarker[]>(() => {
+    if (!editModel || !modelInSync) return [];
+    const cuts = buildCutMarkers(editModel.state, editModel.durationMs);
+    if (!isOwnerAccount || !aiDebug) return cuts;
+    const rendered = renderClipsOf(editModel.state, editModel.durationMs);
+    return [
+      ...cuts,
+      ...buildDebugMarkers(aiDebug.proposals, aiDebug.candidates, rendered, editModel.state.sourceUri),
+    ];
+  }, [editModel, modelInSync, isOwnerAccount, aiDebug]);
+  const panelRows = useMemo<CategoryRow[]>(
+    () =>
+      editModel
+        ? categoryRows(editModel.state, {
+            owner: isOwnerAccount,
+            captionLines: captions.lines.length,
+            captionsOn: captions.captionsOn,
+          })
+        : [],
+    [editModel, isOwnerAccount, captions.lines.length, captions.captionsOn],
+  );
+
+  // Show a new decision state: render again from the model and keep the playhead on
+  // the same footage (output time -> source time -> new output time), never back at 0.
+  const commitDecisions = useCallback(
+    (next: EditState) => {
+      const model = editStateRef.current;
+      if (!model) return;
+      setEditModel({ state: next, durationMs: model.durationMs });
+      const derived = renderClipsOf(next, model.durationMs);
+      const current = clipsForUndoRef.current;
+      if (derived.length === 0 || current.length === 0) return;
+      if (sameRanges(current, derived, model.durationMs, 0)) return;
+      const before = current.map((c) => ({
+        uri: c.uri,
+        trimStartMs: c.trimStartMs ?? 0,
+        trimEndMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? model.durationMs),
+      }));
+      const newPosition = mapOutputPosition(before, derived, positionMsRef.current, next.sourceUri);
+      const wasPlaying = isPlayingRef.current;
+      const base = current[0]!;
+      replaceClips(
+        derived.map((c) => ({ ...base, id: newClipId(), trimStartMs: c.trimStartMs, trimEndMs: c.trimEndMs })),
+      );
+      setPositionMs(newPosition);
+      setIsPlaying(false);
+      setTimeout(() => {
+        handleSeek(newPosition);
+        if (wasPlaying) setTimeout(() => setIsPlaying(true), 60);
+      }, 50);
+    },
+    [setEditModel, replaceClips, handleSeek],
+  );
+
+  // A creator action: one undo step, then show it.
+  const userEdit = useCallback(
+    (produce: (s: EditState) => EditState) => {
+      const model = editStateRef.current;
+      if (!model) return;
+      const next = produce(model.state);
+      if (next === model.state) return;
+      historyRef.current = pushEdit(historyRef.current, model.state);
+      setHistoryTick((n) => n + 1);
+      commitDecisions(next);
+    },
+    [commitDecisions],
+  );
+
+  const handleUndoDecisions = useCallback(() => {
+    const model = editStateRef.current;
+    if (!model) return;
+    const r = undoEdit(historyRef.current, model.state);
+    if (!r) return;
+    historyRef.current = r.history;
+    setHistoryTick((n) => n + 1);
+    commitDecisions(r.state);
+  }, [commitDecisions]);
+
+  const handleRedoDecisions = useCallback(() => {
+    const model = editStateRef.current;
+    if (!model) return;
+    const r = redoEdit(historyRef.current, model.state);
+    if (!r) return;
+    historyRef.current = r.history;
+    setHistoryTick((n) => n + 1);
+    commitDecisions(r.state);
+  }, [commitDecisions]);
+
+  const handleToggleCategory = useCallback(
+    (row: CategoryRow, value: boolean) => {
+      if (row.id === "captions") captions.setCaptionsOn(value);
+      else userEdit((s) => setCategoryEnabled(s, row.type, value));
+    },
+    [userEdit, captions],
+  );
+
+  // Reset to AI edit: plan again from the cached analysis (no file read, no recognizer).
+  const handleResetAi = useCallback(async () => {
+    const model = editStateRef.current;
+    if (!model) return;
+    const loud = await analysis.loudness(model.state.sourceUri);
+    if (!loud) return;
+    const sensitivity = await getAutoEditSensitivity();
+    const fresh = buildAiEditState({
+      uri: model.state.sourceUri,
+      durationMs: loud.durationMs,
+      windows: loud.windows,
+      silenceOptions: SENSITIVITY_PRESETS[sensitivity],
+      words: isOwnerAccount ? captions.words : null,
+    });
+    userEdit(() => fresh);
+    if (isOwnerAccount) captions.setCaptionsOn(true);
+  }, [userEdit, isOwnerAccount, captions]);
+
+  const handleOriginalVideo = useCallback(() => {
+    userEdit(allCategoriesOff);
+    if (isOwnerAccount) captions.setCaptionsOn(false);
+  }, [userEdit, isOwnerAccount, captions]);
+
+  const handleMarkerPress = useCallback(
+    (marker: TimelineMarker) => {
+      if (marker.kind === "proposal" || marker.kind === "filler2") {
+        handleSeekAny(Math.max(0, marker.outputMs - 1000));
+      }
+      setMarkerSheet(marker);
+    },
+    [handleSeekAny],
+  );
+
+  const handleShareAiDebug = useCallback(() => {
+    const model = editStateRef.current;
+    if (!model) return;
+    const text = formatAiDebug({
+      sourceDurationMs: model.durationMs,
+      clips: renderClipsOf(model.state, model.durationMs),
+      sourceUri: model.state.sourceUri,
+      proposals: aiDebug?.proposals ?? [],
+      candidates: aiDebug?.candidates ?? [],
+      hookTrims: model.state.decisions.filter((d) => d.type === "hookTrim" && d.state === "applied"),
+      fillers: model.state.decisions.filter((d) => d.type === "fillerCut" && d.state === "applied"),
+    });
+    Share.share({ message: text }).catch(() => {});
+  }, [aiDebug]);
+
   // ── Auto-edit v2 (owner): decisions planned from the transcript ──────────────
   // Hook trim and filler cuts join the decision model (applied, each reversible) and
   // the render is derived again. Unexplained sounds and emphasis moments are only
@@ -2270,7 +2459,11 @@ export default function EditScreen() {
 
         const planned = [...planHookTrim(words, durationMs), ...planFillerCuts(words)];
         const merged = mergePlan(model.state, planned, ["hookTrim", "fillerCut"]);
-        editStateRef.current = { state: merged.state, durationMs };
+        // AI planning is not an undo step: saved snapshots are re-planned, not extended.
+        historyRef.current = mapHistory(historyRef.current, (snap) =>
+          mergePlan(snap, planned, ["hookTrim", "fillerCut"]).state,
+        );
+        setEditModel({ state: merged.state, durationMs });
 
         const derived = renderClipsOf(merged.state, durationMs);
         if (untouched && !uploadingRef.current && derived.length > 0 && !sameRanges(current, derived, durationMs, 0)) {
@@ -2293,17 +2486,14 @@ export default function EditScreen() {
         }
 
         const threshold = detectSilences(loud.windows, 20, { durationMs }).thresholdDb;
-        console.log("[fillers] method2:", JSON.stringify(findUnexplainedSounds(loud.windows, 20, words, threshold)));
+        const candidates = findUnexplainedSounds(loud.windows, 20, words, threshold);
+        const proposals = planEmphasis({ windows: loud.windows, windowMs: 20, words, durationMs });
+        console.log("[fillers] method2:", JSON.stringify(candidates));
         console.log(
           "[emphasis]",
-          JSON.stringify(
-            emphasisLogEntries(
-              planEmphasis({ windows: loud.windows, windowMs: 20, words, durationMs }),
-              renderClipsOf(merged.state, durationMs),
-              uri,
-            ),
-          ),
+          JSON.stringify(emphasisLogEntries(proposals, renderClipsOf(merged.state, durationMs), uri)),
         );
+        setAiDebug({ proposals, candidates });
       } catch (e) {
         console.warn("[edit] hook/filler planning failed", (e as Error)?.message ?? e);
       } finally {
@@ -3145,6 +3335,8 @@ export default function EditScreen() {
             onTrimRelease={handleTrimRelease}
             onDeselectAndPreview={() => handleDeselectAndPreview()}
             onReorderClips={handleReorderClips}
+            markers={timelineMarkers}
+            onMarkerPress={handleMarkerPress}
           />
         )}
 
@@ -3223,6 +3415,14 @@ export default function EditScreen() {
               Text
             </UiText>
           </Pressable>
+
+          {/* AI edits: every automatic edit, each reversible */}
+          {isVideo && editModel && (
+            <Pressable onPress={() => setAiPanelOpen(true)} style={styles.toolBtn}>
+              <Sparkles size={18} color={theme.text} />
+              <UiText style={styles.toolLabel}>AI edits</UiText>
+            </Pressable>
+          )}
 
           {/* Delete */}
           <Pressable
@@ -3414,6 +3614,31 @@ export default function EditScreen() {
           </Pressable>
         </View>
       )}
+      <AiEditsSheet
+        visible={aiPanelOpen && !!editModel}
+        rows={panelRows}
+        canUndo={canUndoDecisions(historyRef.current)}
+        canRedo={canRedoDecisions(historyRef.current)}
+        onToggle={handleToggleCategory}
+        onUndo={handleUndoDecisions}
+        onRedo={handleRedoDecisions}
+        onReset={handleResetAi}
+        onOriginal={handleOriginalVideo}
+        onShareDebug={isOwnerAccount ? handleShareAiDebug : undefined}
+        onClose={() => setAiPanelOpen(false)}
+      />
+      <MarkerSheet
+        marker={markerSheet}
+        onRestore={(m) => {
+          userEdit((s) => restoreMarker(s, m));
+          setMarkerSheet(null);
+        }}
+        onReapply={(m) => {
+          userEdit((s) => reapplyMarker(s, m));
+          setMarkerSheet(null);
+        }}
+        onClose={() => setMarkerSheet(null)}
+      />
       <AutoEditReviewSheet
         visible={reviewOpen && !!reviewPlan}
         cuts={reviewPlan?.detection.cuts ?? []}

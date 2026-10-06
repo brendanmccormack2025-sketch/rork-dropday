@@ -19,6 +19,7 @@ import { getThumbnailAsync, type VideoThumbnailsResult } from "expo-video-thumbn
 import * as Haptics from "expo-haptics";
 import type { DraftClip } from "@/providers/PostsProvider";
 import { theme } from "@/constants/theme";
+import type { MarkerKind, TimelineMarker } from "@/lib/autoEdit/markers";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const PX_PER_SEC = 44;
@@ -72,7 +73,22 @@ interface TimelineEditorProps {
   onDeselectAndPreview?: () => void;
   /** Called when the user reorders a clip via long-press drag */
   onReorderClips?: (fromIndex: number, toIndex: number) => void;
+  /** AI edit markers on the output timeline (see lib/autoEdit/markers.ts). */
+  markers?: TimelineMarker[];
+  onMarkerPress?: (marker: TimelineMarker) => void;
 }
+
+/** One look per marker kind. "zoom" is reserved for future zoom decisions. */
+const MARKER_LOOK: Record<MarkerKind, { glyph: object; bottom: boolean }> = {
+  cut: { glyph: { backgroundColor: theme.accent, transform: [{ rotate: "45deg" }] }, bottom: false },
+  restored: {
+    glyph: { borderWidth: 1.5, borderColor: theme.textMuted, transform: [{ rotate: "45deg" }], opacity: 0.8 },
+    bottom: true,
+  },
+  zoom: { glyph: { backgroundColor: theme.trending, borderRadius: 6 }, bottom: false },
+  proposal: { glyph: { backgroundColor: theme.trending, borderWidth: 1, borderColor: theme.text, borderRadius: 6 }, bottom: false },
+  filler2: { glyph: { borderWidth: 1.5, borderColor: theme.success, borderRadius: 6 }, bottom: true },
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function clamp(v: number, min: number, max: number) {
@@ -234,6 +250,8 @@ export default function TimelineEditor({
   onTrimRelease,
   onDeselectAndPreview,
   onReorderClips,
+  markers,
+  onMarkerPress,
 }: TimelineEditorProps) {
   const scrollRef = useRef<ScrollView>(null);
   const containerW = useRef(1);
@@ -995,6 +1013,24 @@ export default function TimelineEditor({
               );
             })}
 
+            {/* AI edit markers: a small tappable glyph at the seam (top) or the restored spot (bottom) */}
+            {markers?.map((m) => {
+              const look = MARKER_LOOK[m.kind];
+              return (
+                <Pressable
+                  key={m.id}
+                  onPress={() => onMarkerPress?.(m)}
+                  hitSlop={6}
+                  style={[
+                    styles.markerHit,
+                    { left: EDGE_PAD + msToPx(m.outputMs) - 14, top: look.bottom ? TIMELINE_H - 22 : 0 },
+                  ]}
+                >
+                  <View style={[styles.markerGlyph, look.glyph]} />
+                </Pressable>
+              );
+            })}
+
             {/* Faint playhead guide line inside content */}
             <View
               pointerEvents="none"
@@ -1089,6 +1125,15 @@ export default function TimelineEditor({
 
 // ── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  markerHit: {
+    position: "absolute",
+    width: 28,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 6,
+  },
+  markerGlyph: { width: 10, height: 10 },
   container: {
     height: TIMELINE_H + 12,
     position: "relative",
