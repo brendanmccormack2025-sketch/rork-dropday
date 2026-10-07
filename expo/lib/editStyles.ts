@@ -8,7 +8,7 @@
  *
  * Pure data and functions: no React, no native modules.
  */
-import type { EditInstructions } from "./editModel.ts";
+import type { CaptionStyle, EditInstructions } from "./editModel.ts";
 
 export type OverlayFontWeight = "regular" | "medium" | "semibold" | "bold" | "heavy" | "black";
 
@@ -21,6 +21,8 @@ export type OverlayStyleSpec = {
   backgroundPadding?: number;
   cornerRadius?: number;
   yCenter: number;
+  /** Horizontal centre as a fraction of the frame width (default 0.5). Read by the renderer only once it supports it. */
+  xCenter?: number;
   /** Widest the text may get, as a fraction of the frame width. Default 0.86. */
   maxWidth?: number;
   uppercase?: boolean;
@@ -125,14 +127,29 @@ export function resolveOverlayStyle(kind: "text" | "caption", styleId?: string):
   return preset.spec;
 }
 
+/** A preset with the clip-wide caption box applied: size scaled, position replaced. */
+export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle): OverlayStyleSpec {
+  const s = style.scale;
+  return {
+    ...spec,
+    fontSize: spec.fontSize * s,
+    backgroundPadding: spec.backgroundPadding === undefined ? undefined : spec.backgroundPadding * s,
+    cornerRadius: spec.cornerRadius === undefined ? undefined : spec.cornerRadius * s,
+    letterSpacing: spec.letterSpacing === undefined ? undefined : spec.letterSpacing * s,
+    yCenter: style.yCenter,
+    xCenter: style.xCenter,
+  };
+}
+
 /**
  * The spec sent to the native renderer. A caption never gets both fades at 0: the
  * renderer's discrete (hard cut) path leaves captions visible after their end, so a
  * caption fades for 1 ms, which takes the minimum-fade path.
  */
-function renderSpec(kind: "text" | "caption", styleId?: string): OverlayStyleSpec {
-  const spec = resolveOverlayStyle(kind, styleId);
-  if (kind !== "caption") return spec;
+function renderSpec(kind: "text" | "caption", styleId?: string, captionStyle?: CaptionStyle): OverlayStyleSpec {
+  const resolved = resolveOverlayStyle(kind, styleId);
+  if (kind !== "caption") return resolved;
+  const spec = captionStyle ? applyCaptionStyle(resolved, captionStyle) : resolved;
   return { ...spec, fadeInMs: Math.max(1, spec.fadeInMs ?? 0), fadeOutMs: Math.max(1, spec.fadeOutMs ?? 0) };
 }
 
@@ -145,7 +162,7 @@ export function toRenderJson(instructions: EditInstructions): string {
     ...instructions,
     overlays: instructions.overlays.map((o) =>
       o.kind === "text" || o.kind === "caption"
-        ? { ...o, styleSpec: renderSpec(o.kind, o.style) }
+        ? { ...o, styleSpec: renderSpec(o.kind, o.style, o.kind === "caption" ? o.captionStyle : undefined) }
         : o,
     ),
   });

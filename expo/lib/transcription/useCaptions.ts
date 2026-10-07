@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import type { EditOverlay } from "@/lib/editModel";
+import type { CaptionStyle, EditOverlay } from "@/lib/editModel";
 import { analysis } from "@/lib/autoEdit/analysis";
 import type { TranscriptionInfo, Word } from "@/lib/transcription/types";
 import {
@@ -23,7 +23,7 @@ type Status = "waiting" | "asking" | "running" | "done";
  * the edited timeline. Anything other than a transcript leaves the editor as it was.
  * Only a timeline made of one local video file is captioned.
  */
-export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean) {
+export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean, captionStyle?: CaptionStyle | null) {
   const [captionsOn, setCaptionsOn] = useState(true);
   const [status, setStatus] = useState<Status>("waiting");
   const [transcript, setTranscript] = useState<{ uri: string; words: Word[]; removedWords: Word[] } | null>(null);
@@ -113,13 +113,13 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
       startMs: c.trimStartMs ?? 0,
       endMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0),
     }));
-    return buildCaptionLines(transcript.words, edits, kept);
+    return buildCaptionLines(transcript.words, edits, kept, captionStyle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, transcript, sourceUri, edits, keptKey]);
+  }, [enabled, transcript, sourceUri, edits, keptKey, captionStyle]);
 
   const overlays: EditOverlay[] = useMemo(
-    () => (captionsOn ? captionLinesToEditOverlays(lines) : []),
-    [captionsOn, lines],
+    () => (captionsOn ? captionLinesToEditOverlays(lines, captionStyle) : []),
+    [captionsOn, lines, captionStyle],
   );
 
   useEffect(() => {

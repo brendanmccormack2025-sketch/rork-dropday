@@ -12,6 +12,7 @@
 import {
   keepRangesToClips,
   sourceToOutputMs,
+  type CaptionStyle,
   type EditClip,
   type KeepRange,
 } from "../editModel.ts";
@@ -45,7 +46,16 @@ export type EditState = {
   sourceUri: string;
   decisions: Decision[];
   categoryEnabled: Record<DecisionType, boolean>;
+  /** Clip-wide caption size and position (owner); absent = the preset's own. Undo/redo cover it like any state. */
+  captionStyle?: CaptionStyle;
 };
+
+/** The state with a new caption style; the same object when nothing changes (so it is not an undo step). */
+export function setCaptionStyle(state: EditState, style: CaptionStyle): EditState {
+  const old = state.captionStyle;
+  if (old && old.scale === style.scale && old.yCenter === style.yCenter && old.xCenter === style.xCenter) return state;
+  return { ...state, captionStyle: style };
+}
 
 export const DECISION_TYPES: DecisionType[] = ["silenceCut", "hookTrim", "fillerCut", "umCut", "laughProtect", "zoom", "caption", "audio"];
 

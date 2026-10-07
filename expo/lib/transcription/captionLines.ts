@@ -5,9 +5,9 @@
  * scripts/test-transcription.mjs can run it with Node's type stripping.
  */
 import { groupWordsIntoLines } from "../captions.ts";
-import { resolveOverlayStyle } from "../editStyles.ts";
+import { applyCaptionStyle, resolveOverlayStyle } from "../editStyles.ts";
 import { lineFits } from "./captionFit.ts";
-import type { CaptionEditOverlay, KeepRange } from "../editModel.ts";
+import type { CaptionEditOverlay, CaptionStyle, KeepRange } from "../editModel.ts";
 import { mapWordsToEdit } from "./mapWords.ts";
 import type { Word } from "./types.ts";
 
@@ -34,6 +34,8 @@ export function buildCaptionLines(
   words: Word[],
   edits: WordEdits,
   keptRanges: KeepRange[],
+  /** The clip-wide caption box: a larger scale means narrower lines (fewer words fit). */
+  style?: CaptionStyle | null,
 ): EditorCaptionLine[] {
   const indexed: Array<Word & { srcIndex: number }> = [];
   words.forEach((w, srcIndex) => {
@@ -42,7 +44,8 @@ export function buildCaptionLines(
     indexed.push({ ...w, text, srcIndex });
   });
   const mapped = mapWordsToEdit(indexed, keptRanges);
-  const spec = resolveOverlayStyle("caption", CAPTION_STYLE_ID);
+  const preset = resolveOverlayStyle("caption", CAPTION_STYLE_ID);
+  const spec = style ? applyCaptionStyle(preset, style) : preset;
   const lines = groupWordsIntoLines(mapped, { ...CAPTION_LINE_OPTIONS, fits: (text) => lineFits(text, spec) });
   // The grouper keeps word order and skips none of these words (blanks were removed above).
   let n = 0;
@@ -60,13 +63,14 @@ export function buildCaptionLines(
   return built.filter((l) => l.endMs > l.startMs);
 }
 
-export function captionLinesToEditOverlays(lines: EditorCaptionLine[]): CaptionEditOverlay[] {
+export function captionLinesToEditOverlays(lines: EditorCaptionLine[], style?: CaptionStyle | null): CaptionEditOverlay[] {
   return lines.map((l) => ({
     kind: "caption" as const,
     text: l.text,
     startMs: l.startMs,
     endMs: l.endMs,
     style: CAPTION_STYLE_ID,
+    ...(style ? { captionStyle: style } : {}),
   }));
 }
 

@@ -38,7 +38,13 @@ type OverlayBase = {
 };
 
 export type TextEditOverlay = OverlayBase & { kind: "text"; text: string; style?: string };
-export type CaptionEditOverlay = OverlayBase & { kind: "caption"; text: string; style?: string };
+/**
+ * Clip-wide caption box: every caption follows it. scale multiplies the preset's font size
+ * (and padding); yCenter / xCenter place the box centre as fractions of the frame (0 = top / left).
+ */
+export type CaptionStyle = { scale: number; yCenter: number; xCenter: number };
+
+export type CaptionEditOverlay = OverlayBase & { kind: "caption"; text: string; style?: string; captionStyle?: CaptionStyle };
 /** Type only, not used yet. */
 export type ImageEditOverlay = OverlayBase & { kind: "image"; uri: string };
 /** Type only, not used yet. */

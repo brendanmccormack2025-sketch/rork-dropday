@@ -52,6 +52,7 @@ import CaptionPreview from "@/components/CaptionPreview";
 import { useCaptions } from "@/lib/transcription/useCaptions";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { formatRenderStats, recordRenderStats, reportRender } from "@/lib/renderReport";
+import type { CaptionStyle } from "@/lib/editModel";
 import { RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
 import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
@@ -61,6 +62,7 @@ import {
   mergePlan,
   newEditState,
   renderClipsOf,
+  setCaptionStyle,
   setCategoryEnabled,
   appliedCutRanges,
   mapNonCutDecisions,
@@ -83,6 +85,7 @@ import {
   restoreMarker,
   type TimelineMarker,
 } from "@/lib/autoEdit/markers";
+import { planSelectionSeek, previewModeFor } from "@/lib/previewSelection";
 import { buildAiEditState } from "@/lib/autoEdit/plan";
 import { checkAlignment, type Alignment } from "@/lib/autoEdit/alignment";
 import { planLaughProtection } from "@/lib/autoEdit/laughProtection";
@@ -390,6 +393,7 @@ export default function EditScreen() {
     isDebugOwner(user?.id),
     clips,
     !autoEditRunning && (autoEditFinished || !autoEditPossible),
+    editModel?.state.captionStyle,
   );
   const captionOverlaysRef = useRef(captions.overlays);
   captionOverlaysRef.current = captions.overlays;
@@ -415,8 +419,9 @@ export default function EditScreen() {
   const aheadReady = aheadState.kind === "ready" ? aheadState : null;
   const aheadSignature = aheadRef.current?.signatureOf(clips, captions.overlays) ?? null;
   const aheadMatches = !!aheadReady && aheadReady.signature === aheadSignature;
-  // The rendered file plays only while it matches the timeline and no clip is being trimmed.
-  const previewMode = aheadMatches && selectedClipId === null;
+  // The rendered file plays while it matches the timeline. Selecting a clip is not an edit and does not
+  // leave it (see lib/previewSelection.ts); a trim or cut changes the clips, so the render stops matching.
+  const previewMode = previewModeFor({ aheadMatches, selectedClipId });
   const previewModeRef = useRef(false);
   previewModeRef.current = previewMode;
   const isPlayingRef = useRef(false);
@@ -622,22 +627,36 @@ export default function EditScreen() {
     selectedClipIdxRef.current = clips.findIndex((c) => c.id === selectedClipId);
   }, [clips, selectedClipId]);
 
+  const lastSelectionSeekRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedClipId) return;
-    const idx = clips.findIndex((c) => c.id === selectedClipId);
-    if (idx < 0 || idx === activeIndexRef.current) return;
-    let cumulative = 0;
-    for (let i = 0; i < idx; i++) {
-      const c = clips[i]!;
-      cumulative += effectiveDurationMs(c);
+    if (!selectedClipId) {
+      lastSelectionSeekRef.current = null;
+      return;
     }
-    segmentOffsetRef.current = cumulative;
+    const seek = planSelectionSeek({
+      clips,
+      clipId: selectedClipId,
+      activeIndex: activeIndexRef.current,
+      previewMode: previewModeRef.current,
+      durationOf: effectiveDurationMs,
+    });
+    if (!seek) return;
+    if (seek.kind === "rendered") {
+      // Rendered preview: only move the rendered file to the clip's start (output time); no live
+      // player, no play-state change, and the render stays valid.
+      if (lastSelectionSeekRef.current === selectedClipId) return;
+      lastSelectionSeekRef.current = selectedClipId;
+      playerR.currentTime = seek.outputMs / 1000;
+      setPositionMs(seek.outputMs);
+      return;
+    }
+    segmentOffsetRef.current = seek.outputMs;
     durationSetRef.current = false;
     lastPositionUpdate.current = 0;
-    pendingSeekRef.current = clips[idx]?.trimStartMs ?? 0;
-    setActiveIndex(idx);
+    pendingSeekRef.current = seek.sourceMs;
+    setActiveIndex(seek.index);
     setIsPlaying(true);
-  }, [selectedClipId, clips]);
+  }, [selectedClipId, clips, playerR]);
 
   const totalDurationMs = useMemo(() => {
     let total = 0;
@@ -2413,6 +2432,21 @@ export default function EditScreen() {
     [commitDecisions, guardAction],
   );
 
+  // The creator dragged or pinched the caption: one undo step, every caption follows. Not an AI edit,
+  // so no confirmation; the render picks it up after the usual caption debounce.
+  const handleCaptionStyleCommit = useCallback(
+    (style: CaptionStyle) => {
+      const model = editStateRef.current;
+      if (!model) return;
+      const next = setCaptionStyle(model.state, style);
+      if (next === model.state) return;
+      historyRef.current = pushEdit(historyRef.current, model.state);
+      setHistoryTick((n) => n + 1);
+      setEditModel({ state: next, durationMs: model.durationMs });
+    },
+    [setEditModel],
+  );
+
   const handleUndoDecisions = useCallback(() => {
     guardAction(() => {
       const model = editStateRef.current;
@@ -3398,8 +3432,11 @@ export default function EditScreen() {
                 frameW={frameDims.w}
                 frameH={frameDims.h}
                 invisible={previewMode}
+                style={editModel?.state.captionStyle}
+                isPlaying={isPlaying}
                 onEditStart={() => setIsPlaying(false)}
                 onEdit={captions.editLine}
+                onStyleCommit={handleCaptionStyleCommit}
               />
             )}
 
