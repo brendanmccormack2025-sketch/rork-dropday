@@ -27,6 +27,8 @@ export type CaptionGroupOptions = {
   pauseMs?: number;
   maxWords?: number;
   maxLineMs?: number;
+  /** When given, a word is never added to a line if the line would then not fit (a single word always stays). */
+  fits?: (text: string) => boolean;
 };
 
 /** Group words (in time order) into caption lines. */
@@ -58,7 +60,8 @@ export function groupWordsIntoLines(
       prev &&
       (w.startMs - prev.endMs > pauseMs ||
         current.length >= maxWords ||
-        w.endMs - current[0]!.startMs > maxLineMs)
+        w.endMs - current[0]!.startMs > maxLineMs ||
+        (options.fits !== undefined && !options.fits([...current.map((c) => c.text), w.text.trim()].join(" "))))
     ) {
       flush();
     }

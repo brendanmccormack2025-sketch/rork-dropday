@@ -5,6 +5,8 @@
  * scripts/test-transcription.mjs can run it with Node's type stripping.
  */
 import { groupWordsIntoLines } from "../captions.ts";
+import { resolveOverlayStyle } from "../editStyles.ts";
+import { lineFits } from "./captionFit.ts";
 import type { CaptionEditOverlay, KeepRange } from "../editModel.ts";
 import { mapWordsToEdit } from "./mapWords.ts";
 import type { Word } from "./types.ts";
@@ -40,15 +42,22 @@ export function buildCaptionLines(
     indexed.push({ ...w, text, srcIndex });
   });
   const mapped = mapWordsToEdit(indexed, keptRanges);
-  const lines = groupWordsIntoLines(mapped, CAPTION_LINE_OPTIONS);
+  const spec = resolveOverlayStyle("caption", CAPTION_STYLE_ID);
+  const lines = groupWordsIntoLines(mapped, { ...CAPTION_LINE_OPTIONS, fits: (text) => lineFits(text, spec) });
   // The grouper keeps word order and skips none of these words (blanks were removed above).
   let n = 0;
-  return lines.map((l) => ({
+  const built = lines.map((l) => ({
     text: l.text,
     startMs: l.startMs,
     endMs: l.endMs,
     srcIndexes: l.words.map(() => mapped[n++]!.srcIndex),
   }));
+  // One caption at a time: a line ends when the next one starts.
+  for (let i = 0; i + 1 < built.length; i++) {
+    const next = built[i + 1]!;
+    if (built[i]!.endMs > next.startMs) built[i]!.endMs = Math.max(built[i]!.startMs, next.startMs);
+  }
+  return built.filter((l) => l.endMs > l.startMs);
 }
 
 export function captionLinesToEditOverlays(lines: EditorCaptionLine[]): CaptionEditOverlay[] {
