@@ -57,6 +57,9 @@ import type { CaptionStyle } from "@/lib/editModel";
 import type { WordEdits } from "@/lib/transcription/captionLines";
 import { settleCaptionsForPost } from "@/lib/postWait";
 import { aiEditorFeatures } from "@/lib/autoEdit/rollout";
+import CaptionStyleSheet from "@/components/CaptionStyleSheet";
+import { resetCaptionLook, usableCaptionStyle, withCaptionLook } from "@/lib/transcription/captionStyle";
+import { supportsCaptionFont } from "@/modules/video-render";
 import { RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
 import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
@@ -406,7 +409,10 @@ export default function EditScreen() {
   // files) they live here.
   const [localCaption, setLocalCaption] = useState<{ style?: CaptionStyle; edits?: WordEdits }>({});
   const captionEditsHandlerRef = useRef<(next: WordEdits) => void>(() => {});
-  const captionStyle = editModel ? editModel.state.captionStyle : localCaption.style;
+  const storedCaptionStyle = editModel ? editModel.state.captionStyle : localCaption.style;
+  // A font the build cannot render is not used: the preview never shows what the render cannot produce.
+  const captionStyle = useMemo(() => usableCaptionStyle(storedCaptionStyle, supportsCaptionFont), [storedCaptionStyle]);
+  const [styleSheetOpen, setStyleSheetOpen] = useState(false);
   const captions = useCaptions(
     features.transcription,
     clips,
@@ -2483,6 +2489,17 @@ export default function EditScreen() {
     [setEditModel],
   );
 
+  // The Style sheet: a font, text color or background chosen (instant; one undo step each).
+  const handleCaptionLook = useCallback(
+    (patch: { fontId?: string; textColor?: string; backgroundColor?: string }) =>
+      handleCaptionStyleCommit(withCaptionLook(storedCaptionStyle, patch)),
+    [handleCaptionStyleCommit, storedCaptionStyle],
+  );
+  // "Reset to Trial style": font and colors back to the defaults; size and position stay.
+  const handleCaptionLookReset = useCallback(() => {
+    if (storedCaptionStyle) handleCaptionStyleCommit(resetCaptionLook(storedCaptionStyle));
+  }, [handleCaptionStyleCommit, storedCaptionStyle]);
+
   // Back to the preset's own caption size and position (undoable).
   const handleCaptionStyleReset = useCallback(() => {
     const model = editStateRef.current;
@@ -3550,6 +3567,7 @@ export default function EditScreen() {
                 onStyleCommit={handleCaptionStyleCommit}
                 onStyleReset={handleCaptionStyleReset}
                 onDeleteLine={captions.deleteLine}
+                onOpenStyle={() => setStyleSheetOpen(true)}
               />
             )}
 
@@ -3879,6 +3897,15 @@ export default function EditScreen() {
           </View>
         )}
       </View>
+
+      <CaptionStyleSheet
+        visible={styleSheetOpen}
+        style={storedCaptionStyle}
+        supportsFont={supportsCaptionFont}
+        onChange={handleCaptionLook}
+        onReset={handleCaptionLookReset}
+        onClose={() => setStyleSheetOpen(false)}
+      />
 
       <CaptionsExplainer
         visible={captions.explainerVisible}

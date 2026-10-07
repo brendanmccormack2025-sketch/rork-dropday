@@ -67,6 +67,18 @@ export function setCaptionEdits(state: EditState, edits: Record<number, string>)
   return { ...state, captionEdits: { ...edits } };
 }
 
+/** Same box and same look (an absent look field counts as its default only when both are absent). */
+export function sameCaptionStyle(a: CaptionStyle, b: CaptionStyle): boolean {
+  return (
+    a.scale === b.scale &&
+    a.yCenter === b.yCenter &&
+    a.xCenter === b.xCenter &&
+    a.fontId === b.fontId &&
+    a.textColor === b.textColor &&
+    a.backgroundColor === b.backgroundColor
+  );
+}
+
 /** The state back at the preset's own caption box (no stored style); the same object when it already is. */
 export function clearCaptionStyle(state: EditState): EditState {
   if (state.captionStyle === undefined) return state;
@@ -77,7 +89,7 @@ export function clearCaptionStyle(state: EditState): EditState {
 /** The state with a new caption style; the same object when nothing changes (so it is not an undo step). */
 export function setCaptionStyle(state: EditState, style: CaptionStyle): EditState {
   const old = state.captionStyle;
-  if (old && old.scale === style.scale && old.yCenter === style.yCenter && old.xCenter === style.xCenter) return state;
+  if (old && sameCaptionStyle(old, style)) return state;
   return { ...state, captionStyle: style };
 }
 

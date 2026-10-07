@@ -162,3 +162,31 @@ export function yCenterFromNative(frameH: number, nativeY: number): number {
 export function previewCenterY(frameH: number, yCenter: number): number {
   return frameH * yCenter;
 }
+
+// ── Look: font, text color, background (see captionPresets.ts) ────────────────────────────────
+
+/**
+ * The style to draw and render with. A font is only usable when the build can render it (the native
+ * module reports supportsCaptionFont): without it the font is dropped, so the preview never shows a font
+ * the render cannot produce. The stored style keeps the font.
+ */
+export function usableCaptionStyle(style: CaptionStyle | null | undefined, supportsFont: boolean): CaptionStyle | undefined {
+  if (!style) return undefined;
+  if (supportsFont || style.fontId === undefined) return style;
+  const { fontId: _drop, ...rest } = style;
+  return rest;
+}
+
+/** A look change (a font, a text color or a background chosen) applied to the stored style (or the default one). */
+export function withCaptionLook(
+  style: CaptionStyle | null | undefined,
+  patch: { fontId?: string; textColor?: string; backgroundColor?: string },
+): CaptionStyle {
+  return { ...effectiveCaptionStyle(style), ...patch };
+}
+
+/** "Reset to Trial style": font and colors back to the defaults; size and position are kept. */
+export function resetCaptionLook(style: CaptionStyle | null | undefined): CaptionStyle {
+  const { scale, yCenter, xCenter } = effectiveCaptionStyle(style);
+  return { scale, yCenter, xCenter };
+}

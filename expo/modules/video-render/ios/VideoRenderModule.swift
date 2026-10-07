@@ -80,6 +80,11 @@ public class VideoRenderModule: Module {
   public func definition() -> ModuleDefinition {
     Name("VideoRender")
 
+    // Build capabilities the JS checks: captions can use a font by PostScript name (style "fontName").
+    Constants {
+      ["supportsCaptionFont": true]
+    }
+
     Events("onProgress")
 
     Function("cancelRender") {
@@ -290,20 +295,23 @@ private func hardCutAnimation(
 ) -> CAKeyframeAnimation? {
   let start = min(max(0, startSeconds), totalSeconds)
   let end = min(max(start, endSeconds), totalSeconds)
-  var times: [NSNumber] = []
+  // A discrete animation needs one MORE key time than values (each value holds from its key time to the
+  // next; the last key time is 1.0). With equal counts Core Animation ignores the key times and the
+  // overlay never hides.
+  var times: [NSNumber] = [0]
   var values: [Double] = []
   if start > 0 {
-    times.append(0)
     values.append(0)
+    times.append(NSNumber(value: start / totalSeconds))
   }
-  times.append(NSNumber(value: start / totalSeconds))
   values.append(1)
   if end < totalSeconds {
     times.append(NSNumber(value: end / totalSeconds))
     values.append(0)
   }
+  times.append(1)
   // Visible for the whole video: no animation needed.
-  if times.count == 1 { return nil }
+  if values.count == 1 { return nil }
   let animation = CAKeyframeAnimation(keyPath: "opacity")
   animation.values = values
   animation.keyTimes = times
@@ -361,12 +369,15 @@ private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
   let maxWidth = size.width * CGFloat(number(style["maxWidth"]) ?? 0.86)
   let yFromTop = CGFloat(number(style["yCenter"]) ?? 0.75)
   let text = (style["uppercase"] as? Bool) == true ? overlay.text.uppercased() : overlay.text
+  // An iOS font by PostScript name; the system font at the weight when there is none or it is unavailable.
+  let font: UIFont = (style["fontName"] as? String).flatMap { UIFont(name: $0, size: fontSize) }
+    ?? UIFont.systemFont(ofSize: fontSize, weight: weight)
 
   let paragraph = NSMutableParagraphStyle()
   paragraph.alignment = .center
   paragraph.lineBreakMode = .byWordWrapping
   let attributes: [NSAttributedString.Key: Any] = [
-    .font: UIFont.systemFont(ofSize: fontSize, weight: weight),
+    .font: font,
     .foregroundColor: textColor,
     .kern: CGFloat(number(style["letterSpacing"]) ?? 0) * scale,
     .paragraphStyle: paragraph,

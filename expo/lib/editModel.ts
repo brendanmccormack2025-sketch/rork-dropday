@@ -42,7 +42,15 @@ export type TextEditOverlay = OverlayBase & { kind: "text"; text: string; style?
  * Clip-wide caption box: every caption follows it. scale multiplies the preset's font size
  * (and padding); yCenter / xCenter place the box centre as fractions of the frame (0 = top / left).
  */
-export type CaptionStyle = { scale: number; yCenter: number; xCenter: number };
+export type CaptionStyle = {
+  scale: number;
+  yCenter: number;
+  xCenter: number;
+  /** Look (see lib/transcription/captionPresets.ts): ids; absent = the Trial look. */
+  fontId?: string;
+  textColor?: string;
+  backgroundColor?: string;
+};
 
 export type CaptionEditOverlay = OverlayBase & { kind: "caption"; text: string; style?: string; captionStyle?: CaptionStyle };
 /** Type only, not used yet. */

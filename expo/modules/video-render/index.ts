@@ -10,12 +10,17 @@ type Subscription = { remove(): void };
 type VideoRenderNative = {
   renderAsync(instructionsJson: string, options?: RenderOptions): Promise<RenderResult>;
   cancelRender(): void;
+  /** Present (true) from build 1.0.4: captions can use a font by PostScript name. */
+  supportsCaptionFont?: boolean;
   addListener(event: "onProgress", listener: (e: RenderProgressEvent) => void): Subscription;
 };
 
 // iOS only. Android and web have no native module.
 const native: VideoRenderNative | null =
   Platform.OS === "ios" ? requireOptionalNativeModule<VideoRenderNative>("VideoRender") : null;
+
+/** True when this build can render a caption font (older builds ignore "fontName", so the editor hides the font row). */
+export const supportsCaptionFont: boolean = native?.supportsCaptionFont === true;
 
 /**
  * Render EditInstructions v1 (lib/editModel.ts, as JSON) into one mp4 on this

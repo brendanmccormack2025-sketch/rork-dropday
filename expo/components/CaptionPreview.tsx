@@ -45,6 +45,8 @@ type Props = {
   onStyleReset?: () => void;
   /** Delete this one caption line (one undo step). */
   onDeleteLine?: (lineIndex: number) => void;
+  /** Open the Style sheet (font, text color, background). */
+  onOpenStyle?: () => void;
 };
 
 const sameStyle = (a: CaptionStyle, b: CaptionStyle) =>
@@ -77,6 +79,7 @@ export default function CaptionPreview({
   onStyleCommit,
   onStyleReset,
   onDeleteLine,
+  onOpenStyle,
 }: Props) {
   const stored = useMemo(() => effectiveCaptionStyle(style), [style]);
   const [live, setLive] = useState<CaptionStyle | null>(null);
@@ -200,12 +203,17 @@ export default function CaptionPreview({
 
   if (!line || frameW <= 0 || frameH <= 0) return null;
 
+  // The same look the render gets: a font by PostScript name replaces the system font (and its weight), and a
+  // caption with no background gets the renderer's soft dark shadow (black, 60%, radius 4, 2 down, in frame units).
   const textStyle = {
     color: spec.color,
     fontSize: spec.fontSize * px,
-    fontWeight: WEIGHTS[spec.fontWeight],
+    ...(spec.fontName ? { fontFamily: spec.fontName } : { fontWeight: WEIGHTS[spec.fontWeight] }),
     textAlign: "center" as const,
     letterSpacing: (spec.letterSpacing ?? 0) * px,
+    ...(spec.shadow
+      ? { textShadowColor: "rgba(0,0,0,0.6)", textShadowRadius: 4 * px, textShadowOffset: { width: 0, height: 2 * px } }
+      : {}),
   };
   const boxStyle = {
     backgroundColor: spec.backgroundColor,
@@ -289,6 +297,11 @@ export default function CaptionPreview({
           <Pressable onPress={startEditing} hitSlop={8} style={styles.pill} accessibilityRole="button" accessibilityLabel="Edit text">
             <Text style={styles.pillText}>Edit text</Text>
           </Pressable>
+          {onOpenStyle && (
+            <Pressable onPress={onOpenStyle} hitSlop={8} style={styles.pill} accessibilityRole="button" accessibilityLabel="Caption style">
+              <Text style={styles.pillText}>Style</Text>
+            </Pressable>
+          )}
           {onDeleteLine && (
             <Pressable
               onPress={() => {

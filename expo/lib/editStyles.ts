@@ -9,6 +9,7 @@
  * Pure data and functions: no React, no native modules.
  */
 import type { CaptionStyle, EditInstructions } from "./editModel.ts";
+import { resolveCaptionLook } from "./transcription/captionPresets.ts";
 
 export type OverlayFontWeight = "regular" | "medium" | "semibold" | "bold" | "heavy" | "black";
 
@@ -26,6 +27,8 @@ export type OverlayStyleSpec = {
   /** Widest the text may get, as a fraction of the frame width. Default 0.86. */
   maxWidth?: number;
   uppercase?: boolean;
+  /** iOS PostScript font name; absent = the system font at fontWeight. Read by the renderer from build 1.0.4 on. */
+  fontName?: string;
   letterSpacing?: number;
   shadow?: boolean;
   /** Simple fade at the start and end of the overlay's window. */
@@ -130,7 +133,7 @@ export function resolveOverlayStyle(kind: "text" | "caption", styleId?: string):
 /** A preset with the clip-wide caption box applied: size scaled, position replaced. */
 export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle): OverlayStyleSpec {
   const s = style.scale;
-  return {
+  const out: OverlayStyleSpec = {
     ...spec,
     fontSize: spec.fontSize * s,
     backgroundPadding: spec.backgroundPadding === undefined ? undefined : spec.backgroundPadding * s,
@@ -140,6 +143,15 @@ export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle): 
     // The centre is the default: leave the key out, so the default box sends the preset's own JSON.
     ...(style.xCenter === 0.5 ? {} : { xCenter: style.xCenter }),
   };
+  // The look. Overwritten in place, so the Trial look (white on black, system font) changes nothing:
+  // its JSON is byte-identical to the preset's. Only a different look adds or removes keys.
+  const look = resolveCaptionLook(style);
+  out.color = look.textHex;
+  if (look.backgroundHex === null) delete out.backgroundColor;
+  else out.backgroundColor = look.backgroundHex;
+  if (look.shadow) out.shadow = true;
+  if (look.fontName) out.fontName = look.fontName;
+  return out;
 }
 
 /**

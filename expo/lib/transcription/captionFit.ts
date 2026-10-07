@@ -7,6 +7,7 @@
  * Pure; erasable TypeScript only so the Node tests can run it.
  */
 import type { OverlayStyleSpec } from "../editStyles.ts";
+import { fontWidthFactor } from "./captionPresets.ts";
 
 const FRAME = 1080;
 const DEFAULT_MAX_WIDTH = 0.86;
@@ -35,7 +36,7 @@ export function estimateTextWidth(text: string, spec: OverlayStyleSpec): number 
   let em = 0;
   for (const ch of shown) em += charEm(ch, spec.uppercase === true || ch !== ch.toLowerCase());
   const count = [...shown].length;
-  return em * spec.fontSize * WEIGHT_FACTOR[spec.fontWeight] + count * (spec.letterSpacing ?? 0);
+  return em * spec.fontSize * WEIGHT_FACTOR[spec.fontWeight] * fontWidthFactor(spec.fontName) + count * (spec.letterSpacing ?? 0);
 }
 
 /** Width available to the text of a caption line, in 1080-wide frame units. */
