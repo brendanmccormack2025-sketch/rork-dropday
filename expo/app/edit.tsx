@@ -42,6 +42,7 @@ import {
   Redo2,
   Pencil,
   Sparkles,
+  Captions,
 } from "lucide-react-native";
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
@@ -57,10 +58,11 @@ import type { CaptionStyle } from "@/lib/editModel";
 import type { WordEdits } from "@/lib/transcription/captionLines";
 import { settleCaptionsForPost } from "@/lib/postWait";
 import { aiEditorFeatures } from "@/lib/autoEdit/rollout";
+import { postRenderSource } from "@/lib/renderSignature";
 import CaptionStyleSheet from "@/components/CaptionStyleSheet";
 import { resetCaptionLook, usableCaptionStyle, withCaptionLook } from "@/lib/transcription/captionStyle";
 import { supportsCaptionFont } from "@/modules/video-render";
-import { RenderAhead, type AheadState } from "@/lib/renderAhead";
+import { RENDER_FINAL_IDLE_MS, RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
 import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
@@ -80,10 +82,12 @@ import {
   type Decision,
   type EditState,
 } from "@/lib/autoEdit/decisions";
-import AiEditsSheet from "@/components/AiEditsSheet";
+import CutsSheet from "@/components/CutsSheet";
+import CaptionsSheet from "@/components/CaptionsSheet";
 import MarkerSheet from "@/components/MarkerSheet";
 import { MANUAL_EDIT_CONFIRM_MESSAGE, guardManualEdits, timelineMatchesState } from "@/lib/autoEdit/confirm";
-import { allCategoriesOff, categoryRows, type CategoryRow } from "@/lib/autoEdit/editPanel";
+import { allCategoriesOff, cutsRows, cutsSummary, setCutsRowEnabled, type CutsRow } from "@/lib/autoEdit/editPanel";
+import { CAPTION_TOOLS, toolbarMode, type CaptionToolId } from "@/lib/editorToolbar";
 import { formatAiDebug } from "@/lib/autoEdit/debugText";
 import { canRedo as canRedoDecisions, canUndo as canUndoDecisions, emptyHistory, mapHistory, pushEdit, redoEdit, undoEdit, type EditHistory } from "@/lib/autoEdit/history";
 import {
@@ -109,7 +113,6 @@ import { silenceCutsFromDetection } from "@/lib/autoEdit/silenceCuts";
 import { keepRangesToClips } from "@/lib/editModel";
 import { SENSITIVITY_PRESETS, detectSilences, type Sensitivity } from "@/lib/silenceDetection";
 import { getAutoEditEnabled, getAutoEditSensitivity, getSaveEditedToRoll, setAutoEditSensitivity } from "@/lib/autoEditSettings";
-import AutoEditReviewSheet from "@/components/AutoEditReviewSheet";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -265,7 +268,12 @@ export default function EditScreen() {
   // Undo/redo of the creator's own AI-edit actions (see lib/autoEdit/history.ts).
   const historyRef = useRef<EditHistory>(emptyHistory());
   const [, setHistoryTick] = useState(0);
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  // The Cuts sheet (the old Review sheet and AI edits panel in one) and the Captions panel.
+  const [cutsOpen, setCutsOpen] = useState(false);
+  const [captionsPanelOpen, setCaptionsPanelOpen] = useState(false);
+  // A caption is selected: the bottom toolbar shows its actions (nothing floats over the video).
+  const [captionSelected, setCaptionSelected] = useState(false);
+  const [captionEditRequest, setCaptionEditRequest] = useState(0);
   const [markerSheet, setMarkerSheet] = useState<TimelineMarker | null>(null);
   // Owner debug: emphasis proposals and method-2 filler candidates (never applied).
   const [aiDebug, setAiDebug] = useState<{
@@ -436,27 +444,38 @@ export default function EditScreen() {
   const executePostRef = useRef<() => Promise<void>>(async () => {});
   const captionOverlaysRef = useRef(captions.overlays);
   captionOverlaysRef.current = captions.overlays;
+  // Two background renders, one native render at a time between them:
+  //  - the PREVIEW (cuts only) is what the editor plays; the editor draws the captions itself over it, so a
+  //    caption edit, move or style never re-renders it;
+  //  - the FINAL (cuts + captions burned in) starts after ~2 s with no edit and is what Post uses; any edit
+  //    cancels it.
+  const finalRef = useRef<RenderAhead | null>(null);
   useEffect(() => {
-    const ahead = new RenderAhead();
+    const ahead = new RenderAhead({ includeCaptions: false });
     aheadRef.current = ahead;
     const off = ahead.subscribe(setAheadState);
+    const final = new RenderAhead({ includeCaptions: true, requireCaptions: true, idleMs: RENDER_FINAL_IDLE_MS });
+    finalRef.current = final;
     return () => {
       off();
       ahead.dispose();
+      final.dispose();
       if (aheadRef.current === ahead) aheadRef.current = null;
+      if (finalRef.current === final) finalRef.current = null;
     };
   }, []);
   useEffect(() => {
-    aheadRef.current?.update({
+    const args = {
       clips,
       isRoot: !reactingTo && !rootDropId,
       userId: user?.id,
-      captions: captions.overlays,
       hold: captionsBusy,
-    });
+    };
+    aheadRef.current?.update(args);
+    finalRef.current?.update({ ...args, captions: captions.overlays });
   }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captionsBusy]);
   const aheadReady = aheadState.kind === "ready" ? aheadState : null;
-  const aheadSignature = aheadRef.current?.signatureOf(clips, captions.overlays) ?? null;
+  const aheadSignature = aheadRef.current?.signatureOf(clips) ?? null;
   const aheadMatches = !!aheadReady && aheadReady.signature === aheadSignature;
   // The rendered file plays while it matches the timeline. Selecting a clip is not an edit and does not
   // leave it (see lib/previewSelection.ts); a trim or cut changes the clips, so the render stops matching.
@@ -2396,17 +2415,18 @@ export default function EditScreen() {
       .filter((m) => m.decision.type === "laughProtect")
       .flatMap((m) => m.pieces);
   }, [aiEditsEnabled, editModel, modelInSync]);
-  const panelRows = useMemo<CategoryRow[]>(
-    () =>
-      editModel
-        ? categoryRows(editModel.state, {
-            owner: isOwnerAccount,
-            captionLines: captions.lines.length,
-            captionsOn: captions.captionsOn,
-          })
-        : [],
-    [editModel, isOwnerAccount, captions.lines.length, captions.captionsOn],
+  const cutRows = useMemo<CutsRow[]>(
+    () => (editModel ? cutsRows(editModel.state, { owner: isOwnerAccount }) : []),
+    [editModel, isOwnerAccount],
   );
+  const cutsSummaryText = useMemo(() => {
+    if (editModel) return cutsSummary(editModel.state, editModel.durationMs).text;
+    if (autoEditSession) {
+      const n = autoEditSession.cutEnabled.filter(Boolean).length;
+      return `${n} ${n === 1 ? "cut" : "cuts"} · saved ${(autoEditSession.savedMs / 1000).toFixed(1)} s`;
+    }
+    return "No cuts";
+  }, [editModel, autoEditSession]);
 
   // Show a new decision state: render again from the model and keep the playhead on
   // the same footage (output time -> source time -> new output time), never back at 0.
@@ -2556,12 +2576,11 @@ export default function EditScreen() {
     });
   }, [commitDecisions, guardAction]);
 
-  const handleToggleCategory = useCallback(
-    (row: CategoryRow, value: boolean) => {
-      if (row.id === "captions") captions.setCaptionsOn(value);
-      else userEdit((s) => setCategoryEnabled(s, row.type, value));
-    },
-    [userEdit, captions],
+  // A switch of the Cuts sheet: each of its categories as the separate switches did (undo/redo, the confirm
+  // dialog before replacing manual edits: userEdit).
+  const handleToggleCut = useCallback(
+    (row: CutsRow, value: boolean) => userEdit((s) => setCutsRowEnabled(s, row, value)),
+    [userEdit],
   );
 
   // Reset to AI edit: plan again from the cached analysis (no file read, no recognizer).
@@ -2584,10 +2603,35 @@ export default function EditScreen() {
     captions.setCaptionsOn(true);
   }, [userEdit, captions]);
 
+  // The Cuts sheet opens on the Review state (so a sensitivity change can still be applied on Done) and applies
+  // it when it closes.
+  const handleOpenCuts = useCallback(() => {
+    if (autoEditSession) handleOpenReview();
+    setCutsOpen(true);
+  }, [autoEditSession, handleOpenReview]);
+  const handleCloseCuts = useCallback(() => {
+    setCutsOpen(false);
+    if (reviewOpen) handleReviewDone();
+  }, [reviewOpen, handleReviewDone]);
+
+  // The caption on screen (the one the toolbar's actions are about).
+  const activeCaptionIndex = captions.lines.findIndex((l) => displayPosition >= l.startMs && displayPosition < l.endMs);
+  const handleCaptionTool = useCallback(
+    (id: CaptionToolId) => {
+      if (id === "edit") setCaptionEditRequest((n) => n + 1);
+      else if (id === "style") setStyleSheetOpen(true);
+      else if (id === "deleteLine") {
+        if (activeCaptionIndex >= 0) captions.deleteLine(activeCaptionIndex);
+        setCaptionSelected(false);
+      } else setCaptionSelected(false);
+    },
+    [activeCaptionIndex, captions],
+  );
+
+  // Restore all: the video as recorded. Captions are not cuts: the Captions panel owns them.
   const handleOriginalVideo = useCallback(() => {
     userEdit(allCategoriesOff);
-    captions.setCaptionsOn(false);
-  }, [userEdit, captions]);
+  }, [userEdit]);
 
   const handleMarkerPress = useCallback(
     (marker: TimelineMarker) => {
@@ -2609,7 +2653,7 @@ export default function EditScreen() {
     setAiDebug(null);
     setPlanDone(false);
     captions.restart();
-    setAiPanelOpen(false);
+    setCutsOpen(false);
   }, [captions]);
 
   // "Cut this sound": the creator decides about one method-2 candidate.
@@ -2942,7 +2986,8 @@ export default function EditScreen() {
       // What the internal-tester message says about the render path.
       let renderNote: string = skipReason ? `Not rendered: ${skipReason}` : "";
       if (!skipReason) {
-        const ahead = aheadRef.current;
+        // With captions the FINAL render (captions burned in) is the one to use; without, the preview render is.
+        const ahead = postRenderSource(captionOverlaysForPost.length) === "final" ? finalRef.current : aheadRef.current;
         const signature = ahead?.signatureOf(clips, captionOverlaysForPost) ?? null;
         const { editMs } = buildRenderEdit(clips);
         let handled = false;
@@ -2995,7 +3040,8 @@ export default function EditScreen() {
         if (!handled) {
           // 3. Otherwise exactly as before: stop any render-ahead (one native render
           //    at a time) and render now.
-          await ahead?.cancelAndSuspend();
+          await aheadRef.current?.cancelAndSuspend();
+          await finalRef.current?.cancelAndSuspend();
           setRenderProgress(0);
           try {
             const outcome = await renderForPost(clips, setRenderProgress, captionOverlaysForPost);
@@ -3391,17 +3437,6 @@ export default function EditScreen() {
             </UiText>
           </View>
         )}
-        {features.captions && isVideo && (
-          <Pressable
-            onPress={() => captions.setCaptionsOn(!captions.captionsOn)}
-            style={[styles.captionToggle, { top: insets.top + 62 }]}
-            hitSlop={8}
-          >
-            <UiText style={styles.aheadChipText}>
-              {captions.captionsOn ? (captions.pending ? "Captions: transcribing..." : "Captions: on") : "Captions: off"}
-            </UiText>
-          </Pressable>
-        )}
         {Platform.OS === "ios" && isRootPost && ["denied", "unavailable"].includes(captions.transcriptionInfo?.status ?? "") && (
           <View style={[styles.speechNote, { top: insets.top + 92 }]}>
             <UiText style={styles.speechNoteText}>Captions and um removal need speech access</UiText>
@@ -3540,7 +3575,7 @@ export default function EditScreen() {
                 </Pressable>
               </View>
             )}
-            {isVideo && !isPlaying && !pendingPlay && (
+            {isVideo && !isPlaying && !pendingPlay && !captionSelected && (
               <Pressable onPress={togglePlay} style={styles.playOverlay}>
                 <View style={styles.playCircle}>
                   <Play
@@ -3559,15 +3594,15 @@ export default function EditScreen() {
                 positionMs={displayPosition}
                 frameW={frameDims.w}
                 frameH={frameDims.h}
-                invisible={previewMode}
+                invisible={false}
                 style={captionStyle}
                 isPlaying={isPlaying}
+                selected={captionSelected}
+                onSelectedChange={setCaptionSelected}
+                editRequest={captionEditRequest}
                 onEditStart={() => setIsPlaying(false)}
                 onEdit={captions.editLine}
                 onStyleCommit={handleCaptionStyleCommit}
-                onStyleReset={handleCaptionStyleReset}
-                onDeleteLine={captions.deleteLine}
-                onOpenStyle={() => setStyleSheetOpen(true)}
               />
             )}
 
@@ -3603,24 +3638,13 @@ export default function EditScreen() {
             <UiText style={styles.autoEditText}>{autoEditNote}</UiText>
           </View>
         )}
-        {autoBarMode && autoEditSession && (
+        {isVideo && aiEditsEnabled && (autoEditSession || editModel) && (
           <View style={styles.autoBar}>
-            <UiText style={styles.autoBarText}>
-              {autoBarMode === "auto"
-                ? `${autoEditSession.cutEnabled.filter(Boolean).length} ${
-                    autoEditSession.cutEnabled.filter(Boolean).length === 1 ? "cut" : "cuts"
-                  }, saved ${(autoEditSession.savedMs / 1000).toFixed(1)} s`
-                : "Edited manually"}
+            <UiText style={styles.autoBarText} numberOfLines={1}>
+              {autoBarMode === "manual" ? "Edited manually" : cutsSummaryText}
             </UiText>
-            {autoBarMode === "auto" && (
-              <Pressable onPress={handleOpenReview} hitSlop={8}>
-                <UiText style={styles.autoBarAction}>Review</UiText>
-              </Pressable>
-            )}
-            <Pressable onPress={handleUseOriginal} hitSlop={8}>
-              <UiText style={styles.autoBarAction}>
-                {autoBarMode === "auto" ? "Undo" : "Use original"}
-              </UiText>
+            <Pressable onPress={handleOpenCuts} hitSlop={{ top: 12, bottom: 12, left: 16, right: 12 }} style={styles.autoBarBtn} accessibilityRole="button" accessibilityLabel="Edit cuts">
+              <UiText style={styles.autoBarAction}>Edit cuts</UiText>
             </Pressable>
           </View>
         )}
@@ -3644,6 +3668,24 @@ export default function EditScreen() {
         )}
 
         {/* ── Toolbar ────────────────────────────────────────────────── */}
+        {toolbarMode({ captionSelected, captionsOn: captions.captionsOn, hasLines: activeCaptionIndex >= 0 }) === "caption" ? (
+          // A caption is selected: its actions replace the main toolbar (nothing floats over the video).
+          <View style={styles.toolbar}>
+            {CAPTION_TOOLS.map((tool) => (
+              <Pressable
+                key={tool.id}
+                onPress={() => handleCaptionTool(tool.id)}
+                style={styles.toolBtn}
+                accessibilityRole="button"
+                accessibilityLabel={tool.label}
+              >
+                <UiText style={[styles.toolLabel, tool.id === "done" && { color: theme.accent }]} numberOfLines={1}>
+                  {tool.label}
+                </UiText>
+              </Pressable>
+            ))}
+          </View>
+        ) : (
         <View style={styles.toolbar}>
           {/* Trim — video only */}
           {isVideo && (
@@ -3719,11 +3761,19 @@ export default function EditScreen() {
             </UiText>
           </Pressable>
 
-          {/* AI edits: every automatic edit, each reversible */}
-          {isVideo && editModel && aiEditsEnabled && (
-            <Pressable onPress={() => setAiPanelOpen(true)} style={styles.toolBtn}>
+          {/* Captions: the on/off switch, Style and every caption line */}
+          {isVideo && features.captionControls && (
+            <Pressable onPress={() => setCaptionsPanelOpen(true)} style={styles.toolBtn} accessibilityRole="button" accessibilityLabel="Captions">
+              <Captions size={18} color={captions.captionsOn ? theme.text : theme.textDim} />
+              <UiText style={styles.toolLabel}>Captions</UiText>
+            </Pressable>
+          )}
+
+          {/* Cuts: every automatic cut, each reversible (the old Review sheet and AI edits panel in one) */}
+          {isVideo && aiEditsEnabled && (autoEditSession || editModel) && (
+            <Pressable onPress={handleOpenCuts} style={styles.toolBtn} accessibilityRole="button" accessibilityLabel="Cuts">
               <Sparkles size={18} color={theme.text} />
-              <UiText style={styles.toolLabel}>AI edits</UiText>
+              <UiText style={styles.toolLabel}>Cuts</UiText>
             </Pressable>
           )}
 
@@ -3751,6 +3801,7 @@ export default function EditScreen() {
             </UiText>
           </Pressable>
         </View>
+        )}
 
         {/* ── Text overlay editing toolbar ──────────────────────────── */}
         {selectedOverlayId && (
@@ -3923,7 +3974,7 @@ export default function EditScreen() {
       {renderProgress !== null && (
         <View style={styles.renderOverlay}>
           <ActivityIndicator color={theme.accent} />
-          <UiText style={styles.renderTitle}>Preparing your video...</UiText>
+          <UiText style={styles.renderTitle}>Finishing video…</UiText>
           <View style={styles.renderTrack}>
             <View style={[styles.renderFill, { width: `${Math.round(Math.min(1, renderProgress) * 100)}%` }]} />
           </View>
@@ -3932,19 +3983,37 @@ export default function EditScreen() {
           </Pressable>
         </View>
       )}
-      <AiEditsSheet
-        visible={aiPanelOpen && !!editModel && aiEditsEnabled}
-        rows={panelRows}
+      <CutsSheet
+        visible={cutsOpen && aiEditsEnabled}
+        summary={cutsSummaryText}
+        rows={cutRows}
+        sensitivity={autoEditSession ? reviewSens : undefined}
+        onSensitivity={handleReviewSensitivity}
         canUndo={canUndoDecisions(historyRef.current)}
         canRedo={canRedoDecisions(historyRef.current)}
-        onToggle={handleToggleCategory}
+        onToggle={handleToggleCut}
         onUndo={handleUndoDecisions}
         onRedo={handleRedoDecisions}
         onReset={handleResetAi}
-        onOriginal={handleOriginalVideo}
+        onRestoreAll={editModel ? handleOriginalVideo : handleUseOriginal}
         onShareDebug={isOwnerAccount ? handleShareAiDebug : undefined}
         onClearCache={isOwnerAccount ? handleClearAnalysisCache : undefined}
-        onClose={() => setAiPanelOpen(false)}
+        onClose={handleCloseCuts}
+      />
+      <CaptionsSheet
+        visible={captionsPanelOpen}
+        captionsOn={captions.captionsOn}
+        onToggle={captions.setCaptionsOn}
+        lines={captions.lines}
+        onEditLine={captions.editLine}
+        onDeleteLine={captions.deleteLine}
+        onStyle={() => {
+          // One sheet at a time (iOS cannot stack two modals).
+          setCaptionsPanelOpen(false);
+          setStyleSheetOpen(true);
+        }}
+        onResetStyle={handleCaptionLookReset}
+        onClose={() => setCaptionsPanelOpen(false)}
       />
       <MarkerSheet
         marker={markerSheet}
@@ -3958,19 +4027,6 @@ export default function EditScreen() {
         }}
         onCutSound={isOwnerAccount ? handleCutSound : undefined}
         onClose={() => setMarkerSheet(null)}
-      />
-      <AutoEditReviewSheet
-        visible={reviewOpen && !!reviewPlan}
-        cuts={reviewPlan?.detection.cuts ?? []}
-        enabled={reviewEnabled}
-        sensitivity={reviewSens}
-        onSensitivity={handleReviewSensitivity}
-        onToggle={handleReviewToggle}
-        onUseOriginal={() => {
-          setReviewOpen(false);
-          handleUseOriginal();
-        }}
-        onDone={handleReviewDone}
       />
       <TextOverlayEditor
         visible={textEditorVisible}
@@ -4124,23 +4180,26 @@ const styles = StyleSheet.create({
   },
 
   // ── Toolbar ──
+  // Six tools (Trim, Split, Text, Captions, Cuts, Delete) share the width equally: 60 pt each at 375 pt, never off-screen.
   toolbar: {
     flexDirection: "row",
-    justifyContent: "center",
+    justifyContent: "space-between",
     alignItems: "center",
-    gap: 24,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(10,10,10,0.07)",
   },
   toolBtn: {
+    flex: 1,
     alignItems: "center",
+    justifyContent: "center",
     gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 2,
+    paddingVertical: 6,
     borderRadius: 0,
-    minWidth: 60,
+    minWidth: 0,
+    minHeight: 44,
   },
   toolBtnActive: {
     backgroundColor: "rgba(232,41,28,0.1)",
@@ -4152,7 +4211,7 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
     fontSize: 11,
     fontWeight: "700" as const,
-    letterSpacing: 0.3,
+    letterSpacing: 0.1,
   },
   toolLabelOff: {
     color: theme.textDim,
@@ -4177,14 +4236,6 @@ const styles = StyleSheet.create({
   aheadChip: {
     position: "absolute",
     left: 16,
-    zIndex: 5,
-    backgroundColor: theme.text,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  captionToggle: {
-    position: "absolute",
-    right: 16,
     zIndex: 5,
     backgroundColor: theme.text,
     paddingHorizontal: 10,
@@ -4229,6 +4280,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: "rgba(10,10,10,0.07)",
   },
+  autoBarBtn: { justifyContent: "center" },
   autoBarText: {
     flex: 1,
     color: theme.text,

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
+import { Platform, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import type { CaptionStyle } from "@/lib/editModel";
@@ -8,7 +8,6 @@ import type { EditorCaptionLine } from "@/lib/transcription/captionLines";
 import {
   CAPTION_STYLE_CONFIG,
   captionBoxRect,
-  defaultCaptionStyle,
   effectiveCaptionStyle,
   estimateBoxSize,
   settleCaptionStyle,
@@ -37,16 +36,15 @@ type Props = {
   style?: CaptionStyle | null;
   /** True while the video plays: the selection ends. */
   isPlaying?: boolean;
+  /** The caption is selected (dashed outline on the video; the editor's bottom toolbar shows its actions). */
+  selected: boolean;
+  onSelectedChange: (selected: boolean) => void;
+  /** Bump to start editing the text of the caption on screen (the toolbar's Edit). */
+  editRequest?: number;
   onEditStart: () => void;
   onEdit: (lineIndex: number, text: string) => void;
   /** A drag or pinch ended: the new clip-wide box (one undo step). */
   onStyleCommit?: (style: CaptionStyle) => void;
-  /** Back to the preset's own size and position (one undo step). */
-  onStyleReset?: () => void;
-  /** Delete this one caption line (one undo step). */
-  onDeleteLine?: (lineIndex: number) => void;
-  /** Open the Style sheet (font, text color, background). */
-  onOpenStyle?: () => void;
 };
 
 const sameStyle = (a: CaptionStyle, b: CaptionStyle) =>
@@ -74,17 +72,16 @@ export default function CaptionPreview({
   invisible,
   style,
   isPlaying,
+  selected,
+  onSelectedChange,
+  editRequest,
   onEditStart,
   onEdit,
   onStyleCommit,
-  onStyleReset,
-  onDeleteLine,
-  onOpenStyle,
 }: Props) {
   const stored = useMemo(() => effectiveCaptionStyle(style), [style]);
   const [live, setLive] = useState<CaptionStyle | null>(null);
   const [snapped, setSnapped] = useState(false);
-  const [selected, setSelected] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
@@ -102,15 +99,24 @@ export default function CaptionPreview({
     if (editing !== null) inputRef.current?.focus();
   }, [editing]);
   useEffect(() => {
-    if (isPlaying) setSelected(false);
+    if (isPlaying) onSelectedChange(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying]);
+  // The toolbar's Edit: start editing the caption on screen.
+  const lastEditRequest = useRef(editRequest ?? 0);
+  useEffect(() => {
+    if ((editRequest ?? 0) !== lastEditRequest.current) {
+      lastEditRequest.current = editRequest ?? 0;
+      startEditingRef.current();
+    }
+  }, [editRequest]);
   // The text or the size changed: the measured size is stale until the copy reports again.
   useEffect(() => {
     setMeasured(null);
   }, [shownText, shown.scale, frameW]);
 
-  const latest = useRef({ stored, frameW, frameH, onStyleCommit, onEditStart, index, line });
-  latest.current = { stored, frameW, frameH, onStyleCommit, onEditStart, index, line };
+  const latest = useRef({ stored, frameW, frameH, onStyleCommit, onEditStart, index, line, selected, onSelectedChange });
+  latest.current = { stored, frameW, frameH, onStyleCommit, onEditStart, index, line, selected, onSelectedChange };
 
   const startEditing = useCallback(() => {
     const cur = latest.current;
@@ -119,6 +125,8 @@ export default function CaptionPreview({
     setDraft(cur.line.text.toUpperCase());
     setEditing(cur.index);
   }, []);
+  const startEditingRef = useRef(startEditing);
+  startEditingRef.current = startEditing;
 
   // One continuous gesture (a drag, a pinch, or both at once) starts from the stored box and ends in one commit.
   const g = useRef({ base: stored, dx: 0, dy: 0, pinch: 1, active: 0, moved: false, last: null as CaptionStyle | null });
@@ -159,7 +167,7 @@ export default function CaptionPreview({
     setSnapped(false);
     // A tap that wobbled changes nothing: only a real move or pinch is committed.
     if (gs.moved && result && !sameStyle(result, latest.current.stored)) {
-      setSelected(true);
+      latest.current.onSelectedChange(true);
       latest.current.onStyleCommit?.(result);
     }
   };
@@ -190,7 +198,7 @@ export default function CaptionPreview({
       if (ok) startEditing();
     });
     const singleTap = Gesture.Tap().runOnJS(true).maxDuration(300).onEnd((_e, ok) => {
-      if (ok) setSelected((s) => !s);
+      if (ok) latest.current.onSelectedChange(!latest.current.selected);
     });
     return Gesture.Simultaneous(Gesture.Exclusive(doubleTap, singleTap), pan, pinch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -231,7 +239,6 @@ export default function CaptionPreview({
   // Live preview draws the caption; the rendered preview already shows it burned in.
   const drawn = !invisible || gesturing || editing !== null;
   const showOutline = selected && editing === null;
-  const customised = !sameStyle(stored, defaultCaptionStyle());
 
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
@@ -289,40 +296,6 @@ export default function CaptionPreview({
         </GestureDetector>
       )}
 
-      {showOutline && !gesturing && (
-        <View
-          pointerEvents="box-none"
-          style={[styles.abs, styles.buttons, { left: 0, width: frameW, top: Math.min(frameH - 36, touch.top + touch.height + 8) }]}
-        >
-          <Pressable onPress={startEditing} hitSlop={8} style={styles.pill} accessibilityRole="button" accessibilityLabel="Edit text">
-            <Text style={styles.pillText}>Edit text</Text>
-          </Pressable>
-          {onOpenStyle && (
-            <Pressable onPress={onOpenStyle} hitSlop={8} style={styles.pill} accessibilityRole="button" accessibilityLabel="Caption style">
-              <Text style={styles.pillText}>Style</Text>
-            </Pressable>
-          )}
-          {onDeleteLine && (
-            <Pressable
-              onPress={() => {
-                setSelected(false);
-                onDeleteLine(index);
-              }}
-              hitSlop={8}
-              style={styles.pill}
-              accessibilityRole="button"
-              accessibilityLabel="Delete this caption line"
-            >
-              <Text style={styles.pillText}>Delete line</Text>
-            </Pressable>
-          )}
-          {customised && onStyleReset && (
-            <Pressable onPress={onStyleReset} hitSlop={8} style={styles.pill} accessibilityRole="button" accessibilityLabel="Reset caption size and position">
-              <Text style={styles.pillText}>Reset</Text>
-            </Pressable>
-          )}
-        </View>
-      )}
     </View>
   );
 }
@@ -334,14 +307,4 @@ const styles = StyleSheet.create({
   input: { minWidth: 80, padding: 0 },
   outline: { borderWidth: 1.5, borderColor: "#FFFFFF", borderStyle: "dashed", borderRadius: 2 },
   guide: { position: "absolute", top: 0, width: 1, backgroundColor: "#FFD400" },
-  buttons: { flexDirection: "row", justifyContent: "center", gap: 8 },
-  pill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: "rgba(0,0,0,0.75)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.6)",
-  },
-  pillText: { color: "#FFFFFF", fontSize: 13, fontWeight: "600" },
 });

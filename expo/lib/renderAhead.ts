@@ -22,12 +22,41 @@ import {
 } from "@/lib/renderAtPost";
 import { recordRenderStats } from "@/lib/renderReport";
 import type { EditOverlay } from "@/lib/editModel";
+import { captionsKeyOf, rawKeyOf, renderSignature } from "@/lib/renderSignature";
 import type { DraftClip } from "@/providers/PostsProvider";
 
 /** The timeline must be unchanged this long before a background render starts. */
 export const RENDER_AHEAD_IDLE_MS = 1200;
 /** Same for a change that only touches the captions. */
 export const RENDER_AHEAD_CAPTION_IDLE_MS = 800;
+/**
+ * The FINAL render (cuts plus captions burned in) starts after this long with no edit; any edit cancels it.
+ * The preview render never has captions (the editor draws them itself), so a caption edit never re-renders it.
+ */
+export const RENDER_FINAL_IDLE_MS = 2000;
+
+export type RenderAheadOptions = {
+  /** Burn the caption overlays in (the final render). false: cuts only (the preview render). */
+  includeCaptions?: boolean;
+  /** Only render when there are caption overlays to burn in. */
+  requireCaptions?: boolean;
+  /** Idle time before a render starts (ms). */
+  idleMs?: number;
+};
+
+/**
+ * Native rendering is one at a time, and the preview and the final render share it: whoever asks second waits
+ * for the first to finish (or be cancelled).
+ */
+let nativeChain: Promise<void> = Promise.resolve();
+function acquireNative(): Promise<() => void> {
+  let release: () => void = () => {};
+  const prev = nativeChain;
+  nativeChain = new Promise<void>((r) => {
+    release = r;
+  });
+  return prev.then(() => release);
+}
 /** Longest timeline rendered ahead. */
 export const RENDER_AHEAD_MAX_EDIT_MS = 180_000;
 /** Failures in one editor session before it stops trying. */
@@ -65,16 +94,6 @@ type Args = {
   hold?: boolean;
 };
 
-function captionsKeyOf(captions: EditOverlay[] | undefined): string {
-  return JSON.stringify(captions ?? []);
-}
-
-function rawKeyOf(clips: DraftClip[]): string {
-  return JSON.stringify(
-    clips.map((c) => [c.uri, c.trimStartMs ?? 0, c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0)]),
-  );
-}
-
 export class RenderAhead {
   private state: AheadState = { kind: "idle" };
   private listeners = new Set<(s: AheadState) => void>();
@@ -96,7 +115,14 @@ export class RenderAhead {
   /** Why the last attempt did not produce a file (for the render report). */
   lastFailureReason: string | null = null;
 
-  constructor() {
+  private readonly includeCaptions: boolean;
+  private readonly requireCaptions: boolean;
+  private readonly idleMs: number;
+
+  constructor(options: RenderAheadOptions = {}) {
+    this.includeCaptions = options.includeCaptions ?? true;
+    this.requireCaptions = options.requireCaptions ?? false;
+    this.idleMs = options.idleMs ?? RENDER_AHEAD_IDLE_MS;
     this.appSub = AppState.addEventListener("change", (next: AppStateStatus) => {
       this.appActive = next === "active";
       if (this.appActive && this.waitingForActive) {
@@ -125,7 +151,7 @@ export class RenderAhead {
   signatureOf(clips: DraftClip[], captions?: EditOverlay[]): string | null {
     const first = clips[0];
     const size = first ? this.sizes.get(first.uri) : undefined;
-    return size ? `${rawKeyOf(clips)}~${captionsKeyOf(captions)}|${size.width}x${size.height}` : null;
+    return size ? renderSignature({ clips, captions, includeCaptions: this.includeCaptions, size }) : null;
   }
 
   /** Call whenever the timeline (or who is editing) changes. */
@@ -144,7 +170,7 @@ export class RenderAhead {
       return;
     }
     const clipsKey = rawKeyOf(args.clips);
-    const raw = `${clipsKey}~${captionsKeyOf(args.captions)}`;
+    const raw = `${clipsKey}~${captionsKeyOf(this.captionsOf(args))}`;
     if (raw === this.raw) {
       // Same timeline and captions: nothing to redo, except start once the hold clears.
       if (released && this.state.kind === "waiting") {
@@ -160,7 +186,7 @@ export class RenderAhead {
     this.setState({ kind: "waiting" });
     if (hold) return; // the timer starts when the hold clears
     if (released) this.immediateNext = true;
-    this.startTimer(captionsOnly ? RENDER_AHEAD_CAPTION_IDLE_MS : RENDER_AHEAD_IDLE_MS);
+    this.startTimer(this.includeCaptions ? this.idleMs : captionsOnly ? RENDER_AHEAD_CAPTION_IDLE_MS : this.idleMs);
   }
 
   /** The next render starts without the idle delay (the first one after auto-edit applies). */
@@ -221,9 +247,16 @@ export class RenderAhead {
 
   // ── internals ──────────────────────────────────────────────────────────────
 
+  /** The overlays this instance burns in (none for the preview render). */
+  private captionsOf(args: Args): EditOverlay[] | undefined {
+    return this.includeCaptions ? args.captions : undefined;
+  }
+
   private eligible(args: Args): string | null {
     if (this.failures >= RENDER_AHEAD_MAX_FAILURES) return "too many failures";
-    const reason = renderSkipReason({ isRoot: args.isRoot, userId: args.userId, clips: args.clips, hasOverlays: (args.captions?.length ?? 0) > 0 });
+    const overlays = this.captionsOf(args);
+    if (this.requireCaptions && (overlays?.length ?? 0) === 0) return "no captions";
+    const reason = renderSkipReason({ isRoot: args.isRoot, userId: args.userId, clips: args.clips, hasOverlays: (overlays?.length ?? 0) > 0 });
     if (reason) return reason;
     if (buildRenderEdit(args.clips).editMs > RENDER_AHEAD_MAX_EDIT_MS) return "too long";
     return null;
@@ -245,7 +278,7 @@ export class RenderAhead {
     }
   }
 
-  private startTimer(idleMs: number = RENDER_AHEAD_IDLE_MS): void {
+  private startTimer(idleMs: number = this.idleMs): void {
     this.clearTimer();
     const delay = this.immediateNext ? 0 : idleMs;
     this.immediateNext = false;
@@ -290,7 +323,7 @@ export class RenderAhead {
     }
     if (this.disposed || this.suspended || this.raw !== raw) return;
     const signature = `${raw}|${size.width}x${size.height}`;
-    const captions = args.captions;
+    const captions = this.captionsOf(args);
     const { edit, editMs } = buildRenderEdit(args.clips);
 
     let cancelled = false;
@@ -305,6 +338,8 @@ export class RenderAhead {
       let timeout: ReturnType<typeof setTimeout> | null = null;
       const started = Date.now();
       let outcome: AheadOutcome;
+      // The preview and the final render take turns (one native render at a time).
+      const releaseNative = await acquireNative();
       try {
         const { addRenderProgressListener, cancelRender, renderAsync } = await import("@/modules/video-render");
         cancelNative = cancelRender;
@@ -357,6 +392,7 @@ export class RenderAhead {
       } finally {
         if (timeout) clearTimeout(timeout);
         subscription?.remove();
+        releaseNative();
       }
       this.inflight = null;
       resolveDone(outcome);
