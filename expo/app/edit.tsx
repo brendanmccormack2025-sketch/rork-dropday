@@ -62,6 +62,7 @@ import {
   mergePlan,
   newEditState,
   renderClipsOf,
+  clearCaptionStyle,
   setCaptionStyle,
   setCategoryEnabled,
   appliedCutRanges,
@@ -2447,6 +2448,17 @@ export default function EditScreen() {
     [setEditModel],
   );
 
+  // Back to the preset's own caption size and position (undoable).
+  const handleCaptionStyleReset = useCallback(() => {
+    const model = editStateRef.current;
+    if (!model) return;
+    const next = clearCaptionStyle(model.state);
+    if (next === model.state) return;
+    historyRef.current = pushEdit(historyRef.current, model.state);
+    setHistoryTick((n) => n + 1);
+    setEditModel({ state: next, durationMs: model.durationMs });
+  }, [setEditModel]);
+
   const handleUndoDecisions = useCallback(() => {
     guardAction(() => {
       const model = editStateRef.current;
@@ -3437,6 +3449,7 @@ export default function EditScreen() {
                 onEditStart={() => setIsPlaying(false)}
                 onEdit={captions.editLine}
                 onStyleCommit={handleCaptionStyleCommit}
+                onStyleReset={handleCaptionStyleReset}
               />
             )}
 

@@ -137,7 +137,8 @@ export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle): 
     cornerRadius: spec.cornerRadius === undefined ? undefined : spec.cornerRadius * s,
     letterSpacing: spec.letterSpacing === undefined ? undefined : spec.letterSpacing * s,
     yCenter: style.yCenter,
-    xCenter: style.xCenter,
+    // The centre is the default: leave the key out, so the default box sends the preset's own JSON.
+    ...(style.xCenter === 0.5 ? {} : { xCenter: style.xCenter }),
   };
 }
 

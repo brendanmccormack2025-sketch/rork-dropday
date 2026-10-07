@@ -15,6 +15,7 @@
  */
 import type { CaptionStyle } from "../editModel.ts";
 import { applyCaptionStyle, resolveOverlayStyle, type OverlayStyleSpec } from "../editStyles.ts";
+import { estimateTextWidth } from "./captionFit.ts";
 
 export const CAPTION_STYLE_CONFIG = {
   minScale: 0.6,
@@ -69,8 +70,8 @@ export function clampCaptionStyle(
   const half = halfBoxHeight(scale, aspect, config);
   const lo = config.safeTop + half;
   const hi = config.safeBottom - half;
-  // A box taller than the zone sits in the middle of it.
-  const yCenter = lo > hi ? (config.safeTop + config.safeBottom) / 2 : clamp(style.yCenter, lo, hi);
+  // A box taller than the zone cannot fit it: keep the centre inside the zone.
+  const yCenter = lo > hi ? clamp(style.yCenter, config.safeTop, config.safeBottom) : clamp(style.yCenter, lo, hi);
   const halfW = (presetSpec().maxWidth ?? 0.86) / 2;
   const xCenter = config.horizontalNative ? clamp(style.xCenter, halfW, 1 - halfW) : 0.5;
   return { scale, yCenter, xCenter };
@@ -93,4 +94,71 @@ export function settleCaptionStyle(
 ): { style: CaptionStyle; snappedX: boolean } {
   const snapped = snapCaptionStyle(style, config);
   return { style: clampCaptionStyle(snapped.style, aspect, config), snappedX: snapped.snappedX };
+}
+
+// ── Where the box is, in the preview and in the native render ──────────────────────────────
+
+export type Rect = { left: number; top: number; width: number; height: number };
+
+/** The smallest touch target (points) the interactive overlay may have, in each direction. */
+export const MIN_TOUCH_PT = 44;
+
+/** The caption box in the preview frame: its centre sits at (xCenter, yCenter) of the frame. */
+export function captionBoxRect(frame: { w: number; h: number }, style: CaptionStyle, box: { w: number; h: number }): Rect {
+  return {
+    left: frame.w * style.xCenter - box.w / 2,
+    top: frame.h * style.yCenter - box.h / 2,
+    width: box.w,
+    height: box.h,
+  };
+}
+
+/** The touch target for a box: the same centre, at least MIN_TOUCH_PT in both directions, never smaller than the box. */
+export function touchRect(rect: Rect, min: number = MIN_TOUCH_PT): Rect {
+  const width = Math.max(rect.width, min);
+  const height = Math.max(rect.height, min);
+  return {
+    left: rect.left - (width - rect.width) / 2,
+    top: rect.top - (height - rect.height) / 2,
+    width,
+    height,
+  };
+}
+
+/**
+ * The size the box will have, before it has been measured: the text width estimate (captionFit) wrapped at
+ * the preset's maxWidth, plus padding, in preview pixels. The real size is measured from the layout; this
+ * only places the overlay for the first frame.
+ */
+export function estimateBoxSize(
+  text: string,
+  style: CaptionStyle,
+  frameW: number,
+  config: CaptionStyleConfig = CAPTION_STYLE_CONFIG,
+): { w: number; h: number } {
+  const spec = styledSpec(style);
+  const pad = spec.backgroundPadding ?? 0;
+  const px = frameW / 1080;
+  const avail = Math.max(1, 1080 * (spec.maxWidth ?? 0.86) - 2 * pad);
+  const textW = estimateTextWidth(text, spec);
+  const lines = Math.max(1, Math.ceil(textW / avail));
+  return {
+    w: (Math.min(textW, avail) + 2 * pad) * px,
+    h: (spec.fontSize * config.lineHeight * lines + 2 * pad) * px,
+  };
+}
+
+/**
+ * Core Animation in AVVideoCompositionCoreAnimationTool has its origin at the BOTTOM left, so
+ * VideoRenderModule.swift places the overlay centre at y = height * (1 - yCenter) (yCenter counts from the top).
+ * These two functions are that mapping and its inverse; the preview draws at height * yCenter from the top.
+ */
+export function nativeCenterY(frameH: number, yCenter: number): number {
+  return frameH * (1 - yCenter);
+}
+export function yCenterFromNative(frameH: number, nativeY: number): number {
+  return 1 - nativeY / frameH;
+}
+export function previewCenterY(frameH: number, yCenter: number): number {
+  return frameH * yCenter;
 }

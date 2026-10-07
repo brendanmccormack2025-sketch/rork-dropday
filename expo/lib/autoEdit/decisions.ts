@@ -50,6 +50,13 @@ export type EditState = {
   captionStyle?: CaptionStyle;
 };
 
+/** The state back at the preset's own caption box (no stored style); the same object when it already is. */
+export function clearCaptionStyle(state: EditState): EditState {
+  if (state.captionStyle === undefined) return state;
+  const { captionStyle: _drop, ...rest } = state;
+  return rest;
+}
+
 /** The state with a new caption style; the same object when nothing changes (so it is not an undo step). */
 export function setCaptionStyle(state: EditState, style: CaptionStyle): EditState {
   const old = state.captionStyle;
