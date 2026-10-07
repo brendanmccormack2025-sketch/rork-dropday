@@ -1,9 +1,13 @@
 // Must import before any JSX is evaluated — patches the JSX runtime on web
 // to strip `collapsable` from DOM-bound elements (React 19 compat).
 import "@/lib/webCompat";
+import { installGlobalErrorHandlers, setErrorContext, flushClientErrors } from "@/lib/clientErrors";
+
+// Before anything else can throw: fatal errors and unhandled rejections are recorded.
+installGlobalErrorHandlers();
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
@@ -39,6 +43,17 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const pathname = usePathname();
+
+  // The error recorder knows where the app is and who is signed in; reports saved by an earlier run go up now.
+  useEffect(() => {
+    setErrorContext({ screen: pathname });
+  }, [pathname]);
+  useEffect(() => {
+    const id = session?.user?.id ?? null;
+    setErrorContext({ userId: id });
+    if (id) void flushClientErrors(id);
+  }, [session?.user?.id]);
 
   useEffect(() => {
     if (loading) return;

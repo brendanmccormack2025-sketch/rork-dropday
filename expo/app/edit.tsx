@@ -64,6 +64,9 @@ import { resetCaptionLook, usableCaptionStyle, withCaptionLook } from "@/lib/tra
 import { supportsCaptionFont } from "@/modules/video-render";
 import { RENDER_FINAL_IDLE_MS, RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
+import { recordClientError } from "@/lib/clientErrors";
+import { POST_FAILED_TEXT, renderWithCaptionFallback, safePost, type RenderStepResult } from "@/lib/safePost";
+import type { EditOverlay } from "@/lib/editModel";
 import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
 import { analysis } from "@/lib/autoEdit/analysis";
@@ -195,6 +198,47 @@ function calcFrameDims(areaW: number, areaH: number, aspect: number) {
 }
 
 // ── Screen ───────────────────────────────────────────────────────────────────
+
+/** Cancel the native render; a failing native call must never throw out of a timer or a button. */
+function safeCancelRender(): void {
+  try {
+    cancelRender();
+  } catch (e) {
+    void recordClientError(e, { kind: "cancelRender" });
+  }
+}
+
+/** JSON.stringify that cannot throw (circular errors, undefined). */
+function safeStringify(value: unknown, max = 500): string {
+  try {
+    return (JSON.stringify(value, null, 2) ?? String(value)).slice(0, max);
+  } catch {
+    return String(value).slice(0, max);
+  }
+}
+
+/** "Post without captions?": resolves true only when the creator confirms. */
+function askPostWithoutCaptions(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      if (Platform.OS === "web") {
+        resolve(typeof window !== "undefined" && typeof window.confirm === "function" && window.confirm("Post without captions?"));
+        return;
+      }
+      Alert.alert(
+        "Post without captions?",
+        "The captions could not be added to your video.",
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+          { text: "Post without captions", onPress: () => resolve(true) },
+        ],
+        { cancelable: false },
+      );
+    } catch {
+      resolve(false);
+    }
+  });
+}
 
 /** No caption edits (a stable object, so memos do not rerun). */
 const NO_EDITS: WordEdits = {};
@@ -439,6 +483,13 @@ export default function EditScreen() {
   const [finishingCaptions, setFinishingCaptions] = useState(false);
   const skipCaptionsForPostRef = useRef(false);
   const finishingCaptionsRef = useRef(false);
+  // A post failed: the editor stays as it is and offers "Couldn't post. Try again." with Retry.
+  const [postFailed, setPostFailed] = useState(false);
+  // After a cancelled or failed Post the background renders (suspended while Post owned them) start again.
+  const resumeRenders = () => {
+    aheadRef.current?.resume();
+    finalRef.current?.resume();
+  };
   const captionsOnRef = useRef(false);
   captionsOnRef.current = isRootPost && captions.captionsOn;
   const executePostRef = useRef<() => Promise<void>>(async () => {});
@@ -1876,45 +1927,6 @@ export default function EditScreen() {
     [clips, textOverlays, pushSnapshot],
   );
 
-  const handleDeleteClip = useCallback(() => {
-    if (!selectedClipId) return;
-    pushSnapshot(clips, textOverlays);
-    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    const next = clips.filter((c) => c.id !== selectedClipId);
-    if (next.length === 0) {
-      if (navigation.canGoBack()) {
-        router.back();
-      } else {
-        router.replace("/(tabs)");
-      }
-      return;
-    }
-
-    clipsRef.current = next;
-    activeIndexRef.current = 0;
-    selectedClipIdxRef.current = -1;
-    isIsolatedRef.current = false;
-    const firstClip = next[0];
-    trimStartRef.current = firstClip?.trimStartMs ?? 0;
-    trimEndRef.current = firstClip?.trimEndMs ?? (firstClip?.durationMs ?? 0);
-    prevTrimStartRef.current = trimStartRef.current;
-    prevTrimEndRef.current = trimEndRef.current;
-    trimEndHandledRef.current = false;
-    trimGenerationRef.current += 1;
-    trimSeekDoneRef.current = false;
-    segmentOffsetRef.current = 0;
-    lastPositionUpdate.current = 0;
-    durationSetRef.current = false;
-    pendingSeekRef.current = firstClip?.trimStartMs ?? 0;
-    currentPlayingClipUriRef.current = firstClip?.uri ?? null;
-    safeSeekActiveRef.current = false;
-
-    setClips(next);
-    setSelectedClipId(null);
-    setActiveIndex(0);
-    setIsPlaying(true);
-  }, [selectedClipId, clips, textOverlays, router, pushSnapshot]);
-
   // ── Text overlay operations ───────────────────────────────────────────────
 
   const handleTapTextTool = useCallback(() => {
@@ -2949,6 +2961,7 @@ export default function EditScreen() {
       }
       setError(null);
       setSuccess(null);
+      setPostFailed(false);
       setUploading(true);
 
       // ── Pause the video IMMEDIATELY before any upload work begins ───
@@ -2985,12 +2998,14 @@ export default function EditScreen() {
       let rendered: RenderedEdit | null = null;
       // What the internal-tester message says about the render path.
       let renderNote: string = skipReason ? `Not rendered: ${skipReason}` : "";
-      if (!skipReason) {
+
+      // One render attempt for these overlays: a finished render-ahead file, the running one, or a new render.
+      // Never throws on a render problem (it says why); anything unexpected is caught by the caller.
+      const renderOnce = async (overlays: EditOverlay[]): Promise<RenderStepResult<RenderedEdit>> => {
         // With captions the FINAL render (captions burned in) is the one to use; without, the preview render is.
-        const ahead = postRenderSource(captionOverlaysForPost.length) === "final" ? finalRef.current : aheadRef.current;
-        const signature = ahead?.signatureOf(clips, captionOverlaysForPost) ?? null;
+        const ahead = postRenderSource(overlays.length) === "final" ? finalRef.current : aheadRef.current;
+        const signature = ahead?.signatureOf(clips, overlays) ?? null;
         const { editMs } = buildRenderEdit(clips);
-        let handled = false;
 
         if (ahead && signature) {
           // 1. A finished render-ahead file for exactly this timeline: use it, no wait.
@@ -2998,16 +3013,17 @@ export default function EditScreen() {
           if (taken) {
             const info = await getInfoAsync(taken.uri).catch(() => null);
             if (info?.exists && (info.size ?? 0) > 0 && taken.durationMs >= editMs - 300) {
-              rendered = { uri: taken.uri, durationMs: taken.durationMs, sizeBytes: taken.sizeBytes };
-              renderNote = formatRenderStats({ kind: "ahead", renderMs: taken.renderMs, durationMs: taken.durationMs, sizeBytes: taken.sizeBytes });
-            } else {
-              await deleteAsync(taken.uri, { idempotent: true }).catch(() => {});
-              renderNote = "Not rendered: output too short";
+              return {
+                ok: true,
+                value: { uri: taken.uri, durationMs: taken.durationMs, sizeBytes: taken.sizeBytes },
+                note: formatRenderStats({ kind: "ahead", renderMs: taken.renderMs, durationMs: taken.durationMs, sizeBytes: taken.sizeBytes }),
+              };
             }
-            handled = true;
-          } else if (ahead.isRenderingFor(signature)) {
-            // 2. One for this timeline is running: wait for it (same overlay, progress,
-            //    timeout and Cancel as a render at post time).
+            await deleteAsync(taken.uri, { idempotent: true }).catch(() => {});
+            return { ok: false, reason: "output too short", note: "Not rendered: output too short" };
+          }
+          if (ahead.isRenderingFor(signature)) {
+            // 2. One for this timeline is running: wait for it ("Finishing video…" with progress, timeout, Cancel).
             setRenderProgress(0);
             const off = ahead.subscribe((st) => {
               if (st.kind === "rendering") setRenderProgress(st.progress);
@@ -3015,47 +3031,66 @@ export default function EditScreen() {
             let timedOutWaiting = false;
             const timeout = setTimeout(() => {
               timedOutWaiting = true;
-              cancelRender();
+              safeCancelRender();
             }, renderTimeoutMs(editMs));
             try {
               const outcome = await ahead.waitFor(signature);
               if (outcome.ok) {
                 const r = outcome.ready;
-                rendered = { uri: r.uri, durationMs: r.durationMs, sizeBytes: r.sizeBytes };
-                renderNote = formatRenderStats({ kind: "ahead", renderMs: r.renderMs, durationMs: r.durationMs, sizeBytes: r.sizeBytes });
-              } else {
-                renderNote = timedOutWaiting
-                  ? `Not rendered: timeout after ${Math.round(renderTimeoutMs(editMs) / 1000)} s`
-                  : `Not rendered: ${outcome.reason}`;
+                return {
+                  ok: true,
+                  value: { uri: r.uri, durationMs: r.durationMs, sizeBytes: r.sizeBytes },
+                  note: formatRenderStats({ kind: "ahead", renderMs: r.renderMs, durationMs: r.durationMs, sizeBytes: r.sizeBytes }),
+                };
               }
+              const reason = timedOutWaiting ? `timeout after ${Math.round(renderTimeoutMs(editMs) / 1000)} s` : outcome.reason;
+              return { ok: false, reason, note: `Not rendered: ${reason}` };
             } finally {
               clearTimeout(timeout);
               off();
               setRenderProgress(null);
             }
-            handled = true;
           }
         }
 
-        if (!handled) {
-          // 3. Otherwise exactly as before: stop any render-ahead (one native render
-          //    at a time) and render now.
-          await aheadRef.current?.cancelAndSuspend();
-          await finalRef.current?.cancelAndSuspend();
-          setRenderProgress(0);
-          try {
-            const outcome = await renderForPost(clips, setRenderProgress, captionOverlaysForPost);
-            if (outcome.ok) {
-              rendered = outcome.edit;
-              const stats = { kind: "post" as const, renderMs: outcome.renderMs, durationMs: outcome.edit.durationMs, sizeBytes: outcome.edit.sizeBytes };
-              recordRenderStats(stats);
-              renderNote = formatRenderStats(stats);
-            } else {
-              renderNote = `Not rendered: ${outcome.reason}`;
-            }
-          } finally {
-            setRenderProgress(null);
+        // 3. Otherwise exactly as before: stop any render-ahead (one native render at a time) and render now.
+        await aheadRef.current?.cancelAndSuspend();
+        await finalRef.current?.cancelAndSuspend();
+        setRenderProgress(0);
+        try {
+          const outcome = await renderForPost(clips, setRenderProgress, overlays);
+          if (outcome.ok) {
+            const stats = { kind: "post" as const, renderMs: outcome.renderMs, durationMs: outcome.edit.durationMs, sizeBytes: outcome.edit.sizeBytes };
+            recordRenderStats(stats);
+            return { ok: true, value: outcome.edit, note: formatRenderStats(stats) };
           }
+          return { ok: false, reason: outcome.reason, note: `Not rendered: ${outcome.reason}` };
+        } finally {
+          setRenderProgress(null);
+        }
+      };
+
+      if (!skipReason) {
+        const result = await renderWithCaptionFallback<RenderedEdit>({
+          hasCaptions: captionOverlaysForPost.length > 0,
+          renderWith: (withCaptions) => renderOnce(withCaptions ? captionOverlaysForPost : []),
+          confirmWithoutCaptions: () => askPostWithoutCaptions(),
+          onError: (e) => void recordClientError(e, { kind: "post", stage: "render" }),
+        });
+        if (result.status === "cancelled") {
+          // The creator would rather not post without captions: stay in the editor with every edit.
+          resumeRenders();
+          setUploading(false);
+          return;
+        }
+        rendered = result.value;
+        renderNote = result.note;
+        if (captionOverlaysForPost.length > 0 && !result.withCaptions) skipCaptionsForPostRef.current = true;
+      } else if (captionsSeen && !skipCaptionsForPostRef.current) {
+        // Captions cannot be burned in on this device/build: ask before posting without.
+        if (!(await askPostWithoutCaptions())) {
+          setUploading(false);
+          return;
         }
       }
       if (rendered) {
@@ -3279,13 +3314,15 @@ export default function EditScreen() {
         hint: errAny?.hint,
         status: errAny?.status,
         statusCode: errAny?.statusCode,
-        raw: JSON.stringify(errAny, null, 2).slice(0, 500),
+        raw: safeStringify(errAny),
       });
-      showAlert("Post Failed", errMsg);
+      // Stay on the edit screen with every edit: "Couldn't post. Try again." with a Retry button; log it.
+      void recordClientError(postErr, { kind: "post", stage: "post" });
       setError(errMsg);
+      setPostFailed(true);
+      resumeRenders();
       setUploading(false);
-      // DO NOT re-throw and DO NOT navigate. Stay on the edit screen
-      // so the user can retry or save as draft.
+      // DO NOT re-throw and DO NOT navigate.
     }
   }, [clips, draftId, textOverlays, isMature, followerVisibility, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId, user?.id]);
 
@@ -3318,11 +3355,14 @@ export default function EditScreen() {
       if (finishingCaptionsRef.current) return; // already waiting for captions: one Post at a time
       setError(null);
       setSuccess(null);
-      // Captions still on their way: "Finishing captions..." and wait up to 10 s, then post without them.
+      // Captions still on their way: "Finishing captions…" and wait up to 10 s, then post without them.
       skipCaptionsForPostRef.current = false;
       const waitForCaptions = captionsOnRef.current && captionsBusyRef.current;
-      const postPromise = waitForCaptions
-        ? (async () => {
+      // The whole post (waiting, render, copy, upload, database insert) runs inside safePost: a throw or a
+      // rejected promise anywhere becomes "Couldn't post. Try again." and the editor keeps every edit.
+      void safePost(
+        async () => {
+          if (waitForCaptions) {
             const settled = await settleCaptionsForPost({
               captionsOn: true,
               isBusy: () => captionsBusyRef.current,
@@ -3334,18 +3374,21 @@ export default function EditScreen() {
             skipCaptionsForPostRef.current = !settled.captions;
             // The timeline may have changed while waiting (the AI plan applies cuts): run the LATEST post closure.
             await executePostRef.current();
-          })()
-        : executePost();
-      if (!postPromise || typeof postPromise.catch !== "function") {
-        console.error("[edit] handlePostPress: executePost did not return a Promise — got", typeof postPromise);
-        setError("Something went wrong. Please try again.");
-        return;
-      }
-      postPromise.catch((e: any) => {
-        console.error("[edit] handlePostPress: executePost FAILED (fallback)", (e as Error)?.message ?? e);
-        // executePost already showed Alert.alert() — just set banner as fallback
-        setError(e instanceof Error ? e.message : "Could not post.");
-      });
+          } else {
+            await executePost();
+          }
+        },
+        (e) => {
+          console.error("[edit] handlePostPress: post failed", (e as Error)?.message ?? e);
+          finishingCaptionsRef.current = false;
+          setFinishingCaptions(false);
+          setRenderProgress(null);
+          setUploading(false);
+          setPostFailed(true);
+          resumeRenders();
+          void recordClientError(e, { kind: "post", stage: "flow" });
+        },
+      );
     } catch (err) {
       console.error("[edit] handlePostPress: CRASH in handler", (err as Error)?.message ?? err);
       showAlert(
@@ -3633,6 +3676,20 @@ export default function EditScreen() {
             <UiText style={styles.autoEditText}>Auto-editing...</UiText>
           </View>
         )}
+        {postFailed && (
+          <View style={styles.postFailedRow}>
+            <UiText style={styles.postFailedText}>{POST_FAILED_TEXT}</UiText>
+            <Pressable
+              onPress={handlePostPress}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+              style={styles.postFailedBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Retry posting"
+            >
+              <UiText style={styles.postFailedBtnText}>Retry</UiText>
+            </Pressable>
+          </View>
+        )}
         {autoEditNote && !autoEditRunning && (
           <View style={styles.autoEditRow}>
             <UiText style={styles.autoEditText}>{autoEditNote}</UiText>
@@ -3776,30 +3833,6 @@ export default function EditScreen() {
               <UiText style={styles.toolLabel}>Cuts</UiText>
             </Pressable>
           )}
-
-          {/* Delete */}
-          <Pressable
-            onPress={handleDeleteClip}
-            disabled={!selectedClipId}
-            style={[styles.toolBtn, !selectedClipId && styles.toolBtnOff]}
-          >
-            <Trash2
-              size={18}
-              color={
-                !selectedClipId
-                  ? theme.textDim
-                  : theme.text
-              }
-            />
-            <UiText
-              style={[
-                styles.toolLabel,
-                !selectedClipId && styles.toolLabelOff,
-              ]}
-            >
-              Delete
-            </UiText>
-          </Pressable>
         </View>
         )}
 
@@ -3978,7 +4011,7 @@ export default function EditScreen() {
           <View style={styles.renderTrack}>
             <View style={[styles.renderFill, { width: `${Math.round(Math.min(1, renderProgress) * 100)}%` }]} />
           </View>
-          <Pressable onPress={cancelRender} hitSlop={10}>
+          <Pressable onPress={safeCancelRender} hitSlop={10}>
             <UiText style={styles.renderCancel}>Cancel</UiText>
           </Pressable>
         </View>
@@ -4281,6 +4314,20 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(10,10,10,0.07)",
   },
   autoBarBtn: { justifyContent: "center" },
+  postFailedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    minHeight: 44,
+    backgroundColor: theme.accent,
+  },
+  postFailedText: { flex: 1, color: "#fff", fontSize: 13, fontWeight: "700" as const },
+  postFailedBtn: { minHeight: 44, minWidth: 60, alignItems: "center", justifyContent: "center" },
+  postFailedBtnText: { color: "#fff", fontSize: 14, fontWeight: "900" as const, textDecorationLine: "underline" },
   autoBarText: {
     flex: 1,
     color: theme.text,

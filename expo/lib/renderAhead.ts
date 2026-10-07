@@ -226,6 +226,16 @@ export class RenderAhead {
     return outcome;
   }
 
+  /** Start again after cancelAndSuspend / takeReady (a Post that was cancelled or failed): the editor keeps rendering. */
+  resume(): void {
+    if (this.disposed) return;
+    this.suspended = false;
+    this.raw = null;
+    const args = this.args;
+    if (args) this.update(args);
+    else this.setState({ kind: "idle" });
+  }
+
   /** Stop everything: cancel any render, wait for it, delete files. Used before Post renders on its own. */
   async cancelAndSuspend(): Promise<void> {
     this.suspended = true;

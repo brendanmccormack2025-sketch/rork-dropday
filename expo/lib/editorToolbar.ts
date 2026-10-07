@@ -6,6 +6,9 @@
  */
 export type ToolbarMode = "main" | "caption";
 
+/** The main toolbar, in order. There is no Delete tool (removed: a clip is removed by trimming or cutting it). */
+export const MAIN_TOOL_IDS = ["trim", "split", "text", "captions", "cuts"] as const;
+
 export type CaptionToolId = "edit" | "style" | "deleteLine" | "done";
 
 /** In this order, each a 44 pt target; four of them fit the narrowest iPhone (375 pt) with room to spare. */
