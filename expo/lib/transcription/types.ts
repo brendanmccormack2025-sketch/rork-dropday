@@ -2,7 +2,7 @@
 export type Word = { text: string; startMs: number; endMs: number; confidence?: number };
 
 export type TranscriptResult =
-  | { status: "ok"; words: Word[] }
+  | { status: "ok"; words: Word[]; /** Words dropped as duplicates by dedupeWords. */ removed?: { repeatedWords: number; overlappingWords: number } }
   | { status: "unavailable" | "denied" | "error"; message?: string; /** The native ERR_SPEECH_* code, or one of ours. */ code?: string };
 
 /** What the debug view shows about the transcription of this clip. */
@@ -12,6 +12,9 @@ export type TranscriptionInfo = {
   code?: string;
   message?: string;
   wordCount: number;
+  /** Words removed as repeats / overlaps right after transcription. */
+  repeatedWordsRemoved?: number;
+  overlappingWordsRemoved?: number;
   fromCache: boolean;
   /** The analysis cache key (uri | size | mtime), or null when the file could not be stated. */
   key: string | null;

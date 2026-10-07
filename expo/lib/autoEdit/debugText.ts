@@ -44,6 +44,8 @@ export type AiDebugInput = {
   userCuts?: Decision[];
   /** How the transcription of this clip went. */
   transcription?: TranscriptionInfo | null;
+  /** The transcript after dedupe (ms on the source clip). */
+  transcriptWords?: Array<{ text: string; startMs: number; endMs: number }> | null;
 };
 
 function outputTime(clips: EditClip[], uri: string, sourceMs: number): string {
@@ -61,7 +63,14 @@ export function formatAiDebug(input: AiDebugInput): string {
   if (t) {
     const why = t.status === "ok" ? "" : ` (${t.code ?? "no code"}${t.message ? `: ${t.message}` : ""})`;
     lines.push(`Transcription: ${t.status}${why}; ${t.wordCount} words; from cache: ${t.fromCache ? "yes" : "no"}`);
+    if (t.status === "ok" && (t.repeatedWordsRemoved !== undefined || t.overlappingWordsRemoved !== undefined)) {
+      lines.push(`Duplicates removed: ${t.repeatedWordsRemoved ?? 0} repeated words, ${t.overlappingWordsRemoved ?? 0} overlapping words`);
+    }
     lines.push(`Cache key: ${t.key ?? "none (file could not be read)"}`);
+    if (input.transcriptWords && input.transcriptWords.length > 0) {
+      lines.push("Transcript (after dedupe):");
+      for (const w of input.transcriptWords) lines.push(`  ${formatClock(w.startMs)}-${formatClock(w.endMs)}  ${w.text}`);
+    }
   } else if (input.transcription === null) {
     lines.push("Transcription: not run");
   }

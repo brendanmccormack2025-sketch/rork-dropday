@@ -2525,6 +2525,7 @@ export default function EditScreen() {
       protection: protectionReport(model.state),
       userCuts: model.state.decisions.filter((d) => d.type === "umCut" && d.origin === "user"),
       transcription: captions.transcriptionInfo,
+      transcriptWords: captions.words,
       speechBaselineDb,
       hookTrims: model.state.decisions.filter((d) => d.type === "hookTrim" && d.state === "applied"),
       fillers: model.state.decisions.filter((d) => d.type === "fillerCut" && d.state === "applied"),

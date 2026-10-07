@@ -45,7 +45,14 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
     const { result, fromCache, key } = await analysis.transcriptWithInfo(uri);
     setTranscriptionInfo(
       result.status === "ok"
-        ? { status: "ok", wordCount: result.words.length, fromCache, key }
+        ? {
+            status: "ok",
+            wordCount: result.words.length,
+            repeatedWordsRemoved: result.removed?.repeatedWords ?? 0,
+            overlappingWordsRemoved: result.removed?.overlappingWords ?? 0,
+            fromCache,
+            key,
+          }
         : { status: result.status, code: result.code, message: result.message, wordCount: 0, fromCache, key },
     );
     if (result.status === "ok") {

@@ -134,7 +134,7 @@ eq("the threshold is 2 s", EMPTY_TRANSCRIPT_MIN_SOUND_MS, 2000);
   const { cache, calls } = makeCache({ loud: SPEECH_CLIP, storage, transcribe: async () => ({ status: "ok", words: many(20) }) });
   const r = await cache.transcriptWithInfo(URI);
   eq("a stale empty transcript is dropped and the clip is transcribed again", [r.result.status, r.result.words.length, r.fromCache, calls.transcribe], ["ok", 20, false, 1]);
-  eq("the new transcript replaced it in storage", storage.store.get(`trial:analysis:v1:transcript:${URI}|1000|5`), JSON.stringify(many(20)));
+  eq("the new transcript replaced it in storage", JSON.parse(storage.store.get(`trial:analysis:v1:transcript:${URI}|1000|5`)).words, many(20));
 }
 // ── other results are untouched ──
 {

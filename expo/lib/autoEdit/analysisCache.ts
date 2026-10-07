@@ -9,6 +9,7 @@
  * Pure apart from the injected deps; erasable TypeScript only (see decisions.ts).
  */
 import { detectSilences } from "../silenceDetection.ts";
+import { dedupeWords } from "../transcription/dedupeWords.ts";
 import type { TranscriptResult, Word } from "./../transcription/types.ts";
 
 export type SourceStat = { uri: string; size: number; mtime: number };
@@ -55,9 +56,13 @@ export function sourceKeyOf(s: SourceStat): string {
   return `${s.uri}|${s.size}|${Math.round(s.mtime)}`;
 }
 
+type Removed = { repeatedWords: number; overlappingWords: number };
+/** A stored transcript: words after dedupe, and how many were removed. Older entries are a bare Word[]. */
+type Cached = { words: Word[]; removed: Removed };
+
 export function createAnalysisCache(deps: AnalysisDeps) {
   const loudnessMem = new Map<string, LoudnessData | null>();
-  const transcriptMem = new Map<string, Word[]>();
+  const transcriptMem = new Map<string, Cached>();
   const loudnessFlight = new Map<string, Promise<LoudnessData | null>>();
   const transcriptFlight = new Map<string, Promise<{ result: TranscriptResult; fromCache: boolean; key: string | null }>>();
   const runs = { loudness: 0, transcript: 0 };
@@ -185,13 +190,23 @@ export function createAnalysisCache(deps: AnalysisDeps) {
       // Silence detection first when it is running for this source.
       if (key) await loudnessFlight.get(key)?.catch(() => null);
       if (key) {
-        const cached = transcriptMem.get(key) ?? (await readStored<Word[]>("transcript", key)) ?? undefined;
+        let cached: Cached | undefined = transcriptMem.get(key);
+        if (!cached) {
+          const stored = await readStored<Word[] | Cached>("transcript", key);
+          if (stored) {
+            // Stored by an older build: dedupe now (idempotent for words that were already clean).
+            const loud = await loudness(uri).catch(() => null);
+            const bare = Array.isArray(stored);
+            const d = dedupeWords(bare ? stored : stored.words, loud);
+            cached = { words: d.words, removed: bare ? d.report : stored.removed ?? d.report };
+          }
+        }
         if (cached) {
           // A cached transcript that is empty or sparse for audio with sound is not
           // trusted (an older build may have stored it): it is dropped and redone.
-          if (!(await transcriptProblem(uri, cached))) {
+          if (!(await transcriptProblem(uri, cached.words))) {
             transcriptMem.set(key, cached);
-            return { result: { status: "ok", words: cached }, fromCache: true, key };
+            return { result: { status: "ok", words: cached.words, removed: cached.removed }, fromCache: true, key };
           }
           await forget(key, ["transcript"]);
         }
@@ -200,15 +215,18 @@ export function createAnalysisCache(deps: AnalysisDeps) {
         runs.transcript++;
         return deps.transcribe(uri);
       });
-      if (result.status === "ok") {
-        const problem = await transcriptProblem(uri, result.words);
-        if (problem) return { result: { status: "error", ...problem }, fromCache: false, key };
+      if (result.status !== "ok") return { result, fromCache: false, key };
+      // Recognizer restarts re-deliver words: clean them before anything is judged or cached.
+      const d = dedupeWords(result.words, await loudness(uri).catch(() => null));
+      const cleaned: TranscriptResult = { status: "ok", words: d.words, removed: d.report };
+      const problem = await transcriptProblem(uri, d.words);
+      if (problem) return { result: { status: "error", ...problem }, fromCache: false, key };
+      if (key) {
+        const entry: Cached = { words: d.words, removed: d.report };
+        transcriptMem.set(key, entry);
+        await writeStored("transcript", key, entry);
       }
-      if (result.status === "ok" && key) {
-        transcriptMem.set(key, result.words);
-        await writeStored("transcript", key, result.words);
-      }
-      return { result, fromCache: false, key };
+      return { result: cleaned, fromCache: false, key };
     })();
     if (key) transcriptFlight.set(key, job);
     try {
