@@ -12,6 +12,7 @@ import { planLaughProtection } from "./laughProtection.ts";
 import { analyzeUnexplained } from "./classifySound.ts";
 import { planFillerCuts } from "./fillerCuts.ts";
 import { planUmCuts } from "./umCuts.ts";
+import { planStretchedUms } from "./stretchedUms.ts";
 import { planHookTrim } from "./hookTrim.ts";
 import { planSilenceCuts } from "./silenceCuts.ts";
 
@@ -38,5 +39,7 @@ export function buildAiEditState(input: {
   // (never inside a protected laugh).
   const sounds = analyzeUnexplained(input.windows, WINDOW_MS, input.durationMs, input.words);
   const protectedState = mergePlan(base, planLaughProtection(sounds), ["laughProtect"]).state;
-  return mergePlan(protectedState, planUmCuts(protectedState, sounds, input.durationMs).decisions, ["umCut"]).state;
+  // Ums the recognizer absorbed into a stretched word join the method-2 ums.
+  const umSounds = [...sounds, ...planStretchedUms(input.windows, WINDOW_MS, input.durationMs, input.words).sounds];
+  return mergePlan(protectedState, planUmCuts(protectedState, umSounds, input.durationMs).decisions, ["umCut"]).state;
 }

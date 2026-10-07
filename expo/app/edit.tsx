@@ -87,6 +87,7 @@ import { buildAiEditState } from "@/lib/autoEdit/plan";
 import { checkAlignment, type Alignment } from "@/lib/autoEdit/alignment";
 import { planLaughProtection } from "@/lib/autoEdit/laughProtection";
 import { addUserSoundCut, planUmCuts, type UmCutReport } from "@/lib/autoEdit/umCuts";
+import { planStretchedUms, type StretchedReport } from "@/lib/autoEdit/stretchedUms";
 import { analyzeUnexplained, silenceThresholdDb, speechMedianDb, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
 import { planFillerCuts } from "@/lib/autoEdit/fillerCuts";
 import { emphasisLogEntries, planEmphasis } from "@/lib/autoEdit/emphasisMoments";
@@ -257,6 +258,7 @@ export default function EditScreen() {
     alignment: Alignment | null;
     speechBaselineDb: number;
     umReport: UmCutReport;
+    stretched?: StretchedReport;
   } | null>(null);
 
   useEffect(() => {
@@ -2522,6 +2524,7 @@ export default function EditScreen() {
       candidates: aiDebug?.candidates ?? [],
       alignment,
       umReport: aiDebug?.umReport,
+      stretched: aiDebug?.stretched,
       protection: protectionReport(model.state),
       userCuts: model.state.decisions.filter((d) => d.type === "umCut" && d.origin === "user"),
       transcription: captions.transcriptionInfo,
@@ -2561,7 +2564,8 @@ export default function EditScreen() {
         // Laughs are protected first: no cut may remove time inside one.
         const protectPlan = planLaughProtection(sounds);
         const protectedState = mergePlan(afterMethod1.state, protectPlan, ["laughProtect"]);
-        const umPlan = planUmCuts(protectedState.state, sounds, durationMs);
+        const stretchedPlan = planStretchedUms(loud.windows, 20, durationMs, words);
+        const umPlan = planUmCuts(protectedState.state, [...sounds, ...stretchedPlan.sounds], durationMs);
         const merged = mergePlan(protectedState.state, umPlan.decisions, ["umCut"]);
         // AI planning is not an undo step: saved snapshots are re-planned, not extended.
         historyRef.current = mapHistory(historyRef.current, (snap) =>
@@ -2615,7 +2619,8 @@ export default function EditScreen() {
           JSON.stringify(emphasisLogEntries(proposals, renderClipsOf(merged.state, durationMs), uri)),
         );
         console.log("[ums]", JSON.stringify(umPlan.report));
-        setAiDebug({ proposals, candidates, alignment, speechBaselineDb, umReport: umPlan.report });
+        console.log("[stretched]", JSON.stringify(stretchedPlan.report.words.map((s) => [s.text, s.durationMs, Math.round(s.expectedMs), s.dipFound, s.cut ?? null])));
+        setAiDebug({ proposals, candidates, alignment, speechBaselineDb, umReport: umPlan.report, stretched: stretchedPlan.report });
       } catch (e) {
         console.warn("[edit] hook/filler planning failed", (e as Error)?.message ?? e);
       } finally {

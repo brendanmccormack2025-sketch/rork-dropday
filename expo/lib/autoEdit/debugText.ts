@@ -11,6 +11,7 @@ import type { ProtectionReport } from "./decisions.ts";
 import { formatFeatures, formatUmChecks, type ClassifiedSound } from "./classifySound.ts";
 import { outputPositionOfSource } from "./markers.ts";
 import type { UmCutReport } from "./umCuts.ts";
+import type { StretchedReport } from "./stretchedUms.ts";
 import type { UnexplainedSound } from "./fillerCuts.ts";
 
 /** m:ss.s, rounded to tenths first so 59.96 s reads 1:00.0. */
@@ -38,6 +39,8 @@ export type AiDebugInput = {
   speechBaselineDb?: number;
   /** The applied and skipped method-2 um cuts, with the seam counts. */
   umReport?: UmCutReport;
+  /** Stretched words (ums absorbed into a word) and the diagnosis of the gaps next to them. */
+  stretched?: StretchedReport;
   /** Protected laugh ranges and the cuts they shortened or dropped. */
   protection?: ProtectionReport;
   /** Sounds the creator cut by hand ("Cut this sound"). */
@@ -163,6 +166,32 @@ export function formatAiDebug(input: AiDebugInput): string {
       lines.push(
         `Seam limit hit: at most ${report.seamLimit.allowed} new seams for ${formatClock(report.seamLimit.editedMs)} edited; only the longest ums were applied`,
       );
+    }
+  }
+
+  const st = input.stretched;
+  if (st) {
+    lines.push(
+      "",
+      `Stretched words: ${st.words.length}` + (st.expectedMsPerChar === null ? " (no estimate: too few words)" : ` (expected ${Math.round(st.expectedMsPerChar)} ms per character)`),
+    );
+    for (const s of st.words) {
+      const pause = (ms: number | null) => (ms === null ? "none" : `${Math.round(ms)} ms`);
+      lines.push(
+        `'${s.text}' source ${formatClock(s.startMs)}-${formatClock(s.endMs)}  ${Math.round(s.durationMs)} ms vs expected ${Math.round(s.expectedMs)} ms (${(s.durationMs / s.expectedMs).toFixed(1)}x)  pause before ${pause(s.pauseBeforeMs)}, after ${pause(s.pauseAfterMs)}`,
+      );
+      lines.push(
+        s.dipFound && s.dip
+          ? `    dip found: yes (${s.dip.dropDb.toFixed(1)} dB at ${formatClock(s.dip.startMs)}-${formatClock(s.dip.endMs)}, ${s.side} of the word)`
+          : "    dip found: no",
+      );
+      lines.push(
+        s.cut
+          ? `    cut range: source ${formatClock(s.cut.startMs)}-${formatClock(s.cut.endMs)} (${Math.round(s.cut.endMs - s.cut.startMs)} ms, ${Math.round(s.cut.insideWordMs)} ms inside the word = ${Math.round((100 * s.cut.insideWordMs) / s.durationMs)}%)`
+          : `    cut range: none${s.note ? ` (${s.note})` : ""}`,
+      );
+      for (const g of s.gapDiagnosis) lines.push(`    ${g}`);
+      lines.push(`    profile (50 ms, dB vs speech): ${s.profile}`);
     }
   }
 
