@@ -218,12 +218,12 @@ eq(
   [["fillerCut", 300, 600, "applied"], ["fillerCut", 900, 1100, "applied"]],
 );
 {
-  // 20 ms windows: sound 1000-1300 (no word), sound 2000-2300 (under a word), sound 3000-4000 (too long), blip 5000-5060 (too short)
+  // 20 ms windows: sound 1000-1300 (no word), sound 2000-2300 (under a word), sound 3000-4600 (too long), blip 5000-5060 (too short)
   const windows = new Array(300).fill(-80);
   const loud = (a, b) => { for (let i = a / 20; i < b / 20; i++) windows[i] = -20; };
-  loud(1000, 1300); loud(2000, 2300); loud(3000, 4000); loud(5000, 5060);
+  loud(1000, 1300); loud(2000, 2300); loud(3000, 4600); loud(5000, 5060);
   const found = findUnexplainedSounds(windows, 20, [w("word", 1950, 2350)], -40);
-  eq("filler: method 2 finds only unexplained 150-800 ms sounds", found, [{ startMs: 1000, endMs: 1300, lengthMs: 300 }]);
+  eq("filler: method 2 finds only unexplained 150-1500 ms sounds", found, [{ startMs: 1000, endMs: 1300, lengthMs: 300 }]);
 }
 
 // ── emphasis ──

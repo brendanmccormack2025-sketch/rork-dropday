@@ -2,7 +2,7 @@
  * Filler cuts.
  *  Method 1: transcript words um/uh/er/ah/hmm become applied fillerCut decisions
  *            (reversible one by one).
- *  Method 2: stretches of 150-800 ms where the loudness shows sound but no
+ *  Method 2: stretches of 150-1500 ms where the loudness shows sound but no
  *            transcript word explains it. Only reported (logged), never applied.
  *
  * Pure; erasable TypeScript only (see decisions.ts).
@@ -23,7 +23,7 @@ export function planFillerCuts(words: Word[]): Decision[] {
 }
 
 export const UNEXPLAINED_MIN_MS = 150;
-export const UNEXPLAINED_MAX_MS = 900;
+export const UNEXPLAINED_MAX_MS = 1500;
 /** Word timings are imprecise: a sound this close to a word still belongs to it. */
 export const WORD_SLACK_MS = 120;
 

@@ -2,9 +2,10 @@
  * Classify method-2 filler candidates ("unexplained sound": loud, but no transcript
  * word) from the cached loudness data. Display only: NOTHING here creates a cut
  * decision itself; umCuts.ts turns the 'um' ones into reversible cuts (owner only).
- *   um     a voiced sound between two words, 150-900 ms, not a breath and not louder than
- *          speech: cut by umCuts.ts, else shown as "um?". (With a short transcript the old
- *          rule applies: short, steady, not louder than speech.)
+ *   um     a voiced sound near speech (a word within umNearSpeechMs before or after),
+ *          150-1500 ms, not a breath and not much louder than speech: cut by umCuts.ts,
+ *          else shown as "um?". (With a short transcript the old rule applies: short,
+ *          steady, not louder than speech.)
  *   laugh  pulsed (or loud with pulses): never cut; a zoom signal
  *   unsure anything else: shown, never cut
  * Every threshold is in SOUND_CLASSIFIER_CONFIG so it can be tuned from real clips.
@@ -27,10 +28,12 @@ export const SOUND_CLASSIFIER_CONFIG = {
   nearEmphasisMs: 1000,
   /** um: duration range (ms). */
   umMinMs: 150,
-  umMaxMs: 900,
+  umMaxMs: 1500,
   /** um: peak between these two distances from the median speech loudness (dB): quieter is a breath, louder is not an um. */
   umMinPeakVsSpeechDb: -12,
-  umMaxPeakVsSpeechDb: 4,
+  umMaxPeakVsSpeechDb: 6,
+  /** um: a transcript word must end this close before OR start this close after the candidate (ms). */
+  umNearSpeechMs: 2500,
   /** With fewer transcript words than this the old um rule is used (no mid-speech evidence to rely on). */
   umFallbackBelowWords: 10,
   /** Old rule only: steady = coefficient of variation of the linear loudness at most this. */
@@ -75,6 +78,10 @@ export type SoundFeatures = {
   burstCount: number;
   nearEmphasis: boolean;
   midSpeech: boolean;
+  /** ms from the end of the nearest word before the candidate to its start (null: no word before). */
+  msFromWordBefore?: number | null;
+  /** ms from the end of the candidate to the start of the nearest word after it (null: no word after). */
+  msToWordAfter?: number | null;
   /** How many transcript words the classification had (selects the um rule); unknown = enough. */
   wordCount?: number;
 };
@@ -82,7 +89,10 @@ export type SoundFeatures = {
 /** Which parts of the um rule held, for the debug view. null = not part of the rule that was used. */
 export type UmChecks = {
   rule: "transcript" | "fallback";
+  /** Old rule only. */
   midSpeech: boolean | null;
+  /** Transcript rule: a word within umNearSpeechMs before or after. null for the old rule. */
+  nearSpeech?: boolean | null;
   duration: boolean;
   loudness: boolean;
   steadiness: boolean | null;
@@ -201,8 +211,12 @@ export function soundFeatures(
     return gap >= -slack && gap <= config.midSpeechWindowMs;
   });
 
+  const gapsBefore = ctx.words.map((w) => candidate.startMs - w.endMs).filter((g) => g >= -slack);
+  const gapsAfter = ctx.words.map((w) => w.startMs - candidate.endMs).filter((g) => g >= -slack);
   return {
     durationMs: candidate.lengthMs,
+    msFromWordBefore: gapsBefore.length ? Math.max(0, Math.min(...gapsBefore)) : null,
+    msToWordAfter: gapsAfter.length ? Math.max(0, Math.min(...gapsAfter)) : null,
     peakVsSpeechDb: peakDb - speechMedianDb(ctx, config),
     steadiness: mean > 0 ? Math.sqrt(variance) / mean : 0,
     burstCount: countBursts(amps, ctx.windowMs, config),
@@ -213,10 +227,16 @@ export function soundFeatures(
 }
 
 /**
- * The um rule. With enough transcript words: mid-speech, 150-900 ms, loudness within
- * umMinPeakVsSpeechDb..umMaxPeakVsSpeechDb, and not a laugh (steadiness is only reported).
+ * The um rule. With enough transcript words: a word within umNearSpeechMs before or
+ * after, 150-1500 ms, loudness within umMinPeakVsSpeechDb..umMaxPeakVsSpeechDb, and
+ * not a laugh (steadiness and mid-speech are only reported).
  * With fewer than umFallbackBelowWords words: the old rule (short, steady, not louder than speech).
  */
+function nearSpeech(f: SoundFeatures, config: SoundClassifierConfig): boolean {
+  const near = (ms: number | null | undefined) => ms !== null && ms !== undefined && ms <= config.umNearSpeechMs;
+  return near(f.msFromWordBefore) || near(f.msToWordAfter);
+}
+
 export function umChecks(
   f: SoundFeatures,
   isLaugh: boolean,
@@ -235,13 +255,14 @@ export function umChecks(
       }
     : {
         rule: "transcript",
-        midSpeech: f.midSpeech,
+        midSpeech: null,
+        nearSpeech: nearSpeech(f, config),
         duration,
         loudness: f.peakVsSpeechDb >= config.umMinPeakVsSpeechDb && f.peakVsSpeechDb <= config.umMaxPeakVsSpeechDb,
         steadiness: null,
         laugh: !isLaugh,
       };
-  const isUm = [checks.midSpeech, checks.duration, checks.loudness, checks.steadiness, checks.laugh].every((c) => c !== false);
+  const isUm = [checks.midSpeech, checks.nearSpeech, checks.duration, checks.loudness, checks.steadiness, checks.laugh].every((c) => c !== false);
   return { ...checks, isUm };
 }
 
@@ -259,7 +280,7 @@ export function classifyFeatures(
   if (isUm) {
     return {
       cls: "um",
-      why: [checks.rule === "transcript" ? "voiced sound between two words, not a breath, not louder than speech" : "short, steady, not louder than speech (short transcript)"],
+      why: [checks.rule === "transcript" ? "voiced sound near speech, not a breath, not much louder than speech" : "short, steady, not louder than speech (short transcript)"],
       checks,
     };
   }
@@ -312,7 +333,8 @@ export function formatUmChecks(
   f: SoundFeatures,
   config: SoundClassifierConfig = SOUND_CLASSIFIER_CONFIG,
 ): string {
-  const pf = (ok: boolean | null) => (ok === null ? "n/a" : ok ? "PASS" : "FAIL");
+  const pf = (ok: boolean | null | undefined) => (ok === null || ok === undefined ? "n/a" : ok ? "PASS" : "FAIL");
+  const dist = (ms: number | null | undefined) => (ms === null || ms === undefined ? "none" : `${Math.round(ms)} ms`);
   const sign = f.peakVsSpeechDb >= 0 ? "+" : "";
   const need =
     c.rule === "transcript"
@@ -321,7 +343,10 @@ export function formatUmChecks(
   const steady = c.steadiness === null ? `steadiness ${f.steadiness.toFixed(2)} (not required)` : `steadiness ${pf(c.steadiness)} (${f.steadiness.toFixed(2)}, needs at most ${config.umMaxCv})`;
   return (
     `um rule (${c.rule === "transcript" ? "transcript" : `old rule, fewer than ${config.umFallbackBelowWords} words`}): ` +
-    `mid-speech ${pf(c.midSpeech)}, duration ${pf(c.duration)} (${Math.round(f.durationMs)} ms, needs ${config.umMinMs}-${config.umMaxMs}), ` +
+    (c.rule === "transcript"
+      ? `near speech ${pf(c.nearSpeech)} (word before: ${dist(f.msFromWordBefore)}, word after: ${dist(f.msToWordAfter)}, needs one within ${config.umNearSpeechMs} ms), `
+      : `mid-speech ${pf(c.midSpeech)}, `) +
+    `duration ${pf(c.duration)} (${Math.round(f.durationMs)} ms, needs ${config.umMinMs}-${config.umMaxMs}), ` +
     `loudness ${pf(c.loudness)} (${sign}${f.peakVsSpeechDb.toFixed(1)} dB, ${need}), laugh ${pf(c.laugh)}; ${steady}`
   );
 }
