@@ -48,7 +48,24 @@ export type EditState = {
   categoryEnabled: Record<DecisionType, boolean>;
   /** Clip-wide caption size and position (owner); absent = the preset's own. Undo/redo cover it like any state. */
   captionStyle?: CaptionStyle;
+  /**
+   * The creator's caption edits, keyed by the index of the word in the SOURCE transcript (so they survive when cuts
+   * change): a new text, or "" for a deleted word (Delete line deletes every word of the line). Undo/redo cover it.
+   */
+  captionEdits?: Record<number, string>;
 };
+
+/** The state with new caption edits; the same object when nothing changes (so it is not an undo step). */
+export function setCaptionEdits(state: EditState, edits: Record<number, string>): EditState {
+  const old = state.captionEdits ?? {};
+  const keys = Object.keys(edits);
+  if (keys.length === Object.keys(old).length && keys.every((k) => old[Number(k)] === edits[Number(k)])) return state;
+  if (keys.length === 0) {
+    const { captionEdits: _drop, ...rest } = state;
+    return rest;
+  }
+  return { ...state, captionEdits: { ...edits } };
+}
 
 /** The state back at the preset's own caption box (no stored style); the same object when it already is. */
 export function clearCaptionStyle(state: EditState): EditState {

@@ -223,7 +223,7 @@ export class RenderAhead {
 
   private eligible(args: Args): string | null {
     if (this.failures >= RENDER_AHEAD_MAX_FAILURES) return "too many failures";
-    const reason = renderSkipReason({ isRoot: args.isRoot, userId: args.userId, clips: args.clips });
+    const reason = renderSkipReason({ isRoot: args.isRoot, userId: args.userId, clips: args.clips, hasOverlays: (args.captions?.length ?? 0) > 0 });
     if (reason) return reason;
     if (buildRenderEdit(args.clips).editMs > RENDER_AHEAD_MAX_EDIT_MS) return "too long";
     return null;

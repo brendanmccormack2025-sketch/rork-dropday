@@ -43,6 +43,8 @@ type Props = {
   onStyleCommit?: (style: CaptionStyle) => void;
   /** Back to the preset's own size and position (one undo step). */
   onStyleReset?: () => void;
+  /** Delete this one caption line (one undo step). */
+  onDeleteLine?: (lineIndex: number) => void;
 };
 
 const sameStyle = (a: CaptionStyle, b: CaptionStyle) =>
@@ -74,6 +76,7 @@ export default function CaptionPreview({
   onEdit,
   onStyleCommit,
   onStyleReset,
+  onDeleteLine,
 }: Props) {
   const stored = useMemo(() => effectiveCaptionStyle(style), [style]);
   const [live, setLive] = useState<CaptionStyle | null>(null);
@@ -286,6 +289,20 @@ export default function CaptionPreview({
           <Pressable onPress={startEditing} hitSlop={8} style={styles.pill} accessibilityRole="button" accessibilityLabel="Edit text">
             <Text style={styles.pillText}>Edit text</Text>
           </Pressable>
+          {onDeleteLine && (
+            <Pressable
+              onPress={() => {
+                setSelected(false);
+                onDeleteLine(index);
+              }}
+              hitSlop={8}
+              style={styles.pill}
+              accessibilityRole="button"
+              accessibilityLabel="Delete this caption line"
+            >
+              <Text style={styles.pillText}>Delete line</Text>
+            </Pressable>
+          )}
           {customised && onStyleReset && (
             <Pressable onPress={onStyleReset} hitSlop={8} style={styles.pill} accessibilityRole="button" accessibilityLabel="Reset caption size and position">
               <Text style={styles.pillText}>Reset</Text>

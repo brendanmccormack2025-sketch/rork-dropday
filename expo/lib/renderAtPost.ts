@@ -14,8 +14,8 @@ import { toRenderJson } from "@/lib/editStyles";
 import type { DraftClip } from "@/providers/PostsProvider";
 
 export const RENDER_AT_POST_ENABLED = true;
-/** When true, only the owner and internal testers render at post time. */
-export const RENDER_INTERNAL_ONLY = true;
+/** When true, only the owner and internal testers render at post time. Off: the AI editor (burned-in captions) is for everyone. */
+export const RENDER_INTERNAL_ONLY = false;
 /** Base time allowed for a render (ms); longer videos get more (see renderTimeoutMs). */
 export const RENDER_TIMEOUT_MS = 20_000;
 
@@ -45,6 +45,8 @@ export function renderSkipReason(args: {
   isRoot: boolean;
   userId: string | null | undefined;
   clips: DraftClip[];
+  /** Captions (or other overlays) are burned in: render even when nothing is cut. */
+  hasOverlays?: boolean;
 }): "module missing" | "not an internal account" | "reaction" | "no cuts" | null {
   if (!RENDER_AT_POST_ENABLED) return "no cuts";
   if (!args.isRoot) return "reaction";
@@ -52,7 +54,7 @@ export function renderSkipReason(args: {
   const { clips } = args;
   if (clips.length === 0) return "no cuts";
   if (clips.some((c) => c.type !== "video" || !(c.durationMs && c.durationMs > 0))) return "no cuts";
-  if (!(clips.length > 1 || clips.some(isTrimmed))) return "no cuts";
+  if (!(clips.length > 1 || clips.some(isTrimmed) || args.hasOverlays)) return "no cuts";
   if (!isVideoRenderAvailable()) return "module missing";
   return null;
 }
@@ -61,6 +63,7 @@ export function shouldRenderAtPost(args: {
   isRoot: boolean;
   userId: string | null | undefined;
   clips: DraftClip[];
+  hasOverlays?: boolean;
 }): boolean {
   return renderSkipReason(args) === null;
 }

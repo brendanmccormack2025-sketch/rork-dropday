@@ -83,7 +83,7 @@ const ranges = (r) => r.map((x) => [x.startMs, x.endMs]);
 // ── panel rows ──
 {
   const s = st(cut("silenceCut", 1000, 2000), cut("silenceCut", 3000, 3500), cut("fillerCut", 5000, 5300), cut("hookTrim", 0, 300));
-  eq("everyone sees only Cuts", categoryRows(s, { owner: false, captionLines: 0, captionsOn: true }).map((r) => [r.id, r.label, r.count, r.enabled]), [["cuts", "Cuts", 2, true]]);
+  eq("everyone sees every row except Zooms (emphasis is owner-only)", categoryRows(s, { owner: false, captionLines: 0, captionsOn: true }).map((r) => [r.id, r.label, r.count, r.enabled]), [["cuts", "Cuts", 2, true], ["hook", "Hook", 1, true], ["fillers", "Fillers", 1, true], ["ums", "Ums", 0, true], ["protect", "Protect laughs", 0, true], ["captions", "Captions", 0, true]]);
   const owner = categoryRows(setCategoryEnabled(s, "fillerCut", false), { owner: true, captionLines: 7, captionsOn: true });
   eq("the owner sees all seven rows", owner.map((r) => [r.id, r.count, r.enabled]), [
     ["cuts", 2, true], ["hook", 1, true], ["fillers", 1, false], ["ums", 0, true], ["protect", 0, true], ["zooms", 0, true], ["captions", 7, true],

@@ -18,17 +18,17 @@ export type CategoryRow = {
 
 const ROWS: Array<{ id: CategoryId; label: string; type: DecisionType; ownerOnly: boolean }> = [
   { id: "cuts", label: "Cuts", type: "silenceCut", ownerOnly: false },
-  { id: "hook", label: "Hook", type: "hookTrim", ownerOnly: true },
-  { id: "fillers", label: "Fillers", type: "fillerCut", ownerOnly: true },
-  { id: "ums", label: "Ums", type: "umCut", ownerOnly: true },
-  { id: "protect", label: "Protect laughs", type: "laughProtect", ownerOnly: true },
+  { id: "hook", label: "Hook", type: "hookTrim", ownerOnly: false },
+  { id: "fillers", label: "Fillers", type: "fillerCut", ownerOnly: false },
+  { id: "ums", label: "Ums", type: "umCut", ownerOnly: false },
+  { id: "protect", label: "Protect laughs", type: "laughProtect", ownerOnly: false },
   { id: "zooms", label: "Zooms", type: "zoom", ownerOnly: true },
-  { id: "captions", label: "Captions", type: "caption", ownerOnly: true },
+  { id: "captions", label: "Captions", type: "caption", ownerOnly: false },
 ];
 
 /**
- * One row per category: Cuts for everyone; Hook, Fillers, Zooms and Captions for the
- * owner. Captions are switched by the editor's own captions toggle, so their count
+ * One row per category for everyone (Cuts, Hook, Fillers, Ums, Protect laughs, Captions); Zooms (emphasis
+ * proposals) for the owner only. Captions are switched by the editor's own captions toggle, so their count
  * and state come in as arguments.
  */
 export function categoryRows(

@@ -9,6 +9,7 @@ import { applyCaptionStyle, resolveOverlayStyle } from "../editStyles.ts";
 import { lineFits } from "./captionFit.ts";
 import type { CaptionEditOverlay, CaptionStyle, KeepRange } from "../editModel.ts";
 import { mapWordsToEdit } from "./mapWords.ts";
+import { mapWordsToClips, type ClipRange } from "./multiSource.ts";
 import type { Word } from "./types.ts";
 
 /** At most 3 words and 1.5 s per line; a pause longer than 400 ms starts a new line. */
@@ -36,14 +37,18 @@ export function buildCaptionLines(
   keptRanges: KeepRange[],
   /** The clip-wide caption box: a larger scale means narrower lines (fewer words fit). */
   style?: CaptionStyle | null,
+  /** A timeline of several source files: the file of each word, and the clips (see multiSource.ts). */
+  multi?: { wordUris: string[]; clips: ClipRange[] },
 ): EditorCaptionLine[] {
-  const indexed: Array<Word & { srcIndex: number }> = [];
+  const indexed: Array<Word & { srcIndex: number; uri?: string }> = [];
   words.forEach((w, srcIndex) => {
     const text = edits[srcIndex] ?? w.text;
     if (text.trim() === "") return;
-    indexed.push({ ...w, text, srcIndex });
+    indexed.push({ ...w, text, srcIndex, ...(multi ? { uri: multi.wordUris[srcIndex]! } : {}) });
   });
-  const mapped = mapWordsToEdit(indexed, keptRanges);
+  const mapped = multi
+    ? mapWordsToClips(indexed as Array<Word & { srcIndex: number; uri: string }>, multi.clips)
+    : mapWordsToEdit(indexed, keptRanges);
   const preset = resolveOverlayStyle("caption", CAPTION_STYLE_ID);
   const spec = style ? applyCaptionStyle(preset, style) : preset;
   const lines = groupWordsIntoLines(mapped, { ...CAPTION_LINE_OPTIONS, fits: (text) => lineFits(text, spec) });

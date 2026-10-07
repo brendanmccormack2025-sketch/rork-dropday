@@ -8,6 +8,7 @@ import React, {
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   PanResponder,
   Platform,
   Pressable,
@@ -53,6 +54,9 @@ import { useCaptions } from "@/lib/transcription/useCaptions";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { formatRenderStats, recordRenderStats, reportRender } from "@/lib/renderReport";
 import type { CaptionStyle } from "@/lib/editModel";
+import type { WordEdits } from "@/lib/transcription/captionLines";
+import { settleCaptionsForPost } from "@/lib/postWait";
+import { aiEditorFeatures } from "@/lib/autoEdit/rollout";
 import { RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
 import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
@@ -63,6 +67,7 @@ import {
   newEditState,
   renderClipsOf,
   clearCaptionStyle,
+  setCaptionEdits,
   setCaptionStyle,
   setCategoryEnabled,
   appliedCutRanges,
@@ -184,6 +189,9 @@ function calcFrameDims(areaW: number, areaH: number, aspect: number) {
 }
 
 // ── Screen ───────────────────────────────────────────────────────────────────
+
+/** No caption edits (a stable object, so memos do not rerun). */
+const NO_EDITS: WordEdits = {};
 
 export default function EditScreen() {
   const router = useRouter();
@@ -390,12 +398,36 @@ export default function EditScreen() {
     !((firstClip0.trimEndMs ?? 0) > 0 && (firstClip0.trimEndMs ?? 0) < (firstClip0.durationMs ?? 0) - 50);
   // Hook trim and filler cuts are planned from the transcript; render-ahead waits for them.
   const [planDone, setPlanDone] = useState(false);
+  // The AI editor (captions, ums, hook trim) is for everyone. Root posts only: a reaction is not rendered at
+  // post time, so captions could not be burned in.
+  const isRootPost = !reactingTo && !rootDropId;
+  const features = aiEditorFeatures({ userId: user?.id, isRootPost });
+  // Caption size/position and word edits live in the edit state (undo/redo); with no model (several source
+  // files) they live here.
+  const [localCaption, setLocalCaption] = useState<{ style?: CaptionStyle; edits?: WordEdits }>({});
+  const captionEditsHandlerRef = useRef<(next: WordEdits) => void>(() => {});
+  const captionStyle = editModel ? editModel.state.captionStyle : localCaption.style;
   const captions = useCaptions(
-    isDebugOwner(user?.id),
+    features.transcription,
     clips,
     !autoEditRunning && (autoEditFinished || !autoEditPossible),
-    editModel?.state.captionStyle,
+    captionStyle,
+    {
+      wordEdits: editModel ? (editModel.state.captionEdits ?? NO_EDITS) : (localCaption.edits ?? NO_EDITS),
+      onWordEdits: (next) => captionEditsHandlerRef.current(next),
+    },
   );
+  // Captions are still on their way: transcription running, or the AI plan not finished.
+  const planPending = !!captions.transcribedUri && !!captions.words && !planDone;
+  const captionsBusy = captions.pending || planPending;
+  const captionsBusyRef = useRef(false);
+  captionsBusyRef.current = captionsBusy;
+  const [finishingCaptions, setFinishingCaptions] = useState(false);
+  const skipCaptionsForPostRef = useRef(false);
+  const finishingCaptionsRef = useRef(false);
+  const captionsOnRef = useRef(false);
+  captionsOnRef.current = isRootPost && captions.captionsOn;
+  const executePostRef = useRef<() => Promise<void>>(async () => {});
   const captionOverlaysRef = useRef(captions.overlays);
   captionOverlaysRef.current = captions.overlays;
   useEffect(() => {
@@ -414,9 +446,9 @@ export default function EditScreen() {
       isRoot: !reactingTo && !rootDropId,
       userId: user?.id,
       captions: captions.overlays,
-      hold: captions.pending || (isDebugOwner(user?.id) && !!captions.words && !planDone),
+      hold: captionsBusy,
     });
-  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captions.pending, captions.words, planDone]);
+  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captionsBusy]);
   const aheadReady = aheadState.kind === "ready" ? aheadState : null;
   const aheadSignature = aheadRef.current?.signatureOf(clips, captions.overlays) ?? null;
   const aheadMatches = !!aheadReady && aheadReady.signature === aheadSignature;
@@ -2323,7 +2355,7 @@ export default function EditScreen() {
   }, [clips, user?.id, reactingTo, rootDropId, draftId]);
 
   // ── AI edits panel, timeline markers, undo/redo (lib/autoEdit/) ───────────────
-  const isOwnerAccount = isDebugOwner(user?.id);
+  const isOwnerAccount = features.debugView;
   // Markers and the panel's counts describe the model; they are drawn only while the
   // timeline still is what the model renders (no hand edits since).
   const modelInSync = useMemo(
@@ -2333,8 +2365,8 @@ export default function EditScreen() {
       sameRanges(clips, renderClipsOf(editModel.state, editModel.durationMs), editModel.durationMs, 60),
     [editModel, clips],
   );
-  // Temporary: the AI edits button, panel and cut markers are for internal testers only.
-  const aiEditsEnabled = isInternalTester(user?.id);
+  // The AI edits button, panel and cut markers are for everyone (the debug view and emphasis are owner-only).
+  const aiEditsEnabled = features.aiEditsPanel && features.cutMarkers;
   const timelineMarkers = useMemo<TimelineMarker[]>(() => {
     if (!aiEditsEnabled || !editModel || !modelInSync) return [];
     const cuts = buildCutMarkers(editModel.state, editModel.durationMs);
@@ -2438,7 +2470,10 @@ export default function EditScreen() {
   const handleCaptionStyleCommit = useCallback(
     (style: CaptionStyle) => {
       const model = editStateRef.current;
-      if (!model) return;
+      if (!model) {
+        setLocalCaption((prev) => ({ ...prev, style }));
+        return;
+      }
       const next = setCaptionStyle(model.state, style);
       if (next === model.state) return;
       historyRef.current = pushEdit(historyRef.current, model.state);
@@ -2451,13 +2486,34 @@ export default function EditScreen() {
   // Back to the preset's own caption size and position (undoable).
   const handleCaptionStyleReset = useCallback(() => {
     const model = editStateRef.current;
-    if (!model) return;
+    if (!model) {
+      setLocalCaption((prev) => ({ ...prev, style: undefined }));
+      return;
+    }
     const next = clearCaptionStyle(model.state);
     if (next === model.state) return;
     historyRef.current = pushEdit(historyRef.current, model.state);
     setHistoryTick((n) => n + 1);
     setEditModel({ state: next, durationMs: model.durationMs });
   }, [setEditModel]);
+
+  // Caption word edits (new text, deleted words / lines): keyed by source word, one undo step each.
+  const handleCaptionEdits = useCallback(
+    (edits: WordEdits) => {
+      const model = editStateRef.current;
+      if (!model) {
+        setLocalCaption((prev) => ({ ...prev, edits }));
+        return;
+      }
+      const next = setCaptionEdits(model.state, edits);
+      if (next === model.state) return;
+      historyRef.current = pushEdit(historyRef.current, model.state);
+      setHistoryTick((n) => n + 1);
+      setEditModel({ state: next, durationMs: model.durationMs });
+    },
+    [setEditModel],
+  );
+  captionEditsHandlerRef.current = handleCaptionEdits;
 
   const handleUndoDecisions = useCallback(() => {
     guardAction(() => {
@@ -2503,17 +2559,18 @@ export default function EditScreen() {
       durationMs: loud.durationMs,
       windows: loud.windows,
       silenceOptions: SENSITIVITY_PRESETS[sensitivity],
-      words: isOwnerAccount ? captions.words : null,
+      words: captions.words,
       removedWords: captions.removedWords,
     });
-    userEdit(() => fresh);
-    if (isOwnerAccount) captions.setCaptionsOn(true);
-  }, [userEdit, isOwnerAccount, captions]);
+    // The creator's caption size, position and word edits are theirs, not the AI's: Reset keeps them.
+    userEdit((current) => ({ ...fresh, captionStyle: current.captionStyle, captionEdits: current.captionEdits }));
+    captions.setCaptionsOn(true);
+  }, [userEdit, captions]);
 
   const handleOriginalVideo = useCallback(() => {
     userEdit(allCategoriesOff);
-    if (isOwnerAccount) captions.setCaptionsOn(false);
-  }, [userEdit, isOwnerAccount, captions]);
+    captions.setCaptionsOn(false);
+  }, [userEdit, captions]);
 
   const handleMarkerPress = useCallback(
     (marker: TimelineMarker) => {
@@ -2595,7 +2652,7 @@ export default function EditScreen() {
   useEffect(() => {
     const words = captions.words;
     const uri = captions.transcribedUri;
-    if (!isDebugOwner(user?.id) || !words || !uri || planDone) return;
+    if (!words || !uri || planDone) return;
     (async () => {
       try {
         const loud = await analysis.loudness(uri);
@@ -2649,6 +2706,8 @@ export default function EditScreen() {
           );
         }
 
+        // Owner only: emphasis proposals and the debug view. Everyone else is done here.
+        if (!features.emphasis) return;
         // After classification: confirmed laughs join the emphasis signals. The loudness
         // baseline skips silence and the footage the edit removes.
         const thresholdDb = silenceThresholdDb(loud.windows, 20, durationMs);
@@ -2851,10 +2910,15 @@ export default function EditScreen() {
       // timeline has cuts. Any problem (or Cancel) leaves `rendered` null and the
       // post goes out the old way. A blocking "Preparing your video..." overlay
       // with progress and Cancel is shown while it runs.
+      // Captions the creator saw in the editor: burned in (a render is needed even with no cuts). When Post
+      // had to stop waiting for them, this post goes out without.
+      const captionOverlaysForPost = skipCaptionsForPostRef.current ? [] : captionOverlaysRef.current;
+      const captionsSeen = !reactingTo && !rootDropId && captionOverlaysRef.current.length > 0;
       const skipReason = renderSkipReason({
         isRoot: !reactingTo && !rootDropId,
         userId: user?.id,
         clips,
+        hasOverlays: captionOverlaysForPost.length > 0,
       });
       if (__DEV__) console.log("[edit] render at post:", skipReason ?? "yes");
       let rendered: RenderedEdit | null = null;
@@ -2862,7 +2926,7 @@ export default function EditScreen() {
       let renderNote: string = skipReason ? `Not rendered: ${skipReason}` : "";
       if (!skipReason) {
         const ahead = aheadRef.current;
-        const signature = ahead?.signatureOf(clips, captionOverlaysRef.current) ?? null;
+        const signature = ahead?.signatureOf(clips, captionOverlaysForPost) ?? null;
         const { editMs } = buildRenderEdit(clips);
         let handled = false;
 
@@ -2917,7 +2981,7 @@ export default function EditScreen() {
           await ahead?.cancelAndSuspend();
           setRenderProgress(0);
           try {
-            const outcome = await renderForPost(clips, setRenderProgress, captionOverlaysRef.current);
+            const outcome = await renderForPost(clips, setRenderProgress, captionOverlaysForPost);
             if (outcome.ok) {
               rendered = outcome.edit;
               const stats = { kind: "post" as const, renderMs: outcome.renderMs, durationMs: outcome.edit.durationMs, sizeBytes: outcome.edit.sizeBytes };
@@ -3108,7 +3172,14 @@ export default function EditScreen() {
       });
 
       // Internal testers: say what the render path did (a fixed-wording message, ~6 s).
-      if (renderNote && isInternalTester(user?.id)) reportRender(renderNote);
+      // Never post silently without captions the creator saw: say so, briefly.
+      if (captionsSeen && !rendered) {
+        reportRender(
+          skipCaptionsForPostRef.current
+            ? "Posted without captions (they were not ready in time)"
+            : "Posted without captions",
+        );
+      } else if (renderNote && isInternalTester(user?.id)) reportRender(renderNote);
 
       // ── 5. Navigate to the right screen (best-effort) ───────────────
       //    Root Drops → feed tab. Reactions & replies → reaction-tree
@@ -3156,6 +3227,8 @@ export default function EditScreen() {
   }, [clips, draftId, textOverlays, isMature, followerVisibility, createPost, addOptimisticPost, updateOptimisticProgress, generateThumbnail, router, reactingTo, rootDropId, user?.id]);
 
   useEffect(() => { executeSaveDraftRef.current = executeSaveDraft; }, [executeSaveDraft]);
+  // Assigned during render (not in an effect) so it is never a render behind: Post uses it after waiting for captions.
+  executePostRef.current = executePost;
 
   // handlePostPress calls executePost directly (no ref indirection) so the
   // `clips` closure used at tap time is always the most recent one. Earlier the
@@ -3179,9 +3252,27 @@ export default function EditScreen() {
         return;
       }
 
+      if (finishingCaptionsRef.current) return; // already waiting for captions: one Post at a time
       setError(null);
       setSuccess(null);
-      const postPromise = executePost();
+      // Captions still on their way: "Finishing captions..." and wait up to 10 s, then post without them.
+      skipCaptionsForPostRef.current = false;
+      const waitForCaptions = captionsOnRef.current && captionsBusyRef.current;
+      const postPromise = waitForCaptions
+        ? (async () => {
+            const settled = await settleCaptionsForPost({
+              captionsOn: true,
+              isBusy: () => captionsBusyRef.current,
+              onWaiting: (waiting) => {
+                finishingCaptionsRef.current = waiting;
+                setFinishingCaptions(waiting);
+              },
+            });
+            skipCaptionsForPostRef.current = !settled.captions;
+            // The timeline may have changed while waiting (the AI plan applies cuts): run the LATEST post closure.
+            await executePostRef.current();
+          })()
+        : executePost();
       if (!postPromise || typeof postPromise.catch !== "function") {
         console.error("[edit] handlePostPress: executePost did not return a Promise — got", typeof postPromise);
         setError("Something went wrong. Please try again.");
@@ -3283,7 +3374,7 @@ export default function EditScreen() {
             </UiText>
           </View>
         )}
-        {isDebugOwner(user?.id) && (
+        {features.captions && isVideo && (
           <Pressable
             onPress={() => captions.setCaptionsOn(!captions.captionsOn)}
             style={[styles.captionToggle, { top: insets.top + 62 }]}
@@ -3293,6 +3384,14 @@ export default function EditScreen() {
               {captions.captionsOn ? (captions.pending ? "Captions: transcribing..." : "Captions: on") : "Captions: off"}
             </UiText>
           </Pressable>
+        )}
+        {Platform.OS === "ios" && isRootPost && ["denied", "unavailable"].includes(captions.transcriptionInfo?.status ?? "") && (
+          <View style={[styles.speechNote, { top: insets.top + 92 }]}>
+            <UiText style={styles.speechNoteText}>Captions and um removal need speech access</UiText>
+            <Pressable onPress={() => void Linking.openSettings()} hitSlop={8}>
+              <UiText style={styles.speechNoteLink}>Settings</UiText>
+            </Pressable>
+          </View>
         )}
         <Pressable
           style={styles.previewArea}
@@ -3437,19 +3536,20 @@ export default function EditScreen() {
               </Pressable>
             )}
 
-            {isVideo && isDebugOwner(user?.id) && captions.captionsOn && (
+            {isVideo && features.captionControls && captions.captionsOn && (
               <CaptionPreview
                 lines={captions.lines}
                 positionMs={displayPosition}
                 frameW={frameDims.w}
                 frameH={frameDims.h}
                 invisible={previewMode}
-                style={editModel?.state.captionStyle}
+                style={captionStyle}
                 isPlaying={isPlaying}
                 onEditStart={() => setIsPlaying(false)}
                 onEdit={captions.editLine}
                 onStyleCommit={handleCaptionStyleCommit}
                 onStyleReset={handleCaptionStyleReset}
+                onDeleteLine={captions.deleteLine}
               />
             )}
 
@@ -3787,6 +3887,12 @@ export default function EditScreen() {
       />
 
       {/* ── Text overlay editor modal ─────────────────────────────── */}
+      {finishingCaptions && (
+        <View style={styles.renderOverlay}>
+          <ActivityIndicator color={theme.accent} />
+          <UiText style={styles.renderTitle}>Finishing captions…</UiText>
+        </View>
+      )}
       {renderProgress !== null && (
         <View style={styles.renderOverlay}>
           <ActivityIndicator color={theme.accent} />
@@ -4058,6 +4164,21 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   aheadChipText: { color: "#fff", fontSize: 11, fontWeight: "700" as const },
+  speechNote: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    zIndex: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: theme.text,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  speechNoteText: { color: "#fff", fontSize: 11, fontWeight: "600" as const },
+  speechNoteLink: { color: "#fff", fontSize: 11, fontWeight: "800" as const, textDecorationLine: "underline" },
   renderOverlay: {
     ...StyleSheet.absoluteFill,
     alignItems: "center",

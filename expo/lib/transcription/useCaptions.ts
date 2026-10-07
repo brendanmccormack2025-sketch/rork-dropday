@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { CaptionStyle, EditOverlay } from "@/lib/editModel";
+import { CAPTIONS_ON_BY_DEFAULT } from "@/lib/autoEdit/rollout";
+import { combineSources, distinctSources, type ClipRange } from "@/lib/transcription/multiSource";
 import { analysis } from "@/lib/autoEdit/analysis";
 import type { TranscriptionInfo, Word } from "@/lib/transcription/types";
 import {
@@ -17,59 +19,115 @@ const EXPLAINED_KEY = "trial:captionsExplained";
 
 type Status = "waiting" | "asking" | "running" | "done";
 
+export type CaptionsOptions = {
+  /** Caption edits kept outside (in the edit state, so undo / redo cover them); undefined = kept here. */
+  wordEdits?: WordEdits;
+  onWordEdits?: (next: WordEdits) => void;
+};
+
 /**
  * Auto-captions for the editor. When `enabled`, once `ready` (silence detection has
- * finished) the source clip is transcribed on-device, then caption lines are built on
- * the edited timeline. Anything other than a transcript leaves the editor as it was.
- * Only a timeline made of one local video file is captioned.
+ * finished) every local video file of the timeline is transcribed on-device, one after the
+ * other and each cached per file, then caption lines are built on the edited timeline.
+ * Anything other than a transcript leaves the editor as it was.
+ * A timeline of one file (or segments of one recording) also gets the AI edits (transcribedUri
+ * is set); a timeline of several files gets captions only.
  */
-export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean, captionStyle?: CaptionStyle | null) {
-  const [captionsOn, setCaptionsOn] = useState(true);
+export function useCaptions(
+  enabled: boolean,
+  clips: DraftClip[],
+  ready: boolean,
+  captionStyle?: CaptionStyle | null,
+  options?: CaptionsOptions,
+) {
+  const [captionsOn, setCaptionsOn] = useState(CAPTIONS_ON_BY_DEFAULT);
   const [status, setStatus] = useState<Status>("waiting");
-  const [transcript, setTranscript] = useState<{ uri: string; words: Word[]; removedWords: Word[] } | null>(null);
-  const [edits, setEdits] = useState<WordEdits>({});
+  const [transcript, setTranscript] = useState<{
+    /** The sources it was made for (uris joined). */
+    key: string;
+    /** The one source file when the timeline has one; null for several. */
+    uri: string | null;
+    words: Word[];
+    wordUris: string[];
+    removedWords: Word[];
+  } | null>(null);
+  const [localEdits, setLocalEdits] = useState<WordEdits>({});
+  const edits = options?.wordEdits ?? localEdits;
   const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionInfo | null>(null);
-  const startedUriRef = useRef<string | null>(null);
+  const startedUriRef = useRef<string[] | null>(null);
 
-  const first = clips[0];
-  const sourceUri =
-    first &&
-    first.type === "video" &&
-    !first.uri.startsWith("http") &&
-    clips.every((c) => c.uri === first.uri && c.type === "video")
-      ? first.uri
-      : null;
+  // Every clip must be a local video; the sources are its distinct files.
+  const captionable = clips.length > 0 && clips.every((c) => c.type === "video" && !c.uri.startsWith("http"));
+  const sources = useMemo(() => (captionable ? distinctSources(clips) : []), [captionable, clips]);
+  const sourcesKey = sources.join("|");
 
-  const run = useCallback(async (uri: string) => {
+  const run = useCallback(async (uris: string[]) => {
     setStatus("running");
-    const { result, fromCache, key } = await analysis.transcriptWithInfo(uri);
-    setTranscriptionInfo(
-      result.status === "ok"
-        ? {
-            status: "ok",
-            wordCount: result.words.length,
-            repeatedWordsRemoved: result.removed?.repeatedWords ?? 0,
-            overlappingWordsRemoved: result.removed?.overlappingWords ?? 0,
-            dedupeDecisions: result.removed?.decisions ?? [],
-            fromCache,
-            key,
-          }
-        : { status: result.status, code: result.code, message: result.message, wordCount: 0, fromCache, key },
-    );
-    if (result.status === "ok") {
-      setTranscript({ uri, words: result.words, removedWords: result.removed?.words ?? [] });
+    // One file after the other: the recognizer and the analysis cache run one job at a time anyway.
+    const parts: Array<{ uri: string; words: Word[]; removed: Word[] }> = [];
+    let first: Awaited<ReturnType<typeof analysis.transcriptWithInfo>> | null = null;
+    let failure: Awaited<ReturnType<typeof analysis.transcriptWithInfo>> | null = null;
+    let fromCacheAll = true;
+    let repeated = 0;
+    let overlapping = 0;
+    const decisions: NonNullable<TranscriptionInfo["dedupeDecisions"]> = [];
+    const keys: string[] = [];
+    for (const uri of uris) {
+      const outcome = await analysis.transcriptWithInfo(uri);
+      first = first ?? outcome;
+      keys.push(outcome.key ?? "none");
+      fromCacheAll = fromCacheAll && outcome.fromCache;
+      if (outcome.result.status === "ok") {
+        parts.push({ uri, words: outcome.result.words, removed: outcome.result.removed?.words ?? [] });
+        repeated += outcome.result.removed?.repeatedWords ?? 0;
+        overlapping += outcome.result.removed?.overlappingWords ?? 0;
+        decisions.push(...(outcome.result.removed?.decisions ?? []));
+      } else {
+        failure = failure ?? outcome;
+        // Permission denied or no recognizer: the other files will not do better.
+        if (outcome.result.status === "denied" || outcome.result.status === "unavailable") break;
+      }
+    }
+    if (parts.length > 0) {
+      const combined = combineSources(parts);
+      setTranscriptionInfo({
+        status: "ok",
+        wordCount: combined.words.length,
+        repeatedWordsRemoved: repeated,
+        overlappingWordsRemoved: overlapping,
+        dedupeDecisions: decisions,
+        fromCache: fromCacheAll,
+        key: keys.join(" + "),
+      });
+      setTranscript({
+        key: uris.join("|"),
+        uri: uris.length === 1 ? uris[0]! : null,
+        words: combined.words,
+        wordUris: combined.wordUris,
+        removedWords: parts.flatMap((p) => p.removed),
+      });
     } else {
-      console.log("[captions] no transcript:", result.status, result.code ?? "", result.message ?? "");
+      const f = failure ?? first;
+      const result = f?.result;
+      setTranscriptionInfo({
+        status: result && result.status !== "ok" ? result.status : "error",
+        code: result && result.status !== "ok" ? result.code : undefined,
+        message: result && result.status !== "ok" ? result.message : undefined,
+        wordCount: 0,
+        fromCache: f?.fromCache ?? false,
+        key: keys.join(" + ") || null,
+      });
+      console.log("[captions] no transcript:", result?.status ?? "none");
     }
     setStatus("done");
   }, []);
 
   useEffect(() => {
     if (!enabled || !ready || status !== "waiting") return;
-    if (!sourceUri) {
+    if (sources.length === 0) {
       setTranscriptionInfo({
         status: "skipped",
-        message: "the timeline is not one local video file",
+        message: "the timeline is not made of local video files",
         wordCount: 0,
         fromCache: false,
         key: null,
@@ -77,16 +135,22 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
       setStatus("done");
       return;
     }
-    startedUriRef.current = sourceUri;
+    startedUriRef.current = sources;
     (async () => {
       let explained = false;
       try {
         explained = (await AsyncStorage.getItem(EXPLAINED_KEY)) === "1";
       } catch {}
-      if (explained) await run(sourceUri);
+      if (explained) await run(sources);
       else setStatus("asking");
     })();
-  }, [enabled, ready, status, sourceUri, run]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, ready, status, sourcesKey, run]);
+
+  // A source file was added to the timeline after the transcript: transcribe again (cached per file).
+  useEffect(() => {
+    if (status === "done" && transcript && sourcesKey && transcript.key !== sourcesKey) setStatus("waiting");
+  }, [status, transcript, sourcesKey]);
 
   const onContinue = useCallback(() => {
     AsyncStorage.setItem(EXPLAINED_KEY, "1").catch(() => {});
@@ -106,16 +170,20 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
     setStatus("waiting");
   }, []);
 
-  const keptKey = JSON.stringify(clips.map((c) => [c.trimStartMs ?? 0, c.trimEndMs ?? 0, c.durationMs ?? 0]));
+  const keptKey = JSON.stringify(clips.map((c) => [c.uri, c.trimStartMs ?? 0, c.trimEndMs ?? 0, c.durationMs ?? 0]));
   const lines: EditorCaptionLine[] = useMemo(() => {
-    if (!enabled || !transcript || transcript.uri !== sourceUri) return [];
-    const kept = clips.map((c) => ({
+    if (!enabled || !transcript || transcript.key !== sourcesKey) return [];
+    const ranges: ClipRange[] = clips.map((c) => ({
+      uri: c.uri,
       startMs: c.trimStartMs ?? 0,
       endMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0),
     }));
-    return buildCaptionLines(transcript.words, edits, kept, captionStyle);
+    // One source file: the single-file mapping (touching ranges are one stretch). Several: per clip.
+    return transcript.uri
+      ? buildCaptionLines(transcript.words, edits, ranges, captionStyle)
+      : buildCaptionLines(transcript.words, edits, ranges, captionStyle, { wordUris: transcript.wordUris, clips: ranges });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, transcript, sourceUri, edits, keptKey, captionStyle]);
+  }, [enabled, transcript, sourcesKey, edits, keptKey, captionStyle]);
 
   const overlays: EditOverlay[] = useMemo(
     () => (captionsOn ? captionLinesToEditOverlays(lines, captionStyle) : []),
@@ -132,10 +200,14 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
     (index: number, newText: string) => {
       const line = lines[index];
       if (!line || !transcript) return;
-      setEdits((prev) => applyLineEdit(transcript.words, prev, line, newText));
+      const next = applyLineEdit(transcript.words, edits, line, newText);
+      if (options?.onWordEdits) options.onWordEdits(next);
+      else setLocalEdits(next);
     },
-    [lines, transcript],
+    [lines, transcript, edits, options],
   );
+  /** Delete one caption line: every word of it is deleted (reversible with undo, survives cut changes). */
+  const deleteLine = useCallback((index: number) => editLine(index, ""), [editLine]);
 
   return {
     /** The transcript (source timeline) and the file it belongs to, once there is one. */
@@ -145,6 +217,9 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
     transcriptionInfo,
     restart,
     transcribedUri: transcript?.uri ?? null,
+    /** True when the timeline has several source files (captions only, no AI cuts). */
+    multiSource: !!transcript && transcript.uri === null,
+    deleteLine,
     explainerVisible: status === "asking",
     onContinue,
     onNotNow,
