@@ -30,7 +30,7 @@ function windowsOf(totalMs, stretches) {
   return out;
 }
 const C = ADJACENT_SOUND_CONFIG;
-eq("config values", [C.tailMarginMs, C.headMarginMs, C.minPieceMs, C.maxPieceMs, C.minPeakVsSpeechDb, C.maxPeakVsSpeechDb, C.neighbourGapMs, C.reportPauseMs], [80, 80, 150, 1500, -12, 6, 250, 300]);
+eq("config values", [C.tailMarginMs, C.headMarginMs, C.minPieceMs, C.maxPieceMs, C.maxBursts, C.minPeakVsSpeechDb, C.maxPeakVsSpeechDb, C.neighbourGapMs, C.reportPauseMs], [80, 80, 150, 900, 1, -12, 6, 250, 300]);
 
 // 13 normal 440 ms words (640 ms apart), starting at 500; the interesting word comes after them.
 const TEXTS = ["hello", "there", "world", "about", "think", "right", "which", "other", "might", "could", "state", "again", "never"];

@@ -9,7 +9,7 @@ import type { SilenceDetectionOptions } from "../silenceDetection.ts";
 import type { Word } from "../transcription/types.ts";
 import { mergePlan, newEditState, type EditState } from "./decisions.ts";
 import { planLaughProtection } from "./laughProtection.ts";
-import { analyzeUnexplained } from "./classifySound.ts";
+import { analyzeUnexplained, blockUmsOverlapping } from "./classifySound.ts";
 import { planFillerCuts } from "./fillerCuts.ts";
 import { planUmCuts } from "./umCuts.ts";
 import { planStretchedUms } from "./stretchedUms.ts";
@@ -27,6 +27,8 @@ export function buildAiEditState(input: {
   silenceOptions?: SilenceDetectionOptions;
   /** The transcript (owner only); without it there are no hook or filler decisions. */
   words?: Word[] | null;
+  /** Words transcript cleanup removed: no um is cut over one. */
+  removedWords?: Word[];
 }): EditState {
   const silence = planSilenceCuts(input.windows, WINDOW_MS, input.durationMs, input.silenceOptions);
   const decisions = silence.detection.savedMs >= AI_EDIT_MIN_SAVED_MS ? silence.decisions : [];
@@ -37,9 +39,10 @@ export function buildAiEditState(input: {
   if (!input.words) return base;
   // Owner only, with a transcript: laughs are protected, then method-2 ums are cut
   // (never inside a protected laugh).
-  const sounds = analyzeUnexplained(input.windows, WINDOW_MS, input.durationMs, input.words);
+  const removed = input.removedWords ?? [];
+  const sounds = analyzeUnexplained(input.windows, WINDOW_MS, input.durationMs, input.words, undefined, removed);
   const protectedState = mergePlan(base, planLaughProtection(sounds), ["laughProtect"]).state;
   // Ums the recognizer absorbed into a stretched word join the method-2 ums.
-  const umSounds = [...sounds, ...planStretchedUms(input.windows, WINDOW_MS, input.durationMs, input.words).sounds];
+  const umSounds = [...sounds, ...blockUmsOverlapping(planStretchedUms(input.windows, WINDOW_MS, input.durationMs, input.words).sounds, removed)];
   return mergePlan(protectedState, planUmCuts(protectedState, umSounds, input.durationMs).decisions, ["umCut"]).state;
 }

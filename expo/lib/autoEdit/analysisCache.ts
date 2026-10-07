@@ -10,7 +10,7 @@
  */
 import { detectSilences } from "../silenceDetection.ts";
 import { dedupeWords } from "../transcription/dedupeWords.ts";
-import type { TranscriptResult, Word } from "./../transcription/types.ts";
+import type { DedupeRemoved, TranscriptResult, Word } from "./../transcription/types.ts";
 
 export type SourceStat = { uri: string; size: number; mtime: number };
 export type LoudnessData = { durationMs: number; windows: number[] };
@@ -56,9 +56,13 @@ export function sourceKeyOf(s: SourceStat): string {
   return `${s.uri}|${s.size}|${Math.round(s.mtime)}`;
 }
 
-type Removed = { repeatedWords: number; overlappingWords: number };
-/** A stored transcript: words after dedupe, and how many were removed. Older entries are a bare Word[]. */
-type Cached = { words: Word[]; removed: Removed };
+/**
+ * A stored transcript: the recognizer's raw words, so a change to the dedupe rules is
+ * applied again on read without transcribing again. Entries without raw words (a bare
+ * Word[] or an older shape) were already deduped by older rules and may have lost real
+ * words: they are dropped and the clip is transcribed again.
+ */
+type Cached = { raw: Word[]; words: Word[]; removed: DedupeRemoved };
 
 export function createAnalysisCache(deps: AnalysisDeps) {
   const loudnessMem = new Map<string, LoudnessData | null>();
@@ -192,13 +196,10 @@ export function createAnalysisCache(deps: AnalysisDeps) {
       if (key) {
         let cached: Cached | undefined = transcriptMem.get(key);
         if (!cached) {
-          const stored = await readStored<Word[] | Cached>("transcript", key);
-          if (stored) {
-            // Stored by an older build: dedupe now (idempotent for words that were already clean).
-            const loud = await loudness(uri).catch(() => null);
-            const bare = Array.isArray(stored);
-            const d = dedupeWords(bare ? stored : stored.words, loud);
-            cached = { words: d.words, removed: bare ? d.report : stored.removed ?? d.report };
+          const stored = await readStored<Word[] | Partial<Cached>>("transcript", key);
+          if (stored && !Array.isArray(stored) && Array.isArray(stored.raw)) {
+            const d = dedupeWords(stored.raw, await loudness(uri).catch(() => null));
+            cached = { raw: stored.raw, words: d.words, removed: d.report };
           }
         }
         if (cached) {
@@ -222,7 +223,7 @@ export function createAnalysisCache(deps: AnalysisDeps) {
       const problem = await transcriptProblem(uri, d.words);
       if (problem) return { result: { status: "error", ...problem }, fromCache: false, key };
       if (key) {
-        const entry: Cached = { words: d.words, removed: d.report };
+        const entry: Cached = { raw: result.words, words: d.words, removed: d.report };
         transcriptMem.set(key, entry);
         await writeStored("transcript", key, entry);
       }

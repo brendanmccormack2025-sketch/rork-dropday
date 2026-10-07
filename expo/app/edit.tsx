@@ -89,7 +89,7 @@ import { planLaughProtection } from "@/lib/autoEdit/laughProtection";
 import { addUserSoundCut, planUmCuts, type UmCutReport } from "@/lib/autoEdit/umCuts";
 import { planStretchedUms, type StretchedReport } from "@/lib/autoEdit/stretchedUms";
 import { analyzeAdjacent, type AdjacentFinding } from "@/lib/autoEdit/adjacentSounds";
-import { analyzeUnexplained, silenceThresholdDb, speechMedianDb, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
+import { analyzeUnexplained, blockUmsOverlapping, nonWordStretchReport, silenceThresholdDb, speechMedianDb, type ClassifiedSound, type NonWordStretch } from "@/lib/autoEdit/classifySound";
 import { planFillerCuts } from "@/lib/autoEdit/fillerCuts";
 import { emphasisLogEntries, planEmphasis } from "@/lib/autoEdit/emphasisMoments";
 import { planHookTrim } from "@/lib/autoEdit/hookTrim";
@@ -261,6 +261,7 @@ export default function EditScreen() {
     umReport: UmCutReport;
     stretched?: StretchedReport;
     adjacent?: AdjacentFinding[];
+    stretches?: NonWordStretch[];
   } | null>(null);
 
   useEffect(() => {
@@ -2457,6 +2458,7 @@ export default function EditScreen() {
       windows: loud.windows,
       silenceOptions: SENSITIVITY_PRESETS[sensitivity],
       words: isOwnerAccount ? captions.words : null,
+      removedWords: captions.removedWords,
     });
     userEdit(() => fresh);
     if (isOwnerAccount) captions.setCaptionsOn(true);
@@ -2528,6 +2530,7 @@ export default function EditScreen() {
       umReport: aiDebug?.umReport,
       stretched: aiDebug?.stretched,
       adjacent: aiDebug?.adjacent,
+      stretches: aiDebug?.stretches,
       protection: protectionReport(model.state),
       userCuts: model.state.decisions.filter((d) => d.type === "umCut" && d.origin === "user"),
       transcription: captions.transcriptionInfo,
@@ -2561,14 +2564,14 @@ export default function EditScreen() {
 
         // Method 2: the 'um' sounds become reversible cuts (category Ums); laughs and
         // unsure sounds are display only.
-        const sounds = analyzeUnexplained(loud.windows, 20, durationMs, words);
+        const sounds = analyzeUnexplained(loud.windows, 20, durationMs, words, undefined, captions.removedWords);
         const planned = [...planHookTrim(words, durationMs), ...planFillerCuts(words)];
         const afterMethod1 = mergePlan(model.state, planned, ["hookTrim", "fillerCut"]);
         // Laughs are protected first: no cut may remove time inside one.
         const protectPlan = planLaughProtection(sounds);
         const protectedState = mergePlan(afterMethod1.state, protectPlan, ["laughProtect"]);
         const stretchedPlan = planStretchedUms(loud.windows, 20, durationMs, words);
-        const umPlan = planUmCuts(protectedState.state, [...sounds, ...stretchedPlan.sounds], durationMs);
+        const umPlan = planUmCuts(protectedState.state, [...sounds, ...blockUmsOverlapping(stretchedPlan.sounds, captions.removedWords)], durationMs);
         const merged = mergePlan(protectedState.state, umPlan.decisions, ["umCut"]);
         // AI planning is not an undo step: saved snapshots are re-planned, not extended.
         historyRef.current = mapHistory(historyRef.current, (snap) =>
@@ -2624,7 +2627,7 @@ export default function EditScreen() {
         );
         console.log("[ums]", JSON.stringify(umPlan.report));
         console.log("[stretched]", JSON.stringify(stretchedPlan.report.words.map((s) => [s.text, s.durationMs, Math.round(s.expectedMs), s.dipFound, s.cut ?? null])));
-        setAiDebug({ proposals, candidates, alignment, speechBaselineDb, umReport: umPlan.report, stretched: stretchedPlan.report, adjacent });
+        setAiDebug({ proposals, candidates, alignment, speechBaselineDb, umReport: umPlan.report, stretched: stretchedPlan.report, adjacent, stretches: nonWordStretchReport(loud.windows, 20, durationMs, words) });
       } catch (e) {
         console.warn("[edit] hook/filler planning failed", (e as Error)?.message ?? e);
       } finally {

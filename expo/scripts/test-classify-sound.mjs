@@ -45,7 +45,7 @@ const ctxOf = (windows, words = speechWords) => ({ windows, windowMs: WIN, words
 const classOf = (windows, c, words) => classifySound(c, ctxOf(windows, words), []).cls;
 
 // ── config ──
-eq("every threshold lives in one exported config", Object.keys(SOUND_CLASSIFIER_CONFIG).sort(), ["burstMinGapMs", "burstMinPulseMs", "burstThresholdFraction", "laughMinBursts", "laughPeakAboveSpeechDb", "laughPeakMinBursts", "midSpeechOverlapSlackMs", "midSpeechWindowMs", "minWordsForBaseline", "nearEmphasisMs", "umEdgePaddingMs", "umFallbackBelowWords", "umMaxCv", "umMaxMs", "umMaxPeakAboveSpeechDb", "umMaxPeakVsSpeechDb", "umMergeGapMs", "umMinCutMs", "umMinKeepMs", "umMinMs", "umMinPeakVsSpeechDb", "umNearSpeechMs", "umRequiresMidSpeech", "umSecondsPerNewSeam"]);
+eq("every threshold lives in one exported config", Object.keys(SOUND_CLASSIFIER_CONFIG).sort(), ["burstMinGapMs", "burstMinPulseMs", "burstThresholdFraction", "laughLocalAboveMs", "laughLocalWindowMs", "laughMinBursts", "laughPeakAboveSpeechDb", "laughPeakMinBursts", "midSpeechOverlapSlackMs", "midSpeechWindowMs", "minWordsForBaseline", "nearEmphasisMs", "umEdgePaddingMs", "umFallbackBelowWords", "umMaxCv", "umMaxMs", "umMaxPeakAboveSpeechDb", "umMaxPeakVsSpeechDb", "umMergeGapMs", "umMinCutMs", "umMinKeepMs", "umMinMs", "umMinPeakVsSpeechDb", "umNearSpeechMs", "umRequiresMidSpeech", "umSecondsPerNewSeam"]);
 
 // ── um: flat, short, mid-speech ──
 {

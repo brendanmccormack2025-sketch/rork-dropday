@@ -26,7 +26,7 @@ type Status = "waiting" | "asking" | "running" | "done";
 export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean) {
   const [captionsOn, setCaptionsOn] = useState(true);
   const [status, setStatus] = useState<Status>("waiting");
-  const [transcript, setTranscript] = useState<{ uri: string; words: Word[] } | null>(null);
+  const [transcript, setTranscript] = useState<{ uri: string; words: Word[]; removedWords: Word[] } | null>(null);
   const [edits, setEdits] = useState<WordEdits>({});
   const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionInfo | null>(null);
   const startedUriRef = useRef<string | null>(null);
@@ -50,13 +50,14 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
             wordCount: result.words.length,
             repeatedWordsRemoved: result.removed?.repeatedWords ?? 0,
             overlappingWordsRemoved: result.removed?.overlappingWords ?? 0,
+            dedupeDecisions: result.removed?.decisions ?? [],
             fromCache,
             key,
           }
         : { status: result.status, code: result.code, message: result.message, wordCount: 0, fromCache, key },
     );
     if (result.status === "ok") {
-      setTranscript({ uri, words: result.words });
+      setTranscript({ uri, words: result.words, removedWords: result.removed?.words ?? [] });
     } else {
       console.log("[captions] no transcript:", result.status, result.code ?? "", result.message ?? "");
     }
@@ -139,6 +140,8 @@ export function useCaptions(enabled: boolean, clips: DraftClip[], ready: boolean
   return {
     /** The transcript (source timeline) and the file it belongs to, once there is one. */
     words: transcript?.words ?? null,
+    /** Words dedupe dropped (nothing may be cut where one was). */
+    removedWords: transcript?.removedWords ?? [],
     transcriptionInfo,
     restart,
     transcribedUri: transcript?.uri ?? null,

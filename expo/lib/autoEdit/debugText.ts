@@ -13,6 +13,7 @@ import { outputPositionOfSource } from "./markers.ts";
 import type { UmCutReport } from "./umCuts.ts";
 import type { StretchedReport } from "./stretchedUms.ts";
 import type { AdjacentFinding } from "./adjacentSounds.ts";
+import type { NonWordStretch } from "./classifySound.ts";
 import type { UnexplainedSound } from "./fillerCuts.ts";
 
 /** m:ss.s, rounded to tenths first so 59.96 s reads 1:00.0. */
@@ -31,7 +32,7 @@ export type AiDebugInput = {
   /** Emphasis proposals (zoom decisions with score and reasons); not applied. */
   proposals: Decision[];
   /** Every method-2 candidate, classified (um candidates are cut; laugh and unsure are not). */
-  candidates: Array<UnexplainedSound & Partial<Pick<ClassifiedSound, "cls" | "features" | "checks" | "adjacent">>>;
+  candidates: Array<UnexplainedSound & Partial<Pick<ClassifiedSound, "cls" | "features" | "checks" | "adjacent" | "blocked">>>;
   /** Applied hook trim decisions and applied method-1 filler decisions. */
   hookTrims: Decision[];
   fillers: Decision[];
@@ -40,6 +41,8 @@ export type AiDebugInput = {
   speechBaselineDb?: number;
   /** The applied and skipped method-2 um cuts, with the seam counts. */
   umReport?: UmCutReport;
+  /** Every stretch of sound outside the words longer than 1 s, with its laugh verdict. */
+  stretches?: NonWordStretch[];
   /** What comes right after (or before) each word that has a pause beside it. */
   adjacent?: AdjacentFinding[];
   /** Stretched words (ums absorbed into a word) and the diagnosis of the gaps next to them. */
@@ -71,6 +74,9 @@ export function formatAiDebug(input: AiDebugInput): string {
     lines.push(`Transcription: ${t.status}${why}; ${t.wordCount} words; from cache: ${t.fromCache ? "yes" : "no"}`);
     if (t.status === "ok" && (t.repeatedWordsRemoved !== undefined || t.overlappingWordsRemoved !== undefined)) {
       lines.push(`Duplicates removed: ${t.repeatedWordsRemoved ?? 0} repeated words, ${t.overlappingWordsRemoved ?? 0} overlapping words`);
+      for (const d of t.dedupeDecisions ?? []) {
+        lines.push(`  ${d.outcome === "removed" ? "REMOVED" : "KEPT"} "${d.text}" (${d.wordCount} words at ${formatClock(d.earlierStartMs)} and ${formatClock(d.laterStartMs)}): ${d.reason}`);
+      }
     }
     lines.push(`Cache key: ${t.key ?? "none (file could not be read)"}`);
     if (input.transcriptWords && input.transcriptWords.length > 0) {
@@ -115,7 +121,7 @@ export function formatAiDebug(input: AiDebugInput): string {
   for (const c of input.candidates) {
     lines.push(
       c.cls && c.features
-        ? `${outputTime(clips, uri, c.startMs)}  ${c.cls === "um" ? "um?" : c.cls}  ${formatFeatures(c.features)}${c.adjacent ? `  [adjacent: ${c.adjacent}]` : ""}`
+        ? `${outputTime(clips, uri, c.startMs)}  ${c.cls === "um" ? "um?" : c.cls}  ${formatFeatures(c.features)}${c.adjacent ? `  [adjacent: ${c.adjacent}]` : ""}${c.blocked ? `  [not cut: ${c.blocked}]` : ""}`
         : `${outputTime(clips, uri, c.startMs)}  ${Math.round(c.lengthMs)} ms  sound with no transcript word`,
     );
     if (c.checks && c.features) lines.push(`    ${formatUmChecks(c.checks, c.features)}`);
@@ -168,6 +174,15 @@ export function formatAiDebug(input: AiDebugInput): string {
     if (report.seamLimit.capped) {
       lines.push(
         `Seam limit hit: at most ${report.seamLimit.allowed} new seams for ${formatClock(report.seamLimit.editedMs)} edited; only the longest ums were applied`,
+      );
+    }
+  }
+
+  if (input.stretches) {
+    lines.push("", `Non-word sound stretches over 1 s: ${input.stretches.length}`);
+    for (const s of input.stretches) {
+      lines.push(
+        `${outputTime(clips, uri, s.startMs)}  ${Math.round(s.lengthMs)} ms  bursts ${s.burstCount}  peak vs speech ${s.peakVsSpeechDb >= 0 ? "+" : ""}${s.peakVsSpeechDb.toFixed(1)} dB  ${s.verdict}`,
       );
     }
   }

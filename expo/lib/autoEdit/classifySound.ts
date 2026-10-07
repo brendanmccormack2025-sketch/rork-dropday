@@ -16,7 +16,7 @@ import type { Word } from "../transcription/types.ts";
 import { detectSilences } from "../silenceDetection.ts";
 import { loudnessJumpScorer } from "./emphasisMoments.ts";
 import { findUnexplainedSounds, type UnexplainedSound } from "./fillerCuts.ts";
-import { analyzeAdjacent } from "./adjacentSounds.ts";
+import { ADJACENT_SOUND_CONFIG, analyzeAdjacent, findStretchesOutsideWords } from "./adjacentSounds.ts";
 
 export const SOUND_CLASSIFIER_CONFIG = {
   /** laugh: this many separate loudness pulses inside the candidate or more. */
@@ -59,6 +59,10 @@ export const SOUND_CLASSIFIER_CONFIG = {
   umMinKeepMs: 250,
   /** Safety cap: at most one new seam per this many seconds of edited duration. */
   umSecondsPerNewSeam: 3,
+  /** Sounds longer than this (ms) count pulses against the LOCAL peak (a sliding window), not the stretch's one peak. */
+  laughLocalAboveMs: 1500,
+  /** ...the sliding window is this wide (ms). */
+  laughLocalWindowMs: 300,
   /** pulses: a window counts as part of a pulse above this fraction of the peak (linear). */
   burstThresholdFraction: 0.5,
   /** pulses closer than this are one pulse (ms). */
@@ -106,6 +110,8 @@ export type ClassifiedSound = UnexplainedSound & {
   /** Why it got this class, for the debug view. */
   why: string[];
   checks?: UmChecks;
+  /** Set when the sound may not be cut although the rule says um (see blockUmsOverlapping, adjacent limits). */
+  blocked?: string;
 };
 
 export type SoundContext = {
@@ -185,6 +191,37 @@ function countBursts(amps: number[], windowMs: number, config: SoundClassifierCo
   return runs.filter((r) => r.to - r.from >= minPulse).length;
 }
 
+/**
+ * Pulses of a long sound: a window is "on" when it reaches burstThresholdFraction of the
+ * loudest window within laughLocalWindowMs around it, so a 3 s laugh is counted pulse by
+ * pulse instead of against its single loudest pulse. Runs are merged and filtered exactly
+ * as in countBursts.
+ */
+function countBurstsLocal(amps: number[], windowMs: number, config: SoundClassifierConfig): number {
+  if (!(Math.max(0, ...amps) > 0)) return 0;
+  const half = Math.max(1, Math.round(config.laughLocalWindowMs / windowMs / 2));
+  const minGap = Math.max(1, Math.ceil(config.burstMinGapMs / windowMs));
+  const minPulse = Math.max(1, Math.ceil(config.burstMinPulseMs / windowMs));
+  const on = amps.map((a, i) => {
+    let peak = 0;
+    for (let k = Math.max(0, i - half); k <= Math.min(amps.length - 1, i + half); k++) peak = Math.max(peak, amps[k]!);
+    return peak > 0 && a >= peak * config.burstThresholdFraction;
+  });
+  const runs: Array<{ from: number; to: number }> = [];
+  let start = -1;
+  for (let i = 0; i <= on.length; i++) {
+    const isOn = i < on.length && on[i];
+    if (isOn && start < 0) start = i;
+    if (!isOn && start >= 0) {
+      const last = runs[runs.length - 1];
+      if (last && start - last.to < minGap) last.to = i;
+      else runs.push({ from: start, to: i });
+      start = -1;
+    }
+  }
+  return runs.filter((r) => r.to - r.from >= minPulse).length;
+}
+
 export function soundFeatures(
   candidate: UnexplainedSound,
   ctx: SoundContext,
@@ -220,7 +257,8 @@ export function soundFeatures(
     msToWordAfter: gapsAfter.length ? Math.max(0, Math.min(...gapsAfter)) : null,
     peakVsSpeechDb: peakDb - speechMedianDb(ctx, config),
     steadiness: mean > 0 ? Math.sqrt(variance) / mean : 0,
-    burstCount: countBursts(amps, ctx.windowMs, config),
+    burstCount:
+      candidate.lengthMs > config.laughLocalAboveMs ? countBurstsLocal(amps, ctx.windowMs, config) : countBursts(amps, ctx.windowMs, config),
     nearEmphasis,
     midSpeech: before && after,
     wordCount: ctx.words.length,
@@ -315,6 +353,34 @@ export function classifySounds(
   return candidates.map((c) => classifySound(c, ctx, jumps, config));
 }
 
+/**
+ * A um must never be cut where dedupe removed a word: that audio is (probably) a real word
+ * the transcript lost, not a hesitation. Other classes are left as they are.
+ */
+export function blockUmsOverlapping<T extends ClassifiedSound>(sounds: T[], removed: Word[]): T[] {
+  if (removed.length === 0) return sounds;
+  return sounds.map((s) => {
+    if (s.cls !== "um" || !removed.some((r) => r.startMs < s.endMs && r.endMs > s.startMs)) return s;
+    const hit = removed.find((r) => r.startMs < s.endMs && r.endMs > s.startMs)!;
+    return { ...s, cls: "unsure" as const, why: [...s.why, "overlaps a word the transcript cleanup removed"], blocked: `overlaps removed word '${hit.text}'` };
+  });
+}
+
+/** An um that runs on from a word must be one pulse and short; more is probably words the transcript lacks. */
+function limitAdjacentUms(sounds: ClassifiedSound[]): ClassifiedSound[] {
+  const limit = ADJACENT_SOUND_CONFIG;
+  return sounds.map((s) => {
+    if (!s.adjacent || s.cls !== "um") return s;
+    if (s.features.burstCount > limit.maxBursts) {
+      return { ...s, cls: "unsure" as const, why: [...s.why, `${s.features.burstCount} pulses next to a word: probably untranscribed words`], blocked: `${s.features.burstCount} pulses (limit ${limit.maxBursts})` };
+    }
+    if (s.lengthMs > limit.maxPieceMs) {
+      return { ...s, cls: "unsure" as const, why: [...s.why, `longer than ${limit.maxPieceMs} ms next to a word`], blocked: `longer than ${limit.maxPieceMs} ms` };
+    }
+    return s;
+  });
+}
+
 /** Method 2 end to end: find the unexplained sounds, then classify each. */
 export function analyzeUnexplained(
   windows: number[],
@@ -322,13 +388,46 @@ export function analyzeUnexplained(
   durationMs: number,
   words: Word[],
   config: SoundClassifierConfig = SOUND_CLASSIFIER_CONFIG,
+  /** Words transcript cleanup removed: no um is cut over one. */
+  removedWords: Word[] = [],
 ): ClassifiedSound[] {
   const threshold = silenceThresholdDb(windows, windowMs, durationMs);
   const ctx = { windows, windowMs, words, thresholdDb: threshold };
   // Sounds that run straight on from a word (no gap) are candidates too, minus the part inside the word.
   const adjacent = analyzeAdjacent(windows, windowMs, words, threshold, speechMedianDb(ctx, config)).candidates;
   const found = [...findUnexplainedSounds(windows, windowMs, words, threshold), ...adjacent].sort((a, b) => a.startMs - b.startMs);
-  return classifySounds(found, ctx, config);
+  const classified = classifySounds(found, ctx, config);
+  // Laughs of ANY length: every stretch outside the words that is not already a candidate is
+  // classified too (long sounds count their pulses locally); only a laugh is kept.
+  const longer = findStretchesOutsideWords(windows, windowMs, words, threshold).filter(
+    (st) => !found.some((c) => c.startMs < st.endMs && c.endMs > st.startMs),
+  );
+  const laughs = classifySounds(longer, ctx, config).filter((s) => s.cls === "laugh");
+  return blockUmsOverlapping(limitAdjacentUms([...classified, ...laughs]), removedWords).sort((a, b) => a.startMs - b.startMs);
+}
+
+export type NonWordStretch = { startMs: number; endMs: number; lengthMs: number; burstCount: number; peakVsSpeechDb: number; verdict: "laugh" | "not a laugh" };
+
+/** Every stretch of sound outside the words longer than minMs, with its laugh verdict (debug). */
+export function nonWordStretchReport(
+  windows: number[],
+  windowMs: number,
+  durationMs: number,
+  words: Word[],
+  minMs = 1000,
+  config: SoundClassifierConfig = SOUND_CLASSIFIER_CONFIG,
+): NonWordStretch[] {
+  const threshold = silenceThresholdDb(windows, windowMs, durationMs);
+  const ctx = { windows, windowMs, words, thresholdDb: threshold };
+  const stretches = findStretchesOutsideWords(windows, windowMs, words, threshold).filter((s) => s.lengthMs > minMs);
+  return classifySounds(stretches, ctx, config).map((s) => ({
+    startMs: s.startMs,
+    endMs: s.endMs,
+    lengthMs: s.lengthMs,
+    burstCount: s.features.burstCount,
+    peakVsSpeechDb: s.features.peakVsSpeechDb,
+    verdict: s.cls === "laugh" ? "laugh" : "not a laugh",
+  }));
 }
 
 /** "mid-speech PASS, duration PASS, loudness FAIL (-18.2 dB, needs -12..+4), laugh PASS; steadiness 0.41 (not required)" */

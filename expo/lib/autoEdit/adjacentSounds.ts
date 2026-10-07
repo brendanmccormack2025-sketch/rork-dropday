@@ -15,15 +15,17 @@
  * Pure; erasable TypeScript only (see decisions.ts).
  */
 import type { Word } from "../transcription/types.ts";
-import { UNEXPLAINED_MAX_MS, UNEXPLAINED_MIN_MS, WORD_SLACK_MS, type UnexplainedSound } from "./fillerCuts.ts";
+import { UNEXPLAINED_MIN_MS, WORD_SLACK_MS, type UnexplainedSound } from "./fillerCuts.ts";
 
 export const ADJACENT_SOUND_CONFIG = {
   /** The cut starts this long after the word end (tail) / ends this long before the word start (head), ms. */
   tailMarginMs: 80,
   headMarginMs: 80,
-  /** The piece left after the margin must be at least this long (ms) and at most this long. */
+  /** The piece left after the margin must be at least this long (ms) and at most this long (longer is probably untranscribed speech). */
   minPieceMs: UNEXPLAINED_MIN_MS,
-  maxPieceMs: UNEXPLAINED_MAX_MS,
+  maxPieceMs: 900,
+  /** A tail or head with more loudness pulses than this is probably untranscribed words, not an um. */
+  maxBursts: 1,
   /** Within these dB of the speech baseline (peak of the piece). */
   minPeakVsSpeechDb: -12,
   maxPeakVsSpeechDb: 6,
@@ -80,6 +82,40 @@ export function profileOf(
     out.push(`${(t / 1000).toFixed(2)}:${dbs.length ? (dbs.reduce((a, b) => a + b, 0) / dbs.length - speechDb).toFixed(0) : "--"}`);
   }
   return out.join(" ");
+}
+
+/**
+ * Every stretch of sound that lies outside all words, of ANY length: the loud windows
+ * that are not inside a word widened by the tail / head margins, as contiguous pieces of
+ * at least minPieceMs. (findUnexplainedSounds stops at 1500 ms, which hides a real
+ * multi-second laugh, and drops a laugh that runs on from a word.)
+ */
+export function findStretchesOutsideWords(
+  windows: number[],
+  windowMs: number,
+  words: Word[],
+  thresholdDb: number,
+  config: AdjacentSoundConfig = ADJACENT_SOUND_CONFIG,
+): UnexplainedSound[] {
+  const covered = new Uint8Array(windows.length);
+  for (const w of words) {
+    const from = Math.max(0, Math.floor((w.startMs - config.headMarginMs) / windowMs));
+    const to = Math.min(windows.length, Math.ceil((w.endMs + config.tailMarginMs) / windowMs));
+    for (let i = from; i < to; i++) covered[i] = 1;
+  }
+  const out: UnexplainedSound[] = [];
+  let run = -1;
+  for (let i = 0; i <= windows.length; i++) {
+    const on = i < windows.length && !covered[i] && Number.isFinite(windows[i]!) && windows[i]! > thresholdDb;
+    if (on && run < 0) run = i;
+    if (!on && run >= 0) {
+      const startMs = run * windowMs;
+      const endMs = i * windowMs;
+      if (endMs - startMs >= config.minPieceMs) out.push({ startMs, endMs, lengthMs: endMs - startMs });
+      run = -1;
+    }
+  }
+  return out;
 }
 
 export function analyzeAdjacent(
