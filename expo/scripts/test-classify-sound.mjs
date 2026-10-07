@@ -45,7 +45,7 @@ const ctxOf = (windows, words = speechWords) => ({ windows, windowMs: WIN, words
 const classOf = (windows, c, words) => classifySound(c, ctxOf(windows, words), []).cls;
 
 // ── config ──
-eq("every threshold lives in one exported config", Object.keys(SOUND_CLASSIFIER_CONFIG).sort(), ["burstMinGapMs", "burstMinPulseMs", "burstThresholdFraction", "laughMinBursts", "laughPeakAboveSpeechDb", "laughPeakMinBursts", "midSpeechOverlapSlackMs", "midSpeechWindowMs", "minWordsForBaseline", "nearEmphasisMs", "umEdgePaddingMs", "umMaxCv", "umMaxMs", "umMaxPeakAboveSpeechDb", "umMergeGapMs", "umMinCutMs", "umMinKeepMs", "umMinMs", "umRequiresMidSpeech", "umSecondsPerNewSeam"]);
+eq("every threshold lives in one exported config", Object.keys(SOUND_CLASSIFIER_CONFIG).sort(), ["burstMinGapMs", "burstMinPulseMs", "burstThresholdFraction", "laughMinBursts", "laughPeakAboveSpeechDb", "laughPeakMinBursts", "midSpeechOverlapSlackMs", "midSpeechWindowMs", "minWordsForBaseline", "nearEmphasisMs", "umEdgePaddingMs", "umFallbackBelowWords", "umMaxCv", "umMaxMs", "umMaxPeakAboveSpeechDb", "umMaxPeakVsSpeechDb", "umMergeGapMs", "umMinCutMs", "umMinKeepMs", "umMinMs", "umMinPeakVsSpeechDb", "umRequiresMidSpeech", "umSecondsPerNewSeam"]);
 
 // ── um: flat, short, mid-speech ──
 {
@@ -352,7 +352,7 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   eq("with the category off there is no band", mapNonCutDecisions(setCategoryEnabled(edges, "laughProtect", false), keepClips).length, 0);
 
   // end to end: a laugh followed closely by a um-like sound
-  const words = [[0, 1000], [1600, 2400], [4200, 5200], [5800, 6800], [7400, 8400], [9000, 10000], [10600, 11600], [12200, 13200], [13800, 14800], [15400, 16400]].map(([a, b], i) => w(`w${i}`, a, b));
+  const words = [[0, 1000], [1600, 2400], [4200, 5200], [5800, 6800], [7400, 8400], [9000, 10000], [10600, 11600], [12200, 13200], [13800, 14800]].map(([a, b], i) => w(`w${i}`, a, b));
   const pulses = (i) => (i % 8 < 5 ? -20 : -45);
   const windows = windowsOf(17000, [...words.map((x) => [x.startMs, x.endMs, SPEECH]), [2700, 3200, pulses], [3300, 3600, -31]]);
   const sounds = analyzeUnexplained(windows, WIN, 17000, words);
@@ -454,7 +454,7 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   const threshold = silenceThresholdDb(windows, WIN, 20000);
   eq("silence at word edges does not pull the baseline down", Math.round(speechMedianDb({ windows, windowMs: WIN, words, thresholdDb: threshold })), SPEECH);
   const um = classifySound(cand(2180, 2480), { windows: windowsOf(20000, [...stretches, [2180, 2480, -31]]), windowMs: WIN, words, thresholdDb: threshold }, []);
-  eq("...so a um is judged against speech level, not against silence", [um.cls, Math.round(um.features.peakVsSpeechDb)], ["um", -3]);
+  eq("...so a um is judged against speech level, not against silence", [um.checks.loudness, Math.round(um.features.peakVsSpeechDb)], [true, -3]);
 }
 {
   // fewer than 10 words, all of them off the sound (misaligned): fall back to non-silent frames
@@ -505,6 +505,89 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   const after = analyzeUnexplained(windows, WIN, 12000, speechWords);
   eq("planning zooms from laughs does not change the classification", JSON.stringify(after), JSON.stringify(before));
   eq("the confirmed laugh is a zoom signal afterwards", zooms.some((z) => z.payload.reasons.includes("laugh")), true);
+}
+
+// ── the um rule with a real transcript (10+ words): voiced sound between two words ──
+{
+  const C = SOUND_CLASSIFIER_CONFIG;
+  eq("um rule config", [C.umMinPeakVsSpeechDb, C.umMaxPeakVsSpeechDb, C.umMinMs, C.umMaxMs, C.umFallbackBelowWords, C.midSpeechWindowMs], [-12, 4, 150, 900, 10, 400]);
+  // 10 words, 1000 ms each, 700 ms apart (word i: 1000 + i*1700 ... +1000)
+  const ten = Array.from({ length: 10 }, (_, i) => w(`w${i}`, 1000 + i * 1700, 2000 + i * 1700));
+  const tenStretches = ten.map((x) => [x.startMs, x.endMs, SPEECH]);
+  const total = 19000;
+  const gapAfter3 = [ten[3].endMs + 200, ten[3].endMs + 500]; // 6200-6500, 200 ms from the words on both sides
+  const run = (stretches, words = ten) => analyzeUnexplained(windowsOf(total, [...(words === ten ? tenStretches : words.map((x) => [x.startMs, x.endMs, SPEECH])), ...stretches]), WIN, total, words);
+
+  const voiced = run([[...gapAfter3, SPEECH - 2]]);
+  eq("a voiced sound at -2 dB between two words is an um", [voiced.length, voiced[0].cls, voiced[0].features.midSpeech], [1, "um", true]);
+  eq("...with every check passing, steadiness not required", [voiced[0].checks.rule, voiced[0].checks.midSpeech, voiced[0].checks.duration, voiced[0].checks.loudness, voiced[0].checks.laugh, voiced[0].checks.steadiness], ["transcript", true, true, true, true, null]);
+  const cut = buildAiEditState({ uri: URI, durationMs: total, windows: windowsOf(total, [...tenStretches, [...gapAfter3, SPEECH - 2]]), silenceOptions: SENSITIVITY_PRESETS.tight, words: ten });
+  const umCut = cut.decisions.find((d) => d.type === "umCut");
+  eq("...and it is cut (an applied umCut decision over it)", [Boolean(umCut), umCut?.state, umCut && umCut.sourceStartMs <= gapAfter3[0] + 30 && umCut.sourceEndMs >= gapAfter3[1] - 30], [true, "applied", true]);
+
+  // an unsteady voiced sound is still an um: steadiness is only reported
+  const ramp = run([[...gapAfter3, (i) => -52 + i * 1.6]]);
+  eq("a ramping (unsteady) voiced sound between words is an um; steadiness is reported", [ramp[0].cls, ramp[0].features.steadiness > C.umMaxCv], ["um", true]);
+
+  // a breath: 18 dB under speech
+  const breath = run([[...gapAfter3, SPEECH - 18]]);
+  const breathCut = buildAiEditState({ uri: URI, durationMs: total, windows: windowsOf(total, [...tenStretches, [...gapAfter3, SPEECH - 18]]), silenceOptions: SENSITIVITY_PRESETS.tight, words: ten });
+  eq("a quiet breath at -18 dB between words is not an um", breath.length === 0 || breath[0].cls === "unsure", true);
+  eq("...and nothing is cut for it", breathCut.decisions.some((d) => d.type === "umCut"), false);
+  eq("loudness is the failing check (when it is a candidate at all)", breath.length === 0 || [breath[0].checks.loudness, breath[0].checks.midSpeech], breath.length === 0 || [false, true]);
+  const justLoud = run([[...gapAfter3, SPEECH - 13]]);
+  const justOk = run([[...gapAfter3, SPEECH - 11]]);
+  eq("the lower bound is -12 dB: -13 fails, -11 passes (if above the silence threshold)", [justLoud.length === 0 || justLoud[0].checks.loudness === false, justOk[0]?.checks.loudness], [true, true]);
+  const tooLoud = run([[...gapAfter3, SPEECH + 6]]);
+  eq("louder than speech by +6 dB is not an um", [tooLoud[0].cls, tooLoud[0].checks.loudness], ["unsure", false]);
+
+  // no word on one side
+  const afterLast = run([[ten[9].endMs + 300, ten[9].endMs + 600, SPEECH - 2]]);
+  eq("a sound with no word after it is not an um", [afterLast[0].cls, afterLast[0].features.midSpeech, afterLast[0].checks.midSpeech], ["unsure", false, false]);
+  const beforeFirst = run([[300, 600, SPEECH - 2]]);
+  eq("a sound with no word before it is not an um", [beforeFirst[0].cls, beforeFirst[0].checks.midSpeech], ["unsure", false]);
+  const lone = run([[8500 + 17000 - 17000, 8800, SPEECH - 2]]);
+  eq("a sound far from any word is not an um (mid-speech is required with a transcript)", lone.every((c) => c.features.midSpeech || c.cls !== "um"), true);
+
+  // too short / too long
+  const brief = run([[gapAfter3[0] + 100, gapAfter3[0] + 220, SPEECH - 2]]);
+  eq("under 150 ms is not even a candidate", brief.length, 0);
+  const long = run([[ten[3].endMs + 150, ten[3].endMs + 1050, SPEECH - 2]].map(([a, b, d]) => [a, b, d]), ten);
+  eq("a sound over 900 ms is not a candidate", long.filter((c) => c.lengthMs > 900).length, 0);
+
+  // laugh unchanged
+  const pulses = (i) => (i % 8 < 5 ? -20 : -45);
+  const laughy = run([[...gapAfter3, pulses], [gapAfter3[1], gapAfter3[1] + 1, SPEECH]].slice(0, 1));
+  eq("a pulsed sound between words is still a laugh, not an um", [laughy[0].cls, laughy[0].checks.laugh], ["laugh", false]);
+
+  // fewer than 10 words: the old rule
+  const six = ten.slice(0, 6);
+  const soundIn6 = [[six[3].endMs + 200, six[3].endMs + 500]];
+  const steadyOld = run([[...soundIn6[0], SPEECH - 2]], six);
+  const rampOld = run([[...soundIn6[0], (i) => -52 + i * 1.6]], six);
+  eq("6 words: the old rule applies (steady voiced sound is an um)", [steadyOld[0].cls, steadyOld[0].checks.rule], ["um", "fallback"]);
+  eq("6 words: an unsteady sound is NOT an um under the old rule", [rampOld[0].cls, rampOld[0].checks.rule, rampOld[0].checks.steadiness], ["unsure", "fallback", false]);
+  eq("10 words: the same unsteady sound IS an um", run([[...gapAfter3, (i) => -52 + i * 1.6]])[0].cls, "um");
+
+  // debug text explains a miss
+  const text = formatAiDebug({ sourceDurationMs: total, clips: keepRangesToClips(URI, [{ startMs: 0, endMs: total }]), sourceUri: URI, proposals: [], candidates: tooLoud, hookTrims: [], fillers: [] });
+  eq("debug text shows each um-rule check with its measurement", [
+    text.includes("um rule (transcript): mid-speech PASS, duration PASS"),
+    /loudness FAIL \(\+\d+\.\d dB, needs -12\.\.\+4\), laugh PASS/.test(text),
+    text.includes("steadiness") && text.includes("(not required)"),
+  ], [true, true, true]);
+  const textOld = formatAiDebug({ sourceDurationMs: total, clips: keepRangesToClips(URI, [{ startMs: 0, endMs: total }]), sourceUri: URI, proposals: [], candidates: rampOld, hookTrims: [], fillers: [] });
+  eq("debug text for the old rule names it and the steadiness check", textOld.includes("old rule, fewer than 10 words") && /steadiness FAIL/.test(textOld), true);
+}
+
+// ── method 1: filler words ──
+{
+  const yes = ["um", "Um,", "UM.", "umm", "Umm…", "uh", "Uh", "uhh", "UHH!", "hmm", "Hmm?", "er", "Er,", "ah", "Ah!", "uhm", "erm"];
+  const no = ["umbrella", "her", "hum", "ahead", "error", "hump", "a", "I"];
+  eq("method 1 treats um/umm/uh/uhh/hmm/er/ah (any case, punctuation) as fillers", yes.filter((t) => planFillerCuts([w(t, 0, 300)]).length === 0), []);
+  eq("...and does not touch ordinary words", no.filter((t) => planFillerCuts([w(t, 0, 300)]).length === 1), []);
+  const sample = [w("so", 0, 200), w("um", 300, 600), w("I", 700, 800), w("uh,", 900, 1200), w("think", 1300, 1500), w("Hmm", 1600, 1900), w("er", 2000, 2200), w("ah", 2300, 2500), w("umbrella", 2600, 3000)];
+  eq("on a sample transcript it catches exactly the 5 filler words", planFillerCuts(sample).map((d) => d.payload.text), ["um", "uh,", "Hmm", "er", "ah"]);
 }
 
 if (failed) {

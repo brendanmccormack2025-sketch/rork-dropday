@@ -8,7 +8,7 @@ import type { Decision } from "./decisions.ts";
 import type { TranscriptionInfo } from "../transcription/types.ts";
 import type { Alignment } from "./alignment.ts";
 import type { ProtectionReport } from "./decisions.ts";
-import { formatFeatures, type ClassifiedSound } from "./classifySound.ts";
+import { formatFeatures, formatUmChecks, type ClassifiedSound } from "./classifySound.ts";
 import { outputPositionOfSource } from "./markers.ts";
 import type { UmCutReport } from "./umCuts.ts";
 import type { UnexplainedSound } from "./fillerCuts.ts";
@@ -29,7 +29,7 @@ export type AiDebugInput = {
   /** Emphasis proposals (zoom decisions with score and reasons); not applied. */
   proposals: Decision[];
   /** Every method-2 candidate, classified (um candidates are cut; laugh and unsure are not). */
-  candidates: Array<UnexplainedSound & Partial<Pick<ClassifiedSound, "cls" | "features">>>;
+  candidates: Array<UnexplainedSound & Partial<Pick<ClassifiedSound, "cls" | "features" | "checks">>>;
   /** Applied hook trim decisions and applied method-1 filler decisions. */
   hookTrims: Decision[];
   fillers: Decision[];
@@ -112,6 +112,7 @@ export function formatAiDebug(input: AiDebugInput): string {
         ? `${outputTime(clips, uri, c.startMs)}  ${c.cls === "um" ? "um?" : c.cls}  ${formatFeatures(c.features)}`
         : `${outputTime(clips, uri, c.startMs)}  ${Math.round(c.lengthMs)} ms  sound with no transcript word`,
     );
+    if (c.checks && c.features) lines.push(`    ${formatUmChecks(c.checks, c.features)}`);
   }
 
   const prot = input.protection;
