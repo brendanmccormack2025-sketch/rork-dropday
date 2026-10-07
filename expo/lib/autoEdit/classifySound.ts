@@ -16,6 +16,7 @@ import type { Word } from "../transcription/types.ts";
 import { detectSilences } from "../silenceDetection.ts";
 import { loudnessJumpScorer } from "./emphasisMoments.ts";
 import { findUnexplainedSounds, type UnexplainedSound } from "./fillerCuts.ts";
+import { analyzeAdjacent } from "./adjacentSounds.ts";
 
 export const SOUND_CLASSIFIER_CONFIG = {
   /** laugh: this many separate loudness pulses inside the candidate or more. */
@@ -323,8 +324,11 @@ export function analyzeUnexplained(
   config: SoundClassifierConfig = SOUND_CLASSIFIER_CONFIG,
 ): ClassifiedSound[] {
   const threshold = silenceThresholdDb(windows, windowMs, durationMs);
-  const found = findUnexplainedSounds(windows, windowMs, words, threshold);
-  return classifySounds(found, { windows, windowMs, words, thresholdDb: threshold }, config);
+  const ctx = { windows, windowMs, words, thresholdDb: threshold };
+  // Sounds that run straight on from a word (no gap) are candidates too, minus the part inside the word.
+  const adjacent = analyzeAdjacent(windows, windowMs, words, threshold, speechMedianDb(ctx, config)).candidates;
+  const found = [...findUnexplainedSounds(windows, windowMs, words, threshold), ...adjacent].sort((a, b) => a.startMs - b.startMs);
+  return classifySounds(found, ctx, config);
 }
 
 /** "mid-speech PASS, duration PASS, loudness FAIL (-18.2 dB, needs -12..+4), laugh PASS; steadiness 0.41 (not required)" */

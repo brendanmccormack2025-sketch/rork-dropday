@@ -12,6 +12,7 @@ import { formatFeatures, formatUmChecks, type ClassifiedSound } from "./classify
 import { outputPositionOfSource } from "./markers.ts";
 import type { UmCutReport } from "./umCuts.ts";
 import type { StretchedReport } from "./stretchedUms.ts";
+import type { AdjacentFinding } from "./adjacentSounds.ts";
 import type { UnexplainedSound } from "./fillerCuts.ts";
 
 /** m:ss.s, rounded to tenths first so 59.96 s reads 1:00.0. */
@@ -30,7 +31,7 @@ export type AiDebugInput = {
   /** Emphasis proposals (zoom decisions with score and reasons); not applied. */
   proposals: Decision[];
   /** Every method-2 candidate, classified (um candidates are cut; laugh and unsure are not). */
-  candidates: Array<UnexplainedSound & Partial<Pick<ClassifiedSound, "cls" | "features" | "checks">>>;
+  candidates: Array<UnexplainedSound & Partial<Pick<ClassifiedSound, "cls" | "features" | "checks" | "adjacent">>>;
   /** Applied hook trim decisions and applied method-1 filler decisions. */
   hookTrims: Decision[];
   fillers: Decision[];
@@ -39,6 +40,8 @@ export type AiDebugInput = {
   speechBaselineDb?: number;
   /** The applied and skipped method-2 um cuts, with the seam counts. */
   umReport?: UmCutReport;
+  /** What comes right after (or before) each word that has a pause beside it. */
+  adjacent?: AdjacentFinding[];
   /** Stretched words (ums absorbed into a word) and the diagnosis of the gaps next to them. */
   stretched?: StretchedReport;
   /** Protected laugh ranges and the cuts they shortened or dropped. */
@@ -112,7 +115,7 @@ export function formatAiDebug(input: AiDebugInput): string {
   for (const c of input.candidates) {
     lines.push(
       c.cls && c.features
-        ? `${outputTime(clips, uri, c.startMs)}  ${c.cls === "um" ? "um?" : c.cls}  ${formatFeatures(c.features)}`
+        ? `${outputTime(clips, uri, c.startMs)}  ${c.cls === "um" ? "um?" : c.cls}  ${formatFeatures(c.features)}${c.adjacent ? `  [adjacent: ${c.adjacent}]` : ""}`
         : `${outputTime(clips, uri, c.startMs)}  ${Math.round(c.lengthMs)} ms  sound with no transcript word`,
     );
     if (c.checks && c.features) lines.push(`    ${formatUmChecks(c.checks, c.features)}`);
@@ -166,6 +169,35 @@ export function formatAiDebug(input: AiDebugInput): string {
       lines.push(
         `Seam limit hit: at most ${report.seamLimit.allowed} new seams for ${formatClock(report.seamLimit.editedMs)} edited; only the longest ums were applied`,
       );
+    }
+  }
+
+  const adj = input.adjacent;
+  if (adj) {
+    lines.push("", `Sound next to words (a pause of more than 300 ms beside the word): ${adj.length}`);
+    for (const f of adj) {
+      const what = f.kind === "tail" ? "tail" : "head";
+      const where = f.kind === "tail" ? `after '${f.text}'` : `before '${f.text}'`;
+      const range = `source ${formatClock(f.wordStartMs)}-${formatClock(f.wordEndMs)}, pause ${f.pauseMs === null ? "none" : `${Math.round(f.pauseMs)} ms`}`;
+      const db = f.dbVsSpeech === undefined || !Number.isFinite(f.dbVsSpeech) ? "" : `${f.dbVsSpeech >= 0 ? "+" : ""}${f.dbVsSpeech.toFixed(0)} dB`;
+      const len = Math.round(f.lengthMs ?? 0);
+      let result: string;
+      if (f.status === "no sound") result = `no ${what}`;
+      else if (f.status === "separate sound") result = `a separate sound, ${len} ms at ${db} (a regular candidate, see the list above)`;
+      else if (f.status === "too short") result = `${what} too short (${len} ms)`;
+      else if (f.status === "too long") result = `${what} too long (${len} ms)`;
+      else if (f.status === "too quiet") result = `${what} ${len} ms, too quiet (${db})`;
+      else if (f.status === "too loud") result = `${what} ${len} ms, too loud (${db})`;
+      else {
+        const cand = input.candidates.find((c) => c.startMs === f.startMs);
+        const hit = <T extends { startMs: number; endMs: number }>(r: T) => r.startMs < (f.endMs ?? 0) && r.endMs > (f.startMs ?? 0);
+        const cut = input.umReport?.applied.find(hit);
+        const skipped = input.umReport?.skipped.find(hit);
+        const outcome = cand && cand.cls !== "um" ? `${cand.cls}, not cut` : cut ? "cut" : skipped ? `not cut: ${skipped.reason}` : "not cut";
+        result = `${what} ${len} ms at ${db} -> um candidate (${outcome})`;
+      }
+      lines.push(`${where} (${range}): ${result}`);
+      if (f.status !== "no sound") lines.push(`    profile (50 ms, dB vs speech): ${f.profile}`);
     }
   }
 

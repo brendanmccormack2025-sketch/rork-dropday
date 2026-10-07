@@ -27,7 +27,13 @@ export const UNEXPLAINED_MAX_MS = 1500;
 /** Word timings are imprecise: a sound this close to a word still belongs to it. */
 export const WORD_SLACK_MS = 120;
 
-export type UnexplainedSound = { startMs: number; endMs: number; lengthMs: number };
+export type UnexplainedSound = {
+  startMs: number;
+  endMs: number;
+  lengthMs: number;
+  /** Set on a sound that runs on from a word: "after 'lease'" or "before 'word'" (see adjacentSounds.ts). */
+  adjacent?: string;
+};
 
 /** Method 2 (log only): loud windows above thresholdDb with no transcript word near them. */
 export function findUnexplainedSounds(

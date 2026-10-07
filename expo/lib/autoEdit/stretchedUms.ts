@@ -31,6 +31,7 @@ import {
   type SoundContext,
 } from "./classifySound.ts";
 import { UNEXPLAINED_MAX_MS, UNEXPLAINED_MIN_MS, WORD_SLACK_MS } from "./fillerCuts.ts";
+import { profileOf } from "./adjacentSounds.ts";
 
 export const STRETCHED_UM_CONFIG = {
   /** A word is stretched when longer than this times its expected duration... */
@@ -89,17 +90,6 @@ function median(values: number[]): number {
 
 /** "m:ss.s" style seconds for the report ("9.2" style is enough here). */
 const sec = (ms: number) => (ms / 1000).toFixed(2);
-
-function profileOf(windows: number[], windowMs: number, fromMs: number, toMs: number, speechDb: number, binMs: number): string {
-  const out: string[] = [];
-  for (let t = Math.max(0, Math.floor(fromMs / binMs) * binMs); t < toMs; t += binMs) {
-    const from = Math.floor(t / windowMs);
-    const to = Math.max(from + 1, Math.ceil((t + binMs) / windowMs));
-    const dbs = windows.slice(from, to).filter((v) => Number.isFinite(v));
-    out.push(`${sec(t)}:${dbs.length ? (dbs.reduce((a, b) => a + b, 0) / dbs.length - speechDb).toFixed(0) : "--"}`);
-  }
-  return out.join(" ");
-}
 
 /** Why method 2 found no candidate in [fromMs, toMs): the sound there, run by run. */
 function diagnoseGap(

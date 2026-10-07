@@ -88,6 +88,7 @@ import { checkAlignment, type Alignment } from "@/lib/autoEdit/alignment";
 import { planLaughProtection } from "@/lib/autoEdit/laughProtection";
 import { addUserSoundCut, planUmCuts, type UmCutReport } from "@/lib/autoEdit/umCuts";
 import { planStretchedUms, type StretchedReport } from "@/lib/autoEdit/stretchedUms";
+import { analyzeAdjacent, type AdjacentFinding } from "@/lib/autoEdit/adjacentSounds";
 import { analyzeUnexplained, silenceThresholdDb, speechMedianDb, type ClassifiedSound } from "@/lib/autoEdit/classifySound";
 import { planFillerCuts } from "@/lib/autoEdit/fillerCuts";
 import { emphasisLogEntries, planEmphasis } from "@/lib/autoEdit/emphasisMoments";
@@ -259,6 +260,7 @@ export default function EditScreen() {
     speechBaselineDb: number;
     umReport: UmCutReport;
     stretched?: StretchedReport;
+    adjacent?: AdjacentFinding[];
   } | null>(null);
 
   useEffect(() => {
@@ -2525,6 +2527,7 @@ export default function EditScreen() {
       alignment,
       umReport: aiDebug?.umReport,
       stretched: aiDebug?.stretched,
+      adjacent: aiDebug?.adjacent,
       protection: protectionReport(model.state),
       userCuts: model.state.decisions.filter((d) => d.type === "umCut" && d.origin === "user"),
       transcription: captions.transcriptionInfo,
@@ -2610,6 +2613,7 @@ export default function EditScreen() {
           silenceThresholdDb: thresholdDb,
           cuts: appliedCutRanges(merged.state),
         });
+        const adjacent = analyzeAdjacent(loud.windows, 20, words, thresholdDb, speechMedianDb({ windows: loud.windows, windowMs: 20, words, thresholdDb })).findings;
         const alignment = checkAlignment(loud.windows, 20, words, thresholdDb);
         const speechBaselineDb = speechMedianDb({ windows: loud.windows, windowMs: 20, words, thresholdDb });
         console.log("[timeline]", JSON.stringify({ alignment, speechBaselineDb, thresholdDb }));
@@ -2620,7 +2624,7 @@ export default function EditScreen() {
         );
         console.log("[ums]", JSON.stringify(umPlan.report));
         console.log("[stretched]", JSON.stringify(stretchedPlan.report.words.map((s) => [s.text, s.durationMs, Math.round(s.expectedMs), s.dipFound, s.cut ?? null])));
-        setAiDebug({ proposals, candidates, alignment, speechBaselineDb, umReport: umPlan.report, stretched: stretchedPlan.report });
+        setAiDebug({ proposals, candidates, alignment, speechBaselineDb, umReport: umPlan.report, stretched: stretchedPlan.report, adjacent });
       } catch (e) {
         console.warn("[edit] hook/filler planning failed", (e as Error)?.message ?? e);
       } finally {
