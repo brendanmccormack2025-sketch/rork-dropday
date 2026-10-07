@@ -126,6 +126,17 @@ export function resolveOverlayStyle(kind: "text" | "caption", styleId?: string):
 }
 
 /**
+ * The spec sent to the native renderer. A caption never gets both fades at 0: the
+ * renderer's discrete (hard cut) path leaves captions visible after their end, so a
+ * caption fades for 1 ms, which takes the minimum-fade path.
+ */
+function renderSpec(kind: "text" | "caption", styleId?: string): OverlayStyleSpec {
+  const spec = resolveOverlayStyle(kind, styleId);
+  if (kind !== "caption") return spec;
+  return { ...spec, fadeInMs: Math.max(1, spec.fadeInMs ?? 0), fadeOutMs: Math.max(1, spec.fadeOutMs ?? 0) };
+}
+
+/**
  * EditInstructions -> the JSON the native renderer takes: text and caption
  * overlays get their preset resolved into `styleSpec`.
  */
@@ -134,7 +145,7 @@ export function toRenderJson(instructions: EditInstructions): string {
     ...instructions,
     overlays: instructions.overlays.map((o) =>
       o.kind === "text" || o.kind === "caption"
-        ? { ...o, styleSpec: resolveOverlayStyle(o.kind, o.style) }
+        ? { ...o, styleSpec: renderSpec(o.kind, o.style) }
         : o,
     ),
   });

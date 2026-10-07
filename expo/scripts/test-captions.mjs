@@ -8,6 +8,7 @@
  */
 import { groupWordsIntoLines, captionLinesToOverlays, wordsToCaptionOverlays } from "../lib/captions.ts";
 import { keepRangesToClips } from "../lib/editModel.ts";
+import { toRenderJson } from "../lib/editStyles.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -67,6 +68,17 @@ eq(
   captionLinesToOverlays([{ text: "x", startMs: 700, endMs: 1500, words: [{ text: "x", startMs: 700, endMs: 1500 }] }], cut, URI)[0].endMs,
   1500,
 );
+
+// ── render JSON: a caption never has both fades at 0 (the native hard-cut path leaves captions on screen) ──
+{
+  const overlay = (kind, style) => ({ kind, text: "hi", startMs: 0, endMs: 1000, style });
+  const json = JSON.parse(toRenderJson({ version: 1, clips: [], overlays: [overlay("caption", "trial"), overlay("caption", "minimal"), overlay("caption", "creator"), overlay("text", "title")] }));
+  const fades = json.overlays.map((o) => [o.styleSpec.fadeInMs, o.styleSpec.fadeOutMs]);
+  eq("the trial caption (fades 0/0 in the preset) is sent with 1 ms fades", fades[0], [1, 1]);
+  eq("captions with real fades keep them", [fades[1], fades[2]], [[120, 120], [80, 80]]);
+  eq("no caption overlay is sent with fadeInMs and fadeOutMs both 0", json.overlays.filter((o) => o.kind === "caption").every((o) => !(o.styleSpec.fadeInMs === 0 && o.styleSpec.fadeOutMs === 0)), true);
+  eq("text overlays are untouched", fades[3], [200, 200]);
+}
 
 if (failed > 0) {
   console.error(`\n${failed} test(s) failed`);
