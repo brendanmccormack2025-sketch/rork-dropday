@@ -182,7 +182,7 @@ const ASPECT = 16 / 9;
   const fresh = newEditState("u");
   eq("clearing a state without a style changes nothing", clearCaptionStyle(fresh) === fresh, true);
   // a box too tall for the zone stays inside it (not thrown to the middle)
-  const tall = clampCaptionStyle({ scale: 2, yCenter: 0.12, xCenter: 0.5 }, 0.3);
+  const tall = clampCaptionStyle({ scale: 2, yCenter: 0.12, xCenter: 0.5 }, 0.2);
   eq("a box taller than the zone keeps its centre inside the zone", [tall.yCenter >= 0.1, tall.yCenter <= 0.75, tall.yCenter], [true, true, 0.12]);
 }
 
