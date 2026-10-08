@@ -103,6 +103,7 @@ import { MANUAL_EDIT_CONFIRM_MESSAGE, guardManualEdits, timelineMatchesState } f
 import { addManualCut } from "@/lib/autoEdit/decisions";
 import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/lib/autoEdit/deletePart";
 import { analysisSource, loadLoudnessChecked } from "@/lib/mergeTiming";
+import { AUTO_EDIT_STALL_MS, transcriptionGate } from "@/lib/captionsGate";
 import { aiBoundariesOf, describeEdgeDrag, reshapeCutAtEdge } from "@/lib/autoEdit/reshape";
 import { buildSeamHandles, remapOverlayTimes, type SeamEdgeInfo } from "@/lib/autoEdit/seams";
 import { allCategoriesOff, cutCategoriesOff, cutsRows, cutsSummary, setCutsRowEnabled, type CutsRow } from "@/lib/autoEdit/editPanel";
@@ -512,6 +513,8 @@ export default function EditScreen() {
   // then render-ahead starts with the captions in it.
   const [autoEditRunning, setAutoEditRunning] = useState(false);
   const [autoEditFinished, setAutoEditFinished] = useState(false);
+  // The silence-cut step took too long: it stops holding the transcript back (and is logged).
+  const [autoEditStalled, setAutoEditStalled] = useState(false);
   const firstClip0 = clips[0];
   const autoEditPossible =
     AUTO_EDIT_ENABLED &&
@@ -540,7 +543,7 @@ export default function EditScreen() {
   const captions = useCaptions(
     features.transcription,
     clips,
-    mergeUi.kind === "idle" && !autoEditRunning && (autoEditFinished || !autoEditPossible),
+    transcriptionGate({ merge: mergeUi.kind, autoEditPossible, autoEditRunning, autoEditFinished, autoEditStalled }).ready,
     captionStyle,
     {
       wordEdits: editModel ? (editModel.state.captionEdits ?? NO_EDITS) : (localCaption.edits ?? NO_EDITS),
@@ -2539,6 +2542,24 @@ export default function EditScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clips, user?.id, reactingTo, rootDropId, draftId, mergeUi.kind]);
 
+  // Watchdog: if the silence-cut step has not finished a while after the merge, the transcript no longer waits
+  // for it, and what the editor knew is logged (so "Transcription: not run" can be explained).
+  const autoEditStateRef = useRef({ running: false, started: false, clips: 0 });
+  autoEditStateRef.current = { running: autoEditRunning, started: autoEditStartedRef.current, clips: clips.length };
+  useEffect(() => {
+    if (!autoEditPossible || autoEditFinished || autoEditStalled || mergeUi.kind !== "idle") return;
+    const timer = setTimeout(() => {
+      if (!mountedRef.current) return;
+      setAutoEditStalled(true);
+      void recordClientError(new Error("auto edit did not finish; transcription no longer waits for it"), {
+        kind: "autoEditStalled",
+        merged: !!mergedRef.current,
+        ...autoEditStateRef.current,
+      });
+    }, AUTO_EDIT_STALL_MS);
+    return () => clearTimeout(timer);
+  }, [autoEditPossible, autoEditFinished, autoEditStalled, mergeUi.kind]);
+
   // ── AI edits panel, timeline markers, undo/redo (lib/autoEdit/) ───────────────
   const isOwnerAccount = features.debugView;
   // Markers and the panel's counts describe the model; they are drawn only while the
@@ -2927,13 +2948,14 @@ export default function EditScreen() {
       protection: protectionReport(model.state),
       userCuts: model.state.decisions.filter((d) => d.type === "umCut" && d.origin === "user"),
       transcription: captions.transcriptionInfo,
+      transcriptionWaitingFor: transcriptionGate({ merge: mergeUi.kind, autoEditPossible, autoEditRunning, autoEditFinished, autoEditStalled }).waitingFor,
       transcriptWords: captions.words,
       speechBaselineDb,
       hookTrims: model.state.decisions.filter((d) => d.type === "hookTrim" && d.state === "applied"),
       fillers: model.state.decisions.filter((d) => d.type === "fillerCut" && d.state === "applied"),
     });
     Share.share({ message: text }).catch(() => {});
-  }, [aiDebug, captions.words, captions.transcribedUri, captions.transcriptionInfo]);
+  }, [aiDebug, captions.words, captions.transcribedUri, captions.transcriptionInfo, mergeUi.kind, autoEditPossible, autoEditRunning, autoEditFinished, autoEditStalled]);
 
   // ── Auto-edit v2 (owner): decisions planned from the transcript ──────────────
   // Hook trim and filler cuts join the decision model (applied, each reversible) and

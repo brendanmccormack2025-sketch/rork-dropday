@@ -5,7 +5,8 @@ import {
   useCameraPermissions,
   useMicrophonePermissions,
 } from "expo-camera";
-import { cacheDirectory, documentDirectory, getInfoAsync } from "@/lib/fileSystemCompat";
+import { cacheDirectory, deleteAsync, documentDirectory, getInfoAsync } from "@/lib/fileSystemCompat";
+import { canRecordMore, deleteLastRun, maxDurationSeconds } from "@/lib/cameraSegments";
 import * as Haptics from "expo-haptics";
 
 export type Clip = {
@@ -14,7 +15,10 @@ export type Clip = {
   type: "image" | "video";
   durationMs?: number;
   draftId?: string;
+  /** The record-to-pause run this clip belongs to (a camera flip splits a run into several files). */
   recordingSessionId?: string;
+  /** How long the recorder ran for this file (ms, measured on the phone's clock; the editor measures the real length). */
+  measuredMs?: number;
 };
 
 /** Prevent rapid-fire start/stop causing corrupted recordings */
@@ -58,6 +62,9 @@ export function useCameraRecorder() {
   const [recordState, setRecordState] = useState<RecordState>("idle");
   const [isLocked, setIsLocked] = useState<boolean>(false);
   const [clips, setClips] = useState<Clip[]>([]);
+  /** Mirror of `clips` for the async recording loop (the cap is worked out from what is already recorded). */
+  const clipsRef = useRef<Clip[]>([]);
+  clipsRef.current = clips;
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(0);
   const [isMerging, setIsMerging] = useState<boolean>(false);
@@ -84,6 +91,8 @@ export function useCameraRecorder() {
   const stopRequestedRef = useRef<boolean>(false);
   /** Accumulates URIs from each segment of a multi-flip recording session */
   const accumulatedSegmentUrisRef = useRef<string[]>([]);
+  /** How long each of those files was recorded for (ms), same order. */
+  const accumulatedSegmentMsRef = useRef<number[]>([]);
   /** Stable ref mirror of micPermission — gesture callbacks read this, never the state */
   const micPermissionRef = useRef(micPermission);
 
@@ -204,6 +213,12 @@ export function useCameraRecorder() {
       return;
     }
 
+    // The 60 s cap: nothing more can be recorded once it is used up.
+    if (!canRecordMore(clipsRef.current)) {
+      setError("That's the 60 seconds. Tap Next, or delete the last clip to record more.");
+      return;
+    }
+
     const currentMic = micPermissionRef.current;
     if (!currentMic?.granted) {
       const res = await requestMicPermission();
@@ -239,6 +254,7 @@ export function useCameraRecorder() {
     recordSessionIdRef.current = `rs_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     recordingStartedAtRef.current = Date.now();
     accumulatedSegmentUrisRef.current = [];
+    accumulatedSegmentMsRef.current = [];
     triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
 
     // Recording loop — restarts on camera flip, exits on user stop or max duration.
@@ -285,10 +301,15 @@ export function useCameraRecorder() {
       }
 
       try {
-        const result = await cam.recordAsync({ maxDuration: MAX_VIDEO_SECONDS });
+        // The recorder stops by itself when the 60 s are used up (what is on disk plus this run so far).
+        const spentThisRun = accumulatedSegmentMsRef.current.reduce((n, ms) => n + ms, 0);
+        const startedAt = Date.now();
+        const result = await cam.recordAsync({ maxDuration: maxDurationSeconds(clipsRef.current, spentThisRun) });
+        const ranMs = Date.now() - startedAt;
 
         if (result?.uri) {
           accumulatedSegmentUrisRef.current.push(result.uri);
+          accumulatedSegmentMsRef.current.push(ranMs);
           // File validation is deferred to the finalize phase to avoid
           // blocking the recording loop at every flip boundary.
         } else {
@@ -378,16 +399,17 @@ export function useCameraRecorder() {
     const uris = accumulatedSegmentUrisRef.current;
     if (uris.length > 0) {
       const sessionId = recordSessionIdRef.current ?? undefined;
-      for (const uri of uris) {
+      uris.forEach((uri, i) => {
         const clip: Clip = {
           id: newClipId(),
           uri,
           type: "video",
           durationMs: undefined, // editor computes it per clip
           recordingSessionId: sessionId,
+          measuredMs: accumulatedSegmentMsRef.current[i],
         };
         appendClip(clip);
-      }
+      });
     }
 
     // NOW mark recording as idle — after clips are appended so the Next
@@ -449,6 +471,17 @@ export function useCameraRecorder() {
       lastTransitionRef.current = Date.now();
     }
   }, [canTransition, appendClip, getActiveCamera]);
+
+  /** "Delete last": remove the most recent run (all the files it made) and delete them from the phone. */
+  const deleteLastClip = useCallback((): void => {
+    if (recordStateRef.current !== "idle") return;
+    const { kept, removed } = deleteLastRun(clipsRef.current);
+    if (removed.length === 0) return;
+    clipsRef.current = kept;
+    setClips(kept);
+    setError(null);
+    for (const c of removed) deleteAsync(c.uri, { idempotent: true }).catch(() => {});
+  }, []);
 
   /** Clear clip list (e.g., after navigating away) */
   const clearClips = useCallback((): void => {
@@ -531,6 +564,7 @@ export function useCameraRecorder() {
     // Clips
     clips,
     clearClips,
+    deleteLastClip,
     // Zoom
     zoom,
     setZoom,

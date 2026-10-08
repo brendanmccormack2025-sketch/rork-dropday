@@ -27,10 +27,8 @@ import {
   X,
   Zap,
   ZapOff,
-  ChevronUp,
-  Lock,
   Repeat,
-  Square,
+  Trash2,
   ArrowRight,
   Reply,
 } from "lucide-react-native";
@@ -38,9 +36,8 @@ import {
 import PrimaryButton from "@/components/PrimaryButton";
 import { supabase } from "@/lib/supabase";
 import { theme } from "@/constants/theme";
-import { useCameraRecorder, type Clip, MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
-
-const LOCK_DRAG_DISTANCE = 70;
+import { useCameraRecorder, type Clip } from "@/hooks/useCameraRecorder";
+import { MAX_CAMERA_MS, barSegments, canProceed, tapAction, totalMs } from "@/lib/cameraSegments";
 
 /** Minimum hold duration (ms) before a touch on the capture button is
  *  interpreted as a hold-to-record gesture instead of a tap-to-capture.
@@ -99,13 +96,10 @@ export default function CameraScreen() {
     flipCamera,
     recordStateRef,
     isRecording,
-    isLocked,
-    isLockedRef,
     recordingStartedAtRef,
     startRecording,
     stopRecording,
-    lockRecording,
-    takePicture,
+    deleteLastClip,
     clips,
     zoom,
     setZoom,
@@ -123,7 +117,10 @@ export default function CameraScreen() {
   const progress = useRef(new Animated.Value(0)).current;
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const buttonScale = useRef(new Animated.Value(1)).current;
-  const lockDrag = useRef(new Animated.Value(0)).current;
+  const clipsRef = useRef<Clip[]>(clips);
+  clipsRef.current = clips;
+  /** Length of the run in progress (ms), for the segmented bar. */
+  const [liveMs, setLiveMs] = useState(0);
   /** Flip flash — a quick subtle white hint on camera flip. Not a full
    *  whiteout mask — just enough visual feedback so the user sees the
    *  flip registered instantly, fading out in ~180ms. */
@@ -202,34 +199,28 @@ export default function CameraScreen() {
   }, [setZoom, teardown]);
 
   // ─── Recording progress — driven by real elapsed time ───────────
+  // The ring and the segmented bar show the whole take (what is recorded plus the run in progress) against 60 s.
   useEffect(() => {
-    if (isRecording && !isLocked) {
-      progress.setValue(0);
-
+    if (isRecording) {
       progressIntervalRef.current = setInterval(() => {
-        // Read recordingStartedAtRef.current LIVE each tick so the ring
-        // smoothly resets if the camera flips mid-recording (auto-restart).
+        // Read recordingStartedAtRef.current LIVE each tick (it restarts only with a new run).
         const segStart = recordingStartedAtRef.current ?? Date.now();
-        const elapsed = Date.now() - segStart;
-        const pct = Math.min(elapsed / (MAX_VIDEO_SECONDS * 1000), 1);
-        progress.setValue(pct);
-      }, 50);
+        const live = Math.max(0, Date.now() - segStart);
+        setLiveMs(live);
+        progress.setValue(Math.min((totalMs(clipsRef.current) + live) / MAX_CAMERA_MS, 1));
+      }, 100);
 
       return () => {
         if (progressIntervalRef.current) {
           clearInterval(progressIntervalRef.current);
           progressIntervalRef.current = null;
         }
-        progress.setValue(0);
       };
-    } else if (!isRecording) {
-      progress.setValue(0);
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = null;
-      }
     }
-  }, [isRecording, isLocked, progress, recordingStartedAtRef]);
+    setLiveMs(0);
+    progress.setValue(Math.min(totalMs(clipsRef.current) / MAX_CAMERA_MS, 1));
+    return undefined;
+  }, [isRecording, clips, progress, recordingStartedAtRef]);
 
   // ─── Button scale animation ─────────────────────────────────────
   useEffect(() => {
@@ -247,20 +238,6 @@ export default function CameraScreen() {
       }).start();
     }
   }, [isRecording, buttonScale]);
-
-  // ─── Front flash for photo capture ───────────────────────────
-
-  const triggerFrontFlashPhoto = useCallback(() => {
-    if (frontFlashAnimRef.current) frontFlashAnimRef.current.stop();
-    frontFlashHighlightOpacity.setValue(1);
-    frontFlashAnimRef.current = Animated.timing(frontFlashHighlightOpacity, {
-      toValue: 0,
-      duration: 380,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    });
-    frontFlashAnimRef.current.start();
-  }, [frontFlashHighlightOpacity]);
 
   // ─── Recording screen flash for front camera ─────────────────
 
@@ -282,19 +259,16 @@ export default function CameraScreen() {
 
   // ─── Gesture handlers ──────────────────────────────────────────
 
+  // Tap = start, tap again = pause, tap again = continue (each run is a segment). Hold = record while held, release = pause.
   const handleLongPressStart = useCallback(() => {
     try {
-      if (isLockedRef.current) {
-        stopRecording();
-        return;
-      }
       didLongPress.current = false;
       isTouchDownRef.current = true;
       if (longPressTimer.current) clearTimeout(longPressTimer.current);
+      // Already recording (a tap started it): this touch is the pause tap, nothing to arm.
+      if (recordStateRef.current !== "idle") return;
       longPressTimer.current = setTimeout(() => {
-        // Abort if the finger has already lifted — this was a genuine
-        // tap that outlasted the threshold, not a hold-to-record intent.
-        // handleRelease has already run the photo path by now.
+        // The finger lifted before the threshold: it was a tap, handled on release.
         if (!isTouchDownRef.current) {
           longPressTimer.current = null;
           return;
@@ -309,62 +283,30 @@ export default function CameraScreen() {
       console.error("[camera] handleLongPressStart error:", e);
       setError("Something went wrong. Please try again.");
     }
-  }, [startRecording, stopRecording, setError]);
-
-  const handleDragMove = useCallback(
-    (_: unknown, g: { dy: number }) => {
-      try {
-        if (recordStateRef.current !== "recording" && recordStateRef.current !== "stopping") return;
-        if (isLockedRef.current) return;
-        const upward = -g.dy;
-        const pct = Math.max(0, Math.min(1, upward / LOCK_DRAG_DISTANCE));
-        lockDrag.setValue(pct);
-        if (upward >= LOCK_DRAG_DISTANCE) {
-          lockRecording();
-          Animated.spring(lockDrag, {
-            toValue: 1,
-            useNativeDriver: false,
-            friction: 6,
-          }).start();
-        }
-      } catch (e) {
-        console.error("[camera] handleDragMove error:", e);
-      }
-    },
-    [lockDrag, lockRecording]
-  );
+  }, [startRecording, recordStateRef, setError]);
 
   const handleRelease = useCallback(() => {
     try {
-      // Mark finger up FIRST — so a still-pending long-press timer
-      // (which checks isTouchDownRef) aborts instead of racing into
-      // startRecording() after we've already decided this is a tap.
+      // Mark finger up FIRST so a pending long-press timer aborts instead of racing into startRecording().
       isTouchDownRef.current = false;
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
         longPressTimer.current = null;
       }
-      if (isLockedRef.current) return;
-      if (didLongPress.current || recordStateRef.current === "recording") {
+      const action = didLongPress.current ? "pause" : tapAction(recordStateRef.current);
+      if (action === "pause") {
         stopRecording();
-      } else {
-        if (torch && facing === "front") {
-          triggerFrontFlashPhoto();
-        }
-        takePicture().catch((e) => {
-          console.error("[camera] takePicture failed:", e);
+      } else if (action === "start") {
+        startRecording().catch((e) => {
+          console.error("[camera] startRecording failed:", e);
+          setError(e instanceof Error ? e.message : "Recording failed to start.");
         });
       }
-      Animated.timing(lockDrag, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: false,
-      }).start();
     } catch (e) {
       console.error("[camera] handleRelease error:", e);
       setError("Something went wrong. Please try again.");
     }
-  }, [stopRecording, takePicture, lockDrag, torch, facing, triggerFrontFlashPhoto, setError]);
+  }, [stopRecording, startRecording, recordStateRef, setError]);
 
   const handleTerminate = useCallback(() => {
     try {
@@ -373,18 +315,12 @@ export default function CameraScreen() {
         clearTimeout(longPressTimer.current);
         longPressTimer.current = null;
       }
-      if (!isLockedRef.current && recordStateRef.current === "recording") {
-        stopRecording();
-      }
-      Animated.timing(lockDrag, {
-        toValue: isLockedRef.current ? 1 : 0,
-        duration: 180,
-        useNativeDriver: false,
-      }).start();
+      // A hold that is taken away pauses; a tap-started recording keeps going.
+      if (didLongPress.current && recordStateRef.current === "recording") stopRecording();
     } catch (e) {
       console.error("[camera] handleTerminate error:", e);
     }
-  }, [stopRecording, lockDrag]);
+  }, [stopRecording, recordStateRef]);
 
   const capturePan = useMemo(
     () =>
@@ -393,11 +329,10 @@ export default function CameraScreen() {
         onMoveShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: handleLongPressStart,
-        onPanResponderMove: (_e, g) => handleDragMove(_e, g),
         onPanResponderRelease: handleRelease,
         onPanResponderTerminate: handleTerminate,
       }),
-    [handleLongPressStart, handleDragMove, handleRelease, handleTerminate]
+    [handleLongPressStart, handleRelease, handleTerminate]
   );
 
   // ─── Flip camera with flash ───────────────────────────────────
@@ -516,19 +451,19 @@ export default function CameraScreen() {
   }, [router, teardown]);
 
   const goToEdit = useCallback(async () => {
-    if (clips.length === 0) return;
+    if (!canProceed(clips)) return;
 
     // No getInfoAsync validation here — the files were just written by
     // recordAsync and the editor's Video component will surface any load
     // errors. The redundant check added 100-250ms of blocking before
     // navigation, causing a visible black flash on the camera screen.
+    // The recorder's own timing is only for the bar; the editor measures the real lengths.
+    const forEditor = clips.map(({ measuredMs: _m, ...clip }) => clip);
     const params: Record<string, string> = {
-      clips: JSON.stringify(clips),
+      clips: JSON.stringify(forEditor),
     };
     if (reactingTo) params.reactingTo = reactingTo;
     if (rootDropId) params.rootDropId = rootDropId;
-
-    params.clips = JSON.stringify(clips);
 
     router.push({
       pathname: "/edit",
@@ -536,6 +471,14 @@ export default function CameraScreen() {
     });
   }, [clips, reactingTo, rootDropId, router]);
 
+
+  // "Delete last": confirm, then the most recent run (and its files) is removed. Repeatable.
+  const confirmDeleteLast = useCallback(() => {
+    Alert.alert("Delete last clip?", undefined, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: deleteLastClip },
+    ]);
+  }, [deleteLastClip]);
 
   // ─── Permissions: loading ──────────────────────────────────────
 
@@ -681,18 +624,24 @@ export default function CameraScreen() {
         ]}
       />
 
-      {/* Front flash highlight — brief bright flash for photo capture */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFill,
-          { zIndex: 7, backgroundColor: "#fff", opacity: frontFlashHighlightOpacity },
-        ]}
-      />
+      {/* Segmented progress bar: the whole take against 60 s, a notch where each run starts */}
+      <View style={[styles.segBar, { top: insets.top + 6 }]} pointerEvents="none" accessibilityLabel="Recording progress">
+        {barSegments(clips, isRecording ? { ms: liveMs } : undefined).map((seg, i) => (
+          <View
+            key={i}
+            style={[
+              styles.segFill,
+              { left: `${seg.startFrac * 100}%`, width: `${Math.max(0.4, seg.widthFrac * 100)}%` },
+              seg.live && styles.segFillLive,
+              i > 0 && styles.segNotch,
+            ]}
+          />
+        ))}
+      </View>
 
       {/* Top bar */}
       <View
-        style={[styles.cameraTop, { top: insets.top + 14 }]}
+        style={[styles.cameraTop, { top: insets.top + 22 }]}
         pointerEvents="box-none"
       >
         <View style={styles.topSideLeft}>
@@ -737,7 +686,7 @@ export default function CameraScreen() {
           style={[styles.hintWrap, { bottom: insets.bottom + 210 }]}
           pointerEvents="none"
         >
-          <UiText style={styles.hintText}>Tap to capture  ·  Hold to record  ·  Double-tap to flip</UiText>
+          <UiText style={styles.hintText}>Tap to record  ·  Tap again to pause  ·  Double-tap to flip</UiText>
         </View>
       )}
 
@@ -761,11 +710,11 @@ export default function CameraScreen() {
       {/* Recording indicator — hidden during merge so only the processing overlay shows */}
       {isRecording && !isMerging && (
         <View
-          style={[styles.recTimerWrap, { top: insets.top + 74 }]}
+          style={[styles.recTimerWrap, { top: insets.top + 80 }]}
           pointerEvents="none"
         >
           <View style={styles.recDot} />
-          <UiText style={styles.recTimerText}>REC</UiText>
+          <UiText style={styles.recTimerText}>{`REC  ${Math.min(60, Math.floor((totalMs(clips) + liveMs) / 1000))}s`}</UiText>
         </View>
       )}
 
@@ -788,7 +737,10 @@ export default function CameraScreen() {
         >
           <Pressable
             onPress={goToEdit}
-            style={styles.nextBtn}
+            disabled={!canProceed(clips)}
+            style={[styles.nextBtn, !canProceed(clips) && styles.nextBtnDisabled]}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canProceed(clips) }}
             accessibilityLabel="Proceed to editor"
           >
             <UiText style={styles.nextBtnText}>Next</UiText>
@@ -803,50 +755,6 @@ export default function CameraScreen() {
         style={[styles.cameraBottom, { paddingBottom: insets.bottom + 28 }]}
         pointerEvents="box-none"
       >
-
-        {/* Drag-to-lock hint */}
-        {isRecording && !isLocked && (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.lockHint,
-              {
-                opacity: lockDrag.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.7, 1],
-                }),
-                transform: [
-                  {
-                    translateY: lockDrag.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, -22],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          >
-            <Animated.View
-              style={{
-                opacity: lockDrag.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.4, 1],
-                }),
-              }}
-            >
-              <ChevronUp color={theme.accent} size={22} strokeWidth={2.5} />
-            </Animated.View>
-            <UiText style={styles.lockHintText}>Slide up to lock</UiText>
-          </Animated.View>
-        )}
-
-        {/* Locked indicator */}
-        {isRecording && isLocked && (
-          <View style={styles.lockedPill} pointerEvents="none">
-            <Lock color={theme.accent} size={11} />
-            <UiText style={styles.lockedPillText}>LOCKED · TAP TO STOP</UiText>
-          </View>
-        )}
 
         {/* Capture button */}
         <Animated.View
@@ -885,21 +793,27 @@ export default function CameraScreen() {
             style={[
               styles.captureBtn,
               isRecording && styles.captureBtnRecording,
-              isLocked && styles.captureBtnLocked,
             ]}
           >
-            {isLocked ? (
-              <Square color="#fff" size={22} fill="#fff" />
-            ) : (
-              <View
-                style={[
-                  styles.captureInner,
-                  isRecording && styles.captureInnerRecording,
-                ]}
-              />
-            )}
+            <View
+              style={[
+                styles.captureInner,
+                isRecording && styles.captureInnerRecording,
+              ]}
+            />
           </View>
         </Animated.View>
+
+        {clips.length > 0 && !isRecording && (
+          <Pressable
+            onPress={confirmDeleteLast}
+            style={[styles.deleteLastBtn, { bottom: insets.bottom + 28 + (RING_WRAP - 48) / 2 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Delete last clip"
+          >
+            <Trash2 color="#fff" size={20} />
+          </Pressable>
+        )}
 
         {error && <UiText style={styles.cameraErrorText}>{error}</UiText>}
       </View>
@@ -979,6 +893,31 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.6,
     shadowRadius: 10,
+  },
+  nextBtnDisabled: { opacity: 0.4, shadowOpacity: 0 },
+  segBar: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    height: 4,
+    backgroundColor: "rgba(255,255,255,0.28)",
+    zIndex: 11,
+  },
+  segFill: { position: "absolute", top: 0, bottom: 0, backgroundColor: theme.accent },
+  segFillLive: { opacity: 0.9 },
+  // A notch (a gap in the fill) at the start of each run after the first.
+  segNotch: { borderLeftWidth: 2, borderLeftColor: "#fff" },
+  deleteLastBtn: {
+    position: "absolute",
+    left: 36,
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(10,10,10,0.5)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
+    zIndex: 12,
   },
   nextBtnText: {
     color: "#fff",

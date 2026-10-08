@@ -53,6 +53,8 @@ export type AiDebugInput = {
   userCuts?: Decision[];
   /** How the transcription of this clip went. */
   transcription?: TranscriptionInfo | null;
+  /** Why the transcription has not started, when it has not (shown after "not run"). */
+  transcriptionWaitingFor?: string | null;
   /** The transcript after dedupe (ms on the source clip). */
   transcriptWords?: Array<{ text: string; startMs: number; endMs: number }> | null;
 };
@@ -84,7 +86,7 @@ export function formatAiDebug(input: AiDebugInput): string {
       for (const w of input.transcriptWords) lines.push(`  ${formatClock(w.startMs)}-${formatClock(w.endMs)}  ${w.text}`);
     }
   } else if (input.transcription === null) {
-    lines.push("Transcription: not run");
+    lines.push(`Transcription: not run${input.transcriptionWaitingFor ? ` (waiting for ${input.transcriptionWaitingFor})` : ""}`);
   }
   // The transcript alignment summary.
   const a = input.alignment;

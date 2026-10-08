@@ -8,7 +8,6 @@
  */
 import { readFileSync } from "node:fs";
 import { MERGE_FAILED_TEXT, mergeVideoClips, shouldMerge } from "../lib/mergeClips.ts";
-import { MAX_IMPORT_VIDEOS, moveItem, removeItem, totalDurationMs, validateSelection } from "../lib/importSelection.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -63,7 +62,7 @@ const newId = () => `m${++idSeq}`;
 
   ok("the editor shows Preparing your video… with progress, and Retry on a failure", /MERGE_PREPARING_TEXT/.test(edit) && /accessibilityLabel="Retry"/.test(edit) && /handleMergeRetry/.test(edit));
   ok("a failure is recorded and never throws out of the screen", /recordClientError\(new Error\(result\.message\), \{ kind: "mergeClips"/.test(edit));
-  ok("captions and the render-ahead wait for the merge", /mergeUi\.kind === "idle" && !autoEditRunning/.test(edit) && /hold: captionsBusy \|\| mergeUi\.kind !== "idle"/.test(edit));
+  ok("captions and the render-ahead wait for the merge", /transcriptionGate\(\{ merge: mergeUi\.kind/.test(edit) && /hold: captionsBusy \|\| mergeUi\.kind !== "idle"/.test(edit));
   ok("a draft is not merged again", /shouldMerge\(initialClips, \{ isDraft: !!draftId \}\)/.test(edit));
   ok("the originals are kept: the merge never deletes a source", !/deleteAsync\(originalClipsRef/.test(edit) && /originalClipsRef/.test(edit));
   const nat = read("../lib/mergeNative.ts");
@@ -80,37 +79,11 @@ const newId = () => `m${++idSeq}`;
   ok("the final edited video is still saved by the Save to camera roll switch", /startPostExport\(/.test(edit));
 }
 
-// ── camera roll multi-select ──
+// ── camera roll: one video only (MVP) ──
 {
-  let n = 0;
-  const id = () => `i${++n}`;
-  const a = (uri, duration, type = "video") => ({ uri, duration, type });
-  const three = validateSelection([a("b.mov", 5000), a("a.mov", 7000), a("c.mov", 3000)], 300000, id);
-  eq("several videos keep the order they were picked", [three.ok, three.kind, three.clips.map((c) => c.uri)], [true, "multi", ["b.mov", "a.mov", "c.mov"]]);
-  eq("durations are carried (ms)", three.clips.map((c) => c.durationMs), [5000, 7000, 3000]);
-  eq("one video or photo is the single path, as before", [validateSelection([a("a.mov", 5000)], 300000, id).kind, validateSelection([a("p.jpg", null, "image")], 300000, id).kind], ["single", "single"]);
-  const mixed = validateSelection([a("a.mov", 5000), a("p.jpg", null, "image")], 300000, id);
-  eq("videos only when several are picked", [mixed.ok, mixed.reason], [false, "mixed"]);
-  const long = validateSelection([a("a.mov", 200000), a("b.mov", 150000)], 300000, id);
-  eq("the total length across all videos is limited (300 s)", [long.ok, long.reason], [false, "too-long"]);
-  eq("exactly at the limit is allowed", validateSelection([a("a.mov", 150000), a("b.mov", 150000)], 300000, id).ok, true);
-  eq("one video over the limit is refused as before", validateSelection([a("a.mov", 400000)], 300000, id).reason, "too-long");
-  eq("at most 10 videos", [MAX_IMPORT_VIDEOS, validateSelection(Array.from({ length: 11 }, (_, i) => a(`${i}.mov`, 1000)), 300000, id).reason, validateSelection(Array.from({ length: 10 }, (_, i) => a(`${i}.mov`, 1000)), 300000, id).ok], [10, "too-many", true]);
-  eq("an empty pick is refused", validateSelection([], 300000, id).reason, "empty");
-
-  // Arrange
-  const list = ["x", "y", "z"];
-  eq("Arrange: move a clip earlier / later", [moveItem(list, 2, 0), moveItem(list, 0, 1)], [["z", "x", "y"], ["y", "x", "z"]]);
-  eq("moves are clamped and never change the original list", [moveItem(list, 0, -5), moveItem(list, 1, 99), list], [["x", "y", "z"], ["x", "z", "y"], ["x", "y", "z"]]);
-  eq("Arrange: remove a clip", removeItem(list, 1), ["x", "z"]);
-  eq("the total duration", totalDurationMs([{ durationMs: 1000 }, { durationMs: 2500 }, {}]), 3500);
-
   const sheet = read("../components/PostChoiceSheet.tsx");
-  ok("the picker allows several, ordered, up to 10", /allowsMultipleSelection: !photoCompatible/.test(sheet) && /orderedSelection: true, selectionLimit: MAX_IMPORT_VIDEOS/.test(sheet));
-  ok("the pick is validated (total duration, videos only) before anything opens", /validateSelection\(result\.assets, MAX_VIDEO_SECONDS \* 1000, newClipId\)/.test(sheet));
-  ok("several videos go to the Arrange step first; Combine continues to the editor in that order", /setArranging\(checked\.clips\)/.test(sheet) && /params: \{ clips: JSON\.stringify\(list\) \}/.test(sheet));
-  const arrange = read("../components/ArrangeClips.tsx");
-  ok("Arrange has reorder and remove controls with 44 pt targets and a Combine button", /Move clip/.test(arrange) && /Remove clip/.test(arrange) && /width: 44, height: 44/.test(arrange) && /Combine/.test(arrange));
+  ok("the picker takes one item, no multi-select and no Arrange step", /allowsMultipleSelection: false/.test(sheet) && !/orderedSelection|selectionLimit|ArrangeClips|validateSelection/.test(sheet));
+  ok("a video over the existing single-video limit is refused", /\(asset\.duration \?\? 0\) > MAX_VIDEO_SECONDS \* 1000/.test(sheet));
 }
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
