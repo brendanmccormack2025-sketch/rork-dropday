@@ -71,7 +71,7 @@ import { cancelRender } from "@/modules/video-render";
 import { recordClientError } from "@/lib/clientErrors";
 import { POST_FAILED_TEXT, renderWithCaptionFallback, safePost, type RenderStepResult } from "@/lib/safePost";
 import type { EditOverlay } from "@/lib/editModel";
-import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
+import { startPostExport } from "@/lib/exportEdit";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
 import { analysis } from "@/lib/autoEdit/analysis";
 import {
@@ -119,7 +119,7 @@ import { planHookTrim } from "@/lib/autoEdit/hookTrim";
 import { silenceCutsFromDetection } from "@/lib/autoEdit/silenceCuts";
 import { keepRangesToClips } from "@/lib/editModel";
 import { SENSITIVITY_PRESETS, detectSilences, type Sensitivity } from "@/lib/silenceDetection";
-import { getAutoEditEnabled, getAutoEditSensitivity, getSaveEditedToRoll, setAutoEditSensitivity } from "@/lib/autoEditSettings";
+import { getAutoEditEnabled, getAutoEditSensitivity, getSaveEditedToRoll, setAutoEditSensitivity, setSaveEditedToRoll } from "@/lib/autoEditSettings";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -358,6 +358,19 @@ export default function EditScreen() {
   });
 
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
+  // "Save to camera roll": on by default, remembered per user.
+  const [saveToRoll, setSaveToRoll] = useState(true);
+  const saveToRollRef = useRef(true);
+  saveToRollRef.current = saveToRoll;
+  useEffect(() => {
+    let alive = true;
+    void getSaveEditedToRoll(user?.id).then((v) => {
+      if (alive) setSaveToRoll(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
   const [textEditorVisible, setTextEditorVisible] = useState(false);
   const [liveText, setLiveText] = useState<{ text: string; backgroundStyle: TextBackgroundStyle } | null>(null);
   const [editingOverlayId, setEditingOverlayId] = useState<string | null>(null);
@@ -3108,18 +3121,6 @@ export default function EditScreen() {
             throw new Error("copy of the rendered file failed");
           }
           rendered = { ...rendered, uri: stableRender };
-          // Save the edited video to the camera roll once, in the background, only
-          // if the setting is on and photo permission is ALREADY granted (never
-          // prompts here). Raw recordings are saved elsewhere, unchanged.
-          void (async () => {
-            try {
-              if (!(await getSaveEditedToRoll())) return;
-              const permission = await getMediaLibrary()?.getPermissionsAsync();
-              if (permission?.granted) await saveToLibraryAsync(stableRender);
-            } catch (saveErr) {
-              if (__DEV__) console.log("[render] camera roll save skipped:", (saveErr as Error)?.message);
-            }
-          })();
         } catch (copyErr) {
           if (__DEV__) console.log("[render] could not stage the rendered file:", (copyErr as Error)?.message);
           rendered = null;
@@ -3271,6 +3272,19 @@ export default function EditScreen() {
           updateOptimisticProgress(tempId, percent);
         },
       });
+
+      // Save to camera roll: a dedicated export with cuts, captions and Text-button overlays burned in. It starts
+      // after the upload has started and never touches the post: any problem shows "Couldn't save to camera roll".
+      try {
+        void startPostExport({
+          enabled: saveToRollRef.current && Platform.OS !== "web",
+          clips,
+          captionOverlays: captionOverlaysForPost,
+          textOverlays,
+        }).catch((e) => void recordClientError(e, { kind: "saveToRoll", stage: "start" }));
+      } catch (e) {
+        void recordClientError(e, { kind: "saveToRoll", stage: "start" });
+      }
 
       // Internal testers: say what the render path did (a fixed-wording message, ~6 s).
       // Never post silently without captions the creator saw: say so, briefly.
@@ -3997,6 +4011,22 @@ export default function EditScreen() {
               On Trial, people who don't know you test your video. If it survives, it's pushed to more people for 24 hours.
             </UiText>
           )}
+          {isVideo && Platform.OS !== "web" && (
+            <View style={styles.saveRollRow}>
+              <UiText style={styles.saveRollText}>Save to camera roll</UiText>
+              <Switch
+                value={saveToRoll}
+                onValueChange={(v) => {
+                  setSaveToRoll(v);
+                  setSaveEditedToRoll(v, user?.id);
+                }}
+                trackColor={{ false: theme.border, true: theme.accent }}
+                thumbColor="#fff"
+                ios_backgroundColor={theme.border}
+                accessibilityLabel="Save to camera roll"
+              />
+            </View>
+          )}
           <View style={styles.actionRow}>
             <Pressable
               onPress={handleSaveDraftPress}
@@ -4507,6 +4537,13 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
+  saveRollRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingBottom: 8,
+  },
+  saveRollText: { color: theme.text, fontSize: 13, fontWeight: "600" as const },
   postBtn: {
     flex: 1,
     alignItems: "center",

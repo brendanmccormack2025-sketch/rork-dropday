@@ -81,7 +81,8 @@ public class VideoRenderModule: Module {
     Name("VideoRender")
 
     // Build capabilities the JS checks: captions can use a font by PostScript name (style "fontName").
-    // supportsTextBox: separate padding across/down and a fixed line height (style "backgroundPaddingX/Y", "lineHeight").
+    // supportsTextBox: separate padding across/down, a fixed line height, and a text overlay's own centre and rotation
+    // (style "backgroundPaddingX/Y", "lineHeight", "xCenter", "rotation").
     Constants {
       ["supportsCaptionFont": true, "supportsTextBox": true]
     }
@@ -414,7 +415,13 @@ private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
 
   let container = CALayer()
   container.bounds = CGRect(x: 0, y: 0, width: textWidth + 2 * padX, height: textHeight + 2 * padY)
-  container.position = CGPoint(x: size.width / 2, y: size.height * (1 - yFromTop))
+  // Build 1.0.4: the overlay's horizontal centre (a fraction of the width, default the middle) and a rotation in
+  // degrees, clockwise as on screen. Without these keys the overlay is centred and upright, as older builds drew it.
+  let xFrac = CGFloat(number(style["xCenter"]) ?? 0.5)
+  container.position = CGPoint(x: size.width * xFrac, y: size.height * (1 - yFromTop))
+  if let degrees = number(style["rotation"]), degrees != 0 {
+    container.transform = CATransform3DMakeRotation(-CGFloat(degrees) * .pi / 180, 0, 0, 1)
+  }
   if let bg = style["backgroundColor"] as? String {
     container.backgroundColor = color(bg, fallback: .clear).cgColor
   }

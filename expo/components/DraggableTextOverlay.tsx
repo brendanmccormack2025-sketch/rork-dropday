@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
-import { PanResponder, StyleSheet } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { StyleSheet } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -7,6 +8,7 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import type { TextOverlay, TextBackgroundStyle } from "@/providers/PostsProvider";
+import { clampScale, effectiveFontSize, resolveBgMeta as resolveBgMetaShared } from "@/lib/textOverlayStyle";
 import {
   TEXT_MAX_WIDTH,
   overlayFont,
@@ -34,32 +36,7 @@ function clamp(v: number, min: number, max: number): number {
 
 // ── Background style resolver ────────────────────────────────────────────────
 
-interface BgMeta {
-  bgColor: string;
-  textColor: string;
-  bgOpacity: number;
-  borderRadius: number;
-}
-
-function resolveBgMeta(
-  style: TextBackgroundStyle,
-  accentColor: string,
-): BgMeta {
-  switch (style) {
-    case "none-white":
-      return { bgColor: "transparent", textColor: "#FFFFFF", bgOpacity: 0, borderRadius: 0 };
-    case "none-black":
-      return { bgColor: "transparent", textColor: "#000000", bgOpacity: 0, borderRadius: 0 };
-    case "white-box":
-      return { bgColor: "#FFFFFF", textColor: "#000000", bgOpacity: 1, borderRadius: 0 };
-    case "black-box":
-      return { bgColor: "#000000", textColor: "#FFFFFF", bgOpacity: 1, borderRadius: 0 };
-    case "accent-box":
-      return { bgColor: accentColor, textColor: "#FFFFFF", bgOpacity: 1, borderRadius: 0 };
-    case "translucent-box":
-      return { bgColor: "#000000", textColor: "#FFFFFF", bgOpacity: 0.55, borderRadius: 0 };
-  }
-}
+const resolveBgMeta = resolveBgMetaShared;
 
 export const BG_STYLES: TextBackgroundStyle[] = [
   "none-white",
@@ -113,6 +90,7 @@ export default function DraggableTextOverlay({
   const translateX = useSharedValue(start.x);
   const translateY = useSharedValue(start.y);
   const fontSizeSv = useSharedValue(overlay.fontSize ?? 26);
+  const scaleSv = useSharedValue(clampScale(overlay.scale));
   const rotationSv = useSharedValue(overlay.rotation);
   const textWidth = useSharedValue(0);
   const textHeight = useSharedValue(0);
@@ -152,242 +130,142 @@ export default function DraggableTextOverlay({
     onDragState,
   };
 
-  // ── PanResponder — replaces all RNGH gestures ───────────────────────────
-  const panResponder = useMemo(() => {
-    // Mutable state inside the stable PanResponder closure
-    let _isDragging = false;
-    let _isPinching = false;
-    let _lastTapTime = 0;
-    let _tapTimer: ReturnType<typeof setTimeout> | null = null;
-    let _pinchInitialDist = 0;
-    let _pinchInitialAngle = 0;
-    let _pinchStartFs = 26;
-    let _rotationStartDeg = 0;
+  // Undo, redo or a new frame size change the overlay under us: follow it (never while a finger is down).
+  useEffect(() => {
+    if (isDraggingSv.value === 1) return;
+    const at = fracToFrame(overlay.x, overlay.y, frameWidth, frameHeight, crop);
+    translateX.value = at.x;
+    translateY.value = at.y;
+    scaleSv.value = clampScale(overlay.scale);
+    rotationSv.value = overlay.rotation;
+    fontSizeSv.value = overlay.fontSize ?? 26;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlay.x, overlay.y, overlay.scale, overlay.rotation, overlay.fontSize, frameWidth, frameHeight, crop.cropLeft, crop.cropTop, crop.visibleW, crop.visibleH]);
 
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onShouldBlockNativeResponder: () => false,
+  // ── Gestures: pan, pinch and rotate together (react-native-gesture-handler), tap to select ─────────
+  const gesture = useMemo(() => {
+    let active = 0;
+    let changed = false;
+    let baseScale = 1;
+    let baseRotation = 0;
 
-      onPanResponderGrant: (evt) => {
-        _isDragging = false;
-        _isPinching = false;
+    const begin = () => {
+      const p = propsRef.current;
+      if (active === 0) {
+        changed = false;
+        p.onEditStart?.(p.overlay.id);
+      }
+      active += 1;
+    };
 
-        const touches = evt.nativeEvent.touches;
+    const snapTo = (cx: number, cy: number) => {
+      const p = propsRef.current;
+      const frameCx = p.frameWidth / 2;
+      const frameCy = p.frameHeight / 2;
+      const nearX = Math.abs(cx - frameCx) < SNAP_THRESHOLD;
+      const nearY = Math.abs(cy - frameCy) < SNAP_THRESHOLD;
+      translateX.value = nearX ? frameCx : cx;
+      translateY.value = nearY ? frameCy : cy;
+      snapGuideV.value = withTiming(nearX ? 1 : 0, { duration: nearX ? 120 : 150 });
+      snapGuideH.value = withTiming(nearY ? 1 : 0, { duration: nearY ? 120 : 150 });
+      if (nearX || nearY) {
+        scalePulse.value = withSpring(1.08, { stiffness: 400, damping: 12 }, () => {
+          scalePulse.value = withSpring(1, { stiffness: 300, damping: 15 });
+        });
+      }
+    };
+
+    const commit = () => {
+      const p = propsRef.current;
+      const fw = p.frameWidth;
+      const fh = p.frameHeight;
+      const fx = clamp(translateX.value / fw, DRAG_EDGE_MARGIN, 1 - DRAG_EDGE_MARGIN);
+      const fy = clamp(translateY.value / fh, DRAG_EDGE_MARGIN, 1 - DRAG_EDGE_MARGIN);
+      const full = frameToFrac(fx * fw, fy * fh, fw, fh, p.crop);
+      p.onUpdate(p.overlay.id, {
+        x: full.x,
+        y: full.y,
+        scale: clampScale(scaleSv.value),
+        rotation: rotationSv.value,
+      });
+      p.onDragState?.(p.overlay.id, false, fx, fy);
+      isDraggingSv.value = 0;
+      snapGuideH.value = withTiming(0, { duration: 200 });
+      snapGuideV.value = withTiming(0, { duration: 200 });
+    };
+
+    const end = () => {
+      active = Math.max(0, active - 1);
+      if (active === 0 && changed) {
+        changed = false;
+        commit();
+      }
+    };
+
+    const pan = Gesture.Pan()
+      .runOnJS(true)
+      .minDistance(3)
+      .maxPointers(2)
+      .onStart(() => {
+        begin();
+        dragStartX.value = translateX.value;
+        dragStartY.value = translateY.value;
+        isDraggingSv.value = 1;
+      })
+      .onUpdate((e) => {
+        changed = true;
         const p = propsRef.current;
+        snapTo(dragStartX.value + e.translationX, dragStartY.value + e.translationY);
+        p.onDragState?.(p.overlay.id, true, translateX.value / p.frameWidth, translateY.value / p.frameHeight);
+      })
+      .onFinalize((_e, success) => {
+        if (success) end();
+      });
 
-        if (touches && touches.length >= 2) {
-          // Started with two fingers → pinch/rotate mode
-          _isPinching = true;
-          _isDragging = true;
-          p.onEditStart?.(p.overlay.id);
-          _pinchStartFs = fontSizeSv.value;
-          _rotationStartDeg = rotationSv.value;
+    const pinch = Gesture.Pinch()
+      .runOnJS(true)
+      .onStart(() => {
+        begin();
+        baseScale = scaleSv.value;
+      })
+      .onUpdate((e) => {
+        changed = true;
+        scaleSv.value = clampScale(baseScale * e.scale);
+      })
+      .onFinalize((_e, success) => {
+        if (success) end();
+      });
 
-          const t0 = touches[0]!;
-          const t1 = touches[1]!;
-          const dx = t0.pageX - t1.pageX;
-          const dy = t0.pageY - t1.pageY;
-          _pinchInitialDist = Math.sqrt(dx * dx + dy * dy);
-          _pinchInitialAngle = Math.atan2(dy, dx) * 180 / Math.PI;
-        } else {
-          // Single finger → prepare for pan or tap
-          dragStartX.value = translateX.value;
-          dragStartY.value = translateY.value;
-        }
-      },
+    const rotate = Gesture.Rotation()
+      .runOnJS(true)
+      .onStart(() => {
+        begin();
+        baseRotation = rotationSv.value;
+      })
+      .onUpdate((e) => {
+        changed = true;
+        rotationSv.value = baseRotation + (e.rotation * 180) / Math.PI;
+      })
+      .onFinalize((_e, success) => {
+        if (success) end();
+      });
 
-      onPanResponderMove: (evt, gs) => {
-        const touches = evt.nativeEvent.touches;
-        if (!touches) return;
+    const doubleTap = Gesture.Tap()
+      .runOnJS(true)
+      .numberOfTaps(2)
+      .maxDuration(300)
+      .onEnd((_e, success) => {
+        if (success) propsRef.current.onSelect(propsRef.current.overlay.id);
+      });
+    const singleTap = Gesture.Tap()
+      .runOnJS(true)
+      .maxDuration(300)
+      .onEnd((_e, success) => {
+        if (success) propsRef.current.onSelect(propsRef.current.overlay.id);
+      });
 
-        const p = propsRef.current;
-        const fw = p.frameWidth;
-        const fh = p.frameHeight;
-
-        // Transition from 1 → 2 fingers: switch to pinch/rotate
-        if (touches.length >= 2 && !_isPinching) {
-          _isPinching = true;
-          _isDragging = true;
-          p.onEditStart?.(p.overlay.id);
-          _pinchStartFs = fontSizeSv.value;
-          _rotationStartDeg = rotationSv.value;
-
-          const t0 = touches[0]!;
-          const t1 = touches[1]!;
-          const dx = t0.pageX - t1.pageX;
-          const dy = t0.pageY - t1.pageY;
-          _pinchInitialDist = Math.sqrt(dx * dx + dy * dy);
-          _pinchInitialAngle = Math.atan2(dy, dx) * 180 / Math.PI;
-          return;
-        }
-
-        // Pinch / rotate mode (2 fingers)
-        if (_isPinching && touches.length >= 2) {
-          const t0 = touches[0]!;
-          const t1 = touches[1]!;
-          const dx = t0.pageX - t1.pageX;
-          const dy = t0.pageY - t1.pageY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-
-          if (_pinchInitialDist > 0) {
-            fontSizeSv.value = clamp(
-              _pinchStartFs * (dist / _pinchInitialDist),
-              MIN_FONT_SIZE,
-              MAX_FONT_SIZE,
-            );
-          }
-          rotationSv.value = _rotationStartDeg + (angle - _pinchInitialAngle);
-          return;
-        }
-
-        // Pan mode (1 finger, not pinching)
-        if (touches.length === 1 && !_isPinching) {
-          // Threshold-based drag start
-          if (!_isDragging && (Math.abs(gs.dx) > 3 || Math.abs(gs.dy) > 3)) {
-            _isDragging = true;
-            p.onEditStart?.(p.overlay.id);
-            isDraggingSv.value = 1;
-            p.onDragState?.(
-              p.overlay.id,
-              true,
-              translateX.value / fw,
-              translateY.value / fh,
-            );
-          }
-
-          if (_isDragging) {
-            const cx = dragStartX.value + gs.dx;
-            const cy = dragStartY.value + gs.dy;
-            translateX.value = cx;
-            translateY.value = cy;
-
-            // Snap-to-center guides
-            const frameCx = fw / 2;
-            const frameCy = fh / 2;
-            const distX = Math.abs(cx - frameCx);
-            const distY = Math.abs(cy - frameCy);
-
-            if (distX < SNAP_THRESHOLD) {
-              translateX.value = frameCx;
-              snapGuideV.value = withTiming(1, { duration: 120 });
-            } else {
-              snapGuideV.value = withTiming(0, { duration: 150 });
-            }
-
-            if (distY < SNAP_THRESHOLD) {
-              translateY.value = frameCy;
-              snapGuideH.value = withTiming(1, { duration: 120 });
-            } else {
-              snapGuideH.value = withTiming(0, { duration: 150 });
-            }
-
-            // Snap pulse when either guide triggers
-            if (distX < SNAP_THRESHOLD || distY < SNAP_THRESHOLD) {
-              scalePulse.value = withSpring(
-                1.08,
-                { stiffness: 400, damping: 12 },
-                () => {
-                  scalePulse.value = withSpring(1, { stiffness: 300, damping: 15 });
-                },
-              );
-            }
-
-            p.onDragState?.(
-              p.overlay.id,
-              true,
-              translateX.value / fw,
-              translateY.value / fh,
-            );
-          }
-        }
-      },
-
-      onPanResponderRelease: () => {
-        const p = propsRef.current;
-        const fw = p.frameWidth;
-        const fh = p.frameHeight;
-
-        if (_isDragging || _isPinching) {
-          // ── Sync shared values back to React state ─────────────────
-          const tx = translateX.value;
-          const ty = translateY.value;
-          const centerX = fw / 2;
-          const centerY = fh / 2;
-
-          let snappedX = tx;
-          let snappedY = ty;
-
-          if (Math.abs(tx - centerX) < SNAP_THRESHOLD) {
-            snappedX = centerX;
-            translateX.value = withSpring(centerX, { stiffness: 300, damping: 25 });
-          }
-          if (Math.abs(ty - centerY) < SNAP_THRESHOLD) {
-            snappedY = centerY;
-            translateY.value = withSpring(centerY, { stiffness: 300, damping: 25 });
-          }
-
-          const fx = clamp(snappedX / fw, DRAG_EDGE_MARGIN, 1 - DRAG_EDGE_MARGIN);
-          const fy = clamp(snappedY / fh, DRAG_EDGE_MARGIN, 1 - DRAG_EDGE_MARGIN);
-          const full = frameToFrac(fx * fw, fy * fh, fw, fh, p.crop);
-          const newX = fx;
-          const newY = fy;
-
-          p.onUpdate(p.overlay.id, {
-            x: full.x,
-            y: full.y,
-            fontSize: fontSizeSv.value,
-            rotation: rotationSv.value,
-          });
-
-          p.onDragState?.(p.overlay.id, false, newX, newY);
-
-          isDraggingSv.value = 0;
-          snapGuideH.value = withTiming(0, { duration: 200 });
-          snapGuideV.value = withTiming(0, { duration: 200 });
-        } else {
-          // ── Tap detection ─────────────────────────────────────────
-          const now = Date.now();
-          if (now - _lastTapTime < 300) {
-            // Double tap
-            if (_tapTimer) {
-              clearTimeout(_tapTimer);
-              _tapTimer = null;
-            }
-            // Fire onSelect — the parent's handleSelectOverlay will see
-            // the overlay is already selected (from the double-tap) and
-            // open the editor if appropriate.
-            p.onSelect(p.overlay.id);
-          } else {
-            // Single tap — wait briefly to rule out double-tap
-            _lastTapTime = now;
-            if (_tapTimer) clearTimeout(_tapTimer);
-            _tapTimer = setTimeout(() => {
-              p.onSelect(p.overlay.id);
-              _tapTimer = null;
-            }, 300);
-          }
-        }
-
-        _isDragging = false;
-        _isPinching = false;
-      },
-
-      onPanResponderTerminate: () => {
-        if (_isDragging || _isPinching) {
-          isDraggingSv.value = 0;
-          snapGuideH.value = withTiming(0, { duration: 200 });
-          snapGuideV.value = withTiming(0, { duration: 200 });
-        }
-        if (_tapTimer) {
-          clearTimeout(_tapTimer);
-          _tapTimer = null;
-        }
-        _isDragging = false;
-        _isPinching = false;
-      },
-    });
+    return Gesture.Simultaneous(Gesture.Exclusive(doubleTap, singleTap), pan, pinch, rotate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Animated styles ─────────────────────────────────────────────────────
@@ -406,14 +284,14 @@ export default function DraggableTextOverlay({
 
   // The same function the feed and Preview use, so sizes, padding and line height cannot drift apart.
   const animatedTextStyle = useAnimatedStyle(() => {
-    const l = textLayout(fontSizeSv.value, videoW);
+    const l = textLayout(effectiveFontSize({ fontSize: fontSizeSv.value, scale: scaleSv.value }), videoW);
     return { fontSize: l.fontSize, lineHeight: l.lineHeight };
   });
   const animatedBoxStyle = useAnimatedStyle(() => ({
-    borderRadius: textLayout(fontSizeSv.value, videoW).cornerRadius,
+    borderRadius: textLayout(effectiveFontSize({ fontSize: fontSizeSv.value, scale: scaleSv.value }), videoW).cornerRadius,
   }));
   const animatedPadStyle = useAnimatedStyle(() => {
-    const l = textLayout(fontSizeSv.value, videoW);
+    const l = textLayout(effectiveFontSize({ fontSize: fontSizeSv.value, scale: scaleSv.value }), videoW);
     return { paddingHorizontal: l.padX, paddingVertical: l.padY, borderRadius: l.cornerRadius };
   });
 
@@ -462,10 +340,10 @@ export default function DraggableTextOverlay({
       style={[styles.overlayWrap, { width: slotW }, animatedStyle]}
       pointerEvents="box-none"
     >
+      <GestureDetector gesture={gesture}>
       <Animated.View
         style={[styles.box, animatedPadStyle]}
         onLayout={handleLayout}
-        {...panResponder.panHandlers}
       >
       {/* Background box */}
       {hasBackground && (
@@ -534,6 +412,7 @@ export default function DraggableTextOverlay({
         {overlay.text}
       </Animated.Text>
       </Animated.View>
+      </GestureDetector>
     </Animated.View>
   );
 }

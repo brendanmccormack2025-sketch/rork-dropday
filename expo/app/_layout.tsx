@@ -24,6 +24,7 @@ import {
 
 import { Montserrat_700Bold, Montserrat_800ExtraBold } from "@expo-google-fonts/montserrat";
 
+import SaveToRollToast from "@/components/SaveToRollToast";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import { PostsProvider } from "@/providers/PostsProvider";
@@ -249,6 +250,7 @@ export default function RootLayout() {
           <View style={{ flex: 1, backgroundColor: theme.bg }}>
             <StatusBar style="dark" />
             <RenderReportToast />
+            <SaveToRollToast />
             <AuthProvider>
               <UserBlocksProvider>
                 <PostsProvider>

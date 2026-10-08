@@ -49,7 +49,7 @@ export type RenderAheadOptions = {
  * for the first to finish (or be cancelled).
  */
 let nativeChain: Promise<void> = Promise.resolve();
-function acquireNative(): Promise<() => void> {
+export function acquireNative(): Promise<() => void> {
   let release: () => void = () => {};
   const prev = nativeChain;
   nativeChain = new Promise<void>((r) => {

@@ -32,15 +32,20 @@ export function setAutoEditEnabled(value: boolean): void {
   AsyncStorage.setItem(ENABLED_KEY, value ? "1" : "0").catch(() => {});
 }
 
-/** "Save my edited video to my camera roll" switch; on unless the user turned it off. */
-export async function getSaveEditedToRoll(): Promise<boolean> {
+/**
+ * "Save to camera roll" switch, remembered per user; on unless the user turned it off. A choice made before
+ * it was per user (the single old key) still counts until the user sets their own.
+ */
+export async function getSaveEditedToRoll(userId?: string | null): Promise<boolean> {
   try {
+    const own = userId ? await AsyncStorage.getItem(`${SAVE_EDITED_KEY}:${userId}`) : null;
+    if (own !== null) return own !== "0";
     return (await AsyncStorage.getItem(SAVE_EDITED_KEY)) !== "0";
   } catch {
     return true;
   }
 }
 
-export function setSaveEditedToRoll(value: boolean): void {
-  AsyncStorage.setItem(SAVE_EDITED_KEY, value ? "1" : "0").catch(() => {});
+export function setSaveEditedToRoll(value: boolean, userId?: string | null): void {
+  AsyncStorage.setItem(userId ? `${SAVE_EDITED_KEY}:${userId}` : SAVE_EDITED_KEY, value ? "1" : "0").catch(() => {});
 }

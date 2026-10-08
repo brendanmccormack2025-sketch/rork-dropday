@@ -75,7 +75,7 @@ for (const [label, text] of Object.entries(texts)) {
   const editor = read("../components/DraggableTextOverlay.tsx");
   const feed = read("../components/FeedItem.tsx");
   const edit = read("../app/edit.tsx");
-  ok("the editor takes font size, padding, line height and corner from textLayout (the feed's function)", (editor.match(/textLayout\(fontSizeSv\.value, videoW\)/g) ?? []).length >= 3);
+  ok("the editor takes font size, padding, line height and corner from textLayout (the feed's function)", (editor.match(/textLayout\(effectiveFontSize\(/g) ?? []).length >= 3);
   ok("the editor has no size or width constants of its own", !/maxBoxWidth|TEXT_PAD_|TEXT_RADIUS_EM|TEXT_LINE_HEIGHT_EM|TEXT_REF_WIDTH/.test(editor));
   ok("the editor lays out in a fixed slot (textSlot width), and the feed does the same", /slotW = videoW \* TEXT_MAX_WIDTH/.test(editor) && /textSlot\(left, videoW\)/.test(feed));
   ok("both use the shared overlay font (no build check)", /overlayFont\(overlay\.fontId\)/.test(editor) && /overlayFont\(overlay\.fontId\)/.test(feed) && !/supportsCaptionFont/.test(editor + feed.slice(feed.indexOf("FeedTextOverlay"), feed.indexOf("function timeAgo"))));

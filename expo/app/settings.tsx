@@ -35,8 +35,8 @@ export default function SettingsScreen() {
   useEffect(() => {
     getPlaybackDiagnostics().then(setDiagnostics);
     getAutoEditEnabled().then(setAutoEdit);
-    getSaveEditedToRoll().then(setSaveEdited);
-  }, []);
+    getSaveEditedToRoll(user?.id).then(setSaveEdited);
+  }, [user?.id]);
   const handleSignOut = useCallback(() => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
@@ -143,7 +143,7 @@ export default function SettingsScreen() {
                 value={saveEdited}
                 onValueChange={(v) => {
                   setSaveEdited(v);
-                  setSaveEditedToRoll(v);
+                  setSaveEditedToRoll(v, user?.id);
                 }}
                 trackColor={{ false: theme.border, true: theme.accent }}
                 thumbColor="#fff"

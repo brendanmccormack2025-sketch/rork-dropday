@@ -56,6 +56,8 @@ import {
   videoDisplayWidth,
 } from "@/lib/feedLayout";
 import { uploadLabel } from "@/lib/postingFeed";
+import { savePostToRoll } from "@/lib/exportEdit";
+import { effectiveFontSize } from "@/lib/textOverlayStyle";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 /**
@@ -240,7 +242,7 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
   const top = clampedY * containerH;
 
   // Same sizing as the editor: relative to the width of the whole video.
-  const layout = textLayout(overlay.fontSize, videoDisplayWidth(containerW, { visibleW, visibleH, cropLeft, cropTop }));
+  const layout = textLayout(effectiveFontSize(overlay), videoDisplayWidth(containerW, { visibleW, visibleH, cropLeft, cropTop }));
 
   // The overlay sits in a fixed-width slot centred on its point (as in the editor), so where it is placed
   // never changes how its text wraps. The box shrinks to its text inside the slot.
@@ -1278,6 +1280,9 @@ export const FeedItem = memo(function FeedItem({
   const handleMore = useCallback(() => {
     if (isOwner) {
       Alert.alert("More options", undefined, [
+        ...(post._optimistic || post.media_type !== "video"
+          ? []
+          : [{ text: "Save to camera roll", onPress: () => void savePostToRoll(post) }]),
         { text: "Delete", style: "destructive", onPress: handleDelete },
         { text: "Cancel", style: "cancel" },
       ]);
@@ -1291,7 +1296,7 @@ export const FeedItem = memo(function FeedItem({
         { text: "Cancel", style: "cancel" },
       ]);
     }
-  }, [isOwner, handleDelete, reportContent, post.id]);
+  }, [isOwner, handleDelete, reportContent, post]);
 
   // ── Per-slot callbacks for dual-player ─────────────────────────────
   // Only the active slot runs the full playback/stall logic; the inactive

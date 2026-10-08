@@ -37,7 +37,13 @@ type OverlayBase = {
   endMs?: number;
 };
 
-export type TextEditOverlay = OverlayBase & { kind: "text"; text: string; style?: string };
+export type TextEditOverlay = OverlayBase & {
+  kind: "text";
+  text: string;
+  style?: string;
+  /** A complete style (the Text-button overlays of the camera-roll export); replaces the preset. */
+  spec?: import("./editStyles.ts").OverlayStyleSpec;
+};
 /**
  * Clip-wide caption box: every caption follows it. scale multiplies the preset's font size
  * (and padding); yCenter / xCenter place the box centre as fractions of the frame (0 = top / left).

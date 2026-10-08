@@ -280,6 +280,8 @@ export type TextOverlay = {
   color: string;
   /** Background style preset */
   backgroundStyle: TextBackgroundStyle;
+  /** Pinch scale on top of fontSize (1 = as typed). Absent = 1. */
+  scale?: number;
   /** A font chosen in Style (a caption font id); absent = Montserrat Bold. */
   fontId?: string;
   /** Absent = 'text'. Stored in the existing text_overlays JSON; no new columns. */

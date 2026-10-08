@@ -30,6 +30,8 @@ export type OverlayStyleSpec = {
   yCenter: number;
   /** Horizontal centre as a fraction of the frame width (default 0.5). Read by the renderer only once it supports it. */
   xCenter?: number;
+  /** Degrees, clockwise (build 1.0.4, supportsTextBox). */
+  rotation?: number;
   /** Widest the text may get, as a fraction of the frame width. Default 0.86. */
   maxWidth?: number;
   uppercase?: boolean;
@@ -202,7 +204,7 @@ export function toRenderJson(instructions: EditInstructions, options: RenderOpti
     ...instructions,
     overlays: instructions.overlays.map((o) =>
       o.kind === "text" || o.kind === "caption"
-        ? { ...o, styleSpec: renderSpec(o.kind, o.style, o.kind === "caption" ? o.captionStyle : undefined, options) }
+        ? { ...o, styleSpec: o.kind === "text" && o.spec ? o.spec : renderSpec(o.kind, o.style, o.kind === "caption" ? o.captionStyle : undefined, options) }
         : o,
     ),
   });

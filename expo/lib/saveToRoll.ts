@@ -1,0 +1,120 @@
+/**
+ * Save the edited video to the camera roll. The flow, with its effects passed in so it can be tested:
+ * it never throws and never touches the post; every problem is a result.
+ *
+ * Pure: no React, no native modules.
+ */
+export type SaveToRollResult =
+  | { status: "off" }
+  | { status: "saved" }
+  | { status: "failed"; reason: string };
+
+export type SaveToRollDeps = {
+  /** The "Save to camera roll" switch. */
+  enabled: boolean;
+  /** Render the export (cuts, captions and Text-button overlays burned in). Resolves the file to save. */
+  render: () => Promise<{ uri: string }>;
+  /** Add-only photo permission; true when granted. */
+  ensurePermission: () => Promise<boolean>;
+  save: (uri: string) => Promise<void>;
+  /** Delete the temporary export file. */
+  cleanup: (uri: string) => Promise<void>;
+  onError?: (error: unknown, stage: "render" | "permission" | "save") => void;
+};
+
+function report(deps: SaveToRollDeps, error: unknown, stage: "render" | "permission" | "save"): void {
+  try {
+    deps.onError?.(error, stage);
+  } catch {
+    // Reporting must never be the thing that throws.
+  }
+}
+
+export async function saveToCameraRoll(deps: SaveToRollDeps): Promise<SaveToRollResult> {
+  if (!deps.enabled) return { status: "off" };
+  let file: string | null = null;
+  try {
+    let granted: boolean;
+    try {
+      granted = await deps.ensurePermission();
+    } catch (e) {
+      report(deps, e, "permission");
+      return { status: "failed", reason: "permission" };
+    }
+    if (!granted) return { status: "failed", reason: "permission" };
+    try {
+      file = (await deps.render()).uri;
+    } catch (e) {
+      report(deps, e, "render");
+      return { status: "failed", reason: "render" };
+    }
+    try {
+      await deps.save(file);
+    } catch (e) {
+      report(deps, e, "save");
+      return { status: "failed", reason: "save" };
+    }
+    return { status: "saved" };
+  } finally {
+    if (file) {
+      try {
+        await deps.cleanup(file);
+      } catch {
+        // A leftover temp file is not an error.
+      }
+    }
+  }
+}
+
+// ── What the screen shows ──
+
+export type SaveToRollState =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "saved" }
+  | { kind: "failed"; retry: () => void };
+
+export const SAVE_FAILED_TEXT = "Couldn't save to camera roll";
+export const SAVE_SAVING_TEXT = "Saving to camera roll…";
+export const SAVE_SAVED_TEXT = "Saved to camera roll";
+
+/** A tiny observable (one state, many listeners) for the little message at the top of the screen. */
+export function createSaveStatus() {
+  let state: SaveToRollState = { kind: "idle" };
+  const listeners = new Set<() => void>();
+  return {
+    get: () => state,
+    set(next: SaveToRollState) {
+      state = next;
+      listeners.forEach((l) => l());
+    },
+    subscribe(l: () => void) {
+      listeners.add(l);
+      return () => {
+        listeners.delete(l);
+      };
+    },
+  };
+}
+
+/** Run a save, reflecting it in the status; a failure offers Retry (which runs the same save again). */
+export async function runSaveWithStatus(
+  status: ReturnType<typeof createSaveStatus>,
+  run: () => Promise<SaveToRollResult>,
+): Promise<SaveToRollResult> {
+  status.set({ kind: "saving" });
+  let result: SaveToRollResult;
+  try {
+    result = await run();
+  } catch {
+    result = { status: "failed", reason: "unexpected" };
+  }
+  if (result.status === "failed") {
+    status.set({ kind: "failed", retry: () => void runSaveWithStatus(status, run) });
+  } else if (result.status === "saved") {
+    status.set({ kind: "saved" });
+  } else {
+    status.set({ kind: "idle" });
+  }
+  return result;
+}
