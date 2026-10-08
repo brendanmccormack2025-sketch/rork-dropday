@@ -3232,18 +3232,17 @@ export default function EditScreen() {
         reactingTo || null,
       );
 
-      // Save to camera roll: the export (cuts, captions and Text-button overlays burned in) starts alongside the
-      // upload and never touches the post. The posted file is copied first (the upload deletes it when done) so a
-      // failed export can still save it. Any problem shows "Couldn't save to camera roll"; it is also recorded.
+      // Save to camera roll: the posted video (cuts and captions; text overlays are not part of it) is saved
+      // alongside the upload and never touches the post. The posted file is copied first (the upload deletes it
+      // when done). Any problem shows "Couldn't save to camera roll"; it is also recorded.
       try {
-        const fallbackUri = saveToRollRef.current && rendered ? await stageExportFallback(rendered.uri) : null;
+        const postedUri = saveToRollRef.current && rendered ? await stageExportFallback(rendered.uri) : null;
         void startPostExport({
           enabled: saveToRollRef.current && Platform.OS !== "web",
           clips,
           captionOverlays: captionOverlaysForPost,
-          textOverlays,
           userId: user?.id,
-          fallbackUri,
+          postedUri,
         }).catch((e) => void recordClientError(e, { kind: "saveToRoll", stage: "start" }));
       } catch (e) {
         void recordClientError(e, { kind: "saveToRoll", stage: "start" });

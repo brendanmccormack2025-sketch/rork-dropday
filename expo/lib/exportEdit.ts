@@ -1,9 +1,11 @@
 /**
- * The camera-roll export: a dedicated render of the edit with everything burned in (cuts, captions and the
- * Text-button overlays, which the feed otherwise draws live), then an add-only save to Photos.
+ * The camera-roll export: the video that was posted (cuts and captions burned in), saved to Photos with an
+ * add-only permission. Text-button overlays are NOT part of it: creators add their own text in TikTok or
+ * Instagram. When the post went out as source clips (nothing was rendered) the cuts and captions are
+ * rendered for the save.
  *
- * It runs after the post has started uploading and never touches it. One native render at a time: it waits
- * its turn behind any other render (acquireNative).
+ * It runs alongside the upload and never touches it. One native render at a time: it waits its turn behind
+ * any other render (acquireNative).
  */
 import { documentDirectory, cacheDirectory, copyAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
 import { recordClientError } from "@/lib/clientErrors";
@@ -19,16 +21,13 @@ import {
   saveToCameraRoll,
   type SaveToRollResult,
 } from "@/lib/saveToRoll";
-import { textOverlaysToEditOverlays } from "@/lib/textOverlayStyle";
 import { supportsCaptionFont, supportsTextBox } from "@/modules/video-render";
-import type { DraftClip, Post, TextOverlay } from "@/providers/PostsProvider";
+import type { DraftClip, Post } from "@/providers/PostsProvider";
 
 export { SAVE_FAILED_TEXT };
 
 /** What the little message at the top of the screen shows. */
 export const saveStatus = createSaveStatus();
-
-const CAPS = () => ({ supportsFont: supportsCaptionFont, supportsTextBox });
 
 /** Add-only photo permission: asked when needed, never read access. */
 async function ensureAddPermission(): Promise<boolean> {
@@ -71,78 +70,77 @@ async function renderExport(clips: DraftClip[], overlays: EditOverlay[]): Promis
 }
 
 /**
- * Copy the posted file (cuts and captions burned in) somewhere the upload will not delete, so a failed export
- * render can still save it. Resolves null if there is nothing to copy or the copy failed (never throws).
+ * Copy the posted file (cuts and captions burned in) somewhere the upload will not delete. Resolves null if
+ * there is nothing to copy or the copy failed (never throws); the export then renders instead.
  */
 export async function stageExportFallback(uri: string | null | undefined): Promise<string | null> {
   if (!uri) return null;
   try {
     const dir = cacheDirectory ?? documentDirectory ?? "";
-    const to = `${dir}export_fallback_${Date.now()}.mp4`;
+    const to = `${dir}export_posted_${Date.now()}.mp4`;
     await copyAsync({ from: uri, to });
     return to;
   } catch (e) {
-    void recordClientError(e, { kind: "saveToRoll", stage: "stage-fallback" });
+    void recordClientError(e, { kind: "saveToRoll", stage: "stage-posted" });
     return null;
   }
 }
 
-function deps(
-  enabled: boolean,
-  render: () => Promise<{ uri: string }>,
-  kind: string,
-  extra: { fallbackUri?: string | null; hasTextOverlays?: boolean } = {},
-) {
+function deps(enabled: boolean, render: () => Promise<{ uri: string }>, postedUri: string | null | undefined) {
   return {
     enabled,
     render,
-    fallbackUri: extra.fallbackUri ?? null,
-    hasTextOverlays: extra.hasTextOverlays ?? false,
-    canBurnOverlays: supportsTextBox,
+    postedUri: postedUri ?? null,
     ensurePermission: ensureAddPermission,
     save: (uri: string) => saveToLibraryAsync(uri),
     cleanup: (uri: string) => deleteAsync(uri, { idempotent: true }),
-    onError: (error: unknown, stage: string) => void recordClientError(error, { kind, stage, supportsTextBox, supportsFont: supportsCaptionFont }),
+    onError: (error: unknown, stage: string) =>
+      void recordClientError(error, { kind: "saveToRoll", stage, supportsTextBox, supportsFont: supportsCaptionFont }),
   };
 }
 
 /**
- * After Post: save the edit being posted. Cuts come from `clips`, captions from `captionOverlays`, Text-button
- * overlays from `textOverlays`. Fire and forget; a failure shows "Couldn't save to camera roll" with Retry.
+ * After Post: save the video being posted. `postedUri` is the staged copy of the posted file; without it the
+ * cuts and captions are rendered. Fire and forget; a failure shows "Couldn't save to camera roll" with Retry.
  */
 export function startPostExport(args: {
   enabled: boolean;
   clips: DraftClip[];
   captionOverlays: EditOverlay[];
-  textOverlays: TextOverlay[];
   /** The signed-in user (the owner account sees the real error reason). */
   userId?: string | null;
-  /** The file that was posted (cuts and captions), staged by stageExportFallback: saved if the export render fails. */
-  fallbackUri?: string | null;
+  /** The file that was posted (cuts and captions), staged by stageExportFallback. */
+  postedUri?: string | null;
 }): Promise<SaveToRollResult> {
   if (!args.enabled || args.clips.some((c) => c.type !== "video")) return Promise.resolve({ status: "off" });
-  const overlays = [...args.captionOverlays, ...textOverlaysToEditOverlays(args.textOverlays, CAPS())];
-  const run = () =>
-    saveToCameraRoll(
-      deps(true, () => renderExport(args.clips, overlays), "saveToRoll", {
-        fallbackUri: args.fallbackUri,
-        hasTextOverlays: args.textOverlays.some((t) => t.text.trim().length > 0),
-      }),
-    );
+  const run = () => saveToCameraRoll(deps(true, () => renderExport(args.clips, args.captionOverlays), args.postedUri));
   return runSaveWithStatus(saveStatus, run, isDebugOwner(args.userId));
 }
 
-/** The "…" menu on the user's own post: download it and save it with its Text-button overlays burned in. */
+/**
+ * The "…" menu on the user's own post: download the posted video and save it (cuts and captions are in the
+ * file). A post that went out as several source clips with trim data is rendered into one video first.
+ */
 export function savePostToRoll(post: Post, userId?: string | null): Promise<SaveToRollResult> {
-  const run = () =>
-    saveToCameraRoll(
+  let posted: string | null = null;
+  const run = async () => {
+    const dir = cacheDirectory ?? documentDirectory ?? "";
+    const stamp = Date.now();
+    const urls = post.segments && post.segments.length > 0 ? post.segments : [post.media_url];
+    const unique = Array.from(new Set(urls));
+    const noTrim = !post.trim_data || post.trim_data.length === 0;
+    if (!posted && urls.length === 1 && noTrim) {
+      const to = `${dir}save_${stamp}.mp4`;
+      const res = await downloadAsync(urls[0]!, to).catch(() => null);
+      if (!res || (res.status && res.status >= 400)) {
+        return saveToCameraRoll(deps(true, () => Promise.reject(new Error(`download failed (${res?.status ?? "none"})`)), null));
+      }
+      posted = to;
+    }
+    return saveToCameraRoll(
       deps(
         true,
         async () => {
-          const dir = cacheDirectory ?? documentDirectory ?? "";
-          const stamp = Date.now();
-          const urls = post.segments && post.segments.length > 0 ? post.segments : [post.media_url];
-          const unique = Array.from(new Set(urls));
           const local = new Map<string, string>();
           const downloaded: string[] = [];
           try {
@@ -153,14 +151,6 @@ export function savePostToRoll(post: Post, userId?: string | null): Promise<Save
               downloaded.push(to);
               local.set(url, to);
             }
-            const overlays = textOverlaysToEditOverlays(post.text_overlays ?? [], CAPS());
-            const noTrim = !post.trim_data || post.trim_data.length === 0;
-            if (overlays.length === 0 && urls.length === 1 && noTrim) {
-              // Nothing to burn in: the posted file itself is the video.
-              const only = local.get(urls[0]!)!;
-              downloaded.splice(downloaded.indexOf(only), 1);
-              return { uri: only };
-            }
             const clips: DraftClip[] = urls.map((u, i) => ({
               id: `export_${i}`,
               uri: local.get(u)!,
@@ -169,13 +159,14 @@ export function savePostToRoll(post: Post, userId?: string | null): Promise<Save
               trimEndMs: post.trim_data?.[i]?.trimEndMs ?? 3_600_000,
               durationMs: post.trim_data?.[i]?.trimEndMs ?? 3_600_000,
             }));
-            return await renderExport(clips, overlays);
+            return await renderExport(clips, []);
           } finally {
             for (const f of downloaded) await deleteAsync(f, { idempotent: true }).catch(() => {});
           }
         },
-        "saveToRoll",
+        posted,
       ),
     );
+  };
   return runSaveWithStatus(saveStatus, run, isDebugOwner(userId));
 }

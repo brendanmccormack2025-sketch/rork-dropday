@@ -6,7 +6,7 @@
  */
 export type SaveToRollResult =
   | { status: "off" }
-  | { status: "saved"; /** Text-button overlays could not be burned in: the posted file (cuts and captions) was saved. */ withoutOverlays?: boolean }
+  | { status: "saved" }
   | { status: "failed"; reason: string; /** The real error text (shown to the owner account only). */ detail?: string };
 
 type Stage = "render" | "permission" | "save";
@@ -14,17 +14,13 @@ type Stage = "render" | "permission" | "save";
 export type SaveToRollDeps = {
   /** The "Save to camera roll" switch. */
   enabled: boolean;
-  /** Render the export (cuts, captions and Text-button overlays burned in). Resolves the file to save. */
-  render: () => Promise<{ uri: string }>;
   /**
-   * The posted file (cuts and captions burned in), copied somewhere safe; saved when the export render
-   * fails, or instead of it when there is nothing to burn in. Absent: no fallback.
+   * The video that was posted (cuts and captions burned in), a staged copy. The saved video is exactly this file.
+   * Text-button overlays are never part of it: creators add their own text in TikTok / Instagram.
    */
-  fallbackUri?: string | null;
-  /** True when the post has Text-button overlays (so the posted file is NOT what the feed shows). */
-  hasTextOverlays?: boolean;
-  /** True when this build can burn the Text-button overlays in (otherwise the export render is pointless). */
-  canBurnOverlays?: boolean;
+  postedUri?: string | null;
+  /** Render cuts and captions when there is no posted file to save (the post went out as source clips). */
+  render: () => Promise<{ uri: string }>;
   /** Add-only photo permission; true when granted. */
   ensurePermission: () => Promise<boolean>;
   save: (uri: string) => Promise<void>;
@@ -59,27 +55,19 @@ export async function saveToCameraRoll(deps: SaveToRollDeps): Promise<SaveToRoll
       return { status: "failed", reason: "permission", detail: `permission: ${messageOf(e)}` };
     }
 
-    // What to save: the export render, or the posted file.
-    let file: string | null = null;
-    let withoutOverlays = false;
-    const burn = deps.canBurnOverlays !== false;
-    if (deps.fallbackUri && (!deps.hasTextOverlays || !burn)) {
-      // Nothing to burn in (or this build cannot): the posted file is the video.
-      file = deps.fallbackUri;
-      withoutOverlays = !!deps.hasTextOverlays;
+    let file: string;
+    if (deps.postedUri) {
+      file = deps.postedUri;
     } else {
       try {
         file = (await deps.render()).uri;
         temps.push(file);
-        // A build that cannot place text still renders cuts and captions: the Text overlays are missing.
-        withoutOverlays = !!deps.hasTextOverlays && !burn;
       } catch (e) {
         report(deps, e, "render");
-        if (!deps.fallbackUri) return { status: "failed", reason: "render", detail: `render: ${messageOf(e)}` };
-        file = deps.fallbackUri;
-        withoutOverlays = !!deps.hasTextOverlays;
+        return { status: "failed", reason: "render", detail: `render: ${messageOf(e)}` };
       }
     }
+
     try {
       await deps.save(file);
     } catch (e) {
@@ -87,8 +75,8 @@ export async function saveToCameraRoll(deps: SaveToRollDeps): Promise<SaveToRoll
       return { status: "failed", reason: "save", detail: `save: ${messageOf(e)}` };
     }
     // Saved: the staged copy of the posted file is no longer needed (until then it stays, so Retry can use it).
-    if (deps.fallbackUri) temps.push(deps.fallbackUri);
-    return withoutOverlays ? { status: "saved", withoutOverlays: true } : { status: "saved" };
+    if (deps.postedUri) temps.push(deps.postedUri);
+    return { status: "saved" };
   } finally {
     for (const t of temps) {
       try {
@@ -105,13 +93,12 @@ export async function saveToCameraRoll(deps: SaveToRollDeps): Promise<SaveToRoll
 export type SaveToRollState =
   | { kind: "idle" }
   | { kind: "saving" }
-  | { kind: "saved"; withoutOverlays?: boolean }
+  | { kind: "saved" }
   | { kind: "failed"; retry: () => void; detail?: string };
 
 export const SAVE_FAILED_TEXT = "Couldn't save to camera roll";
 export const SAVE_SAVING_TEXT = "Saving to camera roll…";
 export const SAVE_SAVED_TEXT = "Saved to camera roll";
-export const SAVE_SAVED_WITHOUT_OVERLAYS_TEXT = "Saved without text overlays";
 
 /** A tiny observable (one state, many listeners) for the little message at the top of the screen. */
 export function createSaveStatus() {
@@ -149,7 +136,7 @@ export async function runSaveWithStatus(
   if (result.status === "failed") {
     status.set({ kind: "failed", retry: () => void runSaveWithStatus(status, run, showDetail), ...(showDetail && result.detail ? { detail: result.detail } : {}) });
   } else if (result.status === "saved") {
-    status.set({ kind: "saved", ...(result.withoutOverlays ? { withoutOverlays: true } : {}) });
+    status.set({ kind: "saved" });
   } else {
     status.set({ kind: "idle" });
   }

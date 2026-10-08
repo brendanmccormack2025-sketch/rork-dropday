@@ -120,7 +120,7 @@ const w = (text, startMs, endMs) => ({ text, startMs, endMs });
   ok("recordClientError uploads at once (reportNow) and the insert has no .select()", /recorder\.reportNow\(error, extra\)/.test(clientErrors) && !/\.insert\(rows\)\.select/.test(clientErrors) && /from\("client_errors"\)\.insert\(rows\)/.test(clientErrors));
   ok("the table's policy is user_id = auth.uid() (the rows carry the signed-in user's id)", /with check \(user_id = auth\.uid\(\)\)/.test(read("../supabase/migration-client-errors.sql")));
   const exp = read("../lib/exportEdit.ts");
-  ok("save failures are recorded with the build's capabilities", /recordClientError\(error, \{ kind, stage, supportsTextBox/.test(exp));
+  ok("save failures are recorded with the build's capabilities", /recordClientError\(error, \{ kind: "saveToRoll", stage, supportsTextBox/.test(exp));
 }
 
 // ── 3b: the save itself ──
@@ -140,19 +140,14 @@ const w = (text, startMs, endMs) => ({ text, startMs, endMs });
     cleanup: async (u) => void calls.push(`cleanup:${u}`),
     ...o,
   });
-  let r = await saveToCameraRoll(base({ render: async () => { throw new Error("render died"); }, fallbackUri: "posted.mp4", hasTextOverlays: true, canBurnOverlays: true }));
-  eq("export render fails -> the posted file (cuts + captions) is saved instead, flagged", [r, calls.includes("save:posted.mp4")], [{ status: "saved", withoutOverlays: true }, true]);
+  let r = await saveToCameraRoll(base({ postedUri: "posted.mp4" }));
+  eq("the posted file (cuts + captions) is what is saved: no render at all", [r, calls.includes("render"), calls.includes("save:posted.mp4")], [{ status: "saved" }, false, true]);
+  eq("the staged copy is cleaned up after a successful save", calls.includes("cleanup:posted.mp4"), true);
   calls.length = 0;
-  r = await saveToCameraRoll(base({ fallbackUri: "posted.mp4", hasTextOverlays: true, canBurnOverlays: false }));
-  eq("build 39 (cannot burn text in): no pointless render, the posted file is saved, flagged", [r, calls.includes("render"), calls.includes("save:posted.mp4")], [{ status: "saved", withoutOverlays: true }, false, true]);
+  r = await saveToCameraRoll(base());
+  eq("no posted file (the post went out as source clips): cuts + captions are rendered and saved", [r, calls], [{ status: "saved" }, ["render", "save:export.mp4", "cleanup:export.mp4"]]);
   calls.length = 0;
-  r = await saveToCameraRoll(base({ fallbackUri: "posted.mp4", hasTextOverlays: false, canBurnOverlays: false }));
-  eq("no text overlays: the posted file IS the video, saved plainly", [r, calls.includes("render")], [{ status: "saved" }, false]);
-  calls.length = 0;
-  r = await saveToCameraRoll(base({ fallbackUri: "posted.mp4", hasTextOverlays: true, canBurnOverlays: true }));
-  eq("1.0.4 with overlays: the export render is saved, the staged copy cleaned up", [r, calls], [{ status: "saved" }, ["render", "save:export.mp4", "cleanup:export.mp4", "cleanup:posted.mp4"]]);
-  calls.length = 0;
-  r = await saveToCameraRoll(base({ save: async () => { throw new Error("photos said no"); }, fallbackUri: "posted.mp4" }));
+  r = await saveToCameraRoll(base({ save: async () => { throw new Error("photos said no"); }, postedUri: "posted.mp4" }));
   eq("a failed save keeps the staged copy for Retry", [r.status, calls.includes("cleanup:posted.mp4")], ["failed", false]);
   r = await saveToCameraRoll(base({ render: async () => { throw new Error("x"); } }));
   eq("render fails and there is no posted file: failed, with the reason", [r.status, r.reason], ["failed", "render"]);
@@ -166,11 +161,8 @@ const w = (text, startMs, endMs) => ({ text, startMs, endMs });
   s = mk();
   await runSaveWithStatus(s, failing, false);
   eq("everyone else: no detail", s.get().detail, undefined);
-  s = mk();
-  await runSaveWithStatus(s, () => saveToCameraRoll(base({ fallbackUri: "p.mp4", hasTextOverlays: true, canBurnOverlays: false })), false);
-  eq("the message for a fallback save", [s.get().kind, s.get().withoutOverlays], ["saved", true]);
   const toast = read("../components/SaveToRollToast.tsx");
-  ok("the toast says “Saved without text overlays” and shows the detail", /SAVE_SAVED_WITHOUT_OVERLAYS_TEXT/.test(toast) && /state\.detail/.test(toast) && /Saved without text overlays/.test(read("../lib/saveToRoll.ts")));
+  ok("the toast shows the detail", /state\.detail/.test(toast));
   ok("only the owner account asks for details", /isDebugOwner\(args\.userId\)/.test(read("../lib/exportEdit.ts")));
   ok("Post stages the posted file before the upload can delete it", /stageExportFallback\(rendered\.uri\)/.test(read("../app/edit.tsx")));
 }

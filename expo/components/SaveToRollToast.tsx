@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import UiText from "@/components/UiText";
 import { saveStatus } from "@/lib/exportEdit";
-import { SAVE_FAILED_TEXT, SAVE_SAVED_TEXT, SAVE_SAVED_WITHOUT_OVERLAYS_TEXT, SAVE_SAVING_TEXT } from "@/lib/saveToRoll";
+import { SAVE_FAILED_TEXT, SAVE_SAVED_TEXT, SAVE_SAVING_TEXT } from "@/lib/saveToRoll";
 
 /** A small message at the top of the screen for the camera-roll save: saving, saved, or failed with Retry. */
 export default function SaveToRollToast() {
@@ -30,9 +30,7 @@ export default function SaveToRollToast() {
             <UiText style={styles.text}>{SAVE_SAVING_TEXT}</UiText>
           </>
         )}
-        {state.kind === "saved" && (
-          <UiText style={styles.text}>{state.withoutOverlays ? SAVE_SAVED_WITHOUT_OVERLAYS_TEXT : SAVE_SAVED_TEXT}</UiText>
-        )}
+        {state.kind === "saved" && <UiText style={styles.text}>{SAVE_SAVED_TEXT}</UiText>}
         {state.kind === "failed" && (
           <>
             <View style={styles.failedText}>
