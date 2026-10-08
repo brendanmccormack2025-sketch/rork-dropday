@@ -50,11 +50,12 @@ import {
   TAB_BAR_HEIGHT,
   VIDEO_ASPECT,
   computeCoverCrop,
+  overlayFontFamily,
   textLayout,
+  textSlot,
   videoDisplayWidth,
 } from "@/lib/feedLayout";
 import { uploadLabel } from "@/lib/postingFeed";
-import { TEXT_FONT_FAMILY } from "@/lib/transcription/captionPresets";
 import { supportsCaptionFont } from "@/modules/video-render";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
@@ -242,50 +243,50 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
   // Same sizing as the editor: relative to the width of the whole video.
   const layout = textLayout(overlay.fontSize, videoDisplayWidth(containerW, { visibleW, visibleH, cropLeft, cropTop }));
 
-  // Measure the text box via onLayout so we can center it on the stored
-  // x/y point — matching the editor's DraggableTextOverlay which offsets
-  // by -textWidth/2, -textHeight/2 (lines 377-378).
-  const [textSize, setTextSize] = useState<{ w: number; h: number }>(
-    { w: 0, h: 0 },
-  );
+  // The overlay sits in a fixed-width slot centred on its point (as in the editor), so where it is placed
+  // never changes how its text wraps. The box shrinks to its text inside the slot.
+  const videoW = videoDisplayWidth(containerW, { visibleW, visibleH, cropLeft, cropTop });
+  const slot = textSlot(left, videoW);
+  const [boxH, setBoxH] = useState(0);
+  const hasBackground = backgroundColor !== "transparent";
+  const shadowTint = color === "#000000" ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)";
 
   return (
     <View
       pointerEvents="none"
       onLayout={(e) => {
-        const { width, height } = e.nativeEvent.layout;
-        if (width > 0 && height > 0) {
-          setTextSize((prev) =>
-            prev.w === width && prev.h === height ? prev : { w: width, h: height },
-          );
-        }
+        const { height } = e.nativeEvent.layout;
+        if (height > 0) setBoxH((prev) => (prev === height ? prev : height));
       }}
       style={[
         styles.textOverlayWrap,
         {
-          left,
+          left: slot.left,
           top,
+          width: slot.width,
           transform: [
-            { translateX: -textSize.w / 2 },
-            { translateY: -textSize.h / 2 },
+            { translateY: -boxH / 2 },
             { rotate: `${overlay.rotation}deg` },
           ],
         },
       ]}
     >
       <UiText
+        allowFontScaling={false}
         style={[
           styles.textOverlayText,
           {
             color,
-            ...(supportsCaptionFont ? { fontFamily: TEXT_FONT_FAMILY, fontWeight: "400" as const } : null),
+            fontFamily: overlayFontFamily(supportsCaptionFont),
+            fontWeight: "400" as const,
             fontSize: layout.fontSize,
             lineHeight: layout.lineHeight,
             paddingHorizontal: layout.padX,
             paddingVertical: layout.padY,
             borderRadius: layout.cornerRadius,
-            maxWidth: layout.maxWidth,
+            maxWidth: slot.width,
             backgroundColor,
+            textShadowColor: hasBackground ? "transparent" : shadowTint,
           },
         ]}
         numberOfLines={undefined}
@@ -2111,12 +2112,13 @@ const styles = StyleSheet.create({
   /* Text overlays (feed playback) */
   textOverlayWrap: {
     position: "absolute",
+    alignItems: "center",
   },
   textOverlayText: {
     fontWeight: "900" as const,
     textAlign: "center",
     overflow: "hidden",
-    textShadowColor: "rgba(0,0,0,0.4)",
-    textShadowRadius: 2,
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
 });

@@ -131,6 +131,7 @@ export type TextLayout = {
 
 /** Sizes in pixels for a text overlay on a video displayed `videoW` pixels wide. */
 export function textLayout(overlayFontSize: number | undefined, videoW: number): TextLayout {
+  'worklet';
   const fontSize = (overlayFontSize ?? 26) * (videoW / TEXT_REF_WIDTH);
   return {
     fontSize,
@@ -140,6 +141,21 @@ export function textLayout(overlayFontSize: number | undefined, videoW: number):
     cornerRadius: fontSize * TEXT_RADIUS_EM,
     maxWidth: videoW * TEXT_MAX_WIDTH,
   };
+}
+
+/**
+ * The slot a text overlay is laid out in: as wide as its widest allowed box, centred on the overlay's
+ * point. The text box shrinks to its content inside the slot, so where the overlay sits never changes
+ * how its text wraps (the editor, the feed and Preview all use it).
+ */
+export function textSlot(centerPx: number, videoW: number): { left: number; width: number } {
+  const width = videoW * TEXT_MAX_WIDTH;
+  return { left: centerPx - width / 2, width };
+}
+
+/** JS font family of a text overlay: Montserrat Bold where the build bundles it, else the app font the posted overlay always used. */
+export function overlayFontFamily(supportsFont: boolean): string {
+  return supportsFont ? "Montserrat_700Bold" : "PlusJakartaSans_800ExtraBold";
 }
 
 /**
@@ -158,12 +174,17 @@ export function textOverlayRenderSpec(overlayFontSize: number | undefined) {
   };
 }
 
+/** Width of one line in the same rough model as wrapLines. */
+export function lineWidth(line: string, fontSize: number, charEm = 0.55, wideEm = 1.1): number {
+  return [...line].reduce((n, ch) => n + (ch.codePointAt(0)! > 0x2000 ? wideEm : charEm) * fontSize, 0);
+}
+
 /**
  * Word-wrap `text` into lines of at most `maxTextWidth`, where every character is `charEm` ems
  * wide and an emoji or other wide character is `wideEm`. A rough model, used to compare layouts.
  */
 export function wrapLines(text: string, fontSize: number, maxTextWidth: number, charEm = 0.55, wideEm = 1.1): string[] {
-  const width = (w: string) => [...w].reduce((n, ch) => n + (ch.codePointAt(0)! > 0x2000 ? wideEm : charEm) * fontSize, 0);
+  const width = (w: string) => lineWidth(w, fontSize, charEm, wideEm);
   const lines: string[] = [];
   for (const para of text.split("\n")) {
     let line = "";
@@ -190,3 +211,18 @@ export function textBoxHeight(text: string, layout: TextLayout): number {
 
 /** Where a new text overlay starts: horizontally centred, below the feed's logo and bell. */
 export const DEFAULT_TEXT_OVERLAY_POS = { x: 0.5, y: 0.22 } as const;
+
+/**
+ * The laid-out box of a text overlay on a video displayed `videoW` pixels wide: its lines, and the box
+ * size (text + padding, never wider than the slot). The editor, the feed and Preview all draw this box.
+ */
+export function overlayBox(text: string, overlayFontSize: number | undefined, videoW: number) {
+  const l = textLayout(overlayFontSize, videoW);
+  const lines = wrapLines(text, l.fontSize, l.maxWidth - 2 * l.padX);
+  const widest = Math.max(...lines.map((ln) => lineWidth(ln, l.fontSize)));
+  return {
+    lines,
+    width: Math.min(l.maxWidth, widest + 2 * l.padX),
+    height: lines.length * l.lineHeight + 2 * l.padY,
+  };
+}

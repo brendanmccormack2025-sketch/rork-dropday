@@ -8,18 +8,14 @@ import Animated, {
 } from "react-native-reanimated";
 import type { TextOverlay, TextBackgroundStyle } from "@/providers/PostsProvider";
 import {
-  TEXT_LINE_HEIGHT_EM,
   TEXT_MAX_WIDTH,
-  TEXT_PAD_X_EM,
-  TEXT_PAD_Y_EM,
-  TEXT_RADIUS_EM,
-  TEXT_REF_WIDTH,
+  overlayFontFamily,
+  textLayout,
   fracToFrame,
   frameToFrac,
   type CoverCrop,
 } from "@/lib/feedLayout";
 
-import { TEXT_FONT_FAMILY } from "@/lib/transcription/captionPresets";
 import { supportsCaptionFont } from "@/modules/video-render";
 
 const FULL_CROP: CoverCrop = { visibleW: 1, visibleH: 1, cropLeft: 0, cropTop: 0 };
@@ -396,27 +392,31 @@ export default function DraggableTextOverlay({
   }, []);
 
   // ── Animated styles ─────────────────────────────────────────────────────
-  const k = frameWidth / crop.visibleW / TEXT_REF_WIDTH;
-  const maxBoxWidth = (frameWidth / crop.visibleW) * TEXT_MAX_WIDTH;
+  const videoW = frameWidth / crop.visibleW;
+  const slotW = videoW * TEXT_MAX_WIDTH;
+  // The slot is fixed: only the text box inside it changes size, so wrapping never depends on position.
   const animatedStyle = useAnimatedStyle(() => ({
-    paddingHorizontal: fontSizeSv.value * k * TEXT_PAD_X_EM,
-    paddingVertical: fontSizeSv.value * k * TEXT_PAD_Y_EM,
     opacity: opacity.value,
     transform: [
-      { translateX: translateX.value - textWidth.value / 2 },
+      { translateX: translateX.value - slotW / 2 },
       { translateY: translateY.value - textHeight.value / 2 },
       { rotate: `${rotationSv.value}deg` },
       { scale: scalePulse.value },
     ],
   }));
 
-  const animatedTextStyle = useAnimatedStyle(() => ({
-    fontSize: fontSizeSv.value * k,
-    lineHeight: fontSizeSv.value * k * TEXT_LINE_HEIGHT_EM,
-  }));
+  // The same function the feed and Preview use, so sizes, padding and line height cannot drift apart.
+  const animatedTextStyle = useAnimatedStyle(() => {
+    const l = textLayout(fontSizeSv.value, videoW);
+    return { fontSize: l.fontSize, lineHeight: l.lineHeight };
+  });
   const animatedBoxStyle = useAnimatedStyle(() => ({
-    borderRadius: fontSizeSv.value * k * TEXT_RADIUS_EM,
+    borderRadius: textLayout(fontSizeSv.value, videoW).cornerRadius,
   }));
+  const animatedPadStyle = useAnimatedStyle(() => {
+    const l = textLayout(fontSizeSv.value, videoW);
+    return { paddingHorizontal: l.padX, paddingVertical: l.padY, borderRadius: l.cornerRadius };
+  });
 
   // ── Snap guide line styles ──────────────────────────────────────────────
   const snapGuideHStyle = useAnimatedStyle(() => ({
@@ -460,10 +460,14 @@ export default function DraggableTextOverlay({
   // ── Render ──────────────────────────────────────────────────────────────
   return (
     <Animated.View
-      style={[styles.overlayWrap, { maxWidth: maxBoxWidth }, animatedStyle]}
-      onLayout={handleLayout}
-      {...panResponder.panHandlers}
+      style={[styles.overlayWrap, { width: slotW }, animatedStyle]}
+      pointerEvents="box-none"
     >
+      <Animated.View
+        style={[styles.box, animatedPadStyle]}
+        onLayout={handleLayout}
+        {...panResponder.panHandlers}
+      >
       {/* Background box */}
       {hasBackground && (
         <Animated.View
@@ -513,9 +517,10 @@ export default function DraggableTextOverlay({
 
       {/* Text content — fontSize driven by animated shared value */}
       <Animated.Text
+        allowFontScaling={false}
         style={[
           styles.text,
-          supportsCaptionFont ? { fontFamily: TEXT_FONT_FAMILY, fontWeight: "400" as const } : null,
+          { fontFamily: overlayFontFamily(supportsCaptionFont), fontWeight: "400" as const },
           animatedTextStyle,
           {
             color: effectiveTextColor,
@@ -529,6 +534,7 @@ export default function DraggableTextOverlay({
       >
         {overlay.text}
       </Animated.Text>
+      </Animated.View>
     </Animated.View>
   );
 }
@@ -540,6 +546,9 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     top: 0,
+    alignItems: "center",
+  },
+  box: {
     alignItems: "center",
     justifyContent: "center",
   },
