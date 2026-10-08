@@ -71,7 +71,7 @@ export const CAPTION_STYLES: OverlayStylePreset[] = [
     label: "Trial",
     spec: {
       fontSize: 60, fontWeight: "heavy", color: "#FFFFFF", backgroundColor: "#000000",
-      backgroundPadding: 14, cornerRadius: 0, yCenter: 0.7, maxWidth: 0.86, uppercase: true,
+      backgroundPadding: 18, cornerRadius: 15, yCenter: 0.7, maxWidth: 0.86, uppercase: true,
       fadeInMs: 0, fadeOutMs: 0,
     },
   },
@@ -90,8 +90,8 @@ export const TEXT_STYLES: OverlayStylePreset[] = [
     id: "hook",
     label: "Hook",
     spec: {
-      fontSize: 84, fontWeight: "black", color: "#FFFFFF", yCenter: 0.22, uppercase: true,
-      shadow: true, letterSpacing: 1, fadeInMs: 150, fadeOutMs: 150,
+      fontSize: 84, fontWeight: "black", color: "#FFFFFF", backgroundPadding: 25, cornerRadius: 21,
+      yCenter: 0.22, uppercase: true, shadow: true, letterSpacing: 1, fadeInMs: 150, fadeOutMs: 150,
     },
   },
   {

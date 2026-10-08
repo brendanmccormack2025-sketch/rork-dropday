@@ -43,6 +43,7 @@ import {
   Pencil,
   Sparkles,
   Captions,
+  Grid3x3,
 } from "lucide-react-native";
 
 import { getThumbnailAsync } from "expo-video-thumbnails";
@@ -51,6 +52,9 @@ import { supabase } from "@/lib/supabase";
 import { OWNER_USER_ID, isDebugOwner, isInternalTester } from "@/constants/debug";
 import CaptionsExplainer from "@/components/CaptionsExplainer";
 import CaptionPreview from "@/components/CaptionPreview";
+import EditPreviewModal from "@/components/EditPreviewModal";
+import FeedSafeZones from "@/components/FeedSafeZones";
+import { VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { formatRenderStats, recordRenderStats, reportRender } from "@/lib/renderReport";
@@ -189,14 +193,6 @@ function newOverlayId() {
   return `ov_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function calcFrameDims(areaW: number, areaH: number, aspect: number) {
-  if (areaW <= 0 || areaH <= 0) return { w: areaW, h: areaH };
-  if (areaW / areaH > aspect) {
-    return { w: areaH * aspect, h: areaH };
-  }
-  return { w: areaW, h: areaW / aspect };
-}
-
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 /** Cancel the native render; a failing native call must never throw out of a timer or a button. */
@@ -271,11 +267,17 @@ export default function EditScreen() {
     w: SCREEN_W,
     h: 400,
   });
-  const ASPECT = 9 / 16;
+  // The preview is the feed's shape, filled the way the feed fills it (see lib/feedLayout.ts).
   const frameDims = useMemo(
-    () => calcFrameDims(previewAreaSize.w, previewAreaSize.h, ASPECT),
+    () => fitFrame(previewAreaSize.w, previewAreaSize.h, feedAspect(SCREEN_W, SCREEN_H)),
     [previewAreaSize],
   );
+  const feedCrop = useMemo(
+    () => computeCoverCrop(frameDims.w, frameDims.h, VIDEO_ASPECT),
+    [frameDims],
+  );
+  const [showGuides, setShowGuides] = useState(true);
+  const [fullPreviewOpen, setFullPreviewOpen] = useState(false);
 
   // ── Initialize clips ─────────────────────────────────────────────────────
   const initialClips: DraftClip[] = useMemo(() => {
@@ -3427,6 +3429,18 @@ export default function EditScreen() {
     );
   }
 
+  const fullVideoW = frameDims.w / feedCrop.visibleW;
+  const fullVideoH = frameDims.h / feedCrop.visibleH;
+  const guidesActive = !!dragOverlayInfo || captionSelected;
+  const previewUsername = ((user?.user_metadata?.username as string | undefined) ?? "").trim() || "you";
+  const handleOpenFullPreview = () => {
+    if (!isVideo || !aheadReady || !aheadMatches) {
+      showAlert("Preview", "Your preview is still being made. Try again in a moment.");
+      return;
+    }
+    setIsPlaying(false);
+    setFullPreviewOpen(true);
+  };
   const isIsolated = selectedClipId !== null;
   const editingOverlay = editingOverlayId
     ? textOverlays.find((ov) => ov.id === editingOverlayId)
@@ -3451,6 +3465,22 @@ export default function EditScreen() {
             {draftId ? "Edit Draft" : "Edit Post"}
           </UiText>
           <View style={styles.topBtnRow}>
+            <TouchableOpacity
+              onPress={() => setShowGuides((v) => !v)}
+              style={[styles.topBtn, !showGuides && styles.topBtnOff]}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle feed guides"
+            >
+              <Grid3x3 size={16} color={theme.text} strokeWidth={2} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleOpenFullPreview}
+              style={[styles.topBtn, styles.previewBtn]}
+              accessibilityRole="button"
+              accessibilityLabel="Preview"
+            >
+              <UiText style={styles.previewBtnText}>Preview</UiText>
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={handleUndo}
               disabled={!canUndo}
@@ -3521,7 +3551,7 @@ export default function EditScreen() {
                       left: 0,
                       opacity: activeSlot === 0 ? 1 : 0,
                     }}
-                    contentFit="contain"
+                    contentFit="cover"
                     nativeControls={false}
                     onFirstFrameRender={onReadySlot0}
                     pointerEvents="none"
@@ -3539,7 +3569,7 @@ export default function EditScreen() {
                       left: 0,
                       opacity: activeSlot === 1 ? 1 : 0,
                     }}
-                    contentFit="contain"
+                    contentFit="cover"
                     nativeControls={false}
                     onFirstFrameRender={onReadySlot1}
                     pointerEvents="none"
@@ -3555,7 +3585,7 @@ export default function EditScreen() {
                       top: 0,
                       left: 0,
                     }}
-                    contentFit="contain"
+                    contentFit="cover"
                     nativeControls={false}
                     pointerEvents="none"
                   />
@@ -3576,7 +3606,7 @@ export default function EditScreen() {
               <Image
                 source={{ uri: activeClip.uri }}
                 style={{ width: "100%", height: "100%" }}
-                contentFit="contain"
+                contentFit="cover"
                 pointerEvents="none"
               />
             ) : (
@@ -3632,11 +3662,21 @@ export default function EditScreen() {
             )}
 
             {isVideo && features.captionControls && captions.captionsOn && (
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: "absolute",
+                  left: -feedCrop.cropLeft * fullVideoW,
+                  top: -feedCrop.cropTop * fullVideoH,
+                  width: fullVideoW,
+                  height: fullVideoH,
+                }}
+              >
               <CaptionPreview
                 lines={captions.lines}
                 positionMs={displayPosition}
-                frameW={frameDims.w}
-                frameH={frameDims.h}
+                frameW={fullVideoW}
+                frameH={fullVideoH}
                 invisible={false}
                 style={captionStyle}
                 isPlaying={isPlaying}
@@ -3647,6 +3687,7 @@ export default function EditScreen() {
                 onEdit={captions.editLine}
                 onStyleCommit={handleCaptionStyleCommit}
               />
+              </View>
             )}
 
             {/* Draggable text overlays */}
@@ -3656,6 +3697,7 @@ export default function EditScreen() {
                 overlay={ov}
                 frameWidth={frameDims.w}
                 frameHeight={frameDims.h}
+                crop={feedCrop}
                 isSelected={selectedOverlayId === ov.id}
                 onSelect={handleSelectOverlay}
                 onUpdate={handleOverlayUpdate}
@@ -3666,6 +3708,16 @@ export default function EditScreen() {
                 onDragState={handleDragState}
               />
             ))}
+
+            {showGuides && (
+              <FeedSafeZones
+                frameW={frameDims.w}
+                frameH={frameDims.h}
+                screenW={SCREEN_W}
+                topInset={insets.top}
+                active={guidesActive}
+              />
+            )}
           </View>
         </Pressable>
 
@@ -4076,6 +4128,15 @@ export default function EditScreen() {
         onDone={handleTextEditorDone}
         onCancel={handleTextEditorCancel}
       />
+      <EditPreviewModal
+        visible={fullPreviewOpen}
+        uri={fullPreviewOpen && aheadReady && aheadMatches ? aheadReady.uri : null}
+        onClose={() => setFullPreviewOpen(false)}
+        captionLines={features.captionControls && captions.captionsOn ? captions.lines : null}
+        captionStyle={captionStyle ?? null}
+        textOverlays={textOverlays}
+        username={previewUsername}
+      />
     </GestureHandlerRootView>
   );
 }
@@ -4133,6 +4194,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
+  previewBtn: { width: "auto", paddingHorizontal: 12 },
+  previewBtnText: { color: theme.text, fontSize: 13, fontWeight: "700" as const },
   topBtnOff: {
     opacity: 0.25,
   },

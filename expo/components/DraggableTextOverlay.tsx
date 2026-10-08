@@ -7,6 +7,18 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import type { TextOverlay, TextBackgroundStyle } from "@/providers/PostsProvider";
+import {
+  TEXT_LINE_HEIGHT_EM,
+  TEXT_MAX_WIDTH,
+  TEXT_PAD_EM,
+  TEXT_RADIUS_EM,
+  TEXT_REF_WIDTH,
+  fracToFrame,
+  frameToFrac,
+  type CoverCrop,
+} from "@/lib/feedLayout";
+
+const FULL_CROP: CoverCrop = { visibleW: 1, visibleH: 1, cropLeft: 0, cropTop: 0 };
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -65,6 +77,8 @@ interface DraggableTextOverlayProps {
   overlay: TextOverlay;
   frameWidth: number;
   frameHeight: number;
+  /** The feed cover crop of this frame; overlay x/y are fractions of the whole video. */
+  crop?: CoverCrop;
   isSelected: boolean;
   onSelect: (id: string) => void;
   onUpdate: (id: string, patch: Partial<TextOverlay>) => void;
@@ -85,6 +99,7 @@ export default function DraggableTextOverlay({
   overlay,
   frameWidth,
   frameHeight,
+  crop = FULL_CROP,
   isSelected,
   onSelect,
   onUpdate,
@@ -95,8 +110,9 @@ export default function DraggableTextOverlay({
   onDragState,
 }: DraggableTextOverlayProps) {
   // ── Shared values (UI thread) ────────────────────────────────────────────
-  const translateX = useSharedValue(overlay.x * frameWidth);
-  const translateY = useSharedValue(overlay.y * frameHeight);
+  const start = fracToFrame(overlay.x, overlay.y, frameWidth, frameHeight, crop);
+  const translateX = useSharedValue(start.x);
+  const translateY = useSharedValue(start.y);
   const fontSizeSv = useSharedValue(overlay.fontSize ?? 26);
   const rotationSv = useSharedValue(overlay.rotation);
   const textWidth = useSharedValue(0);
@@ -120,6 +136,7 @@ export default function DraggableTextOverlay({
     overlay,
     frameWidth,
     frameHeight,
+    crop,
     onSelect,
     onUpdate,
     onEditStart,
@@ -129,6 +146,7 @@ export default function DraggableTextOverlay({
     overlay,
     frameWidth,
     frameHeight,
+    crop,
     onSelect,
     onUpdate,
     onEditStart,
@@ -311,12 +329,15 @@ export default function DraggableTextOverlay({
             translateY.value = withSpring(centerY, { stiffness: 300, damping: 25 });
           }
 
-          const newX = clamp(snappedX / fw, DRAG_EDGE_MARGIN, 1 - DRAG_EDGE_MARGIN);
-          const newY = clamp(snappedY / fh, DRAG_EDGE_MARGIN, 1 - DRAG_EDGE_MARGIN);
+          const fx = clamp(snappedX / fw, DRAG_EDGE_MARGIN, 1 - DRAG_EDGE_MARGIN);
+          const fy = clamp(snappedY / fh, DRAG_EDGE_MARGIN, 1 - DRAG_EDGE_MARGIN);
+          const full = frameToFrac(fx * fw, fy * fh, fw, fh, p.crop);
+          const newX = fx;
+          const newY = fy;
 
           p.onUpdate(p.overlay.id, {
-            x: newX,
-            y: newY,
+            x: full.x,
+            y: full.y,
             fontSize: fontSizeSv.value,
             rotation: rotationSv.value,
           });
@@ -371,7 +392,11 @@ export default function DraggableTextOverlay({
   }, []);
 
   // ── Animated styles ─────────────────────────────────────────────────────
+  const k = frameWidth / crop.visibleW / TEXT_REF_WIDTH;
+  const maxBoxWidth = (frameWidth / crop.visibleW) * TEXT_MAX_WIDTH;
   const animatedStyle = useAnimatedStyle(() => ({
+    paddingHorizontal: fontSizeSv.value * k * TEXT_PAD_EM,
+    paddingVertical: fontSizeSv.value * k * TEXT_PAD_EM,
     opacity: opacity.value,
     transform: [
       { translateX: translateX.value - textWidth.value / 2 },
@@ -382,7 +407,11 @@ export default function DraggableTextOverlay({
   }));
 
   const animatedTextStyle = useAnimatedStyle(() => ({
-    fontSize: fontSizeSv.value,
+    fontSize: fontSizeSv.value * k,
+    lineHeight: fontSizeSv.value * k * TEXT_LINE_HEIGHT_EM,
+  }));
+  const animatedBoxStyle = useAnimatedStyle(() => ({
+    borderRadius: fontSizeSv.value * k * TEXT_RADIUS_EM,
   }));
 
   // ── Snap guide line styles ──────────────────────────────────────────────
@@ -427,7 +456,7 @@ export default function DraggableTextOverlay({
   // ── Render ──────────────────────────────────────────────────────────────
   return (
     <Animated.View
-      style={[styles.overlayWrap, animatedStyle]}
+      style={[styles.overlayWrap, { maxWidth: maxBoxWidth }, animatedStyle]}
       onLayout={handleLayout}
       {...panResponder.panHandlers}
     >
@@ -439,20 +468,17 @@ export default function DraggableTextOverlay({
             {
               backgroundColor: bgMeta.bgColor,
               opacity: bgMeta.bgOpacity,
-              borderRadius: bgMeta.borderRadius,
             },
+            animatedBoxStyle,
           ]}
           pointerEvents="none"
         />
       )}
 
-      {/* Selection outline — solid border with slight glow */}
+      {/* Selection outline: the same dashed white outline the caption uses */}
       {isSelected && (
         <Animated.View
-          style={[
-            styles.selectionOutline,
-            { borderColor: "#E8291C" },
-          ]}
+          style={[styles.selectionOutline, animatedBoxStyle]}
           pointerEvents="none"
         />
       )}
@@ -509,17 +535,15 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     top: 0,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
     alignItems: "center",
     justifyContent: "center",
   },
   selectionOutline: {
     ...StyleSheet.absoluteFill,
-    borderWidth: 2,
-    borderRadius: 0,
-    margin: -4,
-    borderColor: "#E8291C",
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: "#FFFFFF",
+    margin: -3,
   },
   text: {
     fontWeight: "900" as const,
@@ -531,7 +555,7 @@ const styles = StyleSheet.create({
   // ── Snap guides ──
   snapGuide: {
     position: "absolute",
-    backgroundColor: "rgba(232,41,28,0.25)",
+    backgroundColor: "rgba(255,255,255,0.45)",
   },
   snapGuideH: {
     height: 1,

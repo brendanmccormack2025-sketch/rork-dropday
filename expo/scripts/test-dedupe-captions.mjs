@@ -132,7 +132,7 @@ const SPEECH = loud(48800, [[300, 3200]]);
 {
   const spec = resolveOverlayStyle("caption", "trial");
   const avail = availableTextWidth(spec);
-  eq("available width = 0.86 of 1080 minus padding, with margin", Math.round(avail), Math.round((0.86 * 1080 - 28) * 0.92));
+  eq("available width = 0.86 of 1080 minus padding, with margin", Math.round(avail), Math.round((0.86 * 1080 - 36) * 0.92));
   const long = ["EXTRAORDINARILY", "COMMUNICATION", "WONDERFULLY", "UNBELIEVABLE"].map((t, i) => w(t, i * 400, i * 400 + 350, 1));
   const lines = buildCaptionLines(long, {}, [{ startMs: 0, endMs: 5000 }]);
   eq("long words are split into fewer words per line", lines.map((l) => l.text), ["EXTRAORDINARILY", "COMMUNICATION", "WONDERFULLY", "UNBELIEVABLE"]);

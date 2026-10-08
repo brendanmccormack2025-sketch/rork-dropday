@@ -46,9 +46,15 @@ import { isInternalTester } from "@/constants/debug";
 import { isVideoRenderAvailable } from "@/lib/renderAtPost";
 import { usePlaybackDiagnostics } from "@/lib/playbackDiagnostics";
 import { formatRenderStats, useLastRenderStats } from "@/lib/renderReport";
+import {
+  TAB_BAR_HEIGHT,
+  VIDEO_ASPECT,
+  computeCoverCrop,
+  textLayout,
+  videoDisplayWidth,
+} from "@/lib/feedLayout";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
-const TAB_BAR_HEIGHT = 88;
 /**
  * Same-file seams: the idle player waits parked RUNUP_MS before the next
  * segment's trimStart, and starts playing (muted, hidden) a "lead" before the
@@ -97,42 +103,7 @@ const rawViewRecorded = new Set<string>();
 /** Height reserved for the action buttons + username row at the bottom of each feed item. */
 const BOTTOM_OVERLAY_HEIGHT = 130;
 
-/** Assumed aspect ratio (w/h) of video content — matches the editor's ASPECT = 9/16. */
-const ASSUMED_VIDEO_ASPECT = 9 / 16;
-
-/**
- * Compute the visible fraction of a video after COVER resize mode crops it
- * to fill a container of different aspect ratio.
- *
- * COVER scales the video so both dimensions >= container, then crops the
- * overflow symmetrically (centered crop).
- *
- * @returns visibleW/visibleH — fraction of the original video that remains
- *          visible; cropLeft/cropTop — fraction cropped off each edge.
- */
-function computeCoverCrop(
-  containerW: number,
-  containerH: number,
-  videoAspect: number,
-): { visibleW: number; visibleH: number; cropLeft: number; cropTop: number } {
-  if (containerW <= 0 || containerH <= 0) {
-    return { visibleW: 1, visibleH: 1, cropLeft: 0, cropTop: 0 };
-  }
-  const containerAspect = containerW / containerH;
-
-  if (videoAspect < containerAspect) {
-    // Video is narrower/taller than container → scale to fill width, crop top/bottom
-    const scaledVideoH = containerW / videoAspect;
-    const visibleH = containerH / scaledVideoH;
-    const cropTop = (1 - visibleH) / 2;
-    return { visibleW: 1, visibleH, cropLeft: 0, cropTop };
-  }
-  // Video is wider than container → scale to fill height, crop left/right
-  const scaledVideoW = containerH * videoAspect;
-  const visibleW = containerW / scaledVideoW;
-  const cropLeft = (1 - visibleW) / 2;
-  return { visibleW, visibleH: 1, cropLeft, cropTop: 0 };
-}
+const ASSUMED_VIDEO_ASPECT = VIDEO_ASPECT;
 
 function ActionButton({
   icon,
@@ -230,7 +201,7 @@ function resolveFeedBg(
 /** Non-interactive text overlay rendered on top of feed media.
  *  Translates editor-space fractions (relative to the full CONTAIN video
  *  frame) into feed-space pixels, accounting for COVER's centered crop. */
-const FeedTextOverlay = memo(function FeedTextOverlay({
+export const FeedTextOverlay = memo(function FeedTextOverlay({
   overlay,
   containerW,
   containerH,
@@ -265,12 +236,8 @@ const FeedTextOverlay = memo(function FeedTextOverlay({
   const left = clampedX * containerW;
   const top = clampedY * containerH;
 
-  // Scale font size: editor's fontSize is relative to its small letterboxed
-  // preview frame (~250px wide). Scale up proportionally to the feed's
-  // full-screen container so text appears at the correct visual proportion.
-  const ASSUMED_EDITOR_FRAME_WIDTH = 250;
-  const fontScale = containerW / ASSUMED_EDITOR_FRAME_WIDTH;
-  const scaledFontSize = (overlay.fontSize ?? 26) * fontScale;
+  // Same sizing as the editor: relative to the width of the whole video.
+  const layout = textLayout(overlay.fontSize, videoDisplayWidth(containerW, { visibleW, visibleH, cropLeft, cropTop }));
 
   // Measure the text box via onLayout so we can center it on the stored
   // x/y point — matching the editor's DraggableTextOverlay which offsets
@@ -308,7 +275,12 @@ const FeedTextOverlay = memo(function FeedTextOverlay({
           styles.textOverlayText,
           {
             color,
-            fontSize: scaledFontSize,
+            fontSize: layout.fontSize,
+            lineHeight: layout.lineHeight,
+            paddingHorizontal: layout.padX,
+            paddingVertical: layout.padY,
+            borderRadius: layout.cornerRadius,
+            maxWidth: layout.maxWidth,
             backgroundColor,
           },
         ]}
@@ -2109,9 +2081,6 @@ const styles = StyleSheet.create({
   textOverlayText: {
     fontWeight: "900" as const,
     textAlign: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 0,
     overflow: "hidden",
     textShadowColor: "rgba(0,0,0,0.4)",
     textShadowRadius: 2,
