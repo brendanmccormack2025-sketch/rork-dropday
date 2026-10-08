@@ -31,7 +31,7 @@ const textSpec = (supportsFont) => JSON.parse(toRenderJson({ version: 1, clips: 
   const app = JSON.parse(readFileSync(new URL("../app.json", import.meta.url), "utf8")).expo;
   const plugin = app.plugins.find((p) => Array.isArray(p) && p[0] === "expo-font");
   eq("app.json embeds both Montserrat files via expo-font", plugin?.[1].fonts.map((f) => f.split("/").pop()), ["Montserrat_800ExtraBold.ttf", "Montserrat_700Bold.ttf"]);
-  eq("app.json version is still 1.0.3", app.version, "1.0.3");
+  eq("app.json version is 1.0.4 (bumped by the owner)", app.version, "1.0.4");
   const ttf = (f) => readFileSync(new URL(`../node_modules/@expo-google-fonts/montserrat/${f}/Montserrat_${f}.ttf`, import.meta.url));
   const psNames = (buf) => {
     // name table, nameID 6 (PostScript name), platform 3 (UTF-16BE) or 1 (Mac Roman)

@@ -98,7 +98,8 @@ function RootLayoutNav() {
             presentation: "fullScreenModal",
             animation: "slide_from_bottom",
             gestureEnabled: false,
-            contentStyle: { backgroundColor: theme.bg },
+            // Black behind the camera preview: any gap in the preview (session rebuild) must never show the light app background.
+            contentStyle: { backgroundColor: "#000" },
           }}
         />
         <Stack.Screen

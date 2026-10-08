@@ -75,7 +75,7 @@ const newId = () => `m${++idSeq}`;
 {
   const cam = read("../hooks/useCameraRecorder.ts");
   ok("no segment is saved to the camera roll", !/saveToGallery\s*\(/.test(cam) && !/saveToLibraryAsync/.test(cam) && !/useMediaLibraryPermissions/.test(cam));
-  ok("segments still reach the editor as clips (one per segment)", /appendClip\(clip\)/.test(cam));
+  ok("segments still reach the editor as clips (one per segment)", /onSegment: \(seg\) =>[\s\S]{0,300}setClips\(clipsRef\.current\)/.test(cam));
   ok("the final edited video is still saved by the Save to camera roll switch", /startPostExport\(/.test(edit));
 }
 

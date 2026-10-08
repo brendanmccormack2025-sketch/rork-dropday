@@ -39,10 +39,8 @@ const seg = (id, runId, ms, type = "video") => ({ id, uri: `file:///${id}.mov`, 
   eq("the run in progress is drawn after them", [live.length, live[3].live, Math.round(live[3].startFrac * 60000), Math.round(live[3].widthFrac * 60000)], [4, true, 12000, 2500]);
 
   const cam = read("../app/camera.tsx");
-  ok("tap on the button: start when stopped, pause when recording", /tapAction\(recordStateRef\.current\)/.test(cam) && /action === "start"[\s\S]{0,80}startRecording\(\)/.test(cam) && /action === "pause"[\s\S]{0,40}stopRecording\(\)/.test(cam));
-  ok("hold still records and release pauses", /LONG_PRESS_THRESHOLD_MS/.test(cam) && /didLongPress\.current \? "pause"/.test(cam));
-  ok("a tap no longer takes a photo, and there is no lock gesture", !/takePicture/.test(cam) && !/lockRecording|Slide up to lock/.test(cam));
-  ok("flip works while paused (and still while recording)", /onPress=\{handleFlip\}/.test(cam) && /flipCamera\(\)/.test(cam));
+  ok("the record button is a plain tap that toggles (no hold-to-record, no photo, no lock)", /onPress=\{onRecordPress\}/.test(cam) && /toggleRecording\(\)/.test(cam) && !/LONG_PRESS|longPress|takePicture|lockRecording|PanResponder/.test(cam));
+  ok("flip works while paused (and while recording, via the state machine)", /onPress=\{handleFlip\}/.test(cam) && /flipCamera\(\)/.test(cam));
   ok("segmented bar at the top with notches", /styles\.segBar/.test(cam) && /styles\.segNotch/.test(cam) && /barSegments\(/.test(cam));
 }
 
@@ -62,7 +60,7 @@ const seg = (id, runId, ms, type = "video") => ({ id, uri: `file:///${id}.mov`, 
   ok("the hook removes the clips of the last run and deletes their files", /deleteLastRun\(clipsRef\.current\)/.test(hook) && /deleteAsync\(c\.uri/.test(hook));
   ok("it cannot run while recording", /recordStateRef\.current !== "idle"\) return;\s*const \{ kept, removed \}/.test(hook));
   ok("the screen asks first: Delete last clip?", /Alert\.alert\("Delete last clip\?"/.test(cam) && /onPress: deleteLastClip/.test(cam));
-  ok("the button sits beside record and is hidden while recording", /clips\.length > 0 && !isRecording[\s\S]{0,200}confirmDeleteLast/.test(cam));
+  ok("the button sits beside record and is hidden while recording", /clips\.length > 0 && \([\s\S]{0,200}confirmDeleteLast/.test(cam) && /disabled=\{isRecording\}/.test(cam));
 }
 
 // ── 60 s cap ──
@@ -74,15 +72,16 @@ const seg = (id, runId, ms, type = "video") => ({ id, uri: `file:///${id}.mov`, 
   eq("no recording past 60 s", [canRecordMore(half), canRecordMore([seg("a", "r1", 60000)]), canRecordMore([seg("a", "r1", 59900)])], [true, false, false]);
   eq("deleting a run frees the time again", canRecordMore(deleteLastRun([seg("a", "r1", 30000), seg("b", "r2", 30000)]).kept), true);
   const hook = read("../hooks/useCameraRecorder.ts");
-  ok("recordAsync gets the remaining time as maxDuration (also after a flip), and a full take refuses to start", /maxDuration: maxDurationSeconds\(clipsRef\.current, spentThisRun\)/.test(hook) && /!canRecordMore\(clipsRef\.current\)/.test(hook));
-  ok("each file's recorded length is kept for the bar and the cap", /measuredMs: accumulatedSegmentMsRef\.current\[i\]/.test(hook));
+  const ctl = read("../lib/recordingController.ts");
+  ok("the recorder gets the remaining time as maxDuration, and a full take refuses to start", /maxDurationSeconds\(segments\)/.test(ctl) && /!canRecordMore\(this\.deps\.getSegments\(\)\)/.test(ctl));
+  ok("each file's recorded length is kept for the bar and the cap", /measuredMs: Math\.max\(0, this\.deps\.now\(\) - startedAt\)/.test(ctl) && /measuredMs: seg\.measuredMs/.test(hook));
 }
 
 // ── Next: >= 1 s, then merge, then transcription + planning ──
 {
   eq("Next needs at least 1 s", [canProceed([seg("a", "r1", 900)]), canProceed([seg("a", "r1", 1000)]), canProceed([])], [false, true, false]);
   const cam = read("../app/camera.tsx");
-  ok("Next is disabled below 1 s and the editor never gets the recorder's timing", /disabled=\{!canProceed\(clips\)\}/.test(cam) && /measuredMs: _m/.test(cam) && /if \(!canProceed\(clips\)\) return;/.test(cam));
+  ok("Next appears from 1 s and the editor never gets the recorder's timing", /showNext = canProceed\(clips\)/.test(cam) && /measuredMs: _m/.test(cam) && /if \(!canProceed\(clips\) \|\| isRecording\) return;/.test(cam));
   ok("no per-segment camera-roll saves", !/saveToLibraryAsync|saveToGallery/.test(read("../hooks/useCameraRecorder.ts")));
 
   // What the editor does with three runs (clips arrive without durations, as the camera sends them).
