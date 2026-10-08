@@ -59,7 +59,7 @@ const textSpec = (supportsFont) => JSON.parse(toRenderJson({ version: 1, clips: 
   eq("capable build, nothing chosen: the default box with Classic", none, { ...defaultCaptionStyle(), fontId: "classic" });
   eq("capable build: the render JSON carries fontName Montserrat-ExtraBold", captionSpec(none).fontName, "Montserrat-ExtraBold");
   eq("capable build: the preview spec has the same fontName", styledSpec(none).fontName, "Montserrat-ExtraBold");
-  eq("capable build: white on black, rounded", [captionSpec(none).color, captionSpec(none).backgroundColor, captionSpec(none).cornerRadius], ["#FFFFFF", "#000000", 15]);
+  eq("capable build: white on black, rounded", [captionSpec(none).color, captionSpec(none).backgroundColor, captionSpec(none).cornerRadius], ["#FFFFFF", "#000000", 10]);
   eq("capable build: a chosen font is kept", usableCaptionStyle(withCaptionLook(undefined, { fontId: "futura" }), true).fontId, "futura");
   eq("capable build: a chosen system font (Trial) is kept", captionSpec(usableCaptionStyle(withCaptionLook(undefined, { fontId: "trial" }), true)).fontName, undefined);
   eq("capable build: a stored style without a font gets Classic, size and place kept",

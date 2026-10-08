@@ -18,7 +18,7 @@ type Props = {
   style: CaptionStyle | null | undefined;
   /** False on a build that cannot render a font: the font row is hidden. */
   supportsFont: boolean;
-  onChange: (patch: { fontId?: string; textColor?: string; backgroundColor?: string }) => void;
+  onChange: (patch: { fontId?: string; textColor?: string; backgroundColor?: string; uppercase?: boolean }) => void;
   onReset: () => void;
   onClose: () => void;
 };
@@ -60,6 +60,25 @@ export default function CaptionStyleSheet({ visible, style, supportsFont, onChan
               </View>
             </>
           )}
+
+          <UiText style={styles.label}>Case</UiText>
+          <View style={styles.row}>
+            {[
+              { id: "normal", label: "Aa", on: !look.uppercase, value: false },
+              { id: "caps", label: "AA", on: look.uppercase, value: true },
+            ].map((c) => (
+              <Pressable
+                key={c.id}
+                onPress={() => onChange({ uppercase: c.value })}
+                style={[styles.chip, c.on && styles.chipOn]}
+                accessibilityRole="button"
+                accessibilityLabel={c.value ? "All caps" : "Normal case"}
+                accessibilityState={{ selected: c.on }}
+              >
+                <UiText style={styles.aa}>{c.label}</UiText>
+              </Pressable>
+            ))}
+          </View>
 
           <UiText style={styles.label}>Text</UiText>
           <View style={styles.row}>

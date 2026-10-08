@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
@@ -8,6 +8,7 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import type { TextOverlay, TextBackgroundStyle } from "@/providers/PostsProvider";
+import { TOUCH_PAD, createGestureTracker } from "@/lib/overlayGestures";
 import { clampScale, effectiveFontSize, resolveBgMeta as resolveBgMetaShared } from "@/lib/textOverlayStyle";
 import {
   TEXT_MAX_WIDTH,
@@ -144,19 +145,8 @@ export default function DraggableTextOverlay({
 
   // ── Gestures: pan, pinch and rotate together (react-native-gesture-handler), tap to select ─────────
   const gesture = useMemo(() => {
-    let active = 0;
-    let changed = false;
     let baseScale = 1;
     let baseRotation = 0;
-
-    const begin = () => {
-      const p = propsRef.current;
-      if (active === 0) {
-        changed = false;
-        p.onEditStart?.(p.overlay.id);
-      }
-      active += 1;
-    };
 
     const snapTo = (cx: number, cy: number) => {
       const p = propsRef.current;
@@ -194,61 +184,57 @@ export default function DraggableTextOverlay({
       snapGuideV.value = withTiming(0, { duration: 200 });
     };
 
-    const end = () => {
-      active = Math.max(0, active - 1);
-      if (active === 0 && changed) {
-        changed = false;
-        commit();
-      }
-    };
+    const tracker = createGestureTracker({
+      onEditStart: () => {
+        const p = propsRef.current;
+        p.onEditStart?.(p.overlay.id);
+      },
+      onCommit: commit,
+    });
 
     const pan = Gesture.Pan()
       .runOnJS(true)
       .minDistance(3)
       .maxPointers(2)
       .onStart(() => {
-        begin();
+        tracker.begin("pan");
         dragStartX.value = translateX.value;
         dragStartY.value = translateY.value;
         isDraggingSv.value = 1;
       })
       .onUpdate((e) => {
-        changed = true;
+        tracker.change();
         const p = propsRef.current;
         snapTo(dragStartX.value + e.translationX, dragStartY.value + e.translationY);
         p.onDragState?.(p.overlay.id, true, translateX.value / p.frameWidth, translateY.value / p.frameHeight);
       })
-      .onFinalize((_e, success) => {
-        if (success) end();
-      });
+      .onFinalize(() => tracker.end("pan"));
 
     const pinch = Gesture.Pinch()
       .runOnJS(true)
       .onStart(() => {
-        begin();
+        tracker.begin("pinch");
+        isDraggingSv.value = 1;
         baseScale = scaleSv.value;
       })
       .onUpdate((e) => {
-        changed = true;
+        tracker.change();
         scaleSv.value = clampScale(baseScale * e.scale);
       })
-      .onFinalize((_e, success) => {
-        if (success) end();
-      });
+      .onFinalize(() => tracker.end("pinch"));
 
     const rotate = Gesture.Rotation()
       .runOnJS(true)
       .onStart(() => {
-        begin();
+        tracker.begin("rotate");
+        isDraggingSv.value = 1;
         baseRotation = rotationSv.value;
       })
       .onUpdate((e) => {
-        changed = true;
+        tracker.change();
         rotationSv.value = baseRotation + (e.rotation * 180) / Math.PI;
       })
-      .onFinalize((_e, success) => {
-        if (success) end();
-      });
+      .onFinalize(() => tracker.end("rotate"));
 
     const doubleTap = Gesture.Tap()
       .runOnJS(true)
@@ -264,6 +250,7 @@ export default function DraggableTextOverlay({
         if (success) propsRef.current.onSelect(propsRef.current.overlay.id);
       });
 
+    // Pan, pinch and rotation all run at once; taps give way to them.
     return Gesture.Simultaneous(Gesture.Exclusive(doubleTap, singleTap), pan, pinch, rotate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -341,6 +328,7 @@ export default function DraggableTextOverlay({
       pointerEvents="box-none"
     >
       <GestureDetector gesture={gesture}>
+      <View collapsable={false} style={styles.touch}>
       <Animated.View
         style={[styles.box, animatedPadStyle]}
         onLayout={handleLayout}
@@ -412,6 +400,7 @@ export default function DraggableTextOverlay({
         {overlay.text}
       </Animated.Text>
       </Animated.View>
+      </View>
       </GestureDetector>
     </Animated.View>
   );
@@ -425,6 +414,14 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     alignItems: "center",
+  },
+  // Invisible padding that still takes touches: two fingers must land on the overlay to pinch it. The negative
+  // margin cancels the padding, so the layout (and the measured box) is unchanged.
+  touch: {
+    padding: TOUCH_PAD,
+    margin: -TOUCH_PAD,
+    alignItems: "center",
+    justifyContent: "center",
   },
   box: {
     alignItems: "center",

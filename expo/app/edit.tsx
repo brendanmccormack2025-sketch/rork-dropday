@@ -71,7 +71,7 @@ import { cancelRender } from "@/modules/video-render";
 import { recordClientError } from "@/lib/clientErrors";
 import { POST_FAILED_TEXT, renderWithCaptionFallback, safePost, type RenderStepResult } from "@/lib/safePost";
 import type { EditOverlay } from "@/lib/editModel";
-import { startPostExport } from "@/lib/exportEdit";
+import { stageExportFallback, startPostExport } from "@/lib/exportEdit";
 import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
 import { analysis } from "@/lib/autoEdit/analysis";
 import {
@@ -3232,6 +3232,23 @@ export default function EditScreen() {
         reactingTo || null,
       );
 
+      // Save to camera roll: the export (cuts, captions and Text-button overlays burned in) starts alongside the
+      // upload and never touches the post. The posted file is copied first (the upload deletes it when done) so a
+      // failed export can still save it. Any problem shows "Couldn't save to camera roll"; it is also recorded.
+      try {
+        const fallbackUri = saveToRollRef.current && rendered ? await stageExportFallback(rendered.uri) : null;
+        void startPostExport({
+          enabled: saveToRollRef.current && Platform.OS !== "web",
+          clips,
+          captionOverlays: captionOverlaysForPost,
+          textOverlays,
+          userId: user?.id,
+          fallbackUri,
+        }).catch((e) => void recordClientError(e, { kind: "saveToRoll", stage: "start" }));
+      } catch (e) {
+        void recordClientError(e, { kind: "saveToRoll", stage: "start" });
+      }
+
       // ── 4. Fire-and-forget upload in the background ──────────────────
       //    MUST come BEFORE navigation — if navigation throws, the mutation
       //    is already registered with TanStack Query and will still upload.
@@ -3272,19 +3289,6 @@ export default function EditScreen() {
           updateOptimisticProgress(tempId, percent);
         },
       });
-
-      // Save to camera roll: a dedicated export with cuts, captions and Text-button overlays burned in. It starts
-      // after the upload has started and never touches the post: any problem shows "Couldn't save to camera roll".
-      try {
-        void startPostExport({
-          enabled: saveToRollRef.current && Platform.OS !== "web",
-          clips,
-          captionOverlays: captionOverlaysForPost,
-          textOverlays,
-        }).catch((e) => void recordClientError(e, { kind: "saveToRoll", stage: "start" }));
-      } catch (e) {
-        void recordClientError(e, { kind: "saveToRoll", stage: "start" });
-      }
 
       // Internal testers: say what the render path did (a fixed-wording message, ~6 s).
       // Never post silently without captions the creator saw: say so, briefly.

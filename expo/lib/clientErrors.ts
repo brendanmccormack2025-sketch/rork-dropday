@@ -43,16 +43,22 @@ const recorder = createErrorRecorder({
   storage: AsyncStorage,
   now: () => Date.now(),
   context: () => ({ ...context }),
+  schedule: (fn, ms) => {
+    setTimeout(fn, ms);
+  },
   upload: async (rows) => {
     const { error } = await supabase.from("client_errors").insert(rows);
-    if (error) throw error;
+    if (error) {
+      console.warn("[client_errors] upload failed:", error.message);
+      throw error;
+    }
   },
 });
 
-/** Record an error that was caught (a failed Post, ...). Never throws. */
+/** Record an error that was caught (a failed Post, a failed save, ...) and upload it at once. Never throws. */
 export function recordClientError(error: unknown, extra: { kind: string } & Record<string, unknown>): Promise<void> {
   if (__DEV__) console.log("[client error]", extra.kind, (error as Error)?.message ?? error);
-  return recorder.record(error, extra);
+  return recorder.reportNow(error, extra);
 }
 
 /** Upload the reports saved by earlier runs (call once the user is signed in). */

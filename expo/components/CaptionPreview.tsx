@@ -124,7 +124,7 @@ export default function CaptionPreview({
     const cur = latest.current;
     if (!cur.line) return;
     cur.onEditStart();
-    setDraft(cur.line.text.toUpperCase());
+    setDraft(cur.line.text);
     setEditing(cur.index);
   }, []);
   const startEditingRef = useRef(startEditing);

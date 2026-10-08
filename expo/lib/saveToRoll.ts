@@ -6,23 +6,34 @@
  */
 export type SaveToRollResult =
   | { status: "off" }
-  | { status: "saved" }
-  | { status: "failed"; reason: string };
+  | { status: "saved"; /** Text-button overlays could not be burned in: the posted file (cuts and captions) was saved. */ withoutOverlays?: boolean }
+  | { status: "failed"; reason: string; /** The real error text (shown to the owner account only). */ detail?: string };
+
+type Stage = "render" | "permission" | "save";
 
 export type SaveToRollDeps = {
   /** The "Save to camera roll" switch. */
   enabled: boolean;
   /** Render the export (cuts, captions and Text-button overlays burned in). Resolves the file to save. */
   render: () => Promise<{ uri: string }>;
+  /**
+   * The posted file (cuts and captions burned in), copied somewhere safe; saved when the export render
+   * fails, or instead of it when there is nothing to burn in. Absent: no fallback.
+   */
+  fallbackUri?: string | null;
+  /** True when the post has Text-button overlays (so the posted file is NOT what the feed shows). */
+  hasTextOverlays?: boolean;
+  /** True when this build can burn the Text-button overlays in (otherwise the export render is pointless). */
+  canBurnOverlays?: boolean;
   /** Add-only photo permission; true when granted. */
   ensurePermission: () => Promise<boolean>;
   save: (uri: string) => Promise<void>;
-  /** Delete the temporary export file. */
+  /** Delete a temporary file. */
   cleanup: (uri: string) => Promise<void>;
-  onError?: (error: unknown, stage: "render" | "permission" | "save") => void;
+  onError?: (error: unknown, stage: Stage) => void;
 };
 
-function report(deps: SaveToRollDeps, error: unknown, stage: "render" | "permission" | "save"): void {
+function report(deps: SaveToRollDeps, error: unknown, stage: Stage): void {
   try {
     deps.onError?.(error, stage);
   } catch {
@@ -30,35 +41,58 @@ function report(deps: SaveToRollDeps, error: unknown, stage: "render" | "permiss
   }
 }
 
+const messageOf = (e: unknown): string => String((e as { message?: unknown } | null)?.message ?? e ?? "unknown error").slice(0, 300);
+
 export async function saveToCameraRoll(deps: SaveToRollDeps): Promise<SaveToRollResult> {
   if (!deps.enabled) return { status: "off" };
-  let file: string | null = null;
+  const temps: string[] = [];
   try {
-    let granted: boolean;
     try {
-      granted = await deps.ensurePermission();
+      const granted = await deps.ensurePermission();
+      if (!granted) {
+        const err = new Error("photo permission was not granted");
+        report(deps, err, "permission");
+        return { status: "failed", reason: "permission", detail: messageOf(err) };
+      }
     } catch (e) {
       report(deps, e, "permission");
-      return { status: "failed", reason: "permission" };
+      return { status: "failed", reason: "permission", detail: `permission: ${messageOf(e)}` };
     }
-    if (!granted) return { status: "failed", reason: "permission" };
-    try {
-      file = (await deps.render()).uri;
-    } catch (e) {
-      report(deps, e, "render");
-      return { status: "failed", reason: "render" };
+
+    // What to save: the export render, or the posted file.
+    let file: string | null = null;
+    let withoutOverlays = false;
+    const burn = deps.canBurnOverlays !== false;
+    if (deps.fallbackUri && (!deps.hasTextOverlays || !burn)) {
+      // Nothing to burn in (or this build cannot): the posted file is the video.
+      file = deps.fallbackUri;
+      withoutOverlays = !!deps.hasTextOverlays;
+    } else {
+      try {
+        file = (await deps.render()).uri;
+        temps.push(file);
+        // A build that cannot place text still renders cuts and captions: the Text overlays are missing.
+        withoutOverlays = !!deps.hasTextOverlays && !burn;
+      } catch (e) {
+        report(deps, e, "render");
+        if (!deps.fallbackUri) return { status: "failed", reason: "render", detail: `render: ${messageOf(e)}` };
+        file = deps.fallbackUri;
+        withoutOverlays = !!deps.hasTextOverlays;
+      }
     }
     try {
       await deps.save(file);
     } catch (e) {
       report(deps, e, "save");
-      return { status: "failed", reason: "save" };
+      return { status: "failed", reason: "save", detail: `save: ${messageOf(e)}` };
     }
-    return { status: "saved" };
+    // Saved: the staged copy of the posted file is no longer needed (until then it stays, so Retry can use it).
+    if (deps.fallbackUri) temps.push(deps.fallbackUri);
+    return withoutOverlays ? { status: "saved", withoutOverlays: true } : { status: "saved" };
   } finally {
-    if (file) {
+    for (const t of temps) {
       try {
-        await deps.cleanup(file);
+        await deps.cleanup(t);
       } catch {
         // A leftover temp file is not an error.
       }
@@ -71,12 +105,13 @@ export async function saveToCameraRoll(deps: SaveToRollDeps): Promise<SaveToRoll
 export type SaveToRollState =
   | { kind: "idle" }
   | { kind: "saving" }
-  | { kind: "saved" }
-  | { kind: "failed"; retry: () => void };
+  | { kind: "saved"; withoutOverlays?: boolean }
+  | { kind: "failed"; retry: () => void; detail?: string };
 
 export const SAVE_FAILED_TEXT = "Couldn't save to camera roll";
 export const SAVE_SAVING_TEXT = "Saving to camera roll…";
 export const SAVE_SAVED_TEXT = "Saved to camera roll";
+export const SAVE_SAVED_WITHOUT_OVERLAYS_TEXT = "Saved without text overlays";
 
 /** A tiny observable (one state, many listeners) for the little message at the top of the screen. */
 export function createSaveStatus() {
@@ -101,6 +136,8 @@ export function createSaveStatus() {
 export async function runSaveWithStatus(
   status: ReturnType<typeof createSaveStatus>,
   run: () => Promise<SaveToRollResult>,
+  /** Show the real error reason in the failure message (the owner account only). */
+  showDetail = false,
 ): Promise<SaveToRollResult> {
   status.set({ kind: "saving" });
   let result: SaveToRollResult;
@@ -110,9 +147,9 @@ export async function runSaveWithStatus(
     result = { status: "failed", reason: "unexpected" };
   }
   if (result.status === "failed") {
-    status.set({ kind: "failed", retry: () => void runSaveWithStatus(status, run) });
+    status.set({ kind: "failed", retry: () => void runSaveWithStatus(status, run, showDetail), ...(showDetail && result.detail ? { detail: result.detail } : {}) });
   } else if (result.status === "saved") {
-    status.set({ kind: "saved" });
+    status.set({ kind: "saved", ...(result.withoutOverlays ? { withoutOverlays: true } : {}) });
   } else {
     status.set({ kind: "idle" });
   }

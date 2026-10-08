@@ -48,10 +48,37 @@ const WEB_DENIED: PermissionResponse = {
 
 // ── saveToLibraryAsync ───────────────────────────────────────────────────────
 
+type LegacyMediaLibrary = typeof import("expo-media-library/legacy");
+let legacyCached: LegacyMediaLibrary | null = null;
+
+/**
+ * The legacy API of expo-media-library. In SDK 57 the old functions imported from "expo-media-library" itself
+ * (saveToLibraryAsync, createAssetAsync, ...) THROW on purpose ("import the legacy API from
+ * expo-media-library/legacy"); that is why saving always failed. Null on web.
+ */
+export function getLegacyMediaLibrary(): LegacyMediaLibrary | null {
+  if (Platform.OS === "web") return null;
+  if (!legacyCached) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    legacyCached = require("expo-media-library/legacy") as LegacyMediaLibrary;
+  }
+  return legacyCached;
+}
+
+/** Save a local video or image file to Photos. Tries the legacy save, then creating an asset; throws if both fail. */
 export async function saveToLibraryAsync(uri: string): Promise<void> {
-  const ml = getMediaLibrary();
-  if (!ml) return; // Web: nothing to save to, treat as a no-op.
-  return ml.saveToLibraryAsync(uri);
+  const legacy = getLegacyMediaLibrary();
+  if (!legacy) return; // Web: nothing to save to, treat as a no-op.
+  const localUri = uri.startsWith("file://") ? uri : `file://${uri}`;
+  try {
+    await legacy.saveToLibraryAsync(localUri);
+  } catch (first) {
+    try {
+      await legacy.createAssetAsync(localUri);
+    } catch (second) {
+      throw new Error(`${(first as Error)?.message ?? first}; then: ${(second as Error)?.message ?? second}`);
+    }
+  }
 }
 
 // ── useMediaLibraryPermissions ───────────────────────────────────────────────

@@ -12,6 +12,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { Appearance, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import {
   useFonts,
@@ -247,7 +248,7 @@ export default function RootLayout() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <SafeAreaProvider>
-          <View style={{ flex: 1, backgroundColor: theme.bg }}>
+          <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.bg }}>
             <StatusBar style="dark" />
             <RenderReportToast />
             <SaveToRollToast />
@@ -264,7 +265,7 @@ export default function RootLayout() {
                 </PostsProvider>
               </UserBlocksProvider>
             </AuthProvider>
-          </View>
+          </GestureHandlerRootView>
         </SafeAreaProvider>
       </QueryClientProvider>
     </ErrorBoundary>

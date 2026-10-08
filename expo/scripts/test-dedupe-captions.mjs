@@ -132,10 +132,10 @@ const SPEECH = loud(48800, [[300, 3200]]);
 {
   const spec = resolveOverlayStyle("caption", "trial");
   const avail = availableTextWidth(spec);
-  eq("available width = 0.86 of 1080 minus padding, with margin", Math.round(avail), Math.round((0.86 * 1080 - 36) * 0.92));
+  eq("available width = 0.86 of 1080 minus padding, with margin", Math.round(avail), Math.round((0.86 * 1080 - 30) * 0.92));
   const long = ["EXTRAORDINARILY", "COMMUNICATION", "WONDERFULLY", "UNBELIEVABLE"].map((t, i) => w(t, i * 400, i * 400 + 350, 1));
   const lines = buildCaptionLines(long, {}, [{ startMs: 0, endMs: 5000 }]);
-  eq("long words are split into fewer words per line", lines.map((l) => l.text), ["EXTRAORDINARILY", "COMMUNICATION", "WONDERFULLY", "UNBELIEVABLE"]);
+  eq("long words are split into fewer words per line (two long words fit a normal-size caption)", lines.map((l) => l.text), ["EXTRAORDINARILY COMMUNICATION", "WONDERFULLY UNBELIEVABLE"]);
   eq("every line fits the available width", lines.every((l) => lineFits(l.text, spec) || !l.text.includes(" ")), true);
   eq("a long phrase is split down to fewer than 3 words per line", Math.max(...lines.map((l) => l.text.split(" ").length)) < 3, true);
   const wide = buildCaptionLines([w("MMMMMMMMMMMMMMMMMMMMMMMMMM", 0, 500, 1)], {}, [{ startMs: 0, endMs: 1000 }]);

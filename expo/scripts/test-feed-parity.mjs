@@ -101,7 +101,7 @@ function ok(name, cond) { eq(name, !!cond, true); }
   eq("a long text wraps to several lines, a short emoji greeting at a modest size to one", [wrapLines(texts["a long text"], 26 * 1.56, 390 * 0.86 - 2 * 26 * 1.56 * 0.3).length > 2, wrapLines("Lease trouble 😳", 16 * 1.56, 390 * 0.86 - 2 * 16 * 1.56 * 0.3).length], [true, 1]);
   eq("multi-line text keeps its three lines", wrapLines(texts["multi-line text"], 20, 4000).length, 3);
   const l = textLayout(26, 250);
-  eq("cleaner style: radius 0.25 em, padding 0.5 em across / 0.25 em down, line height 1.2 em", [l.cornerRadius / l.fontSize, l.padX / l.fontSize, l.padY / l.fontSize, l.lineHeight / l.fontSize], [TEXT_RADIUS_EM, TEXT_PAD_X_EM, TEXT_PAD_Y_EM, TEXT_LINE_HEIGHT_EM]);
+  eq("cleaner style: radius 0.25 em, padding 0.5 em across / 0.3 em down, line height 1.25 em", [l.cornerRadius / l.fontSize, l.padX / l.fontSize, l.padY / l.fontSize, l.lineHeight / l.fontSize], [TEXT_RADIUS_EM, TEXT_PAD_X_EM, TEXT_PAD_Y_EM, TEXT_LINE_HEIGHT_EM]);
   eq("the text box never exceeds 0.86 of the video width", textLayout(26, 400).maxWidth, 400 * TEXT_MAX_WIDTH);
   // On a tall phone the video is wider than the screen: text is sized from the whole video, as the render does.
   const crop = computeCoverCrop(390, 844, VIDEO_ASPECT);
@@ -116,12 +116,12 @@ function ok(name, cond) { eq(name, !!cond, true); }
     const plain = textBoxHeight("Bruhh", l);
     const emoji = textBoxHeight("Bruhh \u{1F633}", l);
     ok(`@${videoW}: "Bruhh" and "Bruhh 😳" boxes are the same height (one fixed line)`, near(plain, emoji));
-    ok(`@${videoW}: box height = one line + 0.25 em above and below (equal space)`, near(emoji, l.lineHeight + 2 * l.padY));
+    ok(`@${videoW}: box height = one line + 0.3 em above and below (equal space)`, near(emoji, l.lineHeight + 2 * l.padY));
     ok(`@${videoW}: the preview's box height is the render's, scaled`, near(emoji / videoW, (spec.fontSize * spec.lineHeight + 2 * spec.backgroundPaddingY) / 1080));
   }
   const l = textLayout(26, 390);
   eq("two lines are two line heights plus the same padding", textBoxHeight("one\ntwo", l), 2 * l.lineHeight + 2 * l.padY);
-  ok("padding is wider across (0.5 em) than down (0.25 em), like captions", near(l.padX, 2 * l.padY));
+  ok("padding is wider across (0.5 em) than down (0.3 em), like captions", near(l.padX / l.padY, 0.5 / 0.3));
   // New overlays start clear of the feed's logo and bell.
   const frameW = 195, frameH = 422;
   const z = safeZones(frameW, frameH, 390, 47);
@@ -137,19 +137,19 @@ function ok(name, cond) { eq(name, !!cond, true); }
 {
   const trial = resolveOverlayStyle("caption", "trial");
   const hook = resolveOverlayStyle("text", undefined);
-  eq("Trial caption: corner radius 0.25 x font size", trial.cornerRadius, trial.fontSize * 0.25);
-  ok("Trial caption: padding is more than before (14)", trial.backgroundPadding > 14);
+  eq("Trial caption: corner radius about 0.25 x font size", Math.abs(trial.cornerRadius - trial.fontSize * 0.25) < 1, true);
+  ok("Trial caption: even padding of about 0.4 em (the old renderer's one value)", Math.abs(trial.backgroundPadding - 0.4 * trial.fontSize) < 1);
   eq("default text style: corner radius 0.25 x font size", hook.cornerRadius, hook.fontSize * 0.25);
   const json = JSON.parse(toRenderJson({ version: 1, clips: [], overlays: [
     { kind: "caption", text: "x", style: "trial", startMs: 0, endMs: 500 },
     { kind: "text", text: "y", startMs: 0, endMs: 500 },
   ] }));
-  ok("render JSON of the default caption includes cornerRadius", json.overlays[0].styleSpec.cornerRadius === 15);
+  ok("render JSON of the default caption includes cornerRadius", json.overlays[0].styleSpec.cornerRadius === 10);
   ok("render JSON of the default text overlay includes cornerRadius", json.overlays[1].styleSpec.cornerRadius === 21);
   // Nothing else changed: the old specs with only these numbers put back are exactly today's.
-  eq("Trial caption: only padding and corner differ from before",
-    { ...json.overlays[0].styleSpec, backgroundPadding: 14, cornerRadius: 0 },
-    { fontSize: 60, fontWeight: "heavy", color: "#FFFFFF", backgroundColor: "#000000", backgroundPadding: 14, cornerRadius: 0, yCenter: 0.7, maxWidth: 0.86, uppercase: true, fadeInMs: 1, fadeOutMs: 1 });
+  eq("Trial caption: the new default (smaller, normal case, lower, rounded)",
+    json.overlays[0].styleSpec,
+    { fontSize: 38, fontWeight: "heavy", color: "#FFFFFF", backgroundColor: "#000000", backgroundPadding: 15, cornerRadius: 10, yCenter: 0.72, maxWidth: 0.86, fadeInMs: 1, fadeOutMs: 1 });
   eq("default text style: only padding and corner differ from before",
     (({ backgroundPadding, cornerRadius, ...rest }) => rest)(json.overlays[1].styleSpec),
     { fontSize: 84, fontWeight: "black", color: "#FFFFFF", yCenter: 0.22, uppercase: true, shadow: true, letterSpacing: 1, fadeInMs: 150, fadeOutMs: 150 });

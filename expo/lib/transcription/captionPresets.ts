@@ -78,7 +78,7 @@ export const MIN_CONTRAST = 3;
 /** A soft dark shadow (the renderer's own shadow option) goes behind text that has no background. */
 export const NO_BACKGROUND_ID = "none";
 
-export type CaptionLookInput = { fontId?: string; textColor?: string; backgroundColor?: string };
+export type CaptionLookInput = { fontId?: string; textColor?: string; backgroundColor?: string; uppercase?: boolean };
 
 export type ResolvedLook = {
   fontId: string;
@@ -92,6 +92,8 @@ export type ResolvedLook = {
   /** null = no background. */
   backgroundHex: string | null;
   shadow: boolean;
+  /** ALL CAPS was chosen (the default is the transcript's own casing). */
+  uppercase: boolean;
   /** The chosen text color was switched to white or black because it could not be read on the background. */
   adjusted: boolean;
 };
@@ -143,6 +145,7 @@ export function resolveCaptionLook(look: CaptionLookInput | null | undefined): R
     textHex,
     backgroundHex: bg.color,
     shadow: bg.color === null,
+    uppercase: look?.uppercase === true,
     adjusted,
   };
 }

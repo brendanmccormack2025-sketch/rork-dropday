@@ -5,10 +5,11 @@
  * It runs after the post has started uploading and never touches it. One native render at a time: it waits
  * its turn behind any other render (acquireNative).
  */
-import { documentDirectory, cacheDirectory, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
+import { documentDirectory, cacheDirectory, copyAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
 import { recordClientError } from "@/lib/clientErrors";
 import type { EditOverlay } from "@/lib/editModel";
-import { getMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
+import { getLegacyMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
+import { isDebugOwner } from "@/constants/debug";
 import { acquireNative } from "@/lib/renderAhead";
 import { buildRenderEdit, checkRenderResult, computeRenderSize, renderRequest, renderTimeoutMs } from "@/lib/renderAtPost";
 import {
@@ -31,7 +32,7 @@ const CAPS = () => ({ supportsFont: supportsCaptionFont, supportsTextBox });
 
 /** Add-only photo permission: asked when needed, never read access. */
 async function ensureAddPermission(): Promise<boolean> {
-  const ml = getMediaLibrary();
+  const ml = getLegacyMediaLibrary();
   if (!ml) return false;
   const current = await ml.getPermissionsAsync(true);
   if (current.granted) return true;
@@ -69,14 +70,39 @@ async function renderExport(clips: DraftClip[], overlays: EditOverlay[]): Promis
   }
 }
 
-function deps(enabled: boolean, render: () => Promise<{ uri: string }>, kind: string) {
+/**
+ * Copy the posted file (cuts and captions burned in) somewhere the upload will not delete, so a failed export
+ * render can still save it. Resolves null if there is nothing to copy or the copy failed (never throws).
+ */
+export async function stageExportFallback(uri: string | null | undefined): Promise<string | null> {
+  if (!uri) return null;
+  try {
+    const dir = cacheDirectory ?? documentDirectory ?? "";
+    const to = `${dir}export_fallback_${Date.now()}.mp4`;
+    await copyAsync({ from: uri, to });
+    return to;
+  } catch (e) {
+    void recordClientError(e, { kind: "saveToRoll", stage: "stage-fallback" });
+    return null;
+  }
+}
+
+function deps(
+  enabled: boolean,
+  render: () => Promise<{ uri: string }>,
+  kind: string,
+  extra: { fallbackUri?: string | null; hasTextOverlays?: boolean } = {},
+) {
   return {
     enabled,
     render,
+    fallbackUri: extra.fallbackUri ?? null,
+    hasTextOverlays: extra.hasTextOverlays ?? false,
+    canBurnOverlays: supportsTextBox,
     ensurePermission: ensureAddPermission,
     save: (uri: string) => saveToLibraryAsync(uri),
     cleanup: (uri: string) => deleteAsync(uri, { idempotent: true }),
-    onError: (error: unknown, stage: string) => void recordClientError(error, { kind, stage }),
+    onError: (error: unknown, stage: string) => void recordClientError(error, { kind, stage, supportsTextBox, supportsFont: supportsCaptionFont }),
   };
 }
 
@@ -89,16 +115,25 @@ export function startPostExport(args: {
   clips: DraftClip[];
   captionOverlays: EditOverlay[];
   textOverlays: TextOverlay[];
+  /** The signed-in user (the owner account sees the real error reason). */
+  userId?: string | null;
+  /** The file that was posted (cuts and captions), staged by stageExportFallback: saved if the export render fails. */
+  fallbackUri?: string | null;
 }): Promise<SaveToRollResult> {
   if (!args.enabled || args.clips.some((c) => c.type !== "video")) return Promise.resolve({ status: "off" });
   const overlays = [...args.captionOverlays, ...textOverlaysToEditOverlays(args.textOverlays, CAPS())];
   const run = () =>
-    saveToCameraRoll(deps(true, () => renderExport(args.clips, overlays), "saveToRoll"));
-  return runSaveWithStatus(saveStatus, run);
+    saveToCameraRoll(
+      deps(true, () => renderExport(args.clips, overlays), "saveToRoll", {
+        fallbackUri: args.fallbackUri,
+        hasTextOverlays: args.textOverlays.some((t) => t.text.trim().length > 0),
+      }),
+    );
+  return runSaveWithStatus(saveStatus, run, isDebugOwner(args.userId));
 }
 
 /** The "…" menu on the user's own post: download it and save it with its Text-button overlays burned in. */
-export function savePostToRoll(post: Post): Promise<SaveToRollResult> {
+export function savePostToRoll(post: Post, userId?: string | null): Promise<SaveToRollResult> {
   const run = () =>
     saveToCameraRoll(
       deps(
@@ -142,5 +177,5 @@ export function savePostToRoll(post: Post): Promise<SaveToRollResult> {
         "saveToRoll",
       ),
     );
-  return runSaveWithStatus(saveStatus, run);
+  return runSaveWithStatus(saveStatus, run, isDebugOwner(userId));
 }

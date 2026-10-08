@@ -1282,7 +1282,7 @@ export const FeedItem = memo(function FeedItem({
       Alert.alert("More options", undefined, [
         ...(post._optimistic || post.media_type !== "video"
           ? []
-          : [{ text: "Save to camera roll", onPress: () => void savePostToRoll(post) }]),
+          : [{ text: "Save to camera roll", onPress: () => void savePostToRoll(post, user?.id) }]),
         { text: "Delete", style: "destructive", onPress: handleDelete },
         { text: "Cancel", style: "cancel" },
       ]);

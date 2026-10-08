@@ -78,8 +78,8 @@ export const CAPTION_STYLES: OverlayStylePreset[] = [
     id: "trial",
     label: "Trial",
     spec: {
-      fontSize: 60, fontWeight: "heavy", color: "#FFFFFF", backgroundColor: "#000000",
-      backgroundPadding: 18, cornerRadius: 15, yCenter: 0.7, maxWidth: 0.86, uppercase: true,
+      fontSize: 38, fontWeight: "heavy", color: "#FFFFFF", backgroundColor: "#000000",
+      backgroundPadding: 15, cornerRadius: 10, yCenter: 0.72, maxWidth: 0.86,
       fadeInMs: 0, fadeOutMs: 0,
     },
   },
@@ -157,6 +157,8 @@ export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle): 
   out.color = look.textHex;
   if (look.backgroundHex === null) delete out.backgroundColor;
   else out.backgroundColor = look.backgroundHex;
+  if (look.uppercase) out.uppercase = true;
+  else delete out.uppercase;
   if (look.shadow) out.shadow = true;
   if (look.fontName) out.fontName = look.fontName;
   return out;

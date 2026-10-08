@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import UiText from "@/components/UiText";
 import { saveStatus } from "@/lib/exportEdit";
-import { SAVE_FAILED_TEXT, SAVE_SAVED_TEXT, SAVE_SAVING_TEXT } from "@/lib/saveToRoll";
+import { SAVE_FAILED_TEXT, SAVE_SAVED_TEXT, SAVE_SAVED_WITHOUT_OVERLAYS_TEXT, SAVE_SAVING_TEXT } from "@/lib/saveToRoll";
 
 /** A small message at the top of the screen for the camera-roll save: saving, saved, or failed with Retry. */
 export default function SaveToRollToast() {
@@ -30,10 +30,15 @@ export default function SaveToRollToast() {
             <UiText style={styles.text}>{SAVE_SAVING_TEXT}</UiText>
           </>
         )}
-        {state.kind === "saved" && <UiText style={styles.text}>{SAVE_SAVED_TEXT}</UiText>}
+        {state.kind === "saved" && (
+          <UiText style={styles.text}>{state.withoutOverlays ? SAVE_SAVED_WITHOUT_OVERLAYS_TEXT : SAVE_SAVED_TEXT}</UiText>
+        )}
         {state.kind === "failed" && (
           <>
-            <UiText style={styles.text}>{SAVE_FAILED_TEXT}</UiText>
+            <View style={styles.failedText}>
+              <UiText style={styles.text}>{SAVE_FAILED_TEXT}</UiText>
+              {state.detail ? <UiText style={styles.detail} numberOfLines={3}>{state.detail}</UiText> : null}
+            </View>
             <Pressable onPress={state.retry} hitSlop={8} accessibilityRole="button" accessibilityLabel="Retry saving">
               <UiText style={styles.retry}>Retry</UiText>
             </Pressable>
@@ -58,6 +63,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: "rgba(10,10,10,0.88)",
   },
+  failedText: { flexShrink: 1, maxWidth: 240, gap: 2 },
+  detail: { color: "rgba(255,255,255,0.7)", fontSize: 11 },
   text: { color: "#fff", fontSize: 13, fontWeight: "600" },
   retry: { color: "#FF6B5E", fontSize: 13, fontWeight: "800" },
   dismiss: { color: "rgba(255,255,255,0.6)", fontSize: 13, fontWeight: "700" },

@@ -77,12 +77,12 @@ const captions = captionLinesToEditOverlays(buildCaptionLines([{ text: "hi", sta
     return { posted, result };
   };
   let r = await post(() => saveToCameraRoll(base({ render: async () => { throw new Error("native"); } })));
-  eq("a render failure: the post is fine, the save says failed", [r.posted, r.result], [true, { status: "failed", reason: "render" }]);
+  eq("a render failure: the post is fine, the save says failed", [r.posted, r.result], [true, { status: "failed", reason: "render", detail: "render: native" }]);
   r = await post(() => saveToCameraRoll(base({ save: async () => { throw new Error("photos"); } })));
   eq("a save failure: failed, the temp file is cleaned up", [r.posted, r.result.status, calls.at(-1)], [true, "failed", "cleanup"]);
   calls.length = 0;
   r = await post(() => saveToCameraRoll(base({ ensurePermission: async () => false })));
-  eq("permission denied: failed, no render was started", [r.result, calls.filter((c) => c === "render").length], [{ status: "failed", reason: "permission" }, 0]);
+  eq("permission denied: failed, no render was started", [r.result, calls.filter((c) => c === "render").length], [{ status: "failed", reason: "permission", detail: "photo permission was not granted" }, 0]);
   calls.length = 0;
   r = await post(() => saveToCameraRoll(base({ ensurePermission: async () => { throw new Error("x"); } })));
   eq("a permission error is a result, not a throw", [r.result.status, calls.length], ["failed", 0]);
@@ -106,7 +106,7 @@ const captions = captionLinesToEditOverlays(buildCaptionLines([{ text: "hi", sta
   const edit = read("../app/edit.tsx");
   const i = edit.indexOf("createPost.mutate(");
   const j = edit.indexOf("startPostExport(");
-  ok("the export starts after the upload has started, inside a try/catch with a recorder", i > 0 && j > i && /startPostExport[\s\S]{0,400}recordClientError/.test(edit));
+  ok("the export starts alongside the upload (before it is fired, never awaited), inside a try/catch with a recorder", i > 0 && j > 0 && !/await startPostExport/.test(edit) && /startPostExport[\s\S]{0,700}recordClientError/.test(edit));
   ok("the failure message and Retry exist", /Couldn't save to camera roll/.test(read("../lib/saveToRoll.ts")) && /Retry/.test(read("../components/SaveToRollToast.tsx")));
 }
 

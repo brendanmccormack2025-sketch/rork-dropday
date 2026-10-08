@@ -65,7 +65,7 @@ eq("the defaults are the Trial look", DEFAULT_CAPTION_LOOK, { fontId: "trial", t
     const s = spec({ ...base, textColor: c.id, backgroundColor: bg });
     eq(`text ${c.id} on ${bg}: ${looksReadable ? hex : "adjusted"}`, s.color, looksReadable ? hex : (bg === "black" ? "#FFFFFF" : "#000000"));
   }
-  eq("the look keeps the box: size and position are untouched by a look change", [spec({ ...base, scale: 1.5, yCenter: 0.4, fontId: "futura" }).fontSize, spec({ ...base, scale: 1.5, yCenter: 0.4, fontId: "futura" }).yCenter], [90, 0.4]);
+  eq("the look keeps the box: size and position are untouched by a look change", [spec({ ...base, scale: 1.5, yCenter: 0.4, fontId: "futura" }).fontSize, spec({ ...base, scale: 1.5, yCenter: 0.4, fontId: "futura" }).yCenter], [57, 0.4]);
 }
 
 // ── readability ──
@@ -111,7 +111,7 @@ eq("the defaults are the Trial look", DEFAULT_CAPTION_LOOK, { fontId: "trial", t
   const base = keepRangesOf(s0, D);
   const look = withCaptionLook(undefined, { fontId: "serif", textColor: "yellow", backgroundColor: "blue" });
   const s1 = setCaptionStyle(s0, look);
-  eq("the look is stored in the edit state", s1.captionStyle, { scale: 1, yCenter: 0.7, xCenter: 0.5, fontId: "serif", textColor: "yellow", backgroundColor: "blue" });
+  eq("the look is stored in the edit state", s1.captionStyle, { scale: 1, yCenter: 0.72, xCenter: 0.5, fontId: "serif", textColor: "yellow", backgroundColor: "blue" });
   eq("changing the style never changes the keep ranges", JSON.stringify(keepRangesOf(s1, D)), JSON.stringify(base));
   eq("...nor does turning captions off (their category) or on", [JSON.stringify(keepRangesOf(setCategoryEnabled(s1, "caption", false), D)), JSON.stringify(keepRangesOf(setCategoryEnabled(setCategoryEnabled(s1, "caption", false), "caption", true), D))], [JSON.stringify(base), JSON.stringify(base)]);
   eq("the same look is not a new undo step; a changed field is", [setCaptionStyle(s1, { ...look }) === s1, setCaptionStyle(s1, { ...look, fontId: "avenir" }) === s1, sameCaptionStyle(look, { ...look, textColor: "red" })], [true, false, false]);
@@ -147,7 +147,7 @@ eq("the defaults are the Trial look", DEFAULT_CAPTION_LOOK, { fontId: "trial", t
   eq("every overlay in the render JSON has the same look", json.overlays.every((o) => o.styleSpec.fontName === "Futura-Bold" && o.styleSpec.backgroundColor === "#FFD400" && o.styleSpec.color === "#000000"), true);
   // a condensed font fits more words per line than a wide one
   const long = [w("think", 0, 300), w("about", 350, 650), w("this", 700, 1000)];
-  const lines = (fontId) => buildCaptionLines(long, {}, KEEP, { ...defaultCaptionStyle(), scale: 1.3, fontId }).length;
+  const lines = (fontId) => buildCaptionLines(long, {}, KEEP, { ...defaultCaptionStyle(), scale: 2.4, fontId }).length;
   eq("line breaks follow the font's width (condensed fits more than typewriter)", lines("condensed") < lines("typewriter"), true);
 }
 

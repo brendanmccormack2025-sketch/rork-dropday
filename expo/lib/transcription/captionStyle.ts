@@ -183,7 +183,7 @@ export function usableCaptionStyle(style: CaptionStyle | null | undefined, suppo
 /** A look change (a font, a text color or a background chosen) applied to the stored style (or the default one). */
 export function withCaptionLook(
   style: CaptionStyle | null | undefined,
-  patch: { fontId?: string; textColor?: string; backgroundColor?: string },
+  patch: { fontId?: string; textColor?: string; backgroundColor?: string; uppercase?: boolean },
 ): CaptionStyle {
   return { ...effectiveCaptionStyle(style), ...patch };
 }

@@ -98,13 +98,13 @@ export default function CaptionsSheet({
                       ) : (
                         <Pressable
                           onPress={() => {
-                            setDraft(line.text.toUpperCase());
+                            setDraft(line.text);
                             setEditing(i);
                           }}
                           style={styles.row}
                         >
                           <UiText style={styles.rowText} numberOfLines={1}>
-                            {line.text.toUpperCase()}
+                            {line.text}
                           </UiText>
                         </Pressable>
                       )}

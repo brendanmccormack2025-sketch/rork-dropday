@@ -56,6 +56,8 @@ export type CaptionStyle = {
   fontId?: string;
   textColor?: string;
   backgroundColor?: string;
+  /** ALL CAPS; absent or false = the transcript's own casing. */
+  uppercase?: boolean;
 };
 
 export type CaptionEditOverlay = OverlayBase & { kind: "caption"; text: string; style?: string; captionStyle?: CaptionStyle };

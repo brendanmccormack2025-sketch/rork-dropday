@@ -117,12 +117,12 @@ export const MONTSERRAT_BOLD_EM = 0.62;
 export const TEXT_REF_WIDTH = 250;
 /** Widest a text box may get, as a fraction of the video width (the native renderer's default). */
 export const TEXT_MAX_WIDTH = 0.86;
-/** Space between the text and the edge of its box: 0.5 em left and right, 0.25 em above and below (captions and text overlays). */
+/** Space between the text and the edge of its box: 0.5 em left and right, 0.3 em above and below (captions and text overlays). */
 export const TEXT_PAD_X_EM = 0.5;
-export const TEXT_PAD_Y_EM = 0.25;
+export const TEXT_PAD_Y_EM = 0.3;
 export const TEXT_RADIUS_EM = 0.25;
 /** One fixed line height: an emoji cannot make a line taller, and the text sits in the middle of it. */
-export const TEXT_LINE_HEIGHT_EM = 1.2;
+export const TEXT_LINE_HEIGHT_EM = 1.25;
 
 export type TextLayout = {
   fontSize: number;

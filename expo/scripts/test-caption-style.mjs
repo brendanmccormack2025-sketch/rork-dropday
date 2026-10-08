@@ -54,7 +54,7 @@ const C = CAPTION_STYLE_CONFIG;
 const ASPECT = 16 / 9;
 {
   eq("config", [C.minScale, C.maxScale, C.safeTop, C.safeBottom, C.horizontalNative], [0.6, 2, 0.1, 0.75, false]);
-  eq("the default is the preset's own box", [defaultCaptionStyle(), effectiveCaptionStyle(null), effectiveCaptionStyle(undefined)], [{ scale: 1, yCenter: 0.7, xCenter: 0.5 }, { scale: 1, yCenter: 0.7, xCenter: 0.5 }, { scale: 1, yCenter: 0.7, xCenter: 0.5 }]);
+  eq("the default is the preset's own box", [defaultCaptionStyle(), effectiveCaptionStyle(null), effectiveCaptionStyle(undefined)], [{ scale: 1, yCenter: 0.72, xCenter: 0.5 }, { scale: 1, yCenter: 0.72, xCenter: 0.5 }, { scale: 1, yCenter: 0.72, xCenter: 0.5 }]);
   eq("a stored style wins", effectiveCaptionStyle({ scale: 1.5, yCenter: 0.4, xCenter: 0.5 }).scale, 1.5);
 
   // scale limits
@@ -119,11 +119,11 @@ const ASPECT = 16 / 9;
   eq("without a style the overlays are as before (no captionStyle field)", captionLinesToEditOverlays(buildCaptionLines(talk, {}, whole)).some((o) => "captionStyle" in o), false);
 
   // a bigger box means narrower lines
-  const long = [w("think", 0, 300), w("about", 350, 650), w("this", 700, 1000)];
+  const long = [w("something", 0, 300), w("different", 350, 650), w("tomorrow", 700, 1000), w("afternoon", 1050, 1300), w("remember", 1350, 1600), w("absolutely", 1650, 1900)];
   const k = [{ startMs: 0, endMs: 2000 }];
-  const normal = buildCaptionLines(long, {}, k, { scale: 1, yCenter: 0.7, xCenter: 0.5 });
-  const big = buildCaptionLines(long, {}, k, { scale: 2, yCenter: 0.7, xCenter: 0.5 });
-  eq("at 2x fewer words fit on a line (lines never overflow the box)", [normal.length, big.length > normal.length], [1, true]);
+  const normal = buildCaptionLines(long, {}, k, { scale: 1, yCenter: 0.72, xCenter: 0.5 });
+  const big = buildCaptionLines(long, {}, k, { scale: 2, yCenter: 0.72, xCenter: 0.5 });
+  eq("at 2x fewer words fit on a line (lines never overflow the box)", [normal.length >= 1, Math.max(...big.map((l) => l.text.split(" ").length)) < Math.max(...normal.map((l) => l.text.split(" ").length))], [true, true]);
 }
 
 // ── B: the render JSON reflects scale and position ──
@@ -132,13 +132,13 @@ const ASPECT = 16 / 9;
   const lines = buildCaptionLines([w("hi", 100, 400), w("there", 450, 900)], {}, [{ startMs: 0, endMs: 1000 }], style);
   const json = JSON.parse(toRenderJson({ version: 1, clips: [], overlays: captionLinesToEditOverlays(lines, style) }));
   const spec = json.overlays[0].styleSpec;
-  eq("render JSON: font size, padding and corner scaled by the box's scale", [spec.fontSize, spec.backgroundPadding, spec.cornerRadius], [60 * 1.5, 18 * 1.5, 15 * 1.5]);
+  eq("render JSON: font size, padding and corner scaled by the box's scale", [spec.fontSize, spec.backgroundPadding, spec.cornerRadius], [38 * 1.5, 15 * 1.5, 10 * 1.5]);
   eq("render JSON: vertical position comes from the box; the centred x is left out (the default)", [spec.yCenter, spec.xCenter], [0.4, undefined]);
   const moved = JSON.parse(toRenderJson({ version: 1, clips: [], overlays: captionLinesToEditOverlays(lines, { ...style, xCenter: 0.6 }) })).overlays[0].styleSpec;
   eq("render JSON: an x other than the centre is sent", moved.xCenter, 0.6);
   eq("render JSON: the fades stay at least 1 ms", [spec.fadeInMs, spec.fadeOutMs], [1, 1]);
   const plain = JSON.parse(toRenderJson({ version: 1, clips: [], overlays: captionLinesToEditOverlays(buildCaptionLines([w("hi", 100, 400)], {}, [{ startMs: 0, endMs: 1000 }])) })).overlays[0].styleSpec;
-  eq("without a style the preset is sent unchanged", [plain.fontSize, plain.yCenter, plain.xCenter], [60, 0.7, undefined]);
+  eq("without a style the preset is sent unchanged", [plain.fontSize, plain.yCenter, plain.xCenter], [38, 0.72, undefined]);
   // the default style reproduces the look from before the controls existed
   const preset = resolveOverlayStyle("caption", "trial");
   const before = JSON.stringify({ ...preset, fadeInMs: 1, fadeOutMs: 1 });
@@ -156,13 +156,14 @@ const ASPECT = 16 / 9;
 {
   const frame = { w: 360, h: 640 };
   const style = defaultCaptionStyle();
+  const LONGER = "so I have to go now please ok but only if it is really truly quite alright with you today";
   const est = estimateBoxSize("SO I HAVE", style, frame.w);
   eq("the estimated box has a real size (never collapsed)", [est.w > 0, est.h > 0], [true, true]);
-  eq("it is as tall as the text plus padding (60 * 1.25 + 36 units, at 360/1080)", Math.round(est.h * 100) / 100, Math.round(((60 * 1.25 + 36) * 360 / 1080) * 100) / 100);
-  eq("a longer text is wider, and wraps at the maximum width into two lines (taller)", [estimateBoxSize("SO I HAVE TO GO NOW PLEASE OK", style, frame.w).h > est.h, estimateBoxSize("SO I HAVE TO GO NOW PLEASE OK", style, frame.w).w <= 0.86 * frame.w + 1e-6], [true, true]);
+  eq("it is as tall as the text plus padding (38 * 1.25 + 30 units, at 360/1080)", Math.round(est.h * 100) / 100, Math.round(((38 * 1.25 + 30) * 360 / 1080) * 100) / 100);
+  eq("a longer text is wider, and wraps at the maximum width into two lines (taller)", [estimateBoxSize(LONGER, style, frame.w).h > est.h, estimateBoxSize(LONGER, style, frame.w).w <= 0.86 * frame.w + 1e-6], [true, true]);
   const box = { w: 200, h: 60 };
   const rect = captionBoxRect(frame, style, box);
-  eq("the overlay rect is the text box: same height, centred at the style's position (70% from the top)", [rect.height, rect.width, rect.top + rect.height / 2, rect.left + rect.width / 2], [60, 200, 0.7 * 640, 0.5 * 360]);
+  eq("the overlay rect is the text box: same height, centred at the style's position (72% from the top)", [rect.height, rect.width, rect.top + rect.height / 2, rect.left + rect.width / 2], [60, 200, 0.72 * 640, 0.5 * 360]);
   eq("a box taller than 44 pt is its own touch target", touchRect(rect), rect);
   const thin = captionBoxRect(frame, style, { w: 200, h: 12 });
   const t = touchRect(thin);
@@ -174,7 +175,7 @@ const ASPECT = 16 / 9;
   eq("native flips: yCenter 0.70 from the top is 30% of the height from the bottom", Math.round(nativeCenterY(1920, 0.7) * 1e6) / 1e6, 576);
   eq("preview and native centres add up to the frame height (same spot, mirrored axis)", [0.1, 0.4, 0.7, 0.75].map((y) => Math.abs(previewCenterY(1920, y) + nativeCenterY(1920, y) - 1920) < 1e-9), [true, true, true, true]);
   eq("the mapping round-trips preview -> native -> preview", [0.1, 0.35, 0.7, 0.75].map((y) => Math.abs(yCenterFromNative(1920, nativeCenterY(1920, y)) - y) < 1e-9), [true, true, true, true]);
-  eq("the default caption is drawn at 70% in the preview and at 30% from the bottom natively", [previewCenterY(640, style.yCenter), Math.round(nativeCenterY(640, style.yCenter) * 1e6) / 1e6], [448, 192]);
+  eq("the default caption is drawn at 72% in the preview and at 28% from the bottom natively", [previewCenterY(640, style.yCenter), Math.round(nativeCenterY(640, style.yCenter) * 1e6) / 1e6].map((n) => Math.round(n * 100) / 100), [460.8, 179.2].map((n) => Math.round(n * 100) / 100));
 
   // the stored style can be cleared again (Reset); undoable like any change
   const s1 = setCaptionStyle(newEditState("u"), { scale: 1.2, yCenter: 0.5, xCenter: 0.5 });

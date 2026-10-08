@@ -43,6 +43,10 @@ export function createErrorRecorder(deps: {
   context: () => ErrorContext;
   /** Insert rows into client_errors as the signed-in user; rejects on failure. */
   upload: (rows: UploadRow[]) => Promise<void>;
+  /** Run `fn` after `ms` (a timer); used to retry an upload that failed. Absent: no retries until the next flush. */
+  schedule?: (fn: () => void, ms: number) => void;
+  /** Delays (ms) of the retries after a failed upload. */
+  retryDelaysMs?: number[];
 }) {
   let pending: ErrorReport[] | null = null;
   let chain: Promise<unknown> = Promise.resolve();
@@ -119,7 +123,35 @@ export function createErrorRecorder(deps: {
     }).catch(() => ({ uploaded: 0 }));
   }
 
-  return { record, flush, pendingCount: async () => (await load()).length };
+  /**
+   * A caught failure (a failed save, a failed Post): saved at once, then uploaded at once for the signed-in user,
+   * not at the next launch. If the upload fails the report stays saved and the upload is retried after the
+   * delays (and at the next launch). Never throws.
+   */
+  async function reportNow(error: unknown, extra: { kind?: string } & Record<string, unknown> = {}): Promise<void> {
+    await record(error, extra);
+    const delays = deps.retryDelaysMs ?? [5_000, 30_000, 120_000];
+    const attempt = async (n: number): Promise<void> => {
+      const userId = deps.context().userId;
+      const before = await pendingCount();
+      const { uploaded } = await flush(userId);
+      const failed = !userId || (before > 0 && uploaded === 0);
+      if (failed && n < delays.length && deps.schedule) {
+        deps.schedule(() => void attempt(n + 1), delays[n]!);
+      }
+    };
+    try {
+      await attempt(0);
+    } catch {
+      // reporting must never throw
+    }
+  }
+
+  async function pendingCount(): Promise<number> {
+    return (await load()).length;
+  }
+
+  return { record, reportNow, flush, pendingCount };
 }
 
 /**
