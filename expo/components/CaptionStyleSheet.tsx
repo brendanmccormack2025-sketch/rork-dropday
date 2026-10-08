@@ -9,6 +9,7 @@ import {
   CAPTION_FONTS,
   CAPTION_TEXT_COLORS,
   resolveCaptionLook,
+  previewFontFamily,
 } from "@/lib/transcription/captionPresets";
 
 type Props = {
@@ -52,7 +53,7 @@ export default function CaptionStyleSheet({ visible, style, supportsFont, onChan
                       accessibilityLabel={`Font ${f.label}`}
                       accessibilityState={{ selected: on }}
                     >
-                      <UiText style={[styles.aa, f.fontName ? { fontFamily: f.fontName } : { fontWeight: "800" }]}>Aa</UiText>
+                      <UiText style={[styles.aa, f.fontName ? { fontFamily: previewFontFamily(f.fontName) } : { fontWeight: "800" }]}>Aa</UiText>
                     </Pressable>
                   );
                 })}

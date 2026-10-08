@@ -53,6 +53,8 @@ import {
   textLayout,
   videoDisplayWidth,
 } from "@/lib/feedLayout";
+import { TEXT_FONT_FAMILY } from "@/lib/transcription/captionPresets";
+import { supportsCaptionFont } from "@/modules/video-render";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 /**
@@ -275,6 +277,7 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
           styles.textOverlayText,
           {
             color,
+            ...(supportsCaptionFont ? { fontFamily: TEXT_FONT_FAMILY, fontWeight: "400" as const } : null),
             fontSize: layout.fontSize,
             lineHeight: layout.lineHeight,
             paddingHorizontal: layout.padX,

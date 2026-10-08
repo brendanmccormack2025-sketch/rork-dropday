@@ -52,7 +52,15 @@
           "origin": "https://rork.com/"
         }
       ],
-      "expo-font",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./node_modules/@expo-google-fonts/montserrat/800ExtraBold/Montserrat_800ExtraBold.ttf",
+            "./node_modules/@expo-google-fonts/montserrat/700Bold/Montserrat_700Bold.ttf"
+          ]
+        }
+      ],
       "expo-web-browser",
       "expo-apple-authentication",
       [

@@ -9,7 +9,7 @@
  * Pure data and functions: no React, no native modules.
  */
 import type { CaptionStyle, EditInstructions } from "./editModel.ts";
-import { resolveCaptionLook } from "./transcription/captionPresets.ts";
+import { TEXT_FONT_NAME, resolveCaptionLook } from "./transcription/captionPresets.ts";
 
 export type OverlayFontWeight = "regular" | "medium" | "semibold" | "bold" | "heavy" | "black";
 
@@ -159,9 +159,10 @@ export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle): 
  * renderer's discrete (hard cut) path leaves captions visible after their end, so a
  * caption fades for 1 ms, which takes the minimum-fade path.
  */
-function renderSpec(kind: "text" | "caption", styleId?: string, captionStyle?: CaptionStyle): OverlayStyleSpec {
+function renderSpec(kind: "text" | "caption", styleId?: string, captionStyle?: CaptionStyle, supportsFont = false): OverlayStyleSpec {
   const resolved = resolveOverlayStyle(kind, styleId);
-  if (kind !== "caption") return resolved;
+  // Text overlays are Montserrat Bold where the build can draw a bundled font; elsewhere the system font, as before.
+  if (kind !== "caption") return supportsFont && !resolved.fontName ? { ...resolved, fontName: TEXT_FONT_NAME } : resolved;
   const spec = captionStyle ? applyCaptionStyle(resolved, captionStyle) : resolved;
   return { ...spec, fadeInMs: Math.max(1, spec.fadeInMs ?? 0), fadeOutMs: Math.max(1, spec.fadeOutMs ?? 0) };
 }
@@ -170,12 +171,12 @@ function renderSpec(kind: "text" | "caption", styleId?: string, captionStyle?: C
  * EditInstructions -> the JSON the native renderer takes: text and caption
  * overlays get their preset resolved into `styleSpec`.
  */
-export function toRenderJson(instructions: EditInstructions): string {
+export function toRenderJson(instructions: EditInstructions, options: { supportsFont?: boolean } = {}): string {
   return JSON.stringify({
     ...instructions,
     overlays: instructions.overlays.map((o) =>
       o.kind === "text" || o.kind === "caption"
-        ? { ...o, styleSpec: renderSpec(o.kind, o.style, o.kind === "caption" ? o.captionStyle : undefined) }
+        ? { ...o, styleSpec: renderSpec(o.kind, o.style, o.kind === "caption" ? o.captionStyle : undefined, options.supportsFont) }
         : o,
     ),
   });

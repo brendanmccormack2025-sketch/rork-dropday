@@ -5,7 +5,8 @@
  * Fonts are iOS built-in fonts, referenced by PostScript name (no bundled files). The native renderer opens
  * them with UIFont(name:size:) and falls back to the system font when a name is unavailable, so a wrong
  * name can only ever show the default font. `trial` has no fontName: it is the system heavy font the
- * captions have always used.
+ * captions have always used. `classic` is Montserrat ExtraBold, bundled with the app (expo-font plugin in
+ * app.json, from build 1.0.4) and the default wherever the build can render a font.
  *
  * Pure; erasable TypeScript only so the Node tests can run it.
  */
@@ -13,8 +14,10 @@
 export type CaptionFontPreset = {
   id: string;
   label: string;
-  /** iOS PostScript name, or null for the system font (the default). */
+  /** iOS PostScript name, or null for the system font. */
   fontName: string | null;
+  /** The name the font is registered under in JS (expo-font), for the editor preview. */
+  jsFamily?: string;
   /** Rough width of its text relative to the system heavy font (only used to decide how many words fit a line). */
   widthFactor: number;
 };
@@ -24,6 +27,7 @@ export type CaptionColorPreset = { id: string; label: string; /** #RRGGBB, or nu
 export const TRIAL_RED = "#E8291C";
 
 export const CAPTION_FONTS: CaptionFontPreset[] = [
+  { id: "classic", label: "Classic", fontName: "Montserrat-ExtraBold", jsFamily: "Montserrat_800ExtraBold", widthFactor: 1.12 },
   { id: "trial", label: "Trial", fontName: null, widthFactor: 1 },
   { id: "avenir", label: "Avenir", fontName: "AvenirNext-Heavy", widthFactor: 1.02 },
   { id: "futura", label: "Futura", fontName: "Futura-Bold", widthFactor: 0.98 },
@@ -49,8 +53,24 @@ export const CAPTION_BACKGROUNDS: CaptionColorPreset[] = [
   { id: "blue", label: "Blue", color: "#1E5BFF" },
 ];
 
-/** The Trial look: what a caption is when nothing was chosen. */
-export const DEFAULT_CAPTION_LOOK = { fontId: "trial", textColor: "white", backgroundColor: "black" };
+/** The font a caption has when no build can draw a bundled font (and always has had): the system heavy font. */
+export const SYSTEM_FONT_ID = "trial";
+/** The default font where the native module reports supportsCaptionFont (build 1.0.4 on). */
+export const CLASSIC_FONT_ID = "classic";
+export const defaultFontId = (supportsFont: boolean): string => (supportsFont ? CLASSIC_FONT_ID : SYSTEM_FONT_ID);
+
+/** Montserrat Bold, the default font of text overlays (PostScript name for the renderer, family name for JS). */
+export const TEXT_FONT_NAME = "Montserrat-Bold";
+export const TEXT_FONT_FAMILY = "Montserrat_700Bold";
+
+/** The Trial look: what a caption is when nothing was chosen (on a build without bundled fonts). */
+export const DEFAULT_CAPTION_LOOK = { fontId: SYSTEM_FONT_ID, textColor: "white", backgroundColor: "black" };
+
+/** The family to draw a PostScript font name with in JS: the registered Montserrat name, else the name itself. */
+export function previewFontFamily(fontName: string): string {
+  if (fontName === TEXT_FONT_NAME) return TEXT_FONT_FAMILY;
+  return CAPTION_FONTS.find((f) => f.fontName === fontName)?.jsFamily ?? fontName;
+}
 
 /** The least contrast (WCAG ratio) between text and background before the text color is switched. */
 export const MIN_CONTRAST = 3;
@@ -98,7 +118,7 @@ export function contrastRatio(a: string, b: string): number {
 }
 
 export function fontPreset(fontId?: string): CaptionFontPreset {
-  return CAPTION_FONTS.find((f) => f.id === fontId) ?? CAPTION_FONTS[0]!;
+  return CAPTION_FONTS.find((f) => f.id === fontId) ?? CAPTION_FONTS.find((f) => f.id === SYSTEM_FONT_ID)!;
 }
 
 /** Unknown or missing ids give the Trial look; contrast under MIN_CONTRAST switches the text to white or black. */

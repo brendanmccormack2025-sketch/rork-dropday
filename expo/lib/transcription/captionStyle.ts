@@ -16,6 +16,7 @@
 import type { CaptionStyle } from "../editModel.ts";
 import { applyCaptionStyle, resolveOverlayStyle, type OverlayStyleSpec } from "../editStyles.ts";
 import { estimateTextWidth } from "./captionFit.ts";
+import { defaultFontId } from "./captionPresets.ts";
 
 export const CAPTION_STYLE_CONFIG = {
   minScale: 0.6,
@@ -171,8 +172,10 @@ export function previewCenterY(frameH: number, yCenter: number): number {
  * the render cannot produce. The stored style keeps the font.
  */
 export function usableCaptionStyle(style: CaptionStyle | null | undefined, supportsFont: boolean): CaptionStyle | undefined {
+  // Where fonts work, a caption with no chosen font is Classic (Montserrat). Where they do not, nothing changes.
+  if (supportsFont) return style?.fontId === undefined ? { ...effectiveCaptionStyle(style), fontId: defaultFontId(true) } : style;
   if (!style) return undefined;
-  if (supportsFont || style.fontId === undefined) return style;
+  if (style.fontId === undefined) return style;
   const { fontId: _drop, ...rest } = style;
   return rest;
 }
@@ -186,7 +189,7 @@ export function withCaptionLook(
 }
 
 /** "Reset to Trial style": font and colors back to the defaults; size and position are kept. */
-export function resetCaptionLook(style: CaptionStyle | null | undefined): CaptionStyle {
+export function resetCaptionLook(style: CaptionStyle | null | undefined, supportsFont = false): CaptionStyle {
   const { scale, yCenter, xCenter } = effectiveCaptionStyle(style);
-  return { scale, yCenter, xCenter };
+  return supportsFont ? { scale, yCenter, xCenter, fontId: defaultFontId(true) } : { scale, yCenter, xCenter };
 }

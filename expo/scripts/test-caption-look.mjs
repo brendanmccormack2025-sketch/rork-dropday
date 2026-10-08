@@ -25,7 +25,7 @@ const spec = (style) => JSON.parse(toRenderJson({ version: 1, clips: [], overlay
 
 // ── the presets ──
 eq("fonts: id -> iOS PostScript name (system heavy for trial)", CAPTION_FONTS.map((f) => [f.id, f.fontName]), [
-  ["trial", null], ["avenir", "AvenirNext-Heavy"], ["futura", "Futura-Bold"], ["condensed", "HelveticaNeue-CondensedBlack"], ["serif", "Georgia-Bold"], ["typewriter", "AmericanTypewriter-Bold"],
+  ["classic", "Montserrat-ExtraBold"], ["trial", null], ["avenir", "AvenirNext-Heavy"], ["futura", "Futura-Bold"], ["condensed", "HelveticaNeue-CondensedBlack"], ["serif", "Georgia-Bold"], ["typewriter", "AmericanTypewriter-Bold"],
 ]);
 eq("backgrounds: Black (default), White, None, Trial red, Yellow, Blue", CAPTION_BACKGROUNDS.map((b) => [b.id, b.color]), [
   ["black", "#000000"], ["white", "#FFFFFF"], ["none", null], ["red", "#E8291C"], ["yellow", "#FFD400"], ["blue", "#1E5BFF"],

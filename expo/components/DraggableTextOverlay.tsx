@@ -18,6 +18,9 @@ import {
   type CoverCrop,
 } from "@/lib/feedLayout";
 
+import { TEXT_FONT_FAMILY } from "@/lib/transcription/captionPresets";
+import { supportsCaptionFont } from "@/modules/video-render";
+
 const FULL_CROP: CoverCrop = { visibleW: 1, visibleH: 1, cropLeft: 0, cropTop: 0 };
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -511,6 +514,7 @@ export default function DraggableTextOverlay({
       <Animated.Text
         style={[
           styles.text,
+          supportsCaptionFont ? { fontFamily: TEXT_FONT_FAMILY, fontWeight: "400" as const } : null,
           animatedTextStyle,
           {
             color: effectiveTextColor,

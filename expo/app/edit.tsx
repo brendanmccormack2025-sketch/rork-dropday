@@ -2531,7 +2531,7 @@ export default function EditScreen() {
   );
   // "Reset to Trial style": font and colors back to the defaults; size and position stay.
   const handleCaptionLookReset = useCallback(() => {
-    if (storedCaptionStyle) handleCaptionStyleCommit(resetCaptionLook(storedCaptionStyle));
+    if (storedCaptionStyle) handleCaptionStyleCommit(resetCaptionLook(storedCaptionStyle, supportsCaptionFont));
   }, [handleCaptionStyleCommit, storedCaptionStyle]);
 
   // Back to the preset's own caption size and position (undoable).

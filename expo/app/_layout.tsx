@@ -22,6 +22,8 @@ import {
   PlusJakartaSans_800ExtraBold,
 } from "@expo-google-fonts/plus-jakarta-sans";
 
+import { Montserrat_700Bold, Montserrat_800ExtraBold } from "@expo-google-fonts/montserrat";
+
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import { PostsProvider } from "@/providers/PostsProvider";
@@ -226,6 +228,8 @@ export default function RootLayout() {
     PlusJakartaSans_500Medium,
     PlusJakartaSans_700Bold,
     PlusJakartaSans_800ExtraBold,
+    Montserrat_700Bold,
+    Montserrat_800ExtraBold,
   });
 
   useEffect(() => {

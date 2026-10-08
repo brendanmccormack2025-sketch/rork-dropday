@@ -4,6 +4,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import type { CaptionStyle } from "@/lib/editModel";
 import type { OverlayFontWeight } from "@/lib/editStyles";
+import { previewFontFamily } from "@/lib/transcription/captionPresets";
 import type { EditorCaptionLine } from "@/lib/transcription/captionLines";
 import {
   CAPTION_STYLE_CONFIG,
@@ -216,7 +217,7 @@ export default function CaptionPreview({
   const textStyle = {
     color: spec.color,
     fontSize: spec.fontSize * px,
-    ...(spec.fontName ? { fontFamily: spec.fontName } : { fontWeight: WEIGHTS[spec.fontWeight] }),
+    ...(spec.fontName ? { fontFamily: previewFontFamily(spec.fontName) } : { fontWeight: WEIGHTS[spec.fontWeight] }),
     textAlign: "center" as const,
     letterSpacing: (spec.letterSpacing ?? 0) * px,
     ...(spec.shadow
