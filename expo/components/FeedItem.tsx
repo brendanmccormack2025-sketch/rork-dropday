@@ -50,13 +50,12 @@ import {
   TAB_BAR_HEIGHT,
   VIDEO_ASPECT,
   computeCoverCrop,
-  overlayFontFamily,
+  overlayFont,
   textLayout,
   textSlot,
   videoDisplayWidth,
 } from "@/lib/feedLayout";
 import { uploadLabel } from "@/lib/postingFeed";
-import { supportsCaptionFont } from "@/modules/video-render";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 /**
@@ -277,8 +276,7 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
           styles.textOverlayText,
           {
             color,
-            fontFamily: overlayFontFamily(supportsCaptionFont),
-            fontWeight: "400" as const,
+            ...overlayFont(overlay.fontId),
             fontSize: layout.fontSize,
             lineHeight: layout.lineHeight,
             paddingHorizontal: layout.padX,

@@ -280,6 +280,8 @@ export type TextOverlay = {
   color: string;
   /** Background style preset */
   backgroundStyle: TextBackgroundStyle;
+  /** A font chosen in Style (a caption font id); absent = Montserrat Bold. */
+  fontId?: string;
   /** Absent = 'text'. Stored in the existing text_overlays JSON; no new columns. */
   kind?: "text" | "caption";
   /** When it shows, in ms on the OUTPUT timeline (after cuts). Missing startMs/endMs = whole video. */

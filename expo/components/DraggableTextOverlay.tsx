@@ -9,14 +9,13 @@ import Animated, {
 import type { TextOverlay, TextBackgroundStyle } from "@/providers/PostsProvider";
 import {
   TEXT_MAX_WIDTH,
-  overlayFontFamily,
+  overlayFont,
   textLayout,
   fracToFrame,
   frameToFrac,
   type CoverCrop,
 } from "@/lib/feedLayout";
 
-import { supportsCaptionFont } from "@/modules/video-render";
 
 const FULL_CROP: CoverCrop = { visibleW: 1, visibleH: 1, cropLeft: 0, cropTop: 0 };
 
@@ -520,7 +519,7 @@ export default function DraggableTextOverlay({
         allowFontScaling={false}
         style={[
           styles.text,
-          { fontFamily: overlayFontFamily(supportsCaptionFont), fontWeight: "400" as const },
+          overlayFont(overlay.fontId),
           animatedTextStyle,
           {
             color: effectiveTextColor,

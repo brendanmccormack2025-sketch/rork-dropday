@@ -5,6 +5,8 @@
  * Pure data and functions: no React, no native modules.
  */
 
+import { CAPTION_FONTS, TEXT_FONT_FAMILY, previewFontFamily } from "./transcription/captionPresets.ts";
+
 export const TAB_BAR_HEIGHT = 88;
 /** Assumed aspect ratio (w/h) of posted video. */
 export const VIDEO_ASPECT = 9 / 16;
@@ -108,6 +110,9 @@ export function safeZones(frameW: number, frameH: number, screenW: number, topIn
 
 // ── Text overlay layout (editor preview == feed) ─────────────────────────────
 
+/** Average character width of Montserrat Bold in ems (the model that line breaks are compared with). */
+export const MONTSERRAT_BOLD_EM = 0.62;
+
 /** A text overlay's fontSize is in points of a frame this wide, and scales with the video width. */
 export const TEXT_REF_WIDTH = 250;
 /** Widest a text box may get, as a fraction of the video width (the native renderer's default). */
@@ -153,9 +158,22 @@ export function textSlot(centerPx: number, videoW: number): { left: number; widt
   return { left: centerPx - width / 2, width };
 }
 
-/** JS font family of a text overlay: Montserrat Bold where the build bundles it, else the app font the posted overlay always used. */
-export function overlayFontFamily(supportsFont: boolean): string {
-  return supportsFont ? "Montserrat_700Bold" : "PlusJakartaSans_800ExtraBold";
+/**
+ * JS font family of a Text-button overlay. These are drawn live (never burned in), so every build
+ * shows Montserrat Bold (loaded with expo-font in app/_layout.tsx). An overlay with a font chosen in
+ * Style (fontId, one of the caption font presets) keeps that font; the system font (Trial) is undefined.
+ */
+export function overlayFontFamily(fontId?: string): string | undefined {
+  if (!fontId) return TEXT_FONT_FAMILY;
+  const font = CAPTION_FONTS.find((f) => f.id === fontId);
+  if (!font) return TEXT_FONT_FAMILY;
+  return font.fontName ? previewFontFamily(font.fontName) : undefined;
+}
+
+/** The font style keys of a Text-button overlay (nothing for the system font, so the app font default stays out of it). */
+export function overlayFont(fontId?: string): { fontFamily?: string; fontWeight: "400" } | { fontWeight: "900" } {
+  const family = overlayFontFamily(fontId);
+  return family ? { fontFamily: family, fontWeight: "400" } : { fontWeight: "900" };
 }
 
 /**
@@ -175,7 +193,7 @@ export function textOverlayRenderSpec(overlayFontSize: number | undefined) {
 }
 
 /** Width of one line in the same rough model as wrapLines. */
-export function lineWidth(line: string, fontSize: number, charEm = 0.55, wideEm = 1.1): number {
+export function lineWidth(line: string, fontSize: number, charEm = MONTSERRAT_BOLD_EM, wideEm = 1.1): number {
   return [...line].reduce((n, ch) => n + (ch.codePointAt(0)! > 0x2000 ? wideEm : charEm) * fontSize, 0);
 }
 
@@ -183,7 +201,7 @@ export function lineWidth(line: string, fontSize: number, charEm = 0.55, wideEm 
  * Word-wrap `text` into lines of at most `maxTextWidth`, where every character is `charEm` ems
  * wide and an emoji or other wide character is `wideEm`. A rough model, used to compare layouts.
  */
-export function wrapLines(text: string, fontSize: number, maxTextWidth: number, charEm = 0.55, wideEm = 1.1): string[] {
+export function wrapLines(text: string, fontSize: number, maxTextWidth: number, charEm = MONTSERRAT_BOLD_EM, wideEm = 1.1): string[] {
   const width = (w: string) => lineWidth(w, fontSize, charEm, wideEm);
   const lines: string[] = [];
   for (const para of text.split("\n")) {
