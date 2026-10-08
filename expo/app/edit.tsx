@@ -102,6 +102,8 @@ import MarkerSheet from "@/components/MarkerSheet";
 import { MANUAL_EDIT_CONFIRM_MESSAGE, guardManualEdits, timelineMatchesState } from "@/lib/autoEdit/confirm";
 import { addManualCut } from "@/lib/autoEdit/decisions";
 import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/lib/autoEdit/deletePart";
+import { aiBoundariesOf, describeEdgeDrag, reshapeCutAtEdge } from "@/lib/autoEdit/reshape";
+import { buildSeamHandles, remapOverlayTimes, type SeamEdgeInfo } from "@/lib/autoEdit/seams";
 import { allCategoriesOff, cutCategoriesOff, cutsRows, cutsSummary, setCutsRowEnabled, type CutsRow } from "@/lib/autoEdit/editPanel";
 import { CAPTION_TOOLS, toolbarMode, type CaptionToolId } from "@/lib/editorToolbar";
 import { formatAiDebug } from "@/lib/autoEdit/debugText";
@@ -2585,6 +2587,11 @@ export default function EditScreen() {
         trimEndMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? model.durationMs),
       }));
       const newPosition = mapOutputPosition(before, derived, positionMsRef.current, next.sourceUri);
+      // Text that was placed on some footage stays on it when the cuts change the output times.
+      setTextOverlays((prev) => {
+        const moved = remapOverlayTimes(prev, before, derived, next.sourceUri);
+        return moved.some((o, i) => o !== prev[i]) ? moved : prev;
+      });
       const wasPlaying = isPlayingRef.current;
       const base = current[0]!;
       replaceClips(
@@ -2597,7 +2604,7 @@ export default function EditScreen() {
         if (wasPlaying) setTimeout(() => setIsPlaying(true), 60);
       }, 50);
     },
-    [setEditModel, replaceClips, handleSeek],
+    [setEditModel, replaceClips, handleSeek, setTextOverlays],
   );
 
   // With manual edits the model does not contain, an AI-edit action asks first.
@@ -2818,6 +2825,28 @@ export default function EditScreen() {
       replaceClips(clips.filter((c) => c.id !== plan.clipId));
     }
   }, [selectedClipId, clips, textOverlays, userEdit, pushSnapshot, replaceClips, handleDeselectAndPreview]);
+
+  // A clip edge dragged on the Cuts timeline: a decision (reshapeCutAtEdge), one undo step, no free trim.
+  const handleSeamDragEnd = useCallback(
+    (edge: SeamEdgeInfo, newSourceMs: number) => {
+      const model = editStateRef.current;
+      if (!model) return;
+      userEdit((st) => reshapeCutAtEdge(st, edge, newSourceMs, model.durationMs));
+    },
+    [userEdit],
+  );
+  const timelineSeams = useMemo(() => {
+    if (!aiEditsEnabled || !editModel || !modelInSync) return undefined;
+    const handles = buildSeamHandles(clips, editModel.state.sourceUri);
+    if (handles.length === 0) return undefined;
+    return {
+      handles,
+      sourceUri: editModel.state.sourceUri,
+      describe: (edge: SeamEdgeInfo, ms: number) => describeEdgeDrag(editModel.state, edge, ms, editModel.durationMs),
+      boundaries: aiBoundariesOf(editModel.state),
+      onDragEnd: handleSeamDragEnd,
+    };
+  }, [aiEditsEnabled, editModel, modelInSync, clips, handleSeamDragEnd]);
 
   // "Keep original": the automatic cuts off, nothing else (captions, text and the creator's own deletes stay).
   const handleKeepOriginal = useCallback(() => {
@@ -4008,6 +4037,7 @@ export default function EditScreen() {
             markers={timelineMarkers}
             onMarkerPress={handleMarkerPress}
             bands={protectionBands}
+            seams={timelineSeams}
           />
         )}
 

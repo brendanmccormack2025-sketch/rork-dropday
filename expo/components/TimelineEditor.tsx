@@ -20,6 +20,9 @@ import * as Haptics from "expo-haptics";
 import type { DraftClip } from "@/providers/PostsProvider";
 import { theme } from "@/constants/theme";
 import type { MarkerKind, TimelineMarker } from "@/lib/autoEdit/markers";
+import type { SeamEdgeInfo, SeamHandleSpec } from "@/lib/autoEdit/seams";
+import { crossedBoundary, type EdgeDrag } from "@/lib/autoEdit/reshape";
+import { SeamDragOverlay, SeamHandle, type SeamDragView } from "@/components/SeamHandles";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const PX_PER_SEC = 44;
@@ -80,6 +83,19 @@ interface TimelineEditorProps {
   onMarkerPress?: (marker: TimelineMarker) => void;
   /** Output-timeline ranges drawn as a subtle band (protected laughs). */
   bands?: Array<{ startMs: number; endMs: number }>;
+  /**
+   * Drag handles on every seam (start, end and between clips) when the timeline is the automatic edit's. A drag
+   * ends in onSeamDragEnd, which routes it through the decision model; the old per-clip trim handles are hidden.
+   */
+  seams?: {
+    handles: SeamHandleSpec[];
+    sourceUri: string;
+    /** What a drag to `newSourceMs` would do (clamped position, footage that comes back or goes). */
+    describe: (edge: SeamEdgeInfo, newSourceMs: number) => EdgeDrag;
+    /** The places the automatic edit cut at: a light haptic when the edge passes one. */
+    boundaries: number[];
+    onDragEnd: (edge: SeamEdgeInfo, newSourceMs: number) => void;
+  };
 }
 
 /** One look per marker kind. "zoom" is reserved for future zoom decisions. */
@@ -259,6 +275,7 @@ export default function TimelineEditor({
   markers,
   onMarkerPress,
   bands,
+  seams,
 }: TimelineEditorProps) {
   const scrollRef = useRef<ScrollView>(null);
   const containerW = useRef(1);
@@ -285,6 +302,28 @@ export default function TimelineEditor({
   const dragGrantSnapshotRef = useRef<{ offsetX: number; pageX: number } | null>(null);
 
   const thumbnails = useThumbnails(clips);
+
+  // ── Seam drag (recover or give up footage at a cut) ─────────────────────────
+  const [seamDrag, setSeamDrag] = useState<{ edge: SeamEdgeInfo; drag: EdgeDrag } | null>(null);
+  const seamLastMsRef = useRef(0);
+  const seamsRef = useRef(seams);
+  seamsRef.current = seams;
+  const handleSeamStart = useCallback((edge: SeamEdgeInfo) => {
+    seamLastMsRef.current = edge.atMs;
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+  }, []);
+  const handleSeamMove = useCallback((edge: SeamEdgeInfo, newMs: number) => {
+    const cfg = seamsRef.current;
+    if (!cfg) return;
+    const drag = cfg.describe(edge, newMs);
+    if (crossedBoundary(cfg.boundaries, seamLastMsRef.current, drag.clampedMs)) triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+    seamLastMsRef.current = drag.clampedMs;
+    setSeamDrag({ edge, drag });
+  }, []);
+  const handleSeamEnd = useCallback((edge: SeamEdgeInfo, newMs: number) => {
+    setSeamDrag(null);
+    seamsRef.current?.onDragEnd(edge, newMs);
+  }, []);
 
   // ── Layouts ──────────────────────────────────────────────────────────────
   const layouts = useMemo(() => buildClipLayouts(clips), [clips]);
@@ -1045,7 +1084,7 @@ export default function TimelineEditor({
       </View>
 
       {/* ── Dimmed trim segments (outside ScrollView, behind handles) ── */}
-      {selectedLayout && selectedLayout.clip.type === "video" && !dragState && (
+      {selectedLayout && selectedLayout.clip.type === "video" && !dragState && !seams && (
         <>
           {leftDimmedScreen && (
             <View
@@ -1069,7 +1108,7 @@ export default function TimelineEditor({
       )}
 
       {/* ── Trim handles overlay (outside ScrollView) ── */}
-      {selectedLayout && selectedLayout.clip.type === "video" && !dragState && (
+      {selectedLayout && selectedLayout.clip.type === "video" && !dragState && !seams && (
         <>
           {/* Left trim handle */}
           <View
@@ -1102,6 +1141,52 @@ export default function TimelineEditor({
           </View>
         </>
       )}
+
+      {/* ── Seam drag handles (outside ScrollView; under the playhead and the markers) ── */}
+      {seams && !dragState &&
+        seams.handles.map((h) => {
+          const x = EDGE_PAD + msToPx(h.outputMs) - scrollX;
+          if (x < -2 * MARKER_TOUCH || x > containerW.current + 2 * MARKER_TOUCH) return null;
+          return (
+            <SeamHandle
+              key={h.id}
+              spec={h}
+              x={x}
+              top={CLIP_TOP}
+              height={CLIP_H}
+              msPerPx={1000 / PX_PER_SEC}
+              active={seamDrag !== null && (seamDrag.edge.clipId === h.prev?.clipId || seamDrag.edge.clipId === h.next?.clipId) && seamDrag.edge.side === (h.prev?.clipId === seamDrag.edge.clipId ? "right" : "left")}
+              onDragStart={handleSeamStart}
+              onDragMove={handleSeamMove}
+              onDragEnd={handleSeamEnd}
+              onTap={onSelectClip}
+            />
+          );
+        })}
+      {seams && seamDrag && seamDrag.drag.kind !== "none" && (() => {
+        const h = seams.handles.find((hh) => hh.prev?.clipId === seamDrag.edge.clipId && seamDrag.edge.side === "right" || hh.next?.clipId === seamDrag.edge.clipId && seamDrag.edge.side === "left");
+        if (!h) return null;
+        const view: SeamDragView = {
+          uri: seams.sourceUri,
+          side: seamDrag.edge.side,
+          kind: seamDrag.drag.kind as "reveal" | "cut",
+          startMs: seamDrag.drag.range.startMs,
+          endMs: seamDrag.drag.range.endMs,
+          edgeMs: seamDrag.drag.clampedMs,
+          deltaMs: (seamDrag.drag.kind === "reveal" ? 1 : -1) * (seamDrag.drag.range.endMs - seamDrag.drag.range.startMs),
+        };
+        return (
+          <SeamDragOverlay
+            view={view}
+            x={EDGE_PAD + msToPx(h.outputMs) - scrollX}
+            top={CLIP_TOP}
+            height={CLIP_H}
+            pxPerMs={PX_PER_SEC / 1000}
+            containerW={containerW.current}
+            bubbleTop={-112}
+          />
+        );
+      })()}
 
       {/* ── Playhead dot overlay (outside ScrollView) ── */}
       <View
