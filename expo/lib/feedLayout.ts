@@ -112,10 +112,12 @@ export function safeZones(frameW: number, frameH: number, screenW: number, topIn
 export const TEXT_REF_WIDTH = 250;
 /** Widest a text box may get, as a fraction of the video width (the native renderer's default). */
 export const TEXT_MAX_WIDTH = 0.86;
-/** Space between the text and the edge of its box. One value on all sides: the renderer's backgroundPadding is uniform. */
-export const TEXT_PAD_EM = 0.3;
+/** Space between the text and the edge of its box: 0.5 em left and right, 0.25 em above and below (captions and text overlays). */
+export const TEXT_PAD_X_EM = 0.5;
+export const TEXT_PAD_Y_EM = 0.25;
 export const TEXT_RADIUS_EM = 0.25;
-export const TEXT_LINE_HEIGHT_EM = 1.18;
+/** One fixed line height: an emoji cannot make a line taller, and the text sits in the middle of it. */
+export const TEXT_LINE_HEIGHT_EM = 1.2;
 
 export type TextLayout = {
   fontSize: number;
@@ -133,8 +135,8 @@ export function textLayout(overlayFontSize: number | undefined, videoW: number):
   return {
     fontSize,
     lineHeight: fontSize * TEXT_LINE_HEIGHT_EM,
-    padX: fontSize * TEXT_PAD_EM,
-    padY: fontSize * TEXT_PAD_EM,
+    padX: fontSize * TEXT_PAD_X_EM,
+    padY: fontSize * TEXT_PAD_Y_EM,
     cornerRadius: fontSize * TEXT_RADIUS_EM,
     maxWidth: videoW * TEXT_MAX_WIDTH,
   };
@@ -148,7 +150,9 @@ export function textOverlayRenderSpec(overlayFontSize: number | undefined) {
   const l = textLayout(overlayFontSize, 1080);
   return {
     fontSize: l.fontSize,
-    backgroundPadding: l.padX,
+    backgroundPaddingX: l.padX,
+    backgroundPaddingY: l.padY,
+    lineHeight: TEXT_LINE_HEIGHT_EM,
     cornerRadius: l.cornerRadius,
     maxWidth: TEXT_MAX_WIDTH,
   };
@@ -174,3 +178,15 @@ export function wrapLines(text: string, fontSize: number, maxTextWidth: number, 
   }
   return lines;
 }
+
+/**
+ * Height of a text box: its lines at the fixed line height plus the vertical padding. The text is
+ * measured in lines, never from font metrics, so an emoji (whose font is taller) changes nothing.
+ */
+export function textBoxHeight(text: string, layout: TextLayout): number {
+  const lines = wrapLines(text, layout.fontSize, layout.maxWidth - 2 * layout.padX).length;
+  return lines * layout.lineHeight + 2 * layout.padY;
+}
+
+/** Where a new text overlay starts: horizontally centred, below the feed's logo and bell. */
+export const DEFAULT_TEXT_OVERLAY_POS = { x: 0.5, y: 0.22 } as const;

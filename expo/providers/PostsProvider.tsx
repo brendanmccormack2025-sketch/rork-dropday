@@ -7,6 +7,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { documentDirectory, cacheDirectory, getInfoAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
 import { router } from "expo-router";
 import { showAlert } from "@/lib/showAlert";
+import { swapOptimistic } from "@/lib/postingFeed";
 import { noteMissingYoutubeColumn, profileLinkColumns } from "@/lib/creatorLinks";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { concatMP4Files } from "@/src/integrations/concatMP4";
@@ -76,6 +77,8 @@ export type Post = {
     youtube_url?: string | null;
     website?: string | null;
   } | null;
+  /** Row key kept from the optimistic copy this post replaced (see lib/postingFeed.ts). */
+  _key?: string;
   /** Present only on optimistic (not-yet-uploaded) posts */
   _optimistic?: {
     tempId: string;
@@ -2246,32 +2249,18 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         setPostedBannerAt(Date.now());
         patchFyp((old) => {
           if (!old) return [newPost];
-          const filtered = old.filter(
-            (p) => p._optimistic?.tempId !== variables.optimisticTempId
-          );
-          if (filtered.some((p) => p.id === newPost.id)) return filtered;
-          return [newPost, ...filtered];
+          return swapOptimistic(old, variables.optimisticTempId, newPost);
         });
         // Also insert into the following-feed cache — the user's own post
         // appears at the top via the self-boost tier. Without this, the
         // optimistic entry would vanish from the Following tab on success.
         qc.setQueryData<Post[]>(["posts", "following-feed", user?.id], (old) => {
-          if (!old) return [newPost];
-          const filtered = old.filter(
-            (p) => p._optimistic?.tempId !== variables.optimisticTempId
-          );
-          if (filtered.some((p) => p.id === newPost.id)) return filtered;
-          return [newPost, ...filtered];
+          return swapOptimistic(old, variables.optimisticTempId, newPost);
         });
       }
 
       qc.setQueryData<Post[]>(["posts", "mine", user?.id], (old) => {
-        if (!old) return [newPost];
-        const filtered = (old ?? []).filter(
-          (p) => p._optimistic?.tempId !== variables.optimisticTempId
-        );
-        if (filtered.some((p) => p.id === newPost.id)) return filtered;
-        return [newPost, ...filtered];
+        return swapOptimistic(old, variables.optimisticTempId, newPost);
       });
 
       // Invalidate all reaction and reply queries so the reaction-tree

@@ -11,7 +11,7 @@ import { Platform } from "react-native";
 import { isInternalTester } from "@/constants/debug";
 import type { EditOverlay } from "@/lib/editModel";
 import { toRenderJson } from "@/lib/editStyles";
-import { supportsCaptionFont } from "@/modules/video-render";
+import { supportsCaptionFont, supportsTextBox } from "@/modules/video-render";
 import type { DraftClip } from "@/providers/PostsProvider";
 
 export const RENDER_AT_POST_ENABLED = true;
@@ -134,7 +134,7 @@ export function renderRequest(
   overlays: EditOverlay[] = [],
 ) {
   return {
-    json: toRenderJson({ version: 1, clips: edit, overlays }, { supportsFont: supportsCaptionFont }),
+    json: toRenderJson({ version: 1, clips: edit, overlays }, { supportsFont: supportsCaptionFont, supportsTextBox }),
     options: { width, height, reframe: "fit" as const, bitrate: RENDER_BITRATE, punchIn: false },
   };
 }

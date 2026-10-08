@@ -15,6 +15,7 @@ import { useVideoFocus } from "@/hooks/useVideoFocus";
 import { FeedItem } from "@/components/FeedItem";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post } from "@/providers/PostsProvider";
+import { isPosting, playingIndex, rowKey, scrollTarget } from "@/lib/postingFeed";
 
 const { height: SCREEN_H } = Dimensions.get("window");
 
@@ -125,6 +126,21 @@ export function FeedListView({
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
 
+  // An upload starts: the new post is first, so show it. Nothing else plays meanwhile (see playingIndex).
+  const posting = isPosting(posts);
+  useEffect(() => {
+    if (!posting) return;
+    const target = scrollTarget(posts);
+    if (target === null) return;
+    try {
+      listRef.current?.scrollToOffset({ offset: listH * target, animated: false });
+      setActiveIndex(target);
+    } catch {
+      // Scrolling is best-effort: a failure must never break posting.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posting]);
+
   // Scroll to top whenever resetToken changes (e.g. feed tab switch)
   useEffect(() => {
     if (resetToken === undefined) return;
@@ -144,7 +160,7 @@ export function FeedListView({
     ({ item, index }: { item: Post; index: number }) => (
       <FeedItem
         post={item}
-        active={index === activeIndex && screenFocused}
+        active={index === playingIndex(posts, activeIndex, screenFocused)}
         bottomInset={overlayInset}
         itemHeight={listH}
         onShare={() => onSharePost?.(item)}
@@ -153,7 +169,7 @@ export function FeedListView({
         onDismiss={() => removeOptimisticPost(item._optimistic?.tempId ?? "")}
       />
     ),
-    [activeIndex, screenFocused, retryOptimisticPost, removeOptimisticPost, overlayInset, listH, onSharePost, onReactionsPost],
+    [posts, activeIndex, screenFocused, retryOptimisticPost, removeOptimisticPost, overlayInset, listH, onSharePost, onReactionsPost],
   );
 
   const safeInitialIndex = Math.max(0, Math.min(initialIndex, posts.length - 1));
@@ -175,7 +191,7 @@ export function FeedListView({
       <FlatList
         ref={listRef}
         data={posts}
-        keyExtractor={(p) => p.id}
+        keyExtractor={rowKey}
         renderItem={renderItem}
         ListEmptyComponent={emptyNode}
         onEndReached={onEndReached}
@@ -256,7 +272,7 @@ export function FeedListView({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg },
+  root: { flex: 1, backgroundColor: "#000" },
   refreshIndicator: {
     position: "absolute",
     left: 0,

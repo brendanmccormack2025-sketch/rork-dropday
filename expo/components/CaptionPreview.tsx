@@ -3,7 +3,8 @@ import { Platform, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } f
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import type { CaptionStyle } from "@/lib/editModel";
-import type { OverlayFontWeight } from "@/lib/editStyles";
+import { withTextBox, type OverlayFontWeight } from "@/lib/editStyles";
+import { supportsTextBox } from "@/modules/video-render";
 import { previewFontFamily } from "@/lib/transcription/captionPresets";
 import type { EditorCaptionLine } from "@/lib/transcription/captionLines";
 import {
@@ -88,7 +89,7 @@ export default function CaptionPreview({
   const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
   const inputRef = useRef<TextInput>(null);
   const shown = live ?? stored;
-  const spec = useMemo(() => styledSpec(shown), [shown]);
+  const spec = useMemo(() => withTextBox(styledSpec(shown), supportsTextBox), [shown]);
   const px = frameW / 1080;
 
   const activeIndex = lines.findIndex((l) => positionMs >= l.startMs && positionMs < l.endMs);
@@ -220,14 +221,15 @@ export default function CaptionPreview({
     ...(spec.fontName ? { fontFamily: previewFontFamily(spec.fontName) } : { fontWeight: WEIGHTS[spec.fontWeight] }),
     textAlign: "center" as const,
     letterSpacing: (spec.letterSpacing ?? 0) * px,
+    ...(spec.lineHeight ? { lineHeight: spec.fontSize * spec.lineHeight * px } : null),
     ...(spec.shadow
       ? { textShadowColor: "rgba(0,0,0,0.6)", textShadowRadius: 4 * px, textShadowOffset: { width: 0, height: 2 * px } }
       : {}),
   };
   const boxStyle = {
     backgroundColor: spec.backgroundColor,
-    paddingHorizontal: (spec.backgroundPadding ?? 0) * px,
-    paddingVertical: (spec.backgroundPadding ?? 0) * px,
+    paddingHorizontal: (spec.backgroundPaddingX ?? spec.backgroundPadding ?? 0) * px,
+    paddingVertical: (spec.backgroundPaddingY ?? spec.backgroundPadding ?? 0) * px,
     maxWidth: frameW * (spec.maxWidth ?? 0.86),
     borderRadius: (spec.cornerRadius ?? 0) * px,
   };

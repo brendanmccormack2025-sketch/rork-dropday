@@ -10,7 +10,8 @@ import type { TextOverlay, TextBackgroundStyle } from "@/providers/PostsProvider
 import {
   TEXT_LINE_HEIGHT_EM,
   TEXT_MAX_WIDTH,
-  TEXT_PAD_EM,
+  TEXT_PAD_X_EM,
+  TEXT_PAD_Y_EM,
   TEXT_RADIUS_EM,
   TEXT_REF_WIDTH,
   fracToFrame,
@@ -398,8 +399,8 @@ export default function DraggableTextOverlay({
   const k = frameWidth / crop.visibleW / TEXT_REF_WIDTH;
   const maxBoxWidth = (frameWidth / crop.visibleW) * TEXT_MAX_WIDTH;
   const animatedStyle = useAnimatedStyle(() => ({
-    paddingHorizontal: fontSizeSv.value * k * TEXT_PAD_EM,
-    paddingVertical: fontSizeSv.value * k * TEXT_PAD_EM,
+    paddingHorizontal: fontSizeSv.value * k * TEXT_PAD_X_EM,
+    paddingVertical: fontSizeSv.value * k * TEXT_PAD_Y_EM,
     opacity: opacity.value,
     transform: [
       { translateX: translateX.value - textWidth.value / 2 },

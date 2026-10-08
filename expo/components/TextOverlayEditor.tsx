@@ -7,10 +7,11 @@ import {
   StyleSheet,
   Keyboard,
   Platform,
-  LayoutAnimation,
+  useWindowDimensions,
 } from "react-native";
 import UiText from "@/components/UiText";
-import { Check, Ellipsis } from "lucide-react-native";
+import { Check } from "lucide-react-native";
+import { SCRIM_OPACITY, editorLayout } from "@/lib/textEditorLayout";
 import { theme } from "@/constants/theme";
 import type { TextBackgroundStyle } from "@/providers/PostsProvider";
 import { BG_STYLES, resolveBgMeta } from "@/components/DraggableTextOverlay";
@@ -21,6 +22,8 @@ interface TextOverlayEditorProps {
   initialBackgroundStyle: TextBackgroundStyle;
   onDone: (text: string, backgroundStyle: TextBackgroundStyle) => void;
   onCancel: () => void;
+  /** Called as the text or style changes, so the video preview shows it live. */
+  onLiveChange?: (text: string, backgroundStyle: TextBackgroundStyle) => void;
 }
 
 export default function TextOverlayEditor({
@@ -29,22 +32,28 @@ export default function TextOverlayEditor({
   initialBackgroundStyle,
   onDone,
   onCancel,
+  onLiveChange,
 }: TextOverlayEditorProps) {
   const [text, setText] = useState(initialText);
   const [bgStyle, setBgStyle] = useState<TextBackgroundStyle>(initialBackgroundStyle);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const { height: screenH } = useWindowDimensions();
 
   // ── Reset state when the editor opens ────────────────────────────────────
   useEffect(() => {
     if (visible) {
       setText(initialText);
       setBgStyle(initialBackgroundStyle);
-      setShowSettings(false);
       setTimeout(() => inputRef.current?.focus(), 200);
     }
   }, [visible, initialText, initialBackgroundStyle]);
+
+  // ── The video preview follows what is typed ───────────────────────────────
+  useEffect(() => {
+    if (visible) onLiveChange?.(text, bgStyle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, text, bgStyle]);
 
   // ── Track keyboard height ────────────────────────────────────────────────
   useEffect(() => {
@@ -64,12 +73,8 @@ export default function TextOverlayEditor({
     };
   }, []);
 
-  // ── Dismiss keyboard & settings on hide ──────────────────────────────────
   useEffect(() => {
-    if (!visible) {
-      Keyboard.dismiss();
-      setShowSettings(false);
-    }
+    if (!visible) Keyboard.dismiss();
   }, [visible]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
@@ -87,20 +92,10 @@ export default function TextOverlayEditor({
     });
   }, []);
 
-  const toggleSettings = useCallback(() => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setShowSettings((p) => !p);
-  }, []);
-
-  const selectBgStyle = useCallback((style: TextBackgroundStyle) => {
-    setBgStyle(style);
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setShowSettings(false);
-  }, []);
-
   if (!visible) return null;
 
   const canConfirm = text.trim().length > 0;
+  const layout = editorLayout(screenH, keyboardHeight);
 
   return (
     <Modal
@@ -111,99 +106,57 @@ export default function TextOverlayEditor({
       onRequestClose={onCancel}
     >
       <View style={styles.wrapper} pointerEvents="box-none">
-        {/* Subtle dim backdrop — tapping dismisses */}
-        <Pressable style={styles.backdrop} onPress={onCancel}>
-          <View style={styles.backdropFill} />
-        </Pressable>
+        {/* 1. Tap anywhere over the preview to close. Draws nothing, so the video stays clear. */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} accessibilityLabel="Close text editor" />
 
-        {/* Toolbar — positioned above the keyboard */}
+        {/* 2. The only dimming: behind the keyboard. */}
+        {layout.scrim.height > 0 && (
+          <View
+            pointerEvents="none"
+            style={[styles.scrim, { top: layout.scrim.top, height: layout.scrim.height }]}
+          />
+        )}
+
+        {/* 3. The input bar, above the keyboard and above the scrim, at full strength. */}
         <View
           style={[styles.toolbarContainer, { bottom: Math.max(keyboardHeight, 0) }]}
           pointerEvents="box-none"
         >
-          {/* Settings panel */}
-          {showSettings && (
-            <View style={styles.settingsPanel}>
-              {BG_STYLES.map((style) => (
-                <Pressable
-                  key={style}
-                  onPress={() => selectBgStyle(style)}
-                  style={[
-                    styles.styleChip,
-                    bgStyle === style && styles.styleChipActive,
-                  ]}
-                  accessibilityLabel={`Select ${style} background`}
-                >
-                  <BgChipPreview
-                    bgStyle={style}
-                    isActive={bgStyle === style}
-                  />
-                </Pressable>
-              ))}
-            </View>
-          )}
-
-          {/* Main toolbar row */}
           <View style={styles.toolbar}>
-            {/* Text input */}
             <TextInput
               ref={inputRef}
               value={text}
               onChangeText={setText}
               placeholder="Type something…"
-              placeholderTextColor="rgba(255,255,255,0.3)"
+              placeholderTextColor="rgba(10,10,10,0.4)"
               style={styles.input}
               maxLength={100}
               multiline
               autoFocus
               returnKeyType="done"
               onSubmitEditing={handleDone}
-              keyboardAppearance="dark"
+              keyboardAppearance="light"
             />
 
-            {/* Background-style cycle button */}
             <Pressable
               onPress={cycleBgStyle}
-              style={styles.iconBtn}
+              style={styles.styleBtn}
               hitSlop={8}
-              accessibilityLabel="Change background style"
+              accessibilityRole="button"
+              accessibilityLabel="Change text style"
             >
               <MiniBgPreview bgStyle={bgStyle} />
             </Pressable>
 
-            {/* Confirm button */}
             <Pressable
               onPress={handleDone}
-              style={[
-                styles.iconBtn,
-                styles.doneBtn,
-                !canConfirm && styles.doneBtnDisabled,
-              ]}
+              style={[styles.doneBtn, !canConfirm && styles.doneBtnOff]}
               hitSlop={8}
               disabled={!canConfirm}
+              accessibilityRole="button"
               accessibilityLabel="Done"
             >
-              <Check
-                color={canConfirm ? "#fff" : "rgba(255,255,255,0.2)"}
-                size={18}
-              />
-            </Pressable>
-
-            {/* Settings toggle */}
-            <Pressable
-              onPress={toggleSettings}
-              style={[styles.iconBtn, showSettings && styles.iconBtnActive]}
-              hitSlop={8}
-              accessibilityLabel="More text options"
-            >
-              <Ellipsis
-                color={
-                  showSettings
-                    ? theme.accent
-                    : "rgba(255,255,255,0.5)"
-                }
-                size={18}
-              />
+              <Check color="#fff" size={20} strokeWidth={3} />
             </Pressable>
           </View>
         </View>
@@ -242,58 +195,17 @@ function MiniBgPreview({ bgStyle }: { bgStyle: TextBackgroundStyle }) {
   );
 }
 
-// ── Background-style chip preview (for the settings panel) ────────────────
-
-function BgChipPreview({
-  bgStyle,
-  isActive,
-}: {
-  bgStyle: TextBackgroundStyle;
-  isActive: boolean;
-}) {
-  const meta = resolveBgMeta(bgStyle, "#FFFFFF");
-  const showBg = meta.bgOpacity > 0 && meta.bgColor !== "transparent";
-
-  return (
-    <View style={chipStyles.wrap}>
-      {showBg && (
-        <View
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              backgroundColor: meta.bgColor,
-              opacity: meta.bgOpacity,
-              borderRadius: 0,
-            },
-          ]}
-        />
-      )}
-      <UiText
-        style={[
-          chipStyles.letter,
-          { color: meta.textColor },
-          isActive && chipStyles.letterActive,
-        ]}
-        numberOfLines={1}
-      >
-        Aa
-      </UiText>
-    </View>
-  );
-}
-
 // ── Styles ─────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   wrapper: {
     flex: 1,
   },
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-  },
-  backdropFill: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.18)",
+  scrim: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    backgroundColor: `rgba(0,0,0,${SCRIM_OPACITY})`,
   },
   toolbarContainer: {
     position: "absolute",
@@ -304,16 +216,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginHorizontal: 10,
+    marginBottom: 6,
     paddingHorizontal: 10,
     paddingVertical: 8,
     gap: 8,
-    backgroundColor: "rgba(255,255,255,0.97)",
-    borderRadius: 0,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "#D8D3C4",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 8,
   },
@@ -322,92 +235,49 @@ const styles = StyleSheet.create({
     color: "#0A0A0A",
     fontSize: 16,
     fontWeight: "600" as const,
-    minHeight: 36,
+    minHeight: 40,
     maxHeight: 80,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: "rgba(10,10,10,0.07)",
-    borderRadius: 0,
+    backgroundColor: "rgba(10,10,10,0.06)",
+    borderRadius: 8,
   },
-  iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 0,
+  styleBtn: {
+    width: 44,
+    height: 40,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(10,10,10,0.07)",
-  },
-  iconBtnActive: {
-    backgroundColor: "rgba(232,41,28,0.15)",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: "rgba(10,10,10,0.35)",
   },
   doneBtn: {
-    backgroundColor: "rgba(232,41,28,0.18)",
-  },
-  doneBtnDisabled: {
-    backgroundColor: "rgba(10,10,10,0.05)",
-  },
-  settingsPanel: {
-    flexDirection: "row",
+    width: 44,
+    height: 40,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
-    marginHorizontal: 10,
-    marginBottom: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: "rgba(255,255,255,0.97)",
-    borderRadius: 0,
-    borderWidth: 1,
-    borderColor: "#D8D3C4",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 6,
+    backgroundColor: theme.accent,
   },
-  styleChip: {
-    width: 44,
-    height: 44,
-    borderRadius: 0,
-    overflow: "hidden",
-    borderWidth: 2,
-    borderColor: "rgba(10,10,10,0.08)",
-  },
-  styleChipActive: {
-    borderColor: theme.accent,
-    borderWidth: 2,
+  doneBtnOff: {
+    opacity: 0.45,
   },
 });
 
 const miniStyles = StyleSheet.create({
   wrap: {
-    width: 26,
-    height: 20,
-    borderRadius: 0,
+    width: 32,
+    height: 24,
+    borderRadius: 4,
     backgroundColor: "rgba(10,10,10,0.06)",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
   letter: {
-    fontSize: 10,
+    fontSize: 14,
     fontWeight: "900" as const,
     letterSpacing: 0.2,
-  },
-});
-
-const chipStyles = StyleSheet.create({
-  wrap: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  letter: {
-    fontSize: 13,
-    fontWeight: "900" as const,
-    letterSpacing: 0.2,
-  },
-  letterActive: {
-    // Keep the same style; active indication is via border
   },
 });

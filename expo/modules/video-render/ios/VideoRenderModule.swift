@@ -81,8 +81,9 @@ public class VideoRenderModule: Module {
     Name("VideoRender")
 
     // Build capabilities the JS checks: captions can use a font by PostScript name (style "fontName").
+    // supportsTextBox: separate padding across/down and a fixed line height (style "backgroundPaddingX/Y", "lineHeight").
     Constants {
-      ["supportsCaptionFont": true]
+      ["supportsCaptionFont": true, "supportsTextBox": true]
     }
 
     Events("onProgress")
@@ -365,7 +366,11 @@ private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
   let fontSize = CGFloat(number(style["fontSize"]) ?? 56) * scale
   let weight = fontWeight(style["fontWeight"] as? String)
   let textColor = color(style["color"] as? String, fallback: .white)
-  let padding = CGFloat(number(style["backgroundPadding"]) ?? 0) * scale
+  // Build 1.0.4: separate across/down padding and one fixed line height (a multiple of the font size).
+  // Without these keys the layout is exactly what older builds drew.
+  let padX = CGFloat(number(style["backgroundPaddingX"]) ?? number(style["backgroundPadding"]) ?? 0) * scale
+  let padY = CGFloat(number(style["backgroundPaddingY"]) ?? number(style["backgroundPadding"]) ?? 0) * scale
+  let lineHeightEm = number(style["lineHeight"]).map { CGFloat($0) }
   let maxWidth = size.width * CGFloat(number(style["maxWidth"]) ?? 0.86)
   let yFromTop = CGFloat(number(style["yCenter"]) ?? 0.75)
   let text = (style["uppercase"] as? Bool) == true ? overlay.text.uppercased() : overlay.text
@@ -376,23 +381,39 @@ private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
   let paragraph = NSMutableParagraphStyle()
   paragraph.alignment = .center
   paragraph.lineBreakMode = .byWordWrapping
-  let attributes: [NSAttributedString.Key: Any] = [
+  var attributes: [NSAttributedString.Key: Any] = [
     .font: font,
     .foregroundColor: textColor,
     .kern: CGFloat(number(style["letterSpacing"]) ?? 0) * scale,
     .paragraphStyle: paragraph,
   ]
+  // A fixed line height: a line with an emoji (whose font is taller) is no taller than any other line, so the
+  // box is lines x lineHeight and the text is centred in each line by raising the baseline by half the spare space.
+  var fixedLineHeight: CGFloat?
+  if let em = lineHeightEm {
+    let lineHeight = fontSize * em
+    paragraph.minimumLineHeight = lineHeight
+    paragraph.maximumLineHeight = lineHeight
+    attributes[.baselineOffset] = (lineHeight - font.lineHeight) / 2
+    fixedLineHeight = lineHeight
+  }
   let attributed = NSAttributedString(string: text, attributes: attributes)
   let bounds = attributed.boundingRect(
-    with: CGSize(width: maxWidth - 2 * padding, height: .greatestFiniteMagnitude),
+    with: CGSize(width: maxWidth - 2 * padX, height: .greatestFiniteMagnitude),
     options: [.usesLineFragmentOrigin, .usesFontLeading],
     context: nil
   )
   let textWidth = ceil(bounds.width) + 2
-  let textHeight = ceil(bounds.height) + 2
+  // With a fixed line height the height is the line count times it (measured, never from font metrics).
+  let textHeight: CGFloat
+  if let fixed = fixedLineHeight {
+    textHeight = (bounds.height / fixed).rounded() * fixed
+  } else {
+    textHeight = ceil(bounds.height) + 2
+  }
 
   let container = CALayer()
-  container.bounds = CGRect(x: 0, y: 0, width: textWidth + 2 * padding, height: textHeight + 2 * padding)
+  container.bounds = CGRect(x: 0, y: 0, width: textWidth + 2 * padX, height: textHeight + 2 * padY)
   container.position = CGPoint(x: size.width / 2, y: size.height * (1 - yFromTop))
   if let bg = style["backgroundColor"] as? String {
     container.backgroundColor = color(bg, fallback: .clear).cgColor
@@ -410,7 +431,7 @@ private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
   textLayer.isWrapped = true
   textLayer.alignmentMode = .center
   textLayer.contentsScale = 2
-  textLayer.frame = CGRect(x: padding, y: padding, width: textWidth, height: textHeight)
+  textLayer.frame = CGRect(x: padX, y: padY, width: textWidth, height: textHeight)
   container.addSublayer(textLayer)
   return container
 }

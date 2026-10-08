@@ -12,6 +12,8 @@ type VideoRenderNative = {
   cancelRender(): void;
   /** Present (true) from build 1.0.4: captions can use a font by PostScript name. */
   supportsCaptionFont?: boolean;
+  /** Present (true) from build 1.0.4: separate padding across/down and a fixed line height in text boxes. */
+  supportsTextBox?: boolean;
   addListener(event: "onProgress", listener: (e: RenderProgressEvent) => void): Subscription;
 };
 
@@ -21,6 +23,9 @@ const native: VideoRenderNative | null =
 
 /** True when this build can render a caption font (older builds ignore "fontName", so the editor hides the font row). */
 export const supportsCaptionFont: boolean = native?.supportsCaptionFont === true;
+
+/** True when this build lays text boxes out with backgroundPaddingX/Y and lineHeight (older builds ignore them). */
+export const supportsTextBox: boolean = native?.supportsTextBox === true;
 
 /**
  * Render EditInstructions v1 (lib/editModel.ts, as JSON) into one mp4 on this

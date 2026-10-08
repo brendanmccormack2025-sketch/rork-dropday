@@ -54,7 +54,7 @@ import CaptionsExplainer from "@/components/CaptionsExplainer";
 import CaptionPreview from "@/components/CaptionPreview";
 import EditPreviewModal from "@/components/EditPreviewModal";
 import FeedSafeZones from "@/components/FeedSafeZones";
-import { VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame } from "@/lib/feedLayout";
+import { DEFAULT_TEXT_OVERLAY_POS, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { formatRenderStats, recordRenderStats, reportRender } from "@/lib/renderReport";
@@ -359,6 +359,7 @@ export default function EditScreen() {
 
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
   const [textEditorVisible, setTextEditorVisible] = useState(false);
+  const [liveText, setLiveText] = useState<{ text: string; backgroundStyle: TextBackgroundStyle } | null>(null);
   const [editingOverlayId, setEditingOverlayId] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
@@ -1958,8 +1959,8 @@ export default function EditScreen() {
         const newOv: TextOverlay = {
           id: newOverlayId(),
           text,
-          x: 0.5,
-          y: 0.5,
+          x: DEFAULT_TEXT_OVERLAY_POS.x,
+          y: DEFAULT_TEXT_OVERLAY_POS.y,
           fontSize: 26,
           rotation: 0,
           color: "#FFFFFF",
@@ -3431,6 +3432,30 @@ export default function EditScreen() {
 
   const fullVideoW = frameDims.w / feedCrop.visibleW;
   const fullVideoH = frameDims.h / feedCrop.visibleH;
+  // While the text editor is open the preview shows what is being typed, before it is committed.
+  const displayOverlays: TextOverlay[] = (() => {
+    if (!textEditorVisible || !liveText) return textOverlays;
+    const typed = liveText.text.trim();
+    if (editingOverlayId) {
+      return textOverlays.map((ov) =>
+        ov.id === editingOverlayId && typed ? { ...ov, text: liveText.text, backgroundStyle: liveText.backgroundStyle } : ov,
+      );
+    }
+    if (!typed) return textOverlays;
+    return [
+      ...textOverlays,
+      {
+        id: "live-new-overlay",
+        text: liveText.text,
+        x: DEFAULT_TEXT_OVERLAY_POS.x,
+        y: DEFAULT_TEXT_OVERLAY_POS.y,
+        fontSize: 26,
+        rotation: 0,
+        color: "#FFFFFF",
+        backgroundStyle: liveText.backgroundStyle,
+      },
+    ];
+  })();
   const guidesActive = !!dragOverlayInfo || captionSelected;
   const previewUsername = ((user?.user_metadata?.username as string | undefined) ?? "").trim() || "you";
   const handleOpenFullPreview = () => {
@@ -3691,7 +3716,7 @@ export default function EditScreen() {
             )}
 
             {/* Draggable text overlays */}
-            {textOverlays.map((ov) => (
+            {displayOverlays.map((ov) => (
               <DraggableTextOverlay
                 key={ov.id}
                 overlay={ov}
@@ -4127,6 +4152,7 @@ export default function EditScreen() {
         }
         onDone={handleTextEditorDone}
         onCancel={handleTextEditorCancel}
+        onLiveChange={(text, backgroundStyle) => setLiveText({ text, backgroundStyle })}
       />
       <EditPreviewModal
         visible={fullPreviewOpen}

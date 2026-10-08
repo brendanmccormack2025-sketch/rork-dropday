@@ -53,6 +53,7 @@ import {
   textLayout,
   videoDisplayWidth,
 } from "@/lib/feedLayout";
+import { uploadLabel } from "@/lib/postingFeed";
 import { TEXT_FONT_FAMILY } from "@/lib/transcription/captionPresets";
 import { supportsCaptionFont } from "@/modules/video-render";
 
@@ -299,6 +300,29 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
   prev.containerW === next.containerW &&
   prev.containerH === next.containerH);
 
+/** A bar that slides back and forth while the length of the wait is unknown ("Finishing up…"). */
+function IndeterminateBar() {
+  const x = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(x, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(x, { toValue: 0, duration: 900, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [x]);
+  return (
+    <Animated.View
+      style={[
+        styles.optProgressFill,
+        { width: 60, transform: [{ translateX: x.interpolate({ inputRange: [0, 1], outputRange: [0, 120] }) }] },
+      ]}
+    />
+  );
+}
+
 function timeAgo(d: Date): string {
   const s = Math.max(1, Math.floor((Date.now() - d.getTime()) / 1000));
   if (s < 60) return `${s}s`;
@@ -335,6 +359,7 @@ export const FeedItem = memo(function FeedItem({
   const isPausedRef = useRef<boolean>(false);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
   // Measured container dimensions — used for cover-crop-aware overlay positioning
+  const uploadStatus = uploadLabel(post._optimistic?.progress);
   const [containerDims, setContainerDims] = useState<{ w: number; h: number }>(
     { w: SCREEN_W, h: SCREEN_H },
   );
@@ -1474,7 +1499,11 @@ export const FeedItem = memo(function FeedItem({
       }}
     >
       {isPlayableVideo ? (
-        <View style={StyleSheet.absoluteFill}>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: "#000" }]}>
+          {/* Poster: the post's own picture while the video loads, never the app background */}
+          {post.thumbnail_url ? (
+            <Image source={{ uri: post.thumbnail_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          ) : null}
           {/* Slot A — primary player, always mounted for video posts */}
           <Animated.View
             style={[
@@ -1633,18 +1662,20 @@ export const FeedItem = memo(function FeedItem({
           <View style={styles.optInner}>
             <UiText style={styles.optTitle}>Posting your post</UiText>
             <View style={styles.optProgressTrack}>
-              <View
-                style={[
-                  styles.optProgressFill,
-                  {
-                    width: `${Math.min(post._optimistic?.progress ?? 0, 100)}%` as unknown as number,
-                  },
-                ]}
-              />
+              {uploadStatus.indeterminate ? (
+                <IndeterminateBar />
+              ) : (
+                <View
+                  style={[
+                    styles.optProgressFill,
+                    {
+                      width: `${Math.min(post._optimistic?.progress ?? 0, 100)}%` as unknown as number,
+                    },
+                  ]}
+                />
+              )}
             </View>
-            <UiText style={styles.optProgressLabel}>
-              Uploading... {post._optimistic?.progress ?? 0}%
-            </UiText>
+            <UiText style={styles.optProgressLabel}>{uploadStatus.text}</UiText>
           </View>
         </View>
       )}
@@ -1808,7 +1839,7 @@ const styles = StyleSheet.create({
   item: {
     width: SCREEN_W,
     height: SCREEN_H,
-    backgroundColor: "#F5F3EE",
+    backgroundColor: "#000",
   },
   gradTop: { position: "absolute", top: 0, left: 0, right: 0, height: 90 },
   gradBottom: { position: "absolute", left: 0, right: 0, bottom: 0, height: 96 },

@@ -10,6 +10,7 @@
  */
 import type { CaptionStyle, EditInstructions } from "./editModel.ts";
 import { TEXT_FONT_NAME, resolveCaptionLook } from "./transcription/captionPresets.ts";
+import { TEXT_LINE_HEIGHT_EM, TEXT_PAD_X_EM, TEXT_PAD_Y_EM } from "./feedLayout.ts";
 
 export type OverlayFontWeight = "regular" | "medium" | "semibold" | "bold" | "heavy" | "black";
 
@@ -20,6 +21,11 @@ export type OverlayStyleSpec = {
   backgroundColor?: string;
   /** Space between the text and the edge of its background box. */
   backgroundPadding?: number;
+  /** Build 1.0.4 (supportsTextBox): padding across and down separately; older builds use backgroundPadding. */
+  backgroundPaddingX?: number;
+  backgroundPaddingY?: number;
+  /** Build 1.0.4 (supportsTextBox): one fixed line height, as a multiple of the font size. */
+  lineHeight?: number;
   cornerRadius?: number;
   yCenter: number;
   /** Horizontal centre as a fraction of the frame width (default 0.5). Read by the renderer only once it supports it. */
@@ -159,24 +165,44 @@ export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle): 
  * renderer's discrete (hard cut) path leaves captions visible after their end, so a
  * caption fades for 1 ms, which takes the minimum-fade path.
  */
-function renderSpec(kind: "text" | "caption", styleId?: string, captionStyle?: CaptionStyle, supportsFont = false): OverlayStyleSpec {
+function renderSpec(kind: "text" | "caption", styleId?: string, captionStyle?: CaptionStyle, options: RenderOptions = {}): OverlayStyleSpec {
   const resolved = resolveOverlayStyle(kind, styleId);
   // Text overlays are Montserrat Bold where the build can draw a bundled font; elsewhere the system font, as before.
-  if (kind !== "caption") return supportsFont && !resolved.fontName ? { ...resolved, fontName: TEXT_FONT_NAME } : resolved;
+  if (kind !== "caption") {
+    const spec = options.supportsFont && !resolved.fontName ? { ...resolved, fontName: TEXT_FONT_NAME } : resolved;
+    return withTextBox(spec, !!options.supportsTextBox);
+  }
   const spec = captionStyle ? applyCaptionStyle(resolved, captionStyle) : resolved;
-  return { ...spec, fadeInMs: Math.max(1, spec.fadeInMs ?? 0), fadeOutMs: Math.max(1, spec.fadeOutMs ?? 0) };
+  return withTextBox({ ...spec, fadeInMs: Math.max(1, spec.fadeInMs ?? 0), fadeOutMs: Math.max(1, spec.fadeOutMs ?? 0) }, !!options.supportsTextBox);
+}
+
+export type RenderOptions = { supportsFont?: boolean; supportsTextBox?: boolean };
+
+/**
+ * The box proportions both the preview and the render use where the build supports them: 0.5 em across and
+ * 0.25 em down around the text, and one fixed line height. A spec with no background keeps no padding.
+ * Without the capability (build 39) the spec is returned untouched.
+ */
+export function withTextBox(spec: OverlayStyleSpec, supportsTextBox: boolean): OverlayStyleSpec {
+  if (!supportsTextBox) return spec;
+  const out: OverlayStyleSpec = { ...spec, lineHeight: TEXT_LINE_HEIGHT_EM };
+  if (spec.backgroundColor) {
+    out.backgroundPaddingX = spec.fontSize * TEXT_PAD_X_EM;
+    out.backgroundPaddingY = spec.fontSize * TEXT_PAD_Y_EM;
+  }
+  return out;
 }
 
 /**
  * EditInstructions -> the JSON the native renderer takes: text and caption
  * overlays get their preset resolved into `styleSpec`.
  */
-export function toRenderJson(instructions: EditInstructions, options: { supportsFont?: boolean } = {}): string {
+export function toRenderJson(instructions: EditInstructions, options: RenderOptions = {}): string {
   return JSON.stringify({
     ...instructions,
     overlays: instructions.overlays.map((o) =>
       o.kind === "text" || o.kind === "caption"
-        ? { ...o, styleSpec: renderSpec(o.kind, o.style, o.kind === "caption" ? o.captionStyle : undefined, options.supportsFont) }
+        ? { ...o, styleSpec: renderSpec(o.kind, o.style, o.kind === "caption" ? o.captionStyle : undefined, options) }
         : o,
     ),
   });
