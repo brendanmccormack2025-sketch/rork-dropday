@@ -33,6 +33,8 @@ const EDGE_PAD = 20;
 const TRIM_HANDLE_W = 32;
 const MIN_TRIM_MS = 200;
 const LONG_PRESS_MS = 400;
+/** A marker's touch target (points), at least the 44 pt minimum. */
+export const MARKER_TOUCH = 44;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface ClipLayout {
@@ -1030,24 +1032,6 @@ export default function TimelineEditor({
               />
             ))}
 
-            {/* AI edit markers: a small tappable glyph at the seam (top) or the restored spot (bottom) */}
-            {markers?.map((m) => {
-              const look = MARKER_LOOK[m.kind];
-              return (
-                <Pressable
-                  key={m.id}
-                  onPress={() => onMarkerPress?.(m)}
-                  hitSlop={6}
-                  style={[
-                    styles.markerHit,
-                    { left: EDGE_PAD + msToPx(m.outputMs) - 14, top: look.bottom ? TIMELINE_H - 22 : 0 },
-                  ]}
-                >
-                  <View style={[styles.markerGlyph, look.glyph]} />
-                </Pressable>
-              );
-            })}
-
             {/* Faint playhead guide line inside content */}
             <View
               pointerEvents="none"
@@ -1136,6 +1120,26 @@ export default function TimelineEditor({
           ]}
         />
       </View>
+
+      {/* ── AI edit markers (outside the scrolling content, above the scrubber and the clips) ──
+          A cut diamond sits at the seam, near the playhead; inside the scroll view it lost the tap to the
+          playhead's drag zone and to the clip underneath. Each is a 44 x 44 target. */}
+      {markers?.map((m) => {
+        const look = MARKER_LOOK[m.kind];
+        const x = EDGE_PAD + msToPx(m.outputMs) - scrollX;
+        if (x < -MARKER_TOUCH || x > containerW.current + MARKER_TOUCH) return null;
+        return (
+          <Pressable
+            key={m.id}
+            onPress={() => onMarkerPress?.(m)}
+            accessibilityRole="button"
+            accessibilityLabel={m.kind === "cut" ? "Cut here. Show what was cut" : "Marker"}
+            style={[styles.markerHit, { left: x - MARKER_TOUCH / 2, top: look.bottom ? TIMELINE_H - MARKER_TOUCH + 8 : -4 }]}
+          >
+            <View style={[styles.markerGlyph, look.glyph]} />
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -1144,13 +1148,13 @@ export default function TimelineEditor({
 const styles = StyleSheet.create({
   markerHit: {
     position: "absolute",
-    width: 28,
-    height: 22,
+    width: MARKER_TOUCH,
+    height: MARKER_TOUCH,
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 6,
+    zIndex: 60,
   },
-  markerGlyph: { width: 10, height: 10 },
+  markerGlyph: { width: 12, height: 12 },
   protectBand: { position: "absolute", top: 0, height: TIMELINE_H, backgroundColor: "rgba(242,140,40,0.28)", zIndex: 4 },
   container: {
     height: TIMELINE_H + 12,

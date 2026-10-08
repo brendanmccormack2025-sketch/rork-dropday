@@ -49,3 +49,11 @@ export function stepLayout(step: EditorStep) {
     guides: step === "edit",
   };
 }
+
+/**
+ * Tapping the video plays or pauses it, on the Cuts screen and in the full-screen editor alike. In the editor a
+ * selected overlay or caption is dropped by that tap first.
+ */
+export function videoTapAction(args: { step: EditorStep; hasSelection: boolean }): "toggle" | "drop-selection" {
+  return args.step === "edit" && args.hasSelection ? "drop-selection" : "toggle";
+}

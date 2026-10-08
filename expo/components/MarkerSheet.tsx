@@ -4,6 +4,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { formatFeatures } from "@/lib/autoEdit/classifySound";
+import { markerAction } from "@/lib/autoEdit/deletePart";
 import type { TimelineMarker } from "@/lib/autoEdit/markers";
 
 type Props = {
@@ -19,7 +20,7 @@ type Props = {
 export default function MarkerSheet({ marker, onRestore, onReapply, onCutSound, onClose }: Props) {
   const title =
     marker?.kind === "cut"
-      ? "Removed here"
+      ? "Cut here"
       : marker?.kind === "restored"
         ? "Restored here"
         : marker?.kind === "proposal"
@@ -70,8 +71,13 @@ export default function MarkerSheet({ marker, onRestore, onReapply, onCutSound, 
               <UiText style={styles.secondary}>Close</UiText>
             </Pressable>
             {marker?.kind === "cut" && (
-              <Pressable onPress={() => onRestore(marker)} hitSlop={8}>
-                <UiText style={styles.primary}>Restore</UiText>
+              <Pressable
+                onPress={() => onRestore(marker)}
+                style={styles.undoBtn}
+                accessibilityRole="button"
+                accessibilityLabel={markerAction(marker)?.label ?? "Undo this cut"}
+              >
+                <UiText style={styles.undoBtnText}>{markerAction(marker)?.label ?? "Undo this cut"}</UiText>
               </Pressable>
             )}
             {onCutSound && (marker?.kind === "um" || marker?.kind === "filler2" || marker?.kind === "laugh") && (
@@ -100,5 +106,7 @@ const styles = StyleSheet.create({
   detail: { color: theme.textMuted, fontSize: 13, paddingVertical: 2 },
   actions: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 16 },
   secondary: { color: theme.textMuted, fontSize: 15, fontWeight: "700" as const },
+  undoBtn: { minHeight: 48, paddingHorizontal: 20, alignItems: "center", justifyContent: "center", backgroundColor: theme.accent },
+  undoBtnText: { color: "#fff", fontSize: 15, fontWeight: "900" as const },
   primary: { color: theme.accent, fontSize: 15, fontWeight: "900" as const },
 });

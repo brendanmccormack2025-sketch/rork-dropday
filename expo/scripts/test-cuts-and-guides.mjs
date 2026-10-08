@@ -13,6 +13,7 @@ import { cutCategoriesOff, cutsRows } from "../lib/autoEdit/editPanel.ts";
 import { emptyHistory, pushEdit, redoEdit, undoEdit } from "../lib/autoEdit/history.ts";
 import { CENTER_SNAP_PT, GUIDE_FADE_MS, GUIDE_TINT, guideTarget, guidesVisible, shouldBuzz, snapToCenter } from "../lib/guides.ts";
 import { cancelTextEdit } from "../lib/textOverlayStyle.ts";
+import { videoTapAction } from "../lib/editorFlow.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -95,7 +96,7 @@ const model = (st) => ({ state: st, durationMs: DURATION });
   ok("and only that cut", renderClipsOf(restored, DURATION).length === renderClipsOf(st, DURATION).length - 1);
   let h = pushEdit(emptyHistory(), st);
   eq("it is one undo step", undoEdit(h, restored).state, st);
-  ok("a cut marker opens the one-tap button, not the sheet", /if \(markerAction\(marker\)\) \{\s*setCutMarker\(marker\)/.test(edit) && /accessibilityLabel="Undo this cut"/.test(edit));
+  ok("a selected part still shows Delete this part and a marker opens its sheet", /setMarkerSheet\(marker\);/.test(edit));
   ok("a selected part shows Delete this part", /selectedClipId && clips\.length > 0 && \(/.test(edit) && /accessibilityLabel="Delete this part"/.test(edit));
 }
 
@@ -175,6 +176,52 @@ const model = (st) => ({ state: st, durationMs: DURATION });
   ok("so does a caption", /onGestureState\?\.\(true, next\.snappedX\)/.test(cap) && /onGestureState\?\.\(false, false\)/.test(cap));
   ok("both snap to the centre with a light haptic", /shouldBuzz\(wasCentered, snapped\.centered\)\) buzz\(\)/.test(drag) && /shouldBuzz\(g\.current\.wasCentered, next\.snappedX\)\) buzz\(\)/.test(cap) && /expo-haptics/.test(drag + cap));
   ok("the old separate center lines are gone", !/snapGuide/.test(drag) && !/styles\.guide\b/.test(cap));
+}
+
+// ── tap a red diamond: the sheet, and Undo this cut restores only that range ──
+{
+  const st = base();
+  const markers = buildCutMarkers(st, DURATION).filter((m) => m.kind === "cut");
+  eq("three cuts make three red diamonds", markers.length, 3);
+  const labels = markers.map((m) => m.items.map((i) => i.label));
+  eq("each lists what was cut there (Silence 1.0s, Filler 'text', Um)", labels.map((l) => l[0].split(" ")[0]), ["Silence", "Filler", "Um"]);
+  const middle = markers[1];
+  const restored = undoThisCut(st, middle);
+  const applied = (state) => state.decisions.filter((d) => d.state === "applied").map((d) => d.type);
+  eq("Undo this cut restores just that range: the other two stay cut", applied(restored), ["silenceCut", "umCut"]);
+  eq("the footage of that cut is back, the others are still gone", [
+    keepRangesOf(restored, DURATION).some((r) => r.startMs <= 9000 && r.endMs >= 9600),
+    keepRangesOf(restored, DURATION).some((r) => r.startMs < 5000 && r.endMs > 4000),
+    keepRangesOf(restored, DURATION).some((r) => r.startMs < 13400 && r.endMs > 13000),
+  ], [true, false, false]);
+  const h = pushEdit(emptyHistory(), st);
+  const u = undoEdit(h, restored);
+  eq("undo cuts it again, redo restores it again", [applied(u.state).length, applied(redoEdit(u.history, u.state).state).length], [3, 2]);
+
+  const sheet = read("../components/MarkerSheet.tsx");
+  ok("the sheet lists the marker's items and has a big Undo this cut button for a cut", /marker\?\.items\.map/.test(sheet) && /marker\?\.kind === "cut"[\s\S]{0,200}styles\.undoBtn/.test(sheet) && /minHeight: 48/.test(sheet) && /Cut here/.test(sheet));
+  ok("the button calls onRestore, which is Undo this cut (restoreRange) as one undo step", /onRestore=\{\(m\) => \{\s*userEdit\(\(s\) => undoThisCut\(s, m\)\)/.test(edit));
+  ok("tapping any diamond opens the sheet", /const handleMarkerPress[\s\S]{0,500}setMarkerSheet\(marker\)/.test(edit) && /onMarkerPress=\{handleMarkerPress\}/.test(edit));
+  const tl = read("../components/TimelineEditor.tsx");
+  ok("the diamond's touch target is 44 x 44", /export const MARKER_TOUCH = 44/.test(tl) && /width: MARKER_TOUCH,\s*height: MARKER_TOUCH/.test(tl));
+  const scrollEnd = tl.indexOf("</ScrollView>");
+  const markersAt = tl.indexOf("AI edit markers (outside the scrolling content");
+  const playheadAt = tl.indexOf("Playhead dot overlay (outside ScrollView)");
+  ok("the markers are outside the scrolling content, after the playhead overlay (on top of it)", markersAt > scrollEnd && markersAt > playheadAt);
+  const z = (name) => Number(new RegExp(name + ": \\{[^}]*zIndex: (\\d+)").exec(tl)?.[1]);
+  ok("and above the scrubber's drag zone (zIndex 25) and the clip bars", z("markerHit") > z("playheadOverlay") && z("markerHit") > 25);
+  ok("the clip tap still selects the clip", /onSelectClip\(layout\.clip\.id\)/.test(tl) && /const handleSelectClip[\s\S]{0,400}setSelectedClipId\(nextId\)/.test(edit));
+  ok("and the empty-timeline tap still seeks (the content touch handler is unchanged)", /onTouchEnd=\{handleContentTouchEnd\}/.test(tl));
+}
+
+// ── tap the video: play / pause on the Cuts screen too ──
+{
+  eq("Cuts screen: a tap toggles", videoTapAction({ step: "cuts", hasSelection: false }), "toggle");
+  eq("editor: a tap toggles when nothing is selected", videoTapAction({ step: "edit", hasSelection: false }), "toggle");
+  eq("editor: a tap drops a selection first", videoTapAction({ step: "edit", hasSelection: true }), "drop-selection");
+  ok("one tap layer serves both screens (any video), with the play icon feedback", /\{isVideo && \(\s*<Pressable\s+style=\{StyleSheet\.absoluteFill\}\s+accessibilityLabel=\{isPlaying \? "Pause" : "Play"\}/.test(edit) && /!isPlaying && !pendingPlay && !\(step === "edit" && hasSelection\)/.test(edit));
+  ok("no second, Cuts-only play button any more", !/step === "cuts" && !isPlaying && !pendingPlay/.test(edit));
+  ok("it sits below the overlays, which take no touches on the Cuts screen", edit.indexOf('accessibilityLabel={isPlaying ? "Pause" : "Play"}') < edit.indexOf("flow.touchOverlays"));
 }
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");

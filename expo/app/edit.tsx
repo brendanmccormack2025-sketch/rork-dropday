@@ -58,7 +58,7 @@ import FeedSafeZones from "@/components/FeedSafeZones";
 import { defaultCaptionStyle } from "@/lib/transcription/captionStyle";
 import { guidesVisible } from "@/lib/guides";
 import { cancelTextEdit } from "@/lib/textOverlayStyle";
-import { backStep, initialStep, nextStep, selectionBarSide, stepLayout, type EditorStep } from "@/lib/editorFlow";
+import { backStep, initialStep, nextStep, selectionBarSide, stepLayout, videoTapAction, type EditorStep } from "@/lib/editorFlow";
 import { DEFAULT_TEXT_OVERLAY_POS, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
@@ -2742,30 +2742,17 @@ export default function EditScreen() {
     userEdit(allCategoriesOff);
   }, [userEdit]);
 
-  // A red cut marker offers one obvious button, "Undo this cut"; the other markers keep their detail sheet.
-  const [cutMarker, setCutMarker] = useState<TimelineMarker | null>(null);
+  // Tapping a marker opens its sheet; a red cut marker lists what was cut there, with "Undo this cut".
   const handleMarkerPress = useCallback(
     (marker: TimelineMarker) => {
       if (marker.kind === "proposal" || marker.kind === "filler2" || marker.kind === "laugh" || marker.kind === "um") {
         handleSeekAny(Math.max(0, marker.outputMs - 1000));
       }
-      if (markerAction(marker)) {
-        setCutMarker(marker);
-        setSelectedClipId(null);
-        return;
-      }
+      setSelectedClipId(null);
       setMarkerSheet(marker);
     },
     [handleSeekAny],
   );
-  // "Undo this cut": the footage comes back (restoreRange), one undo step.
-  const handleUndoThisCut = useCallback(() => {
-    const marker = cutMarker;
-    setCutMarker(null);
-    if (!marker) return;
-    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    userEdit((st) => undoThisCut(st, marker));
-  }, [cutMarker, userEdit]);
 
   // "Delete this part": a cut decision of the creator for that range (or, with manual edits, removing the part).
   const handleDeletePart = useCallback(() => {
@@ -2782,7 +2769,6 @@ export default function EditScreen() {
       return;
     }
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    setCutMarker(null);
     if (plan.kind === "user-cut") {
       handleDeselectAndPreview();
       userEdit((st) => addManualCut(st, plan.range.startMs, plan.range.endMs));
@@ -3851,13 +3837,14 @@ export default function EditScreen() {
                 </Pressable>
               </View>
             )}
-            {/* Tap empty video: play or pause (a selection is dropped first). Below the overlays, so a tap on one never reaches it. */}
-            {isVideo && step === "edit" && (
+            {/* Tap the video: play or pause, the same on the Cuts screen and in the editor (in the editor a selection is
+                dropped first). Below the overlays, so a tap on one never reaches it. */}
+            {isVideo && (
               <Pressable
                 style={StyleSheet.absoluteFill}
                 accessibilityLabel={isPlaying ? "Pause" : "Play"}
                 onPress={() => {
-                  if (selectedOverlayId || captionSelected) {
+                  if (videoTapAction({ step, hasSelection }) === "drop-selection") {
                     setSelectedOverlayId(null);
                     setCaptionSelected(false);
                   } else {
@@ -3866,19 +3853,12 @@ export default function EditScreen() {
                 }}
               />
             )}
-            {isVideo && step === "edit" && !isPlaying && !pendingPlay && !hasSelection && (
+            {isVideo && !isPlaying && !pendingPlay && !(step === "edit" && hasSelection) && (
               <View pointerEvents="none" style={styles.playOverlay}>
                 <View style={styles.playCircle}>
                   <Play size={26} color="#fff" fill="#fff" style={{ left: 2 }} />
                 </View>
               </View>
-            )}
-            {isVideo && step === "cuts" && !isPlaying && !pendingPlay && !captionSelected && (
-              <Pressable onPress={togglePlay} style={styles.playOverlay}>
-                <View style={styles.playCircle}>
-                  <Play size={26} color="#fff" fill="#fff" style={{ left: 2 }} />
-                </View>
-              </Pressable>
             )}
 
             <View pointerEvents={flow.touchOverlays ? "box-none" : "none"} style={StyleSheet.absoluteFill}>
@@ -3996,17 +3976,6 @@ export default function EditScreen() {
             <Pressable onPress={handleDeletePart} style={styles.deletePartBtn} accessibilityRole="button" accessibilityLabel="Delete this part">
               <Trash2 size={18} color="#fff" strokeWidth={2.2} />
               <UiText style={styles.cutActionText}>Delete this part</UiText>
-            </Pressable>
-          </View>
-        )}
-        {cutMarker && !selectedClipId && (
-          <View style={styles.cutActionRow}>
-            <Pressable onPress={handleUndoThisCut} style={styles.undoCutBtn} accessibilityRole="button" accessibilityLabel="Undo this cut">
-              <Undo2 size={18} color="#fff" strokeWidth={2.2} />
-              <UiText style={styles.cutActionText}>Undo this cut</UiText>
-            </Pressable>
-            <Pressable onPress={() => setCutMarker(null)} hitSlop={10} style={styles.cutActionClose} accessibilityRole="button" accessibilityLabel="Close">
-              <UiText style={styles.cutActionCloseText}>✕</UiText>
             </Pressable>
           </View>
         )}
@@ -4377,7 +4346,7 @@ export default function EditScreen() {
       <MarkerSheet
         marker={markerSheet}
         onRestore={(m) => {
-          userEdit((s) => restoreMarker(s, m));
+          userEdit((s) => undoThisCut(s, m));
           setMarkerSheet(null);
         }}
         onReapply={(m) => {
