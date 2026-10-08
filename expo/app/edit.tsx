@@ -79,7 +79,7 @@ import { recordClientError } from "@/lib/clientErrors";
 import { POST_FAILED_TEXT, renderWithCaptionFallback, safePost, type RenderStepResult } from "@/lib/safePost";
 import type { EditOverlay } from "@/lib/editModel";
 import { stageExportFallback, startPostExport } from "@/lib/exportEdit";
-import { autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
+import { AUTO_EDIT_WINDOW_MS, autoEdit, mergeKeepRanges, planSilenceTrim } from "@/lib/ai/autoEdit";
 import { analysis } from "@/lib/autoEdit/analysis";
 import {
   mergePlan,
@@ -102,6 +102,7 @@ import MarkerSheet from "@/components/MarkerSheet";
 import { MANUAL_EDIT_CONFIRM_MESSAGE, guardManualEdits, timelineMatchesState } from "@/lib/autoEdit/confirm";
 import { addManualCut } from "@/lib/autoEdit/decisions";
 import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/lib/autoEdit/deletePart";
+import { analysisSource, loadLoudnessChecked } from "@/lib/mergeTiming";
 import { aiBoundariesOf, describeEdgeDrag, reshapeCutAtEdge } from "@/lib/autoEdit/reshape";
 import { buildSeamHandles, remapOverlayTimes, type SeamEdgeInfo } from "@/lib/autoEdit/seams";
 import { allCategoriesOff, cutCategoriesOff, cutsRows, cutsSummary, setCutsRowEnabled, type CutsRow } from "@/lib/autoEdit/editPanel";
@@ -330,6 +331,8 @@ export default function EditScreen() {
     () => (shouldMerge(initialClips, { isDraft: !!draftId }) ? { kind: "merging", progress: 0 } : { kind: "idle" }),
   );
   const originalClipsRef = useRef<DraftClip[]>(initialClips);
+  // The merged file once the merge has finished (what the analysis may run on).
+  const mergedRef = useRef<{ uri: string; durationMs: number } | null>(null);
   const mergeStartedRef = useRef(false);
   // The editor's three steps: Cuts -> full-screen editor -> Post. One component, so nothing is lost moving between them.
   const [step, setStep] = useState<EditorStep>(() =>
@@ -2307,6 +2310,9 @@ export default function EditScreen() {
     });
     if (!mountedRef.current) return;
     if (result.ok) {
+      mergedRef.current = { uri: result.clip.uri, durationMs: result.clip.durationMs };
+      const timing = result.timing as { issues?: string[] } | undefined;
+      if (timing?.issues?.length) void recordClientError(new Error(`merge timing: ${timing.issues.join("; ")}`), { kind: "mergeTiming", ...(timing as object) });
       replaceClips([result.clip]);
       setMergeUi({ kind: "idle" });
     } else {
@@ -2457,6 +2463,8 @@ export default function EditScreen() {
     if (!clip || clip.type !== "video" || !(clip.durationMs && clip.durationMs > 0)) return;
     const trimEnd = clip.trimEndMs ?? 0;
     if ((clip.trimStartMs ?? 0) > 0 || (trimEnd > 0 && trimEnd < clip.durationMs - 50)) return;
+    // After a merge the analysis runs on the merged file only, and only once it is finished and replaced the parts.
+    if (analysisSource({ merge: mergeUi.kind, merged: mergedRef.current, clips }) !== clip.uri) return;
 
     autoEditStartedRef.current = true;
     (async () => {
@@ -2466,7 +2474,17 @@ export default function EditScreen() {
       const result = await autoEdit(
         { uri: clip.uri, durationMs: clip.durationMs! },
         SENSITIVITY_PRESETS[sensitivity],
-        (uri) => analysis.loudness(uri),
+        // The loudness must cover the video: if it does not (more than 100 ms apart) it is logged and measured again.
+        (uri) =>
+          loadLoudnessChecked({
+            uri,
+            load: (u) => analysis.loudness(u),
+            clear: (u) => analysis.clear(u),
+            videoDurationMs: clip.durationMs!,
+            windowMs: AUTO_EDIT_WINDOW_MS,
+            report: (info) =>
+              void recordClientError(new Error("loudness length differs from video duration"), { kind: "loudnessMismatch", merged: !!mergedRef.current, ...info }),
+          }),
       );
       console.log("[edit] autoEdit result:", result.changed ? "changed" : result.reason);
       if (
@@ -2519,7 +2537,7 @@ export default function EditScreen() {
         }
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clips, user?.id, reactingTo, rootDropId, draftId]);
+  }, [clips, user?.id, reactingTo, rootDropId, draftId, mergeUi.kind]);
 
   // ── AI edits panel, timeline markers, undo/redo (lib/autoEdit/) ───────────────
   const isOwnerAccount = features.debugView;

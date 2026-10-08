@@ -19,7 +19,7 @@ export type MergedClip = {
 };
 
 export type MergeResult =
-  | { ok: true; clip: MergedClip; mergedFrom: string[] }
+  | { ok: true; clip: MergedClip; mergedFrom: string[]; timing?: unknown }
   | { ok: false; message: string };
 
 export const MERGE_FAILED_TEXT = "Couldn't prepare your video.";
@@ -37,7 +37,7 @@ export function shouldMerge(clips: ReadonlyArray<Pick<MergeInput, "type">>, opts
 export async function mergeVideoClips(args: {
   clips: ReadonlyArray<MergeInput>;
   /** Renders the uris in order into one file; progress is 0..1. */
-  render: (uris: string[], onProgress: (p: number) => void) => Promise<{ uri: string; durationMs: number }>;
+  render: (uris: string[], onProgress: (p: number) => void) => Promise<{ uri: string; durationMs: number; timing?: unknown }>;
   onProgress?: (p: number) => void;
   newId: () => string;
 }): Promise<MergeResult> {
@@ -55,6 +55,7 @@ export async function mergeVideoClips(args: {
     return {
       ok: true,
       mergedFrom: uris,
+      ...(out.timing ? { timing: out.timing } : {}),
       clip: { id: args.newId(), uri: out.uri, type: "video", durationMs: out.durationMs, trimStartMs: 0, trimEndMs: out.durationMs },
     };
   } catch (e) {

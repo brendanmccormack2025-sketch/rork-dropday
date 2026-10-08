@@ -85,7 +85,7 @@ public class VideoRenderModule: Module {
     // "backgroundPaddingX/Y", "lineHeight").
     // supportsLineBackgrounds: a caption with several lines gets a background per line (style "lineBackground").
     Constants {
-      ["supportsCaptionFont": true, "supportsTextBox": true, "supportsLineBackgrounds": true]
+      ["supportsCaptionFont": true, "supportsTextBox": true, "supportsLineBackgrounds": true, "supportsTimingProbe": true]
     }
 
     Events("onProgress")
@@ -93,6 +93,14 @@ public class VideoRenderModule: Module {
     Function("cancelRender") {
       RenderState.shared.cancel()
     }
+
+    // Build 1.0.4 (supportsTimingProbe): where a file's video and audio tracks start and how long they are, in
+    // movie time (the clock the player and the loudness analysis share). Resolves
+    // { durationMs, videoStartMs, videoDurationMs, audioStartMs, audioDurationMs }; a missing track is -1.
+    AsyncFunction("probeTimingAsync") { (uri: String) -> [String: Any] in
+      return try probeTiming(uri: uri)
+    }
+    .runOnQueue(DispatchQueue.global(qos: .userInitiated))
 
     // Resolves { uri, durationMs, sizeBytes }; rejects with an ERR_RENDER_* code.
     AsyncFunction("renderAsync") { (json: String, options: [String: Any]?, promise: Promise) in
@@ -115,6 +123,43 @@ public class VideoRenderModule: Module {
       }
     }
   }
+}
+
+// MARK: - Timing
+
+/// Insert the part of `range` (the clip's clock) that `source` really has, at the matching place after `cursor`.
+private func insertAligned(
+  _ dest: AVMutableCompositionTrack,
+  from source: AVAssetTrack,
+  range: CMTimeRange,
+  at cursor: CMTime
+) throws {
+  let usable = range.intersection(source.timeRange)
+  if usable.isEmpty || usable.duration <= .zero { return }
+  let lead = CMTimeSubtract(usable.start, range.start)
+  try dest.insertTimeRange(usable, of: source, at: CMTimeAdd(cursor, lead))
+}
+
+private func probeTiming(uri: String) throws -> [String: Any] {
+  let trimmed = uri.trimmingCharacters(in: .whitespacesAndNewlines)
+  let url = trimmed.hasPrefix("/") ? URL(fileURLWithPath: trimmed) : URL(string: trimmed)
+  guard let url = url, url.isFileURL, FileManager.default.fileExists(atPath: url.path) else {
+    throw fail("ERR_PROBE_FILE_NOT_FOUND", "File not found: \(trimmed)")
+  }
+  let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+  func ms(_ t: CMTime) -> Int {
+    let v = CMTimeGetSeconds(t)
+    return v.isFinite ? Int((v * 1000).rounded()) : -1
+  }
+  let video = asset.tracks(withMediaType: .video).first
+  let audio = asset.tracks(withMediaType: .audio).first
+  return [
+    "durationMs": ms(asset.duration),
+    "videoStartMs": video.map { ms($0.timeRange.start) } ?? -1,
+    "videoDurationMs": video.map { ms($0.timeRange.duration) } ?? -1,
+    "audioStartMs": audio.map { ms($0.timeRange.start) } ?? -1,
+    "audioDurationMs": audio.map { ms($0.timeRange.duration) } ?? -1,
+  ]
 }
 
 // MARK: - Input
@@ -144,6 +189,8 @@ private struct RenderSettings {
   var fill = true
   var bitrate: Double = 8_000_000
   var punchIn = false
+  // A 20 ms dip in the audio at every join. A plain concatenation (merge) turns it off.
+  var seamFades = true
 }
 
 private func number(_ v: Any?) -> Double? {
@@ -173,6 +220,7 @@ private func parseSettings(_ options: [String: Any]) -> RenderSettings {
   if let r = options["reframe"] as? String { s.fill = r != "fit" }
   if let b = number(options["bitrate"]), b >= 100_000 { s.bitrate = b }
   if let p = options["punchIn"] as? Bool { s.punchIn = p }
+  if let f = options["seamFades"] as? Bool { s.seamFades = f }
   return s
 }
 
@@ -632,7 +680,9 @@ private func render(
     let range = CMTimeRange(start: start, end: end)
 
     do {
-      try videoTrack.insertTimeRange(range, of: sourceVideo, at: cursor)
+      // Each track goes in at its own place on the clip's clock: a track that starts late (audio often does) or
+      // ends early keeps that offset instead of sliding to the start of the range, so audio and video stay in step.
+      try insertAligned(videoTrack, from: sourceVideo, range: range, at: cursor)
       if let sourceAudio = asset.tracks(withMediaType: .audio).first {
         if audioTrack == nil {
           audioTrack = composition.addMutableTrack(
@@ -640,7 +690,9 @@ private func render(
             preferredTrackID: kCMPersistentTrackID_Invalid
           )
         }
-        try audioTrack?.insertTimeRange(range, of: sourceAudio, at: cursor)
+        if let audioTrack = audioTrack {
+          try insertAligned(audioTrack, from: sourceAudio, range: range, at: cursor)
+        }
       }
     } catch {
       throw fail("ERR_RENDER_COMPOSITION_FAILED", error.localizedDescription)
@@ -720,7 +772,7 @@ private func render(
   if let audioTrack = audioTrack {
     let params = AVMutableAudioMixInputParameters(track: audioTrack)
     let half = CMTime(seconds: seamFadeSeconds, preferredTimescale: 44100)
-    for seg in segments.dropFirst() where CMTimeGetSeconds(seg.duration) > 4 * seamFadeSeconds {
+    for seg in segments.dropFirst() where settings.seamFades && CMTimeGetSeconds(seg.duration) > 4 * seamFadeSeconds {
       let seam = seg.compStart
       params.setVolumeRamp(
         fromStartVolume: 1, toEndVolume: 0,

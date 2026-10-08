@@ -14,6 +14,17 @@ export type RenderOptions = {
   bitrate?: number;
   /** Scale 108% on every second segment to hide jump cuts. Default false. */
   punchIn?: boolean;
+  /** A 20 ms audio dip at every join. Default true; a plain merge sets false (build 1.0.4; older builds ignore it). */
+  seamFades?: boolean;
+};
+
+/** Track timing of a file in movie time; -1 = no such track. */
+export type TimingProbe = {
+  durationMs: number;
+  videoStartMs: number;
+  videoDurationMs: number;
+  audioStartMs: number;
+  audioDurationMs: number;
 };
 
 export type RenderResult = {
