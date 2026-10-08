@@ -134,12 +134,12 @@ export function newEditState(sourceUri: string, decisions: Decision[] = []): Edi
   return { sourceUri, decisions: sortDecisions(dedupe(decisions)), categoryEnabled };
 }
 
-function dedupe(list: Decision[]): Decision[] {
+export function dedupe(list: Decision[]): Decision[] {
   const seen = new Set<string>();
   return list.filter((d) => (seen.has(d.id) ? false : (seen.add(d.id), true)));
 }
 
-function sortDecisions(list: Decision[]): Decision[] {
+export function sortDecisions(list: Decision[]): Decision[] {
   return [...list].sort((a, b) => a.sourceStartMs - b.sourceStartMs || a.sourceEndMs - b.sourceEndMs);
 }
 
@@ -148,7 +148,7 @@ export function isManualDelete(d: Decision): boolean {
   return d.origin === "user" && (d.payload as { manual?: boolean } | undefined)?.manual === true;
 }
 
-function isActiveCut(state: EditState, d: Decision): boolean {
+export function isActiveCut(state: EditState, d: Decision): boolean {
   // A category missing from an older saved state counts as on. A part the creator deleted by hand stays deleted
   // whatever the automatic categories do ("Keep original" turns off the AI's cuts, not the creator's).
   return isCutType(d.type) && d.state === "applied" && (isManualDelete(d) || state.categoryEnabled[d.type] !== false);
