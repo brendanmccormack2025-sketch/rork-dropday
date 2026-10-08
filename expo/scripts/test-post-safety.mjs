@@ -11,7 +11,7 @@ import { POST_FAILED_TEXT, renderWithCaptionFallback, safePost } from "../lib/sa
 import {
   ERROR_STORAGE_KEY, FATAL_WRITE_WAIT_MS, createErrorRecorder, isReleasedNativeObjectError, wrapGlobalHandler,
 } from "../lib/errorRecorder.ts";
-import { MAIN_TOOL_IDS, MIN_TOOL_TARGET_PT, toolWidth } from "../lib/editorToolbar.ts";
+import { CUTS_TOOL_IDS, EDITOR_TOOL_IDS, MIN_TOOL_TARGET_PT, toolWidth } from "../lib/editorToolbar.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -141,14 +141,14 @@ const CTX = { screen: "/edit", appVersion: "1.0.3", buildNumber: "39", updateId:
 // ── the toolbar ──
 {
   const src = readFileSync(new URL("../app/edit.tsx", import.meta.url), "utf8");
-  const a = src.indexOf("{/* ── Toolbar ───");
-  const b = src.indexOf("{/* ── Text overlay editing toolbar");
+  const a = src.indexOf("{/* ── Cuts screen: the timeline and the Cuts panel");
+  const b = src.indexOf("{/* ── Post screen");
   const toolbar = src.slice(a, b);
   eq("the toolbar section exists", [a > 0, b > a], [true, true]);
   eq("it has no Delete tool: no Delete label, no delete handler, no trash icon", [/>\s*Delete\s*</.test(toolbar.replace(/Delete line/g, "")), toolbar.includes("handleDeleteClip"), toolbar.includes("Trash2")], [false, false, false]);
   eq("nothing else in the editor still refers to the removed clip-delete handler", src.includes("handleDeleteClip"), false);
-  eq("the main tools: Trim, Split, Text, Captions, Cuts", MAIN_TOOL_IDS, ["trim", "split", "text", "captions", "cuts"]);
-  eq("each of the five fits the narrowest iPhone widths above the 44 pt target (375 and 320 pt)", [toolWidth(375, MAIN_TOOL_IDS.length, 8), toolWidth(320, MAIN_TOOL_IDS.length, 8)].map((w) => Math.round(w) >= MIN_TOOL_TARGET_PT), [true, true]);
+  eq("the tools: Trim, Split on the Cuts screen; Text, Captions, Style, Cuts in the full-screen editor", [CUTS_TOOL_IDS, EDITOR_TOOL_IDS], [["trim", "split"], ["text", "captions", "style", "cuts"]]);
+  eq("each tool fits the narrowest iPhone widths above the 44 pt target (375 and 320 pt)", [toolWidth(375, CUTS_TOOL_IDS.length, 8), toolWidth(320, CUTS_TOOL_IDS.length, 8)].map((w) => Math.round(w) >= MIN_TOOL_TARGET_PT), [true, true]);
   eq("the toolbar buttons share the width (flex), so nothing overflows", /toolBtn: \{[^}]*flex: 1/.test(src), true);
 }
 

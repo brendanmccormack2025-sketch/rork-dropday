@@ -6,8 +6,14 @@
  */
 export type ToolbarMode = "main" | "caption";
 
-/** The main toolbar, in order. There is no Delete tool (removed: a clip is removed by trimming or cutting it). */
-export const MAIN_TOOL_IDS = ["trim", "split", "text", "captions", "cuts"] as const;
+/** The Cuts screen's toolbar (the timeline's tools). There is no Delete tool (a clip is removed by trimming or cutting it). */
+export const CUTS_TOOL_IDS = ["trim", "split"] as const;
+
+/** The slim tool column of the full-screen editor, top to bottom ("cuts" returns to the Cuts screen). */
+export const EDITOR_TOOL_IDS = ["text", "captions", "style", "cuts"] as const;
+
+/** Every tool of the editor across its screens. */
+export const MAIN_TOOL_IDS = [...CUTS_TOOL_IDS, ...EDITOR_TOOL_IDS] as const;
 
 export type CaptionToolId = "edit" | "style" | "deleteLine" | "done";
 

@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { resolveOverlayStyle, toRenderJson, withTextBox } from "../lib/editStyles.ts";
 import { TEXT_LINE_HEIGHT_EM, TEXT_PAD_X_EM, TEXT_PAD_Y_EM, textLayout, textOverlayRenderSpec } from "../lib/feedLayout.ts";
-import { EDITOR_BAR_HEIGHT, EDITOR_LAYER_ORDER, editorLayout } from "../lib/textEditorLayout.ts";
+import { EDITOR_LAYER_ORDER, LIGHT_DIM, editorLayout, fieldCenterY } from "../lib/textEditorLayout.ts";
 import { adoptKey, insertFirst, isPosting, playingIndex, rowKey, scrollTarget, swapOptimistic, uploadLabel } from "../lib/postingFeed.ts";
 
 let failed = 0;
@@ -47,21 +47,20 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
   ok("Swift: fixed line heights, box height = measured lines (no +2 only on the new path)", /minimumLineHeight/.test(swift) && /maximumLineHeight/.test(swift) && /baselineOffset/.test(swift));
 }
 
-// ── B: the text editor's layers ──
+// ── B: the text editor (Instagram style) ──
 {
   for (const kb of [0, 291, 336]) {
-    const L = editorLayout(844, kb);
-    ok(`keyboard ${kb}: the bar is not inside the dimmed area`, L.bar.top + L.bar.height <= L.scrim.top || L.scrim.height === 0);
-    ok(`keyboard ${kb}: the video preview region has no dimming`, L.preview.top + L.preview.height <= L.scrim.top && L.preview.height > 0);
-    ok(`keyboard ${kb}: the bar sits right above the keyboard`, L.bar.top + L.bar.height === 844 - kb && L.bar.height === EDITOR_BAR_HEIGHT);
+    const L = editorLayout(844, kb, 47);
+    ok(`keyboard ${kb}: the controls row is below the status bar and above the field area`, L.controls.top === 47 && L.fieldArea.top >= L.controls.top + L.controls.height);
+    ok(`keyboard ${kb}: the field is centred in the space above the keyboard`, Math.abs(fieldCenterY(L) - (L.fieldArea.top + (844 - kb - L.fieldArea.top) / 2)) < 1e-9 && L.fieldArea.top + L.fieldArea.height <= 844 - kb + 1e-9);
+    ok(`keyboard ${kb}: the dim is light and the same for everything`, L.dim.opacity === LIGHT_DIM && LIGHT_DIM <= 0.45);
   }
-  eq("layer order: dismiss area, scrim, then the bar on top", [...EDITOR_LAYER_ORDER], ["dismiss", "scrim", "bar"]);
+  eq("layers back to front: video, dim, controls, field (nothing dims the controls or the field)", [...EDITOR_LAYER_ORDER], ["video", "dim", "controls", "field"]);
   const src = read("../components/TextOverlayEditor.tsx");
-  ok("the bar is rendered after the scrim in the component", src.indexOf("styles.scrim") < src.indexOf("styles.toolbarContainer"));
-  ok("no full-screen dim any more", !/backdropFill/.test(src) && !/rgba\(0,0,0,0\.18\)/.test(src));
+  ok("the dim is rendered before the controls and the field", src.indexOf("styles.dim") < src.indexOf("styles.controls") && src.indexOf("styles.controls") < src.indexOf("styles.fieldArea"));
   ok("the confirm button is solid accent with a white check, no disabled-looking pink", /doneBtn: \{[^}]*backgroundColor: theme\.accent/.test(src) && !/rgba\(232,41,28,0\.18\)/.test(src));
-  ok("the useless “…” button is gone", !/Ellipsis/.test(src) && !/More text options/.test(src));
-  ok("the editor reports live text for the preview", /onLiveChange\?\.\(text, bgStyle\)/.test(src) && /onLiveChange=/.test(read("../app/edit.tsx")));
+  ok("the useless \u201c\u2026\u201d button is gone", !/Ellipsis/.test(src) && !/More text options/.test(src));
+  ok("the editor reports live text for the video behind", /onLiveChange\?\.\(text, bgStyle\)/.test(src) && /onLiveChange=/.test(read("../app/edit.tsx")));
 }
 
 // ── C: posting ──

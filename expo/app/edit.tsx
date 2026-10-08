@@ -8,10 +8,12 @@ import React, {
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Linking,
   PanResponder,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Share,
   Switch,
@@ -52,8 +54,9 @@ import { supabase } from "@/lib/supabase";
 import { OWNER_USER_ID, isDebugOwner, isInternalTester } from "@/constants/debug";
 import CaptionsExplainer from "@/components/CaptionsExplainer";
 import CaptionPreview from "@/components/CaptionPreview";
-import EditPreviewModal from "@/components/EditPreviewModal";
 import FeedSafeZones from "@/components/FeedSafeZones";
+import { defaultCaptionStyle } from "@/lib/transcription/captionStyle";
+import { backStep, initialStep, nextStep, selectionBarSide, stepLayout, type EditorStep } from "@/lib/editorFlow";
 import { DEFAULT_TEXT_OVERLAY_POS, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
@@ -193,6 +196,32 @@ function newOverlayId() {
   return `ov_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** A round translucent button on the full-screen editor (top row). */
+function EditorRoundButton({ label, onPress, disabled, dim, children }: { label: string; onPress: () => void; disabled?: boolean; dim?: boolean; children: React.ReactNode }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={[styles.eRound, (disabled || dim) && { opacity: 0.4 }]}
+    >
+      {children}
+    </Pressable>
+  );
+}
+
+/** A tool of the slim column on the right of the full-screen editor: a round button and its label. */
+function EditorToolButton({ label, onPress, dim, children }: { label: string; onPress: () => void; dim?: boolean; children: React.ReactNode }) {
+  return (
+    <Pressable onPress={onPress} hitSlop={4} accessibilityRole="button" accessibilityLabel={label} style={[styles.eTool, dim && { opacity: 0.5 }]}>
+      <View style={styles.eRound}>{children}</View>
+      <UiText style={styles.eToolLabel}>{label}</UiText>
+    </Pressable>
+  );
+}
+
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 /** Cancel the native render; a failing native call must never throw out of a timer or a button. */
@@ -262,23 +291,6 @@ export default function EditScreen() {
 
   const _editMountT0 = useRef<number>(Date.now());
 
-  // ── Frame measurement ────────────────────────────────────────────────────
-  const [previewAreaSize, setPreviewAreaSize] = useState({
-    w: SCREEN_W,
-    h: 400,
-  });
-  // The preview is the feed's shape, filled the way the feed fills it (see lib/feedLayout.ts).
-  const frameDims = useMemo(
-    () => fitFrame(previewAreaSize.w, previewAreaSize.h, feedAspect(SCREEN_W, SCREEN_H)),
-    [previewAreaSize],
-  );
-  const feedCrop = useMemo(
-    () => computeCoverCrop(frameDims.w, frameDims.h, VIDEO_ASPECT),
-    [frameDims],
-  );
-  const [showGuides, setShowGuides] = useState(true);
-  const [fullPreviewOpen, setFullPreviewOpen] = useState(false);
-
   // ── Initialize clips ─────────────────────────────────────────────────────
   const initialClips: DraftClip[] = useMemo(() => {
     if (draftId) {
@@ -304,6 +316,28 @@ export default function EditScreen() {
   }, [clipsJson, nativeVideoUrl, draftId, draftProjects]);
 
   const [clips, setClips] = useState<DraftClip[]>(initialClips);
+  // The editor's three steps: Cuts -> full-screen editor -> Post. One component, so nothing is lost moving between them.
+  const [step, setStep] = useState<EditorStep>(() =>
+    initialStep({ isDraft: !!draftId, isVideo: initialClips[0]?.type !== "image" }),
+  );
+  // ── Frame measurement ────────────────────────────────────────────────────
+  const [previewAreaSize, setPreviewAreaSize] = useState({
+    w: SCREEN_W,
+    h: step === "edit" ? SCREEN_H : 400,
+  });
+  // The preview is the feed's shape, filled the way the feed fills it (see lib/feedLayout.ts).
+  // In the full-screen editor the video IS the screen (same crop as the feed); on the Cuts screen it is a small
+  // feed-shaped frame.
+  const frameDims = useMemo(
+    () => (step === "edit" ? previewAreaSize : fitFrame(previewAreaSize.w, previewAreaSize.h, feedAspect(SCREEN_W, SCREEN_H))),
+    [previewAreaSize, step],
+  );
+  const feedCrop = useMemo(
+    () => computeCoverCrop(frameDims.w, frameDims.h, VIDEO_ASPECT),
+    [frameDims],
+  );
+  const [showGuides, setShowGuides] = useState(true);
+
   // The auto-edit decisions behind the clips (see lib/autoEdit/decisions.ts).
   const editStateRef = useRef<{ state: EditState; durationMs: number } | null>(null);
   const [editModel, setEditModelView] = useState<{ state: EditState; durationMs: number } | null>(null);
@@ -793,6 +827,22 @@ export default function EditScreen() {
 
   const activeClip: DraftClip | undefined = clips[activeIndex];
   const isVideo = activeClip?.type === "video";
+  // Android's back button walks the steps back: Post -> editor -> Cuts -> leave.
+  const stepRef = useRef<EditorStep>(step);
+  stepRef.current = step;
+  const isVideoRef = useRef(isVideo);
+  isVideoRef.current = isVideo;
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      const to = backStep(stepRef.current, { isVideo: isVideoRef.current });
+      if (to === "exit") return false;
+      setIsPlaying(false);
+      setStep(to);
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
   const displayPosition = isVideo ? Math.min(positionMs, totalDurationMs) : 0;
 
   const videoSource = useMemo(() => {
@@ -2642,6 +2692,16 @@ export default function EditScreen() {
     if (reviewOpen) handleReviewDone();
   }, [reviewOpen, handleReviewDone]);
 
+  // The first time the Cuts screen has automatic cuts to review, its panel opens by itself.
+  const cutsAutoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (step !== "cuts" || cutsAutoOpenedRef.current || !aiEditsEnabled || autoEditRunning) return;
+    if (!cutRows.some((r) => r.count > 0)) return;
+    cutsAutoOpenedRef.current = true;
+    handleOpenCuts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, aiEditsEnabled, autoEditRunning, cutRows]);
+
   // The caption on screen (the one the toolbar's actions are about).
   const activeCaptionIndex = captions.lines.findIndex((l) => displayPosition >= l.startMs && displayPosition < l.endMs);
   const handleCaptionTool = useCallback(
@@ -3350,6 +3410,27 @@ export default function EditScreen() {
   // Assigned during render (not in an effect) so it is never a render behind: Post uses it after waiting for captions.
   executePostRef.current = executePost;
 
+  // The Post screen shows the final video's first frame (or the photo).
+  const [postThumb, setPostThumb] = useState<string | null>(null);
+  useEffect(() => {
+    if (step !== "post") return;
+    let alive = true;
+    void (async () => {
+      const first = clips[0];
+      if (!first) return;
+      try {
+        const uri = first.type === "video" ? await generateThumbnail(first.uri, first.trimStartMs ?? 0) : first.uri;
+        if (alive) setPostThumb(uri ?? null);
+      } catch (e) {
+        void recordClientError(e, { kind: "postThumbnail" });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   // handlePostPress calls executePost directly (no ref indirection) so the
   // `clips` closure used at tap time is always the most recent one. Earlier the
   // handler read executePostRef.current, whose sync effect ran after render —
@@ -3474,15 +3555,40 @@ export default function EditScreen() {
     ];
   })();
   const guidesActive = !!dragOverlayInfo || captionSelected;
-  const previewUsername = ((user?.user_metadata?.username as string | undefined) ?? "").trim() || "you";
-  const handleOpenFullPreview = () => {
-    if (!isVideo || !aheadReady || !aheadMatches) {
-      showAlert("Preview", "Your preview is still being made. Try again in a moment.");
+  const flow = stepLayout(step);
+  const leaveEditor = () => {
+    if (navigation.canGoBack()) router.back();
+    else router.replace("/(tabs)");
+  };
+  const handleBackPress = () => {
+    const to = backStep(step, { isVideo });
+    if (to === "exit") {
+      leaveEditor();
       return;
     }
     setIsPlaying(false);
-    setFullPreviewOpen(true);
+    setStep(to);
   };
+  // "Next" / "Done": nothing stays selected going forward, and the clip selection of the timeline ends.
+  const goNext = () => {
+    setIsPlaying(false);
+    setCaptionSelected(false);
+    setSelectedOverlayId(null);
+    if (selectedClipId) handleDeselectAndPreview();
+    setStep(nextStep(step));
+  };
+  const goToCuts = () => {
+    setIsPlaying(false);
+    setCaptionSelected(false);
+    setSelectedOverlayId(null);
+    setStep("cuts");
+  };
+  const selectedOverlay = selectedOverlayId ? textOverlays.find((o) => o.id === selectedOverlayId) ?? null : null;
+  const captionBarOn = toolbarMode({ captionSelected, captionsOn: captions.captionsOn, hasLines: activeCaptionIndex >= 0 }) === "caption";
+  const hasSelection = !!selectedOverlay || captionBarOn;
+  const selectionY = selectedOverlay ? selectedOverlay.y : (captionStyle?.yCenter ?? defaultCaptionStyle().yCenter);
+  const barSide = selectionBarSide(selectionY);
+  const previewUsername = ((user?.user_metadata?.username as string | undefined) ?? "").trim() || "you";
   const isIsolated = selectedClipId !== null;
   const editingOverlay = editingOverlayId
     ? textOverlays.find((ov) => ov.id === editingOverlayId)
@@ -3493,52 +3599,34 @@ export default function EditScreen() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={styles.screen}>
-        <StatusBar style="dark" />
+        <StatusBar style={step === "edit" ? "light" : "dark"} />
 
-        {/* ── Top bar ────────────────────────────────────────────────── */}
+        {/* ── Top bar: the Cuts screen ─────────────────────────────── */}
+        {step === "cuts" && (
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-          <TouchableOpacity
-            onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
-            style={styles.topBtn}
-          >
+          <TouchableOpacity onPress={handleBackPress} style={styles.topBtn} accessibilityLabel="Back">
             <ArrowLeft size={20} color={theme.text} strokeWidth={2.5} />
           </TouchableOpacity>
-          <UiText style={styles.topTitle}>
-            {draftId ? "Edit Draft" : "Edit Post"}
-          </UiText>
+          <UiText style={styles.topTitle}>Cuts</UiText>
           <View style={styles.topBtnRow}>
-            <TouchableOpacity
-              onPress={() => setShowGuides((v) => !v)}
-              style={[styles.topBtn, !showGuides && styles.topBtnOff]}
-              accessibilityRole="button"
-              accessibilityLabel="Toggle feed guides"
-            >
-              <Grid3x3 size={16} color={theme.text} strokeWidth={2} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleOpenFullPreview}
-              style={[styles.topBtn, styles.previewBtn]}
-              accessibilityRole="button"
-              accessibilityLabel="Preview"
-            >
-              <UiText style={styles.previewBtnText}>Preview</UiText>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleUndo}
-              disabled={!canUndo}
-              style={[styles.topBtn, !canUndo && styles.topBtnOff]}
-            >
+            <TouchableOpacity onPress={handleUndo} disabled={!canUndo} style={[styles.topBtn, !canUndo && styles.topBtnOff]}>
               <Undo2 size={16} color={theme.text} strokeWidth={2} />
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleRedo}
-              disabled={!canRedo}
-              style={[styles.topBtn, !canRedo && styles.topBtnOff]}
-            >
+            <TouchableOpacity onPress={handleRedo} disabled={!canRedo} style={[styles.topBtn, !canRedo && styles.topBtnOff]}>
               <Redo2 size={16} color={theme.text} strokeWidth={2} />
             </TouchableOpacity>
           </View>
         </View>
+        )}
+        {step === "post" && (
+        <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+          <TouchableOpacity onPress={handleBackPress} style={styles.topBtn} accessibilityLabel="Back to the editor">
+            <ArrowLeft size={20} color={theme.text} strokeWidth={2.5} />
+          </TouchableOpacity>
+          <UiText style={styles.topTitle}>{reactingTo ? "Post reaction" : "Post"}</UiText>
+          <View style={styles.topBtnRow} />
+        </View>
+        )}
 
         {/* ── Preview area ───────────────────────────────────────────── */}
         {isInternalTester(user?.id) && (aheadState.kind === "ready" || aheadState.kind === "waiting" || aheadState.kind === "rendering") && (
@@ -3560,8 +3648,9 @@ export default function EditScreen() {
             </Pressable>
           </View>
         )}
+        {flow.timeline || flow.fullScreenVideo ? (
         <Pressable
-          style={styles.previewArea}
+          style={step === "edit" ? styles.previewAreaFull : styles.previewArea}
           onLayout={(e) => {
             const { width, height } = e.nativeEvent.layout;
             setPreviewAreaSize({ w: width, h: height });
@@ -3575,6 +3664,7 @@ export default function EditScreen() {
           <View
             style={[
               styles.previewFrame,
+              step === "edit" && styles.previewFrameFull,
               { width: frameDims.w, height: frameDims.h },
             ]}
           >
@@ -3690,19 +3780,37 @@ export default function EditScreen() {
                 </Pressable>
               </View>
             )}
-            {isVideo && !isPlaying && !pendingPlay && !captionSelected && (
+            {/* Tap empty video: play or pause (a selection is dropped first). Below the overlays, so a tap on one never reaches it. */}
+            {isVideo && step === "edit" && (
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                accessibilityLabel={isPlaying ? "Pause" : "Play"}
+                onPress={() => {
+                  if (selectedOverlayId || captionSelected) {
+                    setSelectedOverlayId(null);
+                    setCaptionSelected(false);
+                  } else {
+                    togglePlay();
+                  }
+                }}
+              />
+            )}
+            {isVideo && step === "edit" && !isPlaying && !pendingPlay && !hasSelection && (
+              <View pointerEvents="none" style={styles.playOverlay}>
+                <View style={styles.playCircle}>
+                  <Play size={26} color="#fff" fill="#fff" style={{ left: 2 }} />
+                </View>
+              </View>
+            )}
+            {isVideo && step === "cuts" && !isPlaying && !pendingPlay && !captionSelected && (
               <Pressable onPress={togglePlay} style={styles.playOverlay}>
                 <View style={styles.playCircle}>
-                  <Play
-                    size={26}
-                    color="#fff"
-                    fill="#fff"
-                    style={{ left: 2 }}
-                  />
+                  <Play size={26} color="#fff" fill="#fff" style={{ left: 2 }} />
                 </View>
               </Pressable>
             )}
 
+            <View pointerEvents={flow.touchOverlays ? "box-none" : "none"} style={StyleSheet.absoluteFill}>
             {isVideo && features.captionControls && captions.captionsOn && (
               <View
                 pointerEvents="box-none"
@@ -3750,8 +3858,9 @@ export default function EditScreen() {
                 onDragState={handleDragState}
               />
             ))}
+            </View>
 
-            {showGuides && (
+            {showGuides && flow.guides && (
               <FeedSafeZones
                 frameW={frameDims.w}
                 frameH={frameDims.h}
@@ -3762,26 +3871,15 @@ export default function EditScreen() {
             )}
           </View>
         </Pressable>
+        ) : null}
 
-        {/* ── Timeline editor ────────────────────────────────────────── */}
+        {/* ── Cuts screen: the timeline and the Cuts panel ───────────── */}
+        {step === "cuts" && (
+          <>
         {autoEditRunning && (
           <View style={styles.autoEditRow}>
             <ActivityIndicator size="small" color={theme.textMuted} />
             <UiText style={styles.autoEditText}>Auto-editing...</UiText>
-          </View>
-        )}
-        {postFailed && (
-          <View style={styles.postFailedRow}>
-            <UiText style={styles.postFailedText}>{POST_FAILED_TEXT}</UiText>
-            <Pressable
-              onPress={handlePostPress}
-              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
-              style={styles.postFailedBtn}
-              accessibilityRole="button"
-              accessibilityLabel="Retry posting"
-            >
-              <UiText style={styles.postFailedBtnText}>Retry</UiText>
-            </Pressable>
           </View>
         )}
         {autoEditNote && !autoEditRunning && (
@@ -3818,25 +3916,7 @@ export default function EditScreen() {
           />
         )}
 
-        {/* ── Toolbar ────────────────────────────────────────────────── */}
-        {toolbarMode({ captionSelected, captionsOn: captions.captionsOn, hasLines: activeCaptionIndex >= 0 }) === "caption" ? (
-          // A caption is selected: its actions replace the main toolbar (nothing floats over the video).
-          <View style={styles.toolbar}>
-            {CAPTION_TOOLS.map((tool) => (
-              <Pressable
-                key={tool.id}
-                onPress={() => handleCaptionTool(tool.id)}
-                style={styles.toolBtn}
-                accessibilityRole="button"
-                accessibilityLabel={tool.label}
-              >
-                <UiText style={[styles.toolLabel, tool.id === "done" && { color: theme.accent }]} numberOfLines={1}>
-                  {tool.label}
-                </UiText>
-              </Pressable>
-            ))}
-          </View>
-        ) : (
+
         <View style={styles.toolbar}>
           {/* Trim — video only */}
           {isVideo && (
@@ -3884,108 +3964,50 @@ export default function EditScreen() {
             </UiText>
           </Pressable>
 
-          {/* Text */}
-          <Pressable
-            onPress={handleTapTextTool}
-            style={[
-              styles.toolBtn,
-              (selectedOverlayId || textEditorVisible) && styles.toolBtnActive,
-            ]}
-          >
-            <Type
-              size={18}
-              color={
-                selectedOverlayId || textEditorVisible
-                  ? theme.accent
-                  : theme.text
-              }
-            />
-            <UiText
-              style={[
-                styles.toolLabel,
-                (selectedOverlayId || textEditorVisible) && {
-                  color: theme.accent,
-                },
-              ]}
-            >
-              Text
-            </UiText>
-          </Pressable>
-
-          {/* Captions: the on/off switch, Style and every caption line */}
-          {isVideo && features.captionControls && (
-            <Pressable onPress={() => setCaptionsPanelOpen(true)} style={styles.toolBtn} accessibilityRole="button" accessibilityLabel="Captions">
-              <Captions size={18} color={captions.captionsOn ? theme.text : theme.textDim} />
-              <UiText style={styles.toolLabel}>Captions</UiText>
-            </Pressable>
-          )}
-
-          {/* Cuts: every automatic cut, each reversible (the old Review sheet and AI edits panel in one) */}
-          {isVideo && aiEditsEnabled && (autoEditSession || editModel) && (
-            <Pressable onPress={handleOpenCuts} style={styles.toolBtn} accessibilityRole="button" accessibilityLabel="Cuts">
-              <Sparkles size={18} color={theme.text} />
-              <UiText style={styles.toolLabel}>Cuts</UiText>
-            </Pressable>
-          )}
         </View>
+        <View style={[styles.bottomSection, { paddingBottom: insets.bottom + 8 }]}>
+          <Pressable
+            onPress={goNext}
+            style={({ pressed }) => [styles.postBtn, pressed && { opacity: 0.8 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Done with cuts"
+          >
+            <UiText style={styles.postBtnText}>Done</UiText>
+          </Pressable>
+        </View>
+          </>
         )}
 
-        {/* ── Text overlay editing toolbar ──────────────────────────── */}
-        {selectedOverlayId && (
-          <View style={styles.textToolbarWrap}>
-            <View style={styles.textActionRow}>
-              <Pressable
-                onPress={() => handleCycleBackgroundStyle(selectedOverlayId!)}
-                style={styles.textActionBtn}
-              >
-                <RectangleEllipsis size={14} color={theme.text} />
-                <UiText style={styles.textActionLabel}>Style</UiText>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  const ov = textOverlays.find(
-                    (o) => o.id === selectedOverlayId,
-                  );
-                  setEditingOverlayId(selectedOverlayId);
-                  setTextEditorVisible(true);
-                }}
-                style={styles.textActionBtn}
-              >
-                <Pencil size={14} color={theme.text} />
-                <UiText style={styles.textActionLabel}>Edit</UiText>
-              </Pressable>
-              <Pressable
-                onPress={handleDuplicateOverlay}
-                style={styles.textActionBtn}
-              >
-                <Type size={14} color={theme.text} />
-                <UiText style={styles.textActionLabel}>Duplicate</UiText>
-              </Pressable>
-              <Pressable
-                onPress={() => handleDeleteOverlay()}
-                style={[styles.textActionBtn, styles.textActionBtnDanger]}
-              >
-                <Trash2 size={14} color="#E8291C" />
-                <UiText
-                  style={[
-                    styles.textActionLabel,
-                    styles.textActionLabelDanger,
-                  ]}
-                >
-                  Delete
-                </UiText>
-              </Pressable>
+        {/* ── Post screen ────────────────────────────────────────────── */}
+        {step === "post" && (
+          <ScrollView
+            style={styles.postScroll}
+            contentContainerStyle={[styles.postScrollContent, { paddingBottom: insets.bottom + 16 }]}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.thumbWrap}>
+              {postThumb ? (
+                <Image source={{ uri: postThumb }} style={styles.thumb} contentFit="cover" />
+              ) : (
+                <View style={[styles.thumb, styles.thumbEmpty]}>
+                  <ActivityIndicator color={theme.textDim} />
+                </View>
+              )}
             </View>
+        {postFailed && (
+          <View style={styles.postFailedRow}>
+            <UiText style={styles.postFailedText}>{POST_FAILED_TEXT}</UiText>
+            <Pressable
+              onPress={handlePostPress}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+              style={styles.postFailedBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Retry posting"
+            >
+              <UiText style={styles.postFailedBtnText}>Retry</UiText>
+            </Pressable>
           </View>
         )}
-
-        {/* ── Bottom section: Actions ─────────────────────────────── */}
-        <View
-          style={[
-            styles.bottomSection,
-            { paddingBottom: insets.bottom + 8 },
-          ]}
-        >
           {error && (
             <View style={styles.bannerError}>
               <UiText style={styles.bannerErrorText}>{error}</UiText>
@@ -3995,6 +4017,11 @@ export default function EditScreen() {
             <View style={styles.bannerSuccess}>
               <UiText style={styles.bannerSuccessText}>{success}</UiText>
             </View>
+          )}
+          {!reactingTo && (
+            <UiText style={styles.trialNote}>
+              On Trial, people who don't know you test your video. If it survives, it's pushed to more people for 24 hours.
+            </UiText>
           )}
           <View style={styles.matureRow}>
             <View style={styles.matureLabelWrap}>
@@ -4009,11 +4036,6 @@ export default function EditScreen() {
               ios_backgroundColor={theme.border}
             />
           </View>
-          {!reactingTo && (
-            <UiText style={styles.trialNote}>
-              On Trial, people who don't know you test your video. If it survives, it's pushed to more people for 24 hours.
-            </UiText>
-          )}
           {isVideo && Platform.OS !== "web" && (
             <View style={styles.saveRollRow}>
               <UiText style={styles.saveRollText}>Save to camera roll</UiText>
@@ -4061,10 +4083,102 @@ export default function EditScreen() {
               )}
             </Pressable>
           </View>
-        </View>
+
+          </ScrollView>
+        )}
+
+        {/* ── Full-screen editor: tools, selection bar, Next ─────────── */}
+        {step === "edit" && (
+          <>
+            <View style={[styles.eTopBar, { top: insets.top + 6 }]} pointerEvents="box-none">
+              <EditorRoundButton label="Back" onPress={handleBackPress}>
+                <ArrowLeft size={20} color="#fff" strokeWidth={2.5} />
+              </EditorRoundButton>
+              <View style={styles.eTopRight}>
+                <EditorRoundButton label="Undo" onPress={handleUndo} disabled={!canUndo}>
+                  <Undo2 size={18} color="#fff" strokeWidth={2} />
+                </EditorRoundButton>
+                <EditorRoundButton label="Redo" onPress={handleRedo} disabled={!canRedo}>
+                  <Redo2 size={18} color="#fff" strokeWidth={2} />
+                </EditorRoundButton>
+                <EditorRoundButton label="Feed guides" onPress={() => setShowGuides((v) => !v)} dim={!showGuides}>
+                  <Grid3x3 size={18} color="#fff" strokeWidth={2} />
+                </EditorRoundButton>
+              </View>
+            </View>
+
+            <View style={[styles.eTools, { top: insets.top + 74 }]} pointerEvents="box-none">
+              <EditorToolButton label="Text" onPress={() => { setSelectedOverlayId(null); setCaptionSelected(false); setEditingOverlayId(null); setTextEditorVisible(true); }}>
+                <Type size={22} color="#fff" strokeWidth={2} />
+              </EditorToolButton>
+              {isVideo && features.captionControls && (
+                <EditorToolButton label="Captions" onPress={() => setCaptionsPanelOpen(true)} dim={!captions.captionsOn}>
+                  <Captions size={22} color="#fff" strokeWidth={2} />
+                </EditorToolButton>
+              )}
+              {isVideo && features.captionControls && captions.captionsOn && (
+                <EditorToolButton label="Style" onPress={() => setStyleSheetOpen(true)}>
+                  <RectangleEllipsis size={22} color="#fff" strokeWidth={2} />
+                </EditorToolButton>
+              )}
+              {isVideo && (
+                <EditorToolButton label="Cuts" onPress={goToCuts}>
+                  <Scissors size={22} color="#fff" strokeWidth={2} />
+                </EditorToolButton>
+              )}
+            </View>
+
+            {hasSelection ? (
+              <View
+                style={[styles.eSelectionBar, barSide === "top" ? { top: insets.top + 64 } : { bottom: insets.bottom + 14 }]}
+                accessibilityLabel="Selected item controls"
+              >
+                {captionBarOn
+                  ? CAPTION_TOOLS.map((tool) => (
+                      <Pressable
+                        key={tool.id}
+                        onPress={() => handleCaptionTool(tool.id)}
+                        style={styles.eBarBtn}
+                        accessibilityRole="button"
+                        accessibilityLabel={tool.label}
+                      >
+                        <UiText style={[styles.eBarLabel, tool.id === "done" && { color: "#fff", fontWeight: "900" }, tool.id === "deleteLine" && { color: "#FF6B5E" }]} numberOfLines={1}>
+                          {tool.label}
+                        </UiText>
+                      </Pressable>
+                    ))
+                  : (
+                    <>
+                      <Pressable onPress={() => { setEditingOverlayId(selectedOverlayId); setTextEditorVisible(true); }} style={styles.eBarBtn} accessibilityRole="button" accessibilityLabel="Edit text">
+                        <UiText style={styles.eBarLabel}>Edit</UiText>
+                      </Pressable>
+                      <Pressable onPress={() => handleCycleBackgroundStyle(selectedOverlayId!)} style={styles.eBarBtn} accessibilityRole="button" accessibilityLabel="Change text style">
+                        <UiText style={styles.eBarLabel}>Style</UiText>
+                      </Pressable>
+                      <Pressable onPress={() => handleDeleteOverlay()} style={styles.eBarBtn} accessibilityRole="button" accessibilityLabel="Delete text">
+                        <UiText style={[styles.eBarLabel, { color: "#FF6B5E" }]}>Delete</UiText>
+                      </Pressable>
+                      <Pressable onPress={() => setSelectedOverlayId(null)} style={styles.eBarBtn} accessibilityRole="button" accessibilityLabel="Done">
+                        <UiText style={[styles.eBarLabel, { color: "#fff", fontWeight: "900" }]}>Done</UiText>
+                      </Pressable>
+                    </>
+                  )}
+              </View>
+            ) : (
+              <Pressable
+                onPress={goNext}
+                style={[styles.eNext, { bottom: insets.bottom + 16 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Next"
+              >
+                <UiText style={styles.eNextText}>Next</UiText>
+              </Pressable>
+            )}
+          </>
+        )}
 
         {/* ── Drag-to-trash zone ────────────────────────────────────── */}
-        {dragOverlayInfo?.isDragging && (
+        {step === "edit" && dragOverlayInfo?.isDragging && (
           <View
             style={[
               styles.trashZone,
@@ -4187,15 +4301,6 @@ export default function EditScreen() {
         onCancel={handleTextEditorCancel}
         onLiveChange={(text, backgroundStyle) => setLiveText({ text, backgroundStyle })}
       />
-      <EditPreviewModal
-        visible={fullPreviewOpen}
-        uri={fullPreviewOpen && aheadReady && aheadMatches ? aheadReady.uri : null}
-        onClose={() => setFullPreviewOpen(false)}
-        captionLines={features.captionControls && captions.captionsOn ? captions.lines : null}
-        captionStyle={captionStyle ?? null}
-        textOverlays={textOverlays}
-        username={previewUsername}
-      />
     </GestureHandlerRootView>
   );
 }
@@ -4258,6 +4363,65 @@ const styles = StyleSheet.create({
   topBtnOff: {
     opacity: 0.25,
   },
+
+  // ── Three steps: full-screen editor and Post screen ──
+  previewAreaFull: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#000",
+  },
+  previewFrameFull: { backgroundColor: "#000" },
+  eRound: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  eTopBar: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    zIndex: 20,
+  },
+  eTopRight: { flexDirection: "row", gap: 8 },
+  eTools: { position: "absolute", right: 10, alignItems: "center", gap: 14, zIndex: 20 },
+  eTool: { alignItems: "center", gap: 3 },
+  eToolLabel: { color: "#fff", fontSize: 11, fontWeight: "700" as const, textShadowColor: "rgba(0,0,0,0.6)", textShadowRadius: 3 },
+  eSelectionBar: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    backgroundColor: "rgba(0,0,0,0.72)",
+    borderRadius: 14,
+    paddingHorizontal: 6,
+    zIndex: 30,
+  },
+  eBarBtn: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center" },
+  eBarLabel: { color: "rgba(255,255,255,0.9)", fontSize: 14, fontWeight: "700" as const },
+  eNext: {
+    position: "absolute",
+    right: 16,
+    minHeight: 48,
+    paddingHorizontal: 30,
+    borderRadius: 24,
+    backgroundColor: theme.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 30,
+  },
+  eNextText: { color: "#fff", fontSize: 16, fontWeight: "900" as const },
+  postScroll: { flex: 1 },
+  postScrollContent: { paddingHorizontal: 16, paddingTop: 8, gap: 12 },
+  thumbWrap: { alignItems: "center", paddingVertical: 8 },
+  thumb: { width: 168, height: 298, borderRadius: 10, backgroundColor: "#000", overflow: "hidden" },
+  thumbEmpty: { alignItems: "center", justifyContent: "center" },
 
   // ── Preview area ──
   previewArea: {

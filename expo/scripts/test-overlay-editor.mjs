@@ -82,7 +82,6 @@ for (const [label, text] of Object.entries(texts)) {
   ok("Montserrat Bold is loaded with the app's fonts", /Montserrat_700Bold/.test(read("../app/_layout.tsx")));
   ok("both ignore the phone's text-size setting (one shared text component)", /allowFontScaling=\{false\}/.test(read("../components/HuggingText.tsx")) && /HuggingText/.test(editor) && /HuggingText/.test(feed));
   ok("both draw the shadow only without a background, with the same radius", /textShadowRadius: 4/.test(editor) && /textShadowRadius: 4/.test(feed));
-  ok("the full-screen Preview draws overlays with the feed's component", /FeedTextOverlay/.test(read("../components/EditPreviewModal.tsx")));
   ok("while typing, the text on the video is drawn by the same editor component and values", /displayOverlays\.map\(\(ov\) => \(\s*<DraggableTextOverlay/.test(edit));
 }
 
