@@ -35,7 +35,7 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
   for (const [name, s] of [["caption", cap], ["text overlay", txt]]) {
     eq(`1.0.4 ${name}: 0.5 em across, 0.3 em down, line height 1.25 em`, [s.backgroundPaddingX / s.fontSize, s.backgroundPaddingY / s.fontSize, s.lineHeight], [TEXT_PAD_X_EM, TEXT_PAD_Y_EM, TEXT_LINE_HEIGHT_EM]);
   }
-  eq("1.0.4: the legacy padding key stays, for the old renderer path", [cap.backgroundPadding, txt.backgroundPadding], [15, 20]);
+  eq("1.0.4: the legacy padding key stays, for the old renderer path", [cap.backgroundPadding, txt.backgroundPadding], [18, 20]);
   const { backgroundPaddingX, backgroundPaddingY, lineHeight, ...rest } = cap;
   eq("1.0.4: nothing else changes in a caption's spec", rest, JSON.parse(toRenderJson(instr)).overlays[0].styleSpec);
   const plain = withTextBox(resolveOverlayStyle("text"), true);

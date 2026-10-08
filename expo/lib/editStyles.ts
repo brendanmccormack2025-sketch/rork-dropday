@@ -26,6 +26,8 @@ export type OverlayStyleSpec = {
   backgroundPaddingY?: number;
   /** Build 1.0.4 (supportsTextBox): one fixed line height, as a multiple of the font size. */
   lineHeight?: number;
+  /** Build 1.0.4 (supportsLineBackgrounds): a rounded background per line, joined. Absent: one box as wide as the widest line. */
+  lineBackground?: boolean;
   cornerRadius?: number;
   yCenter: number;
   /** Horizontal centre as a fraction of the frame width (default 0.5). Read by the renderer only once it supports it. */
@@ -77,7 +79,7 @@ export const CAPTION_STYLES: OverlayStylePreset[] = [
     label: "Trial",
     spec: {
       fontSize: 38, fontWeight: "heavy", color: "#FFFFFF", backgroundColor: "#000000",
-      backgroundPadding: 15, cornerRadius: 10, yCenter: 0.72, maxWidth: 0.86,
+      backgroundPadding: 18, cornerRadius: 11, yCenter: 0.72, maxWidth: 0.86,
       fadeInMs: 0, fadeOutMs: 0,
     },
   },
@@ -172,22 +174,23 @@ function renderSpec(kind: "text" | "caption", styleId?: string, captionStyle?: C
   // Text overlays are Montserrat Bold where the build can draw a bundled font; elsewhere the system font, as before.
   if (kind !== "caption") {
     const spec = options.supportsFont && !resolved.fontName ? { ...resolved, fontName: TEXT_FONT_NAME } : resolved;
-    return withTextBox(spec, !!options.supportsTextBox);
+    return withTextBox(spec, !!options.supportsTextBox, !!options.supportsLineBackgrounds);
   }
   const spec = captionStyle ? applyCaptionStyle(resolved, captionStyle) : resolved;
-  return withTextBox({ ...spec, fadeInMs: Math.max(1, spec.fadeInMs ?? 0), fadeOutMs: Math.max(1, spec.fadeOutMs ?? 0) }, !!options.supportsTextBox);
+  return withTextBox({ ...spec, fadeInMs: Math.max(1, spec.fadeInMs ?? 0), fadeOutMs: Math.max(1, spec.fadeOutMs ?? 0) }, !!options.supportsTextBox, !!options.supportsLineBackgrounds);
 }
 
-export type RenderOptions = { supportsFont?: boolean; supportsTextBox?: boolean };
+export type RenderOptions = { supportsFont?: boolean; supportsTextBox?: boolean; supportsLineBackgrounds?: boolean };
 
 /**
  * The box proportions both the preview and the render use where the build supports them: 0.5 em across and
  * 0.25 em down around the text, and one fixed line height. A spec with no background keeps no padding.
  * Without the capability (build 39) the spec is returned untouched.
  */
-export function withTextBox(spec: OverlayStyleSpec, supportsTextBox: boolean): OverlayStyleSpec {
+export function withTextBox(spec: OverlayStyleSpec, supportsTextBox: boolean, supportsLineBackgrounds = false): OverlayStyleSpec {
   if (!supportsTextBox) return spec;
   const out: OverlayStyleSpec = { ...spec, lineHeight: TEXT_LINE_HEIGHT_EM };
+  if (spec.backgroundColor && supportsLineBackgrounds) out.lineBackground = true;
   if (spec.backgroundColor) {
     out.backgroundPaddingX = spec.fontSize * TEXT_PAD_X_EM;
     out.backgroundPaddingY = spec.fontSize * TEXT_PAD_Y_EM;

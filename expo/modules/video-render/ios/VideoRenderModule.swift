@@ -83,8 +83,9 @@ public class VideoRenderModule: Module {
     // Build capabilities the JS checks: captions can use a font by PostScript name (style "fontName").
     // supportsTextBox: the caption box (separate padding across/down and a fixed line height: style
     // "backgroundPaddingX/Y", "lineHeight").
+    // supportsLineBackgrounds: a caption with several lines gets a background per line (style "lineBackground").
     Constants {
-      ["supportsCaptionFont": true, "supportsTextBox": true]
+      ["supportsCaptionFont": true, "supportsTextBox": true, "supportsLineBackgrounds": true]
     }
 
     Events("onProgress")
@@ -416,10 +417,32 @@ private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
   let container = CALayer()
   container.bounds = CGRect(x: 0, y: 0, width: textWidth + 2 * padX, height: textHeight + 2 * padY)
   container.position = CGPoint(x: size.width / 2, y: size.height * (1 - yFromTop))
+  let cornerRadius = CGFloat(number(style["cornerRadius"]) ?? 0) * scale
   if let bg = style["backgroundColor"] as? String {
-    container.backgroundColor = color(bg, fallback: .clear).cgColor
+    if (style["lineBackground"] as? Bool) == true {
+      // Build 1.0.4 (supportsLineBackgrounds): a rounded background per line, as wide as that line, joined into one
+      // outline. Without the key the background is one box as wide as the widest line (textWidth), as before.
+      let widths = lineWidths(of: attributed, width: maxWidth - 2 * padX)
+      let lineHeight = fixedLineHeight ?? (textHeight / CGFloat(max(1, widths.count)))
+      if widths.count > 1 {
+        let bgLayer = CAShapeLayer()
+        bgLayer.frame = CGRect(x: 0, y: 0, width: textWidth + 2 * padX, height: textHeight + 2 * padY)
+        let outline = lineBackgroundPath(widths: widths.map { $0 + 2 }, lineHeight: lineHeight, padX: padX, padY: padY, radius: cornerRadius,
+                                         boxWidth: textWidth + 2 * padX)
+        // The outline is built top-down; Core Animation here is bottom-up.
+        var flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: textHeight + 2 * padY)
+        bgLayer.path = outline.copy(using: &flip)
+        bgLayer.fillColor = color(bg, fallback: .clear).cgColor
+        container.addSublayer(bgLayer)
+      } else {
+        container.backgroundColor = color(bg, fallback: .clear).cgColor
+        container.cornerRadius = cornerRadius
+      }
+    } else {
+      container.backgroundColor = color(bg, fallback: .clear).cgColor
+    }
   }
-  container.cornerRadius = CGFloat(number(style["cornerRadius"]) ?? 0) * scale
+  if (style["lineBackground"] as? Bool) != true { container.cornerRadius = cornerRadius }
   if (style["shadow"] as? Bool) == true {
     container.shadowColor = UIColor.black.cgColor
     container.shadowOpacity = 0.6
@@ -435,6 +458,81 @@ private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
   textLayer.frame = CGRect(x: padX, y: padY, width: textWidth, height: textHeight)
   container.addSublayer(textLayer)
   return container
+}
+
+/// The width of each laid-out line of `attributed` when wrapped at `width` (TextKit, no padding).
+private func lineWidths(of attributed: NSAttributedString, width: CGFloat) -> [CGFloat] {
+  let storage = NSTextStorage(attributedString: attributed)
+  let layout = NSLayoutManager()
+  let textContainer = NSTextContainer(size: CGSize(width: width, height: .greatestFiniteMagnitude))
+  textContainer.lineFragmentPadding = 0
+  layout.addTextContainer(textContainer)
+  storage.addLayoutManager(layout)
+  var widths: [CGFloat] = []
+  layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: textContainer)) { _, usedRect, _, _, _ in
+    widths.append(ceil(usedRect.width))
+  }
+  return widths
+}
+
+/// One outline for lines stacked touching and centred: every line is its own width plus padding, with rounded
+/// corners and rounded joins where a line is wider or narrower than the next. Built top-down (y grows downward);
+/// the same shape lib/lineBackground.ts draws in the editor.
+private func lineBackgroundPath(widths: [CGFloat], lineHeight: CGFloat, padX: CGFloat, padY: CGFloat, radius: CGFloat, boxWidth: CGFloat) -> CGPath {
+  let n = widths.count
+  let half = widths.map { ($0 + 2 * padX) / 2 }
+  let cx = boxWidth / 2
+  let height = CGFloat(n) * lineHeight + 2 * padY
+  var ys: [CGFloat] = [0]
+  for i in 1..<n { ys.append(padY + CGFloat(i) * lineHeight) }
+  ys.append(height)
+  func lineH(_ i: Int) -> CGFloat { ys[i + 1] - ys[i] }
+
+  // Right side from the top centre down; each step is (end point, optional quad control point for a rounded corner).
+  var steps: [(CGPoint, CGPoint?)] = []
+  let r0 = min(radius, half[0], lineH(0))
+  steps.append((CGPoint(x: cx + half[0] - r0, y: 0), nil))
+  steps.append((CGPoint(x: cx + half[0], y: r0), CGPoint(x: cx + half[0], y: 0)))
+  for i in 0..<(n - 1) {
+    let yb = ys[i + 1]
+    let d = half[i + 1] - half[i]
+    if abs(d) < 0.5 {
+      steps.append((CGPoint(x: cx + half[i + 1], y: yb), nil))
+      continue
+    }
+    let rc = min(radius, abs(d) / 2, lineH(i) / 2, lineH(i + 1) / 2)
+    if d < 0 {
+      steps.append((CGPoint(x: cx + half[i], y: yb - rc), nil))
+      steps.append((CGPoint(x: cx + half[i] - rc, y: yb), CGPoint(x: cx + half[i], y: yb)))
+      steps.append((CGPoint(x: cx + half[i + 1] + rc, y: yb), nil))
+      steps.append((CGPoint(x: cx + half[i + 1], y: yb + rc), CGPoint(x: cx + half[i + 1], y: yb)))
+    } else {
+      steps.append((CGPoint(x: cx + half[i], y: yb - rc), nil))
+      steps.append((CGPoint(x: cx + half[i] + rc, y: yb), CGPoint(x: cx + half[i], y: yb)))
+      steps.append((CGPoint(x: cx + half[i + 1] - rc, y: yb), nil))
+      steps.append((CGPoint(x: cx + half[i + 1], y: yb + rc), CGPoint(x: cx + half[i + 1], y: yb)))
+    }
+  }
+  let rn = min(radius, half[n - 1], lineH(n - 1))
+  steps.append((CGPoint(x: cx + half[n - 1], y: height - rn), nil))
+  steps.append((CGPoint(x: cx + half[n - 1] - rn, y: height), CGPoint(x: cx + half[n - 1], y: height)))
+  steps.append((CGPoint(x: cx, y: height), nil))
+
+  let path = UIBezierPath()
+  path.move(to: CGPoint(x: cx, y: 0))
+  for step in steps {
+    if let control = step.1 { path.addQuadCurve(to: step.0, controlPoint: control) } else { path.addLine(to: step.0) }
+  }
+  // Back up the left side: the same steps in reverse, mirrored.
+  var starts: [CGPoint] = [CGPoint(x: cx, y: 0)]
+  for step in steps { starts.append(step.0) }
+  func mirror(_ p: CGPoint) -> CGPoint { CGPoint(x: 2 * cx - p.x, y: p.y) }
+  for i in stride(from: steps.count - 1, through: 0, by: -1) {
+    let target = mirror(starts[i])
+    if let control = steps[i].1 { path.addQuadCurve(to: target, controlPoint: mirror(control)) } else { path.addLine(to: target) }
+  }
+  path.close()
+  return path.cgPath
 }
 
 private func makeImageOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer? {

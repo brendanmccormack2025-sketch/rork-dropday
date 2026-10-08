@@ -14,6 +14,8 @@ type VideoRenderNative = {
   supportsCaptionFont?: boolean;
   /** Present (true) from build 1.0.4: separate padding across/down and a fixed line height in text boxes. */
   supportsTextBox?: boolean;
+  /** Present (true) from build 1.0.4: a caption with several lines gets a background per line (style "lineBackground"). */
+  supportsLineBackgrounds?: boolean;
   addListener(event: "onProgress", listener: (e: RenderProgressEvent) => void): Subscription;
 };
 
@@ -26,6 +28,9 @@ export const supportsCaptionFont: boolean = native?.supportsCaptionFont === true
 
 /** True when this build lays text boxes out with backgroundPaddingX/Y and lineHeight (older builds ignore them). */
 export const supportsTextBox: boolean = native?.supportsTextBox === true;
+
+/** True when this build draws a background per caption line (older builds draw one box as wide as the widest line). */
+export const supportsLineBackgrounds: boolean = native?.supportsLineBackgrounds === true;
 
 /**
  * Render EditInstructions v1 (lib/editModel.ts, as JSON) into one mp4 on this

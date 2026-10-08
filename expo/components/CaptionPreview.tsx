@@ -4,7 +4,9 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import type { CaptionStyle } from "@/lib/editModel";
 import { withTextBox, type OverlayFontWeight } from "@/lib/editStyles";
-import { supportsTextBox } from "@/modules/video-render";
+import HuggingText from "@/components/HuggingText";
+import { TOUCH_PAD } from "@/lib/overlayGestures";
+import { supportsLineBackgrounds, supportsTextBox } from "@/modules/video-render";
 import { previewFontFamily } from "@/lib/transcription/captionPresets";
 import type { EditorCaptionLine } from "@/lib/transcription/captionLines";
 import {
@@ -84,12 +86,14 @@ export default function CaptionPreview({
   const stored = useMemo(() => effectiveCaptionStyle(style), [style]);
   const [live, setLive] = useState<CaptionStyle | null>(null);
   const [snapped, setSnapped] = useState(false);
+  // While the fingers are down a pinch only scales the drawn box (cheap and smooth); the size is committed at the end.
+  const [pinchLive, setPinchLive] = useState(1);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
   const inputRef = useRef<TextInput>(null);
   const shown = live ?? stored;
-  const spec = useMemo(() => withTextBox(styledSpec(shown), supportsTextBox), [shown]);
+  const spec = useMemo(() => withTextBox(styledSpec(shown), supportsTextBox, supportsLineBackgrounds), [shown]);
   const px = frameW / 1080;
 
   const activeIndex = lines.findIndex((l) => positionMs >= l.startMs && positionMs < l.endMs);
@@ -144,7 +148,13 @@ export default function CaptionPreview({
       cur.frameH / Math.max(1, cur.frameW),
     );
     gs.last = next.style;
-    setLive(next.style);
+    // Position follows the fingers at the stored size; the pinch is shown as a scale of the drawn box.
+    const moving = settleCaptionStyle(
+      { scale: gs.base.scale, yCenter: next.style.yCenter, xCenter: next.style.xCenter },
+      cur.frameH / Math.max(1, cur.frameW),
+    );
+    setLive(moving.style);
+    setPinchLive(Math.max(0.3, Math.min(4, next.style.scale / gs.base.scale)));
     setSnapped(next.snappedX);
   };
   const begin = () => {
@@ -166,6 +176,7 @@ export default function CaptionPreview({
     const result = gs.last;
     gs.last = null;
     setLive(null);
+    setPinchLive(1);
     setSnapped(false);
     // A tap that wobbled changes nothing: only a real move or pinch is committed.
     if (gs.moved && result && !sameStyle(result, latest.current.stored)) {
@@ -215,29 +226,54 @@ export default function CaptionPreview({
 
   // The same look the render gets: a font by PostScript name replaces the system font (and its weight), and a
   // caption with no background gets the renderer's soft dark shadow (black, 60%, radius 4, 2 down, in frame units).
+  const px1 = px;
+  const lineHeightPx = spec.fontSize * (spec.lineHeight ?? 1.2) * px1;
   const textStyle = {
     color: spec.color,
     fontSize: spec.fontSize * px,
     ...(spec.fontName ? { fontFamily: previewFontFamily(spec.fontName) } : { fontWeight: WEIGHTS[spec.fontWeight] }),
     textAlign: "center" as const,
     letterSpacing: (spec.letterSpacing ?? 0) * px,
-    ...(spec.lineHeight ? { lineHeight: spec.fontSize * spec.lineHeight * px } : null),
+    lineHeight: lineHeightPx,
     ...(spec.shadow
       ? { textShadowColor: "rgba(0,0,0,0.6)", textShadowRadius: 4 * px, textShadowOffset: { width: 0, height: 2 * px } }
       : {}),
   };
+  const padX = (spec.backgroundPaddingX ?? spec.backgroundPadding ?? 0) * px;
+  const padY = (spec.backgroundPaddingY ?? spec.backgroundPadding ?? 0) * px;
+  const radiusPx = (spec.cornerRadius ?? 0) * px;
+  const maxBox = frameW * (spec.maxWidth ?? 0.86);
+  // The caption as the render draws it: a background per line where the build can (supportsLineBackgrounds),
+  // otherwise one box as wide as the widest line. Never a full-width banner.
+  const caption = (hidden: boolean, onLayout?: (e: LayoutChangeEvent) => void) => (
+    <HuggingText
+      text={shownText}
+      hidden={hidden}
+      onLayout={onLayout}
+      textStyle={textStyle}
+      padX={padX}
+      padY={padY}
+      radius={radiusPx}
+      background={spec.backgroundColor ?? null}
+      maxWidth={maxBox}
+      mode={supportsLineBackgrounds ? "lines" : "box"}
+    />
+  );
+  // The edit field keeps a plain box.
   const boxStyle = {
     backgroundColor: spec.backgroundColor,
-    paddingHorizontal: (spec.backgroundPaddingX ?? spec.backgroundPadding ?? 0) * px,
-    paddingVertical: (spec.backgroundPaddingY ?? spec.backgroundPadding ?? 0) * px,
-    maxWidth: frameW * (spec.maxWidth ?? 0.86),
-    borderRadius: (spec.cornerRadius ?? 0) * px,
+    paddingHorizontal: padX,
+    paddingVertical: padY,
+    maxWidth: maxBox,
+    borderRadius: radiusPx,
   };
 
   // Placement comes from the measured box (an estimate for the very first frame).
   const size = measured ?? estimateBoxSize(line.text, shown, frameW);
   const rect = captionBoxRect({ w: frameW, h: frameH }, { ...shown, xCenter: spec.xCenter ?? shown.xCenter }, size);
-  const touch = touchRect(rect);
+  const base = touchRect(rect);
+  // Two fingers must land on the caption to pinch it: the target reaches TOUCH_PAD beyond the box on every side.
+  const touch = { left: base.left - TOUCH_PAD, top: base.top - TOUCH_PAD, width: base.width + 2 * TOUCH_PAD, height: base.height + 2 * TOUCH_PAD };
   const gesturing = live !== null;
   // Live preview draws the caption; the rendered preview already shows it burned in.
   const drawn = !invisible || gesturing || editing !== null;
@@ -246,17 +282,15 @@ export default function CaptionPreview({
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       {/* A copy of the caption that only measures: invisible, never touched. */}
-      <View pointerEvents="none" style={[styles.measure, boxStyle]} onLayout={onMeasure}>
-        <Text style={textStyle}>{shownText}</Text>
+      <View pointerEvents="none" style={styles.measure}>
+        {caption(true, onMeasure)}
       </View>
 
       {gesturing && snapped && <View pointerEvents="none" style={[styles.guide, { left: frameW / 2 - 0.5, height: frameH }]} />}
 
       {drawn && editing === null && (
-        <View pointerEvents="none" style={[styles.abs, { left: rect.left, top: rect.top, width: rect.width, height: rect.height }]}>
-          <View style={[boxStyle, styles.fill]}>
-            <Text style={textStyle}>{shownText}</Text>
-          </View>
+        <View pointerEvents="none" style={[styles.abs, styles.fill, { left: rect.left, top: rect.top, width: rect.width, height: rect.height, transform: [{ scale: pinchLive }] }]}>
+          {caption(false)}
         </View>
       )}
 

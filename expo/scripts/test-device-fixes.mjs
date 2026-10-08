@@ -31,7 +31,7 @@ const w = (text, startMs, endMs) => ({ text, startMs, endMs });
   ok("37% smaller than before (60 -> 38)", trial.fontSize === 38 && 1 - 38 / 60 > 0.35 && 1 - 38 / 60 < 0.4);
   ok("normal case by default: the preset has no uppercase", trial.uppercase === undefined);
   eq("lower: 72% from the top", trial.yCenter, 0.72);
-  ok("rounded corners (about 0.25 em)", trial.cornerRadius > 0 && Math.abs(trial.cornerRadius - 0.25 * trial.fontSize) < 1);
+  ok("rounded corners (about 0.3 em)", trial.cornerRadius > 0 && Math.abs(trial.cornerRadius - 0.3 * trial.fontSize) < 1);
 
   const cap = (look, caps) => JSON.parse(toRenderJson({ version: 1, clips: [], overlays: captionLinesToEditOverlays(buildCaptionLines([w("Break my lease", 0, 900)], {}, [{ startMs: 0, endMs: 1000 }], look), look) }, caps)).overlays[0];
   const def = cap(usableCaptionStyle(undefined, true), { supportsFont: true, supportsTextBox: true });

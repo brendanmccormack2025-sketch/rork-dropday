@@ -123,8 +123,8 @@ const captions = captionLinesToEditOverlays(buildCaptionLines([{ text: "hi", sta
   }
   const drag = read("../components/DraggableTextOverlay.tsx");
   const feed = read("../components/FeedItem.tsx");
-  ok("the editor pinch uses react-native-gesture-handler (pan, pinch, rotate together) and stores scale", /Gesture\.Pinch\(\)/.test(drag) && /Gesture\.Pan\(\)/.test(drag) && /Gesture\.Rotation\(\)/.test(drag) && /Gesture\.Simultaneous\(/.test(drag) && /scale: clampScale\(scaleSv\.value\)/.test(drag));
-  ok("editor and feed both size from effectiveFontSize", /effectiveFontSize\(\{ fontSize: fontSizeSv\.value, scale: scaleSv\.value \}\)/.test(drag) && /effectiveFontSize\(overlay\)/.test(feed));
+  ok("the editor pinch uses react-native-gesture-handler (pan, pinch, rotate together) and stores scale", /Gesture\.Pinch\(\)/.test(drag) && /Gesture\.Pan\(\)/.test(drag) && /Gesture\.Rotation\(\)/.test(drag) && /Gesture\.Simultaneous\(/.test(drag) && /scale: clampScale\(scaleSv\.value \* pinchSv\.value\)/.test(drag));
+  ok("editor and feed both size from effectiveFontSize", /effectiveFontSize\(overlay\)/.test(drag) && /effectiveFontSize\(overlay\)/.test(feed));
   ok("a gesture takes the undo snapshot first, so undo/redo cover it", /p\.onEditStart\?\.\(p\.overlay\.id\)/.test(drag) && /handleTextOverlayEditStart/.test(read("../app/edit.tsx")));
   ok("undo/redo move the overlay: shared values follow the props", /scaleSv\.value = clampScale\(overlay\.scale\)/.test(drag));
 }

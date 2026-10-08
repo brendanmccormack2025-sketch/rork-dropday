@@ -56,6 +56,7 @@ import {
   videoDisplayWidth,
 } from "@/lib/feedLayout";
 import { uploadLabel } from "@/lib/postingFeed";
+import HuggingText from "@/components/HuggingText";
 import { savePostToRoll } from "@/lib/exportEdit";
 import { effectiveFontSize } from "@/lib/textOverlayStyle";
 
@@ -245,7 +246,7 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
   const layout = textLayout(effectiveFontSize(overlay), videoDisplayWidth(containerW, { visibleW, visibleH, cropLeft, cropTop }));
 
   // The overlay sits in a fixed-width slot centred on its point (as in the editor), so where it is placed
-  // never changes how its text wraps. The box shrinks to its text inside the slot.
+  // never changes how its text wraps. The background hugs the words, line by line (HuggingText).
   const videoW = videoDisplayWidth(containerW, { visibleW, visibleH, cropLeft, cropTop });
   const slot = textSlot(left, videoW);
   const [boxH, setBoxH] = useState(0);
@@ -255,10 +256,6 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
   return (
     <View
       pointerEvents="none"
-      onLayout={(e) => {
-        const { height } = e.nativeEvent.layout;
-        if (height > 0) setBoxH((prev) => (prev === height ? prev : height));
-      }}
       style={[
         styles.textOverlayWrap,
         {
@@ -272,27 +269,28 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
         },
       ]}
     >
-      <UiText
-        allowFontScaling={false}
-        style={[
-          styles.textOverlayText,
-          {
-            color,
-            ...overlayFont(overlay.fontId),
-            fontSize: layout.fontSize,
-            lineHeight: layout.lineHeight,
-            paddingHorizontal: layout.padX,
-            paddingVertical: layout.padY,
-            borderRadius: layout.cornerRadius,
-            maxWidth: slot.width,
-            backgroundColor,
-            textShadowColor: hasBackground ? "transparent" : shadowTint,
-          },
-        ]}
-        numberOfLines={undefined}
-      >
-        {overlay.text}
-      </UiText>
+      <HuggingText
+        text={overlay.text}
+        onLayout={(e) => {
+          const { height } = e.nativeEvent.layout;
+          if (height > 0) setBoxH((prev) => (prev === height ? prev : height));
+        }}
+        maxWidth={layout.maxWidth}
+        padX={layout.padX}
+        padY={layout.padY}
+        radius={layout.cornerRadius}
+        mode="lines"
+        background={hasBackground ? backgroundColor : null}
+        textStyle={{
+          ...overlayFont(overlay.fontId),
+          color,
+          fontSize: layout.fontSize,
+          lineHeight: layout.lineHeight,
+          textShadowOffset: { width: 0, height: 1 },
+          textShadowRadius: 4,
+          textShadowColor: hasBackground ? "transparent" : shadowTint,
+        }}
+      />
     </View>
   );
 },

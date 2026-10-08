@@ -8,6 +8,7 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import type { TextOverlay, TextBackgroundStyle } from "@/providers/PostsProvider";
+import HuggingText from "@/components/HuggingText";
 import { TOUCH_PAD, createGestureTracker } from "@/lib/overlayGestures";
 import { clampScale, effectiveFontSize, resolveBgMeta as resolveBgMetaShared } from "@/lib/textOverlayStyle";
 import {
@@ -92,6 +93,7 @@ export default function DraggableTextOverlay({
   const translateY = useSharedValue(start.y);
   const fontSizeSv = useSharedValue(overlay.fontSize ?? 26);
   const scaleSv = useSharedValue(clampScale(overlay.scale));
+  const pinchSv = useSharedValue(1);
   const rotationSv = useSharedValue(overlay.rotation);
   const textWidth = useSharedValue(0);
   const textHeight = useSharedValue(0);
@@ -138,6 +140,7 @@ export default function DraggableTextOverlay({
     translateX.value = at.x;
     translateY.value = at.y;
     scaleSv.value = clampScale(overlay.scale);
+    pinchSv.value = 1;
     rotationSv.value = overlay.rotation;
     fontSizeSv.value = overlay.fontSize ?? 26;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -175,7 +178,7 @@ export default function DraggableTextOverlay({
       p.onUpdate(p.overlay.id, {
         x: full.x,
         y: full.y,
-        scale: clampScale(scaleSv.value),
+        scale: clampScale(scaleSv.value * pinchSv.value),
         rotation: rotationSv.value,
       });
       p.onDragState?.(p.overlay.id, false, fx, fy);
@@ -219,7 +222,7 @@ export default function DraggableTextOverlay({
       })
       .onUpdate((e) => {
         tracker.change();
-        scaleSv.value = clampScale(baseScale * e.scale);
+        pinchSv.value = clampScale(baseScale * e.scale) / baseScale;
       })
       .onFinalize(() => tracker.end("pinch"));
 
@@ -258,6 +261,10 @@ export default function DraggableTextOverlay({
   // ── Animated styles ─────────────────────────────────────────────────────
   const videoW = frameWidth / crop.visibleW;
   const slotW = videoW * TEXT_MAX_WIDTH;
+  // The same function the feed uses, so sizes, padding and line height cannot drift apart. The pinch changes the
+  // overlay's stored scale; while the fingers are down the box is only scaled (cheap and smooth), and the real
+  // size takes over when the new scale arrives.
+  const layout = textLayout(effectiveFontSize(overlay), videoW);
   // The slot is fixed: only the text box inside it changes size, so wrapping never depends on position.
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -265,22 +272,9 @@ export default function DraggableTextOverlay({
       { translateX: translateX.value - slotW / 2 },
       { translateY: translateY.value - textHeight.value / 2 },
       { rotate: `${rotationSv.value}deg` },
-      { scale: scalePulse.value },
+      { scale: scalePulse.value * pinchSv.value },
     ],
   }));
-
-  // The same function the feed and Preview use, so sizes, padding and line height cannot drift apart.
-  const animatedTextStyle = useAnimatedStyle(() => {
-    const l = textLayout(effectiveFontSize({ fontSize: fontSizeSv.value, scale: scaleSv.value }), videoW);
-    return { fontSize: l.fontSize, lineHeight: l.lineHeight };
-  });
-  const animatedBoxStyle = useAnimatedStyle(() => ({
-    borderRadius: textLayout(effectiveFontSize({ fontSize: fontSizeSv.value, scale: scaleSv.value }), videoW).cornerRadius,
-  }));
-  const animatedPadStyle = useAnimatedStyle(() => {
-    const l = textLayout(effectiveFontSize({ fontSize: fontSizeSv.value, scale: scaleSv.value }), videoW);
-    return { paddingHorizontal: l.padX, paddingVertical: l.padY, borderRadius: l.cornerRadius };
-  });
 
   // ── Snap guide line styles ──────────────────────────────────────────────
   const snapGuideHStyle = useAnimatedStyle(() => ({
@@ -293,7 +287,7 @@ export default function DraggableTextOverlay({
     height: frameHeight + 20,
   }));
 
-  // ── Measure text on JS thread, then fade in ────────────────────────────
+  // ── Measure the box on the JS thread, then fade in ──────────────────────
   const [hasMeasured, setHasMeasured] = useState(false);
 
   const handleLayout = useCallback(
@@ -320,6 +314,7 @@ export default function DraggableTextOverlay({
 
   const hasBackground = bgMeta.bgColor !== "transparent" && bgMeta.bgOpacity > 0;
   const effectiveTextColor = bgMeta.textColor;
+  const background = hasBackground ? withOpacity(bgMeta.bgColor, bgMeta.bgOpacity) : null;
 
   // ── Render ──────────────────────────────────────────────────────────────
   return (
@@ -328,82 +323,56 @@ export default function DraggableTextOverlay({
       pointerEvents="box-none"
     >
       <GestureDetector gesture={gesture}>
-      <View collapsable={false} style={styles.touch}>
-      <Animated.View
-        style={[styles.box, animatedPadStyle]}
-        onLayout={handleLayout}
-      >
-      {/* Background box */}
-      {hasBackground && (
-        <Animated.View
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              backgroundColor: bgMeta.bgColor,
-              opacity: bgMeta.bgOpacity,
-            },
-            animatedBoxStyle,
-          ]}
-          pointerEvents="none"
-        />
-      )}
+        <View collapsable={false} style={styles.touch}>
+          <View style={styles.box}>
+            <HuggingText
+              text={overlay.text}
+              onLayout={handleLayout}
+              maxWidth={layout.maxWidth}
+              padX={layout.padX}
+              padY={layout.padY}
+              radius={layout.cornerRadius}
+              mode="lines"
+              background={background}
+              textStyle={{
+                ...overlayFont(overlay.fontId),
+                fontSize: layout.fontSize,
+                lineHeight: layout.lineHeight,
+                color: effectiveTextColor,
+                textShadowOffset: { width: 0, height: 1 },
+                textShadowRadius: 4,
+                textShadowColor: hasBackground
+                  ? "transparent"
+                  : effectiveTextColor === "#000000"
+                    ? "rgba(255,255,255,0.6)"
+                    : "rgba(0,0,0,0.6)",
+              }}
+            />
 
-      {/* Selection outline: the same dashed white outline the caption uses */}
-      {isSelected && (
-        <Animated.View
-          style={[styles.selectionOutline, animatedBoxStyle]}
-          pointerEvents="none"
-        />
-      )}
+            {/* Selection outline: the same dashed white outline the caption uses */}
+            {isSelected && (
+              <View pointerEvents="none" style={[styles.selectionOutline, { borderRadius: layout.cornerRadius }]} />
+            )}
 
-      {/* Snap guides (rendered as absolute overlays) */}
-      {isSelected && (
-        <>
-          {/* Horizontal center guide */}
-          <Animated.View
-            style={[
-              styles.snapGuide,
-              styles.snapGuideH,
-              snapGuideHStyle,
-            ]}
-            pointerEvents="none"
-          />
-          {/* Vertical center guide */}
-          <Animated.View
-            style={[
-              styles.snapGuide,
-              styles.snapGuideV,
-              snapGuideVStyle,
-            ]}
-            pointerEvents="none"
-          />
-        </>
-      )}
-
-      {/* Text content — fontSize driven by animated shared value */}
-      <Animated.Text
-        allowFontScaling={false}
-        style={[
-          styles.text,
-          overlayFont(overlay.fontId),
-          animatedTextStyle,
-          {
-            color: effectiveTextColor,
-            textShadowColor: hasBackground
-              ? "transparent"
-              : effectiveTextColor === "#000000"
-                ? "rgba(255,255,255,0.6)"
-                : "rgba(0,0,0,0.6)",
-          },
-        ]}
-      >
-        {overlay.text}
-      </Animated.Text>
-      </Animated.View>
-      </View>
+            {/* Snap guides (rendered as absolute overlays) */}
+            {isSelected && (
+              <>
+                <Animated.View style={[styles.snapGuide, styles.snapGuideH, snapGuideHStyle]} pointerEvents="none" />
+                <Animated.View style={[styles.snapGuide, styles.snapGuideV, snapGuideVStyle]} pointerEvents="none" />
+              </>
+            )}
+          </View>
+        </View>
       </GestureDetector>
     </Animated.View>
   );
+}
+
+/** "#RRGGBB" and an opacity -> "rgba(r,g,b,a)". */
+function withOpacity(hex: string, opacity: number): string {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h.slice(0, 6), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${opacity})`;
 }
 
 // ── Styles ──────────────────────────────────────────────────────────────────
@@ -433,13 +402,6 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
     borderColor: "#FFFFFF",
     margin: -3,
-  },
-  text: {
-    fontWeight: "900" as const,
-    textAlign: "center",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-    includeFontPadding: false,
   },
   // ── Snap guides ──
   snapGuide: {
