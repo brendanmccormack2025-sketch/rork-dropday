@@ -8,7 +8,9 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import type { TextOverlay, TextBackgroundStyle } from "@/providers/PostsProvider";
+import * as Haptics from "expo-haptics";
 import HuggingText from "@/components/HuggingText";
+import { shouldBuzz, snapToCenter } from "@/lib/guides";
 import { TOUCH_PAD, createGestureTracker } from "@/lib/overlayGestures";
 import { clampScale, effectiveFontSize, resolveBgMeta as resolveBgMetaShared } from "@/lib/textOverlayStyle";
 import {
@@ -28,9 +30,17 @@ const FULL_CROP: CoverCrop = { visibleW: 1, visibleH: 1, cropLeft: 0, cropTop: 0
 export const MIN_FONT_SIZE = 12;
 export const MAX_FONT_SIZE = 120;
 const DRAG_EDGE_MARGIN = 0.01;
-const SNAP_THRESHOLD = 16; // px — distance from center to trigger snap
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** A light tick when the overlay lands on the centre; never throws. */
+function buzz(): void {
+  try {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  } catch {
+    // no haptics here
+  }
+}
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
@@ -69,6 +79,8 @@ interface DraggableTextOverlayProps {
   /** Called continuously during drag so the parent can show a trash zone.
    *  Passes the overlay's center in frame-relative coordinates. */
   onDragState?: (id: string, isDragging: boolean, centerX: number, centerY: number) => void;
+  /** A drag, pinch or rotation is in progress (and whether the overlay is centred): drives the safe-zone guides. */
+  onGestureState?: (active: boolean, centered: boolean) => void;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -86,6 +98,7 @@ export default function DraggableTextOverlay({
   onCycleBackgroundStyle: _onCycleBackgroundStyle,
   onEditStart,
   onDragState,
+  onGestureState,
 }: DraggableTextOverlayProps) {
   // ── Shared values (UI thread) ────────────────────────────────────────────
   const start = fracToFrame(overlay.x, overlay.y, frameWidth, frameHeight, crop);
@@ -100,8 +113,6 @@ export default function DraggableTextOverlay({
   const opacity = useSharedValue(0);
 
   // Snap guide visibility
-  const snapGuideH = useSharedValue(0); // 0=hidden, 1=visible
-  const snapGuideV = useSharedValue(0);
   const scalePulse = useSharedValue(1);
 
   // ── Temporary snapshots for gesture arithmetic ──────────────────────────
@@ -121,6 +132,7 @@ export default function DraggableTextOverlay({
     onUpdate,
     onEditStart,
     onDragState,
+    onGestureState,
   });
   propsRef.current = {
     overlay,
@@ -131,6 +143,7 @@ export default function DraggableTextOverlay({
     onUpdate,
     onEditStart,
     onDragState,
+    onGestureState,
   };
 
   // Undo, redo or a new frame size change the overlay under us: follow it (never while a finger is down).
@@ -151,21 +164,15 @@ export default function DraggableTextOverlay({
     let baseScale = 1;
     let baseRotation = 0;
 
+    // The overlay snaps to the horizontal centre (within a few points) with a light tick; the guides layer draws the line.
+    let wasCentered = false;
     const snapTo = (cx: number, cy: number) => {
-      const p = propsRef.current;
-      const frameCx = p.frameWidth / 2;
-      const frameCy = p.frameHeight / 2;
-      const nearX = Math.abs(cx - frameCx) < SNAP_THRESHOLD;
-      const nearY = Math.abs(cy - frameCy) < SNAP_THRESHOLD;
-      translateX.value = nearX ? frameCx : cx;
-      translateY.value = nearY ? frameCy : cy;
-      snapGuideV.value = withTiming(nearX ? 1 : 0, { duration: nearX ? 120 : 150 });
-      snapGuideH.value = withTiming(nearY ? 1 : 0, { duration: nearY ? 120 : 150 });
-      if (nearX || nearY) {
-        scalePulse.value = withSpring(1.08, { stiffness: 400, damping: 12 }, () => {
-          scalePulse.value = withSpring(1, { stiffness: 300, damping: 15 });
-        });
-      }
+      const snapped = snapToCenter(cx, propsRef.current.frameWidth);
+      translateX.value = snapped.x;
+      translateY.value = cy;
+      if (shouldBuzz(wasCentered, snapped.centered)) buzz();
+      wasCentered = snapped.centered;
+      propsRef.current.onGestureState?.(true, snapped.centered);
     };
 
     const commit = () => {
@@ -183,16 +190,17 @@ export default function DraggableTextOverlay({
       });
       p.onDragState?.(p.overlay.id, false, fx, fy);
       isDraggingSv.value = 0;
-      snapGuideH.value = withTiming(0, { duration: 200 });
-      snapGuideV.value = withTiming(0, { duration: 200 });
+      wasCentered = false;
     };
 
     const tracker = createGestureTracker({
       onEditStart: () => {
         const p = propsRef.current;
         p.onEditStart?.(p.overlay.id);
+        p.onGestureState?.(true, false);
       },
       onCommit: commit,
+      onEnd: () => propsRef.current.onGestureState?.(false, false),
     });
 
     const pan = Gesture.Pan()
@@ -276,17 +284,6 @@ export default function DraggableTextOverlay({
     ],
   }));
 
-  // ── Snap guide line styles ──────────────────────────────────────────────
-  const snapGuideHStyle = useAnimatedStyle(() => ({
-    opacity: snapGuideH.value,
-    width: frameWidth + 20,
-  }));
-
-  const snapGuideVStyle = useAnimatedStyle(() => ({
-    opacity: snapGuideV.value,
-    height: frameHeight + 20,
-  }));
-
   // ── Measure the box on the JS thread, then fade in ──────────────────────
   const [hasMeasured, setHasMeasured] = useState(false);
 
@@ -354,13 +351,6 @@ export default function DraggableTextOverlay({
               <View pointerEvents="none" style={[styles.selectionOutline, { borderRadius: layout.cornerRadius }]} />
             )}
 
-            {/* Snap guides (rendered as absolute overlays) */}
-            {isSelected && (
-              <>
-                <Animated.View style={[styles.snapGuide, styles.snapGuideH, snapGuideHStyle]} pointerEvents="none" />
-                <Animated.View style={[styles.snapGuide, styles.snapGuideV, snapGuideVStyle]} pointerEvents="none" />
-              </>
-            )}
           </View>
         </View>
       </GestureDetector>
@@ -402,22 +392,5 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
     borderColor: "#FFFFFF",
     margin: -3,
-  },
-  // ── Snap guides ──
-  snapGuide: {
-    position: "absolute",
-    backgroundColor: "rgba(255,255,255,0.45)",
-  },
-  snapGuideH: {
-    height: 1,
-    left: -10,
-    top: "50%" as const,
-    marginTop: -0.5,
-  },
-  snapGuideV: {
-    width: 1,
-    top: -10,
-    left: "50%" as const,
-    marginLeft: -0.5,
   },
 });

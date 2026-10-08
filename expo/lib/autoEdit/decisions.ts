@@ -143,9 +143,15 @@ function sortDecisions(list: Decision[]): Decision[] {
   return [...list].sort((a, b) => a.sourceStartMs - b.sourceStartMs || a.sourceEndMs - b.sourceEndMs);
 }
 
+/** A part the creator deleted by hand from the Cuts screen (see addManualCut). */
+export function isManualDelete(d: Decision): boolean {
+  return d.origin === "user" && (d.payload as { manual?: boolean } | undefined)?.manual === true;
+}
+
 function isActiveCut(state: EditState, d: Decision): boolean {
-  // A category missing from an older saved state counts as on.
-  return isCutType(d.type) && d.state === "applied" && state.categoryEnabled[d.type] !== false;
+  // A category missing from an older saved state counts as on. A part the creator deleted by hand stays deleted
+  // whatever the automatic categories do ("Keep original" turns off the AI's cuts, not the creator's).
+  return isCutType(d.type) && d.state === "applied" && (isManualDelete(d) || state.categoryEnabled[d.type] !== false);
 }
 
 // ── Laugh protection ────────────────────────────────────────────────────────
@@ -350,6 +356,12 @@ export function restoreRange(state: EditState, sourceStartMs: number, sourceEndM
 /** A cut the user made by hand; it wins over any later AI plan. */
 export function addUserCut(state: EditState, sourceStartMs: number, sourceEndMs: number): EditState {
   const d = makeDecision("silenceCut", sourceStartMs, sourceEndMs, { origin: "user" });
+  return { ...state, decisions: sortDecisions(dedupe([...state.decisions.filter((x) => x.id !== d.id), d])) };
+}
+
+/** "Delete this part": a cut the creator made by hand. Like any cut it can be restored (restoreRange) and undone. */
+export function addManualCut(state: EditState, sourceStartMs: number, sourceEndMs: number): EditState {
+  const d = makeDecision("silenceCut", sourceStartMs, sourceEndMs, { origin: "user", payload: { manual: true } });
   return { ...state, decisions: sortDecisions(dedupe([...state.decisions.filter((x) => x.id !== d.id), d])) };
 }
 

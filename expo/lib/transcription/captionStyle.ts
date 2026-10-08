@@ -24,8 +24,8 @@ export const CAPTION_STYLE_CONFIG = {
   /** The caption box stays between these fractions of the frame height (top edge .. bottom edge). */
   safeTop: 0.1,
   safeBottom: 0.75,
-  /** Snap to the horizontal centre when within this fraction of the frame width. */
-  snapX: 0.04,
+  /** Snap to the horizontal centre when within this fraction of the frame width (about 6 pt on a phone). */
+  snapX: 0.016,
   /** Line height used to estimate the box height (times the font size). */
   lineHeight: 1.25,
   /** False until VideoRenderModule.swift reads xCenter: horizontal movement is then off (see report). */

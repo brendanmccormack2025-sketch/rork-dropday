@@ -141,8 +141,8 @@ const CTX = { screen: "/edit", appVersion: "1.0.3", buildNumber: "39", updateId:
 // ── the toolbar ──
 {
   const src = readFileSync(new URL("../app/edit.tsx", import.meta.url), "utf8");
-  const a = src.indexOf("{/* ── Cuts screen: the timeline and the Cuts panel");
-  const b = src.indexOf("{/* ── Post screen");
+  const a = src.indexOf("<View style={styles.toolbar}>\n          {/* Trim");
+  const b = src.indexOf("<View style={[styles.bottomSection");
   const toolbar = src.slice(a, b);
   eq("the toolbar section exists", [a > 0, b > a], [true, true]);
   eq("it has no Delete tool: no Delete label, no delete handler, no trash icon", [/>\s*Delete\s*</.test(toolbar.replace(/Delete line/g, "")), toolbar.includes("handleDeleteClip"), toolbar.includes("Trash2")], [false, false, false]);

@@ -71,10 +71,10 @@ const ASPECT = 16 / 9;
   eq("growing the box (pinch) near the bottom pushes it back inside the zone", (() => { const s = clampCaptionStyle({ scale: 2, yCenter: 0.7, xCenter: 0.5 }, ASPECT); return s.yCenter + halfBoxHeight(2, ASPECT) <= 0.75 + 1e-9; })(), true);
 
   // snap
-  eq("within 4% of the horizontal centre snaps to it", [snapCaptionStyle({ scale: 1, yCenter: 0.5, xCenter: 0.53 }).snappedX, snapCaptionStyle({ scale: 1, yCenter: 0.5, xCenter: 0.53 }).style.xCenter], [true, 0.5]);
+  eq("within 1.6% (about 6 pt) of the horizontal centre snaps to it", [snapCaptionStyle({ scale: 1, yCenter: 0.5, xCenter: 0.512 }).snappedX, snapCaptionStyle({ scale: 1, yCenter: 0.5, xCenter: 0.512 }).style.xCenter], [true, 0.5]);
   eq("beyond that it does not", [snapCaptionStyle({ scale: 1, yCenter: 0.5, xCenter: 0.6 }).snappedX, snapCaptionStyle({ scale: 1, yCenter: 0.5, xCenter: 0.6 }).style.xCenter], [false, 0.6]);
   const h = { ...C, horizontalNative: true };
-  eq("with native horizontal placement, x moves, snaps near the centre and is clamped inside the frame", [0.52, 0.56, 0.99, 0.01].map((x) => Math.round(settleCaptionStyle({ scale: 1, yCenter: 0.5, xCenter: x }, ASPECT, h).style.xCenter * 1000) / 1000), [0.5, 0.56, 0.57, 0.43]);
+  eq("with native horizontal placement, x moves, snaps near the centre and is clamped inside the frame", [0.51, 0.56, 0.99, 0.01].map((x) => Math.round(settleCaptionStyle({ scale: 1, yCenter: 0.5, xCenter: x }, ASPECT, h).style.xCenter * 1000) / 1000), [0.5, 0.56, 0.57, 0.43]);
   eq("while the renderer cannot place horizontally, x is locked to the centre", settleCaptionStyle({ scale: 1, yCenter: 0.5, xCenter: 0.9 }, ASPECT).style.xCenter, 0.5);
 }
 

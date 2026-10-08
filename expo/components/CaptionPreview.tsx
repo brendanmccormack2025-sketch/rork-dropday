@@ -4,7 +4,9 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import type { CaptionStyle } from "@/lib/editModel";
 import { withTextBox, type OverlayFontWeight } from "@/lib/editStyles";
+import * as Haptics from "expo-haptics";
 import HuggingText from "@/components/HuggingText";
+import { shouldBuzz } from "@/lib/guides";
 import { TOUCH_PAD } from "@/lib/overlayGestures";
 import { supportsLineBackgrounds, supportsTextBox } from "@/modules/video-render";
 import { previewFontFamily } from "@/lib/transcription/captionPresets";
@@ -49,7 +51,18 @@ type Props = {
   onEdit: (lineIndex: number, text: string) => void;
   /** A drag or pinch ended: the new clip-wide box (one undo step). */
   onStyleCommit?: (style: CaptionStyle) => void;
+  /** A drag or pinch is in progress (and whether the caption is centred): drives the safe-zone guides. */
+  onGestureState?: (active: boolean, centered: boolean) => void;
 };
+
+/** A light tick when the caption lands on the centre; never throws. */
+function buzz(): void {
+  try {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  } catch {
+    // no haptics here
+  }
+}
 
 const sameStyle = (a: CaptionStyle, b: CaptionStyle) =>
   Math.abs(a.scale - b.scale) < 1e-4 && Math.abs(a.yCenter - b.yCenter) < 1e-4 && Math.abs(a.xCenter - b.xCenter) < 1e-4;
@@ -82,6 +95,7 @@ export default function CaptionPreview({
   onEditStart,
   onEdit,
   onStyleCommit,
+  onGestureState,
 }: Props) {
   const stored = useMemo(() => effectiveCaptionStyle(style), [style]);
   const [live, setLive] = useState<CaptionStyle | null>(null);
@@ -121,8 +135,8 @@ export default function CaptionPreview({
     setMeasured(null);
   }, [shownText, shown.scale, frameW]);
 
-  const latest = useRef({ stored, frameW, frameH, onStyleCommit, onEditStart, index, line, selected, onSelectedChange });
-  latest.current = { stored, frameW, frameH, onStyleCommit, onEditStart, index, line, selected, onSelectedChange };
+  const latest = useRef({ stored, frameW, frameH, onStyleCommit, onEditStart, index, line, selected, onSelectedChange, onGestureState });
+  latest.current = { stored, frameW, frameH, onStyleCommit, onEditStart, index, line, selected, onSelectedChange, onGestureState };
 
   const startEditing = useCallback(() => {
     const cur = latest.current;
@@ -135,7 +149,7 @@ export default function CaptionPreview({
   startEditingRef.current = startEditing;
 
   // One continuous gesture (a drag, a pinch, or both at once) starts from the stored box and ends in one commit.
-  const g = useRef({ base: stored, dx: 0, dy: 0, pinch: 1, active: 0, moved: false, last: null as CaptionStyle | null });
+  const g = useRef({ base: stored, dx: 0, dy: 0, pinch: 1, active: 0, moved: false, wasCentered: false, last: null as CaptionStyle | null });
   const update = () => {
     const cur = latest.current;
     const gs = g.current;
@@ -155,7 +169,10 @@ export default function CaptionPreview({
     );
     setLive(moving.style);
     setPinchLive(Math.max(0.3, Math.min(4, next.style.scale / gs.base.scale)));
+    if (shouldBuzz(g.current.wasCentered, next.snappedX)) buzz();
+    g.current.wasCentered = next.snappedX;
     setSnapped(next.snappedX);
+    cur.onGestureState?.(true, next.snappedX);
   };
   const begin = () => {
     const gs = g.current;
@@ -168,6 +185,7 @@ export default function CaptionPreview({
       gs.last = null;
     }
     gs.active++;
+    latest.current.onGestureState?.(true, false);
   };
   const finish = () => {
     const gs = g.current;
@@ -178,6 +196,8 @@ export default function CaptionPreview({
     setLive(null);
     setPinchLive(1);
     setSnapped(false);
+    gs.wasCentered = false;
+    latest.current.onGestureState?.(false, false);
     // A tap that wobbled changes nothing: only a real move or pinch is committed.
     if (gs.moved && result && !sameStyle(result, latest.current.stored)) {
       latest.current.onSelectedChange(true);
@@ -286,8 +306,6 @@ export default function CaptionPreview({
         {caption(true, onMeasure)}
       </View>
 
-      {gesturing && snapped && <View pointerEvents="none" style={[styles.guide, { left: frameW / 2 - 0.5, height: frameH }]} />}
-
       {drawn && editing === null && (
         <View pointerEvents="none" style={[styles.abs, styles.fill, { left: rect.left, top: rect.top, width: rect.width, height: rect.height, transform: [{ scale: pinchLive }] }]}>
           {caption(false)}
@@ -309,7 +327,7 @@ export default function CaptionPreview({
                 if (editing !== null) onEdit(editing, draft);
                 setEditing(null);
               }}
-              autoCapitalize="characters"
+              autoCapitalize="sentences"
               autoCorrect={false}
               returnKeyType="done"
               style={[textStyle, styles.input]}
@@ -343,5 +361,4 @@ const styles = StyleSheet.create({
   measure: { position: "absolute", left: 0, top: 0, opacity: 0, alignSelf: "flex-start" },
   input: { minWidth: 80, padding: 0 },
   outline: { borderWidth: 1.5, borderColor: "#FFFFFF", borderStyle: "dashed", borderRadius: 2 },
-  guide: { position: "absolute", top: 0, width: 1, backgroundColor: "#FFD400" },
 });

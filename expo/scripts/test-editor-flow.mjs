@@ -54,7 +54,7 @@ const edit = read("../app/edit.tsx");
 // ── state is kept ──
 {
   ok("one component, one step state: moving between steps only sets the step", /const \[step, setStep\] = useState<EditorStep>/.test(edit));
-  const stepFns = edit.slice(edit.indexOf("const handleBackPress"), edit.indexOf("const selectedOverlay ="));
+  const stepFns = edit.slice(edit.indexOf("const handleBackPress"), edit.indexOf("// On the Cuts screen undo"));
   ok("going back or forward never touches clips, overlays, captions or history", !/setClips|setTextOverlays|setEditModel|historyRef|pushSnapshot|userEdit|captions\.\w+\(/.test(stepFns));
   ok("the video players are hooks of the component, so they survive the steps", /useVideoPlayer\(/.test(edit) && !/step === "[a-z]+" && useVideoPlayer/.test(edit));
   ok("Android's back button walks the steps", /BackHandler\.addEventListener\("hardwareBackPress"/.test(edit) && /backStep\(stepRef\.current/.test(edit));
@@ -66,7 +66,7 @@ const edit = read("../app/edit.tsx");
   ok("the video fills the screen with the feed's crop: the frame is the whole area in this step", /step === "edit" \? previewAreaSize :/.test(edit) && /previewAreaFull/.test(edit));
   ok("tap on empty video plays or pauses (a selection is dropped first)", /accessibilityLabel=\{isPlaying \? "Pause" : "Play"\}/.test(edit) && /togglePlay\(\);/.test(edit));
   ok("text overlays and captions are edited on the video (touch layer on only in the editor)", /pointerEvents=\{flow\.touchOverlays \? "box-none" : "none"\}/.test(edit));
-  ok("top: back, undo, redo, guides toggle", /label="Back"[\s\S]{0,300}label="Undo"[\s\S]{0,300}label="Redo"[\s\S]{0,300}label="Feed guides"/.test(edit));
+  ok("top: back, undo, redo (no guides button: the guides appear by themselves while dragging)", /label="Back"[\s\S]{0,300}label="Undo"[\s\S]{0,300}label="Redo"/.test(edit) && !/label="Feed guides"/.test(edit));
   ok("right column: Text, Captions, Style, Cuts", /label="Text"[\s\S]{0,700}label="Captions"[\s\S]{0,400}label="Style"[\s\S]{0,400}label="Cuts"/.test(edit));
   ok("Next, bottom-right", /styles\.eNext/.test(edit) && /right: 16,\s*minHeight: 48/.test(edit));
   eq("the caption bar: Edit, Style, Delete line, Done", CAPTION_TOOLS.map((t) => t.label), ["Edit", "Style", "Delete line", "Done"]);

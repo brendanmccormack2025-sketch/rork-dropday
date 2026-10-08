@@ -11,7 +11,7 @@
 
 export type GestureName = "pan" | "pinch" | "rotate";
 
-export function createGestureTracker(hooks: { onEditStart: () => void; onCommit: () => void }) {
+export function createGestureTracker(hooks: { onEditStart: () => void; onCommit: () => void; /** Every time the last gesture is over, changed or not. */ onEnd?: () => void }) {
   const started = new Set<GestureName>();
   let changed = false;
   return {
@@ -30,9 +30,11 @@ export function createGestureTracker(hooks: { onEditStart: () => void; onCommit:
     /** A gesture finished, however it finished. Gestures that never began are ignored. */
     end(name: GestureName) {
       if (!started.delete(name)) return;
-      if (started.size === 0 && changed) {
+      if (started.size === 0) {
+        const wasChanged = changed;
         changed = false;
-        hooks.onCommit();
+        if (wasChanged) hooks.onCommit();
+        hooks.onEnd?.();
       }
     },
     active: () => started.size,

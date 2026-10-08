@@ -48,15 +48,23 @@ export default function CaptionsSheet({
       <GestureHandlerRootView style={styles.root}>
         <Pressable style={styles.backdrop} onPress={onClose} />
         <View style={styles.sheet}>
-          <View style={styles.titleRow}>
-            <UiText style={styles.title}>Captions</UiText>
+          <UiText style={styles.title}>Captions</UiText>
+          {/* The first thing on the panel: a big, obvious way to say no thanks (cuts and text are not touched). */}
+          <View style={[styles.offCard, !captionsOn && styles.offCardOff]}>
+            <View style={styles.offText}>
+              <UiText style={styles.offTitle}>{captionsOn ? "Captions on" : "Captions off"}</UiText>
+              <UiText style={styles.offHint}>
+                {captionsOn ? "Turn off to post without captions." : "Turn on to add captions again."}
+              </UiText>
+            </View>
             <Switch
               value={captionsOn}
               onValueChange={onToggle}
               trackColor={{ false: theme.border, true: theme.accent }}
               thumbColor="#fff"
               ios_backgroundColor={theme.border}
-              accessibilityLabel="Captions on or off"
+              accessibilityLabel={captionsOn ? "Captions off" : "Captions on"}
+              style={styles.offSwitch}
             />
           </View>
 
@@ -89,7 +97,7 @@ export default function CaptionsSheet({
                             onBlur={commit}
                             onSubmitEditing={commit}
                             autoFocus
-                            autoCapitalize="characters"
+                            autoCapitalize="sentences"
                             autoCorrect={false}
                             returnKeyType="done"
                             style={styles.input}
@@ -135,6 +143,22 @@ export default function CaptionsSheet({
 }
 
 const styles = StyleSheet.create({
+  offCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 14,
+    marginTop: 4,
+    marginBottom: 8,
+    borderWidth: 1.5,
+    borderColor: theme.accent,
+    backgroundColor: theme.card,
+  },
+  offCardOff: { borderColor: theme.border },
+  offText: { flex: 1, paddingRight: 12 },
+  offTitle: { color: theme.text, fontSize: 17, fontWeight: "900" as const },
+  offHint: { color: theme.textMuted, fontSize: 12, fontWeight: "600" as const, marginTop: 2 },
+  offSwitch: { transform: [{ scaleX: 1.15 }, { scaleY: 1.15 }] },
   root: { flex: 1, justifyContent: "flex-end" },
   backdrop: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.5)" },
   sheet: { backgroundColor: theme.card, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32, maxHeight: "70%" },

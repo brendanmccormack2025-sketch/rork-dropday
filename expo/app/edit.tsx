@@ -56,6 +56,8 @@ import CaptionsExplainer from "@/components/CaptionsExplainer";
 import CaptionPreview from "@/components/CaptionPreview";
 import FeedSafeZones from "@/components/FeedSafeZones";
 import { defaultCaptionStyle } from "@/lib/transcription/captionStyle";
+import { guidesVisible } from "@/lib/guides";
+import { cancelTextEdit } from "@/lib/textOverlayStyle";
 import { backStep, initialStep, nextStep, selectionBarSide, stepLayout, type EditorStep } from "@/lib/editorFlow";
 import { DEFAULT_TEXT_OVERLAY_POS, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
@@ -96,7 +98,9 @@ import CutsSheet from "@/components/CutsSheet";
 import CaptionsSheet from "@/components/CaptionsSheet";
 import MarkerSheet from "@/components/MarkerSheet";
 import { MANUAL_EDIT_CONFIRM_MESSAGE, guardManualEdits, timelineMatchesState } from "@/lib/autoEdit/confirm";
-import { allCategoriesOff, cutsRows, cutsSummary, setCutsRowEnabled, type CutsRow } from "@/lib/autoEdit/editPanel";
+import { addManualCut } from "@/lib/autoEdit/decisions";
+import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/lib/autoEdit/deletePart";
+import { allCategoriesOff, cutCategoriesOff, cutsRows, cutsSummary, setCutsRowEnabled, type CutsRow } from "@/lib/autoEdit/editPanel";
 import { CAPTION_TOOLS, toolbarMode, type CaptionToolId } from "@/lib/editorToolbar";
 import { formatAiDebug } from "@/lib/autoEdit/debugText";
 import { canRedo as canRedoDecisions, canUndo as canUndoDecisions, emptyHistory, mapHistory, pushEdit, redoEdit, undoEdit, type EditHistory } from "@/lib/autoEdit/history";
@@ -336,7 +340,11 @@ export default function EditScreen() {
     () => computeCoverCrop(frameDims.w, frameDims.h, VIDEO_ASPECT),
     [frameDims],
   );
-  const [showGuides, setShowGuides] = useState(true);
+  // The safe-zone guides: on only while an overlay or caption is dragged or pinched; centred = on the middle line.
+  const [guideGesture, setGuideGesture] = useState({ active: false, centered: false });
+  const handleGestureState = useCallback((active: boolean, centered: boolean) => {
+    setGuideGesture((prev) => (prev.active === active && prev.centered === centered ? prev : { active, centered }));
+  }, []);
 
   // The auto-edit decisions behind the clips (see lib/autoEdit/decisions.ts).
   const editStateRef = useRef<{ state: EditState; durationMs: number } | null>(null);
@@ -2078,6 +2086,19 @@ export default function EditScreen() {
     setDragOverlayInfo(null);
   }, [selectedOverlayId, clips, textOverlays, pushSnapshot]);
 
+  // The text editor's Cancel: a new text is discarded; an existing one is removed (one undo step brings it back).
+  const handleTextEditorRemove = useCallback(() => {
+    setTextEditorVisible(false);
+    const result = cancelTextEdit(textOverlays, editingOverlayId);
+    if (result.snapshot) {
+      pushSnapshot(clips, textOverlays);
+      setTextOverlays(result.overlays);
+      if (editingOverlayId === selectedOverlayId) setSelectedOverlayId(null);
+    }
+    setEditingOverlayId(null);
+    setLiveText(null);
+  }, [editingOverlayId, selectedOverlayId, clips, textOverlays, pushSnapshot]);
+
   const handleCycleBackgroundStyle = useCallback(
     (id: string) => {
       pushSnapshot(clips, textOverlays);
@@ -2721,15 +2742,61 @@ export default function EditScreen() {
     userEdit(allCategoriesOff);
   }, [userEdit]);
 
+  // A red cut marker offers one obvious button, "Undo this cut"; the other markers keep their detail sheet.
+  const [cutMarker, setCutMarker] = useState<TimelineMarker | null>(null);
   const handleMarkerPress = useCallback(
     (marker: TimelineMarker) => {
       if (marker.kind === "proposal" || marker.kind === "filler2" || marker.kind === "laugh" || marker.kind === "um") {
         handleSeekAny(Math.max(0, marker.outputMs - 1000));
       }
+      if (markerAction(marker)) {
+        setCutMarker(marker);
+        setSelectedClipId(null);
+        return;
+      }
       setMarkerSheet(marker);
     },
     [handleSeekAny],
   );
+  // "Undo this cut": the footage comes back (restoreRange), one undo step.
+  const handleUndoThisCut = useCallback(() => {
+    const marker = cutMarker;
+    setCutMarker(null);
+    if (!marker) return;
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    userEdit((st) => undoThisCut(st, marker));
+  }, [cutMarker, userEdit]);
+
+  // "Delete this part": a cut decision of the creator for that range (or, with manual edits, removing the part).
+  const handleDeletePart = useCallback(() => {
+    if (!selectedClipId) return;
+    const model = editStateRef.current;
+    const plan = planDeletePart({
+      clips,
+      clipId: selectedClipId,
+      model,
+      matches: !!model && timelineMatchesState(clipsForUndoRef.current, model.state, model.durationMs),
+    });
+    if (plan.kind === "blocked") {
+      showAlert("Can't delete", LAST_PART_MESSAGE);
+      return;
+    }
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    setCutMarker(null);
+    if (plan.kind === "user-cut") {
+      handleDeselectAndPreview();
+      userEdit((st) => addManualCut(st, plan.range.startMs, plan.range.endMs));
+    } else {
+      pushSnapshot(clips, textOverlays);
+      replaceClips(clips.filter((c) => c.id !== plan.clipId));
+    }
+  }, [selectedClipId, clips, textOverlays, userEdit, pushSnapshot, replaceClips, handleDeselectAndPreview]);
+
+  // "Keep original": the automatic cuts off, nothing else (captions, text and the creator's own deletes stay).
+  const handleKeepOriginal = useCallback(() => {
+    if (editStateRef.current) userEdit(cutCategoriesOff);
+    else handleUseOriginal();
+  }, [userEdit, handleUseOriginal]);
 
   // Owner: forget everything cached for this clip and analyse it again (transcript, loudness).
   const handleClearAnalysisCache = useCallback(async () => {
@@ -3554,7 +3621,6 @@ export default function EditScreen() {
       },
     ];
   })();
-  const guidesActive = !!dragOverlayInfo || captionSelected;
   const flow = stepLayout(step);
   const leaveEditor = () => {
     if (navigation.canGoBack()) router.back();
@@ -3570,6 +3636,11 @@ export default function EditScreen() {
     setStep(to);
   };
   // "Next" / "Done": nothing stays selected going forward, and the clip selection of the timeline ends.
+  // On the Cuts screen undo / redo are about the cuts first (the automatic edit's history), then the timeline.
+  const cutsCanUndo = canUndoDecisions(historyRef.current) || canUndo;
+  const cutsCanRedo = canRedoDecisions(historyRef.current) || canRedo;
+  const handleUndoCuts = () => (canUndoDecisions(historyRef.current) ? handleUndoDecisions() : handleUndo());
+  const handleRedoCuts = () => (canRedoDecisions(historyRef.current) ? handleRedoDecisions() : handleRedo());
   const goNext = () => {
     setIsPlaying(false);
     setCaptionSelected(false);
@@ -3609,10 +3680,10 @@ export default function EditScreen() {
           </TouchableOpacity>
           <UiText style={styles.topTitle}>Cuts</UiText>
           <View style={styles.topBtnRow}>
-            <TouchableOpacity onPress={handleUndo} disabled={!canUndo} style={[styles.topBtn, !canUndo && styles.topBtnOff]}>
+            <TouchableOpacity onPress={handleUndoCuts} disabled={!cutsCanUndo} style={[styles.topBtn, !cutsCanUndo && styles.topBtnOff]} accessibilityLabel="Undo">
               <Undo2 size={16} color={theme.text} strokeWidth={2} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={handleRedo} disabled={!canRedo} style={[styles.topBtn, !canRedo && styles.topBtnOff]}>
+            <TouchableOpacity onPress={handleRedoCuts} disabled={!cutsCanRedo} style={[styles.topBtn, !cutsCanRedo && styles.topBtnOff]} accessibilityLabel="Redo">
               <Redo2 size={16} color={theme.text} strokeWidth={2} />
             </TouchableOpacity>
           </View>
@@ -3836,6 +3907,7 @@ export default function EditScreen() {
                 onEditStart={() => setIsPlaying(false)}
                 onEdit={captions.editLine}
                 onStyleCommit={handleCaptionStyleCommit}
+                onGestureState={handleGestureState}
               />
               </View>
             )}
@@ -3856,17 +3928,19 @@ export default function EditScreen() {
                 onCycleBackgroundStyle={handleCycleBackgroundStyle}
                 onEditStart={handleTextOverlayEditStart}
                 onDragState={handleDragState}
+                onGestureState={handleGestureState}
               />
             ))}
             </View>
 
-            {showGuides && flow.guides && (
+            {flow.guides && (
               <FeedSafeZones
                 frameW={frameDims.w}
                 frameH={frameDims.h}
                 screenW={SCREEN_W}
                 topInset={insets.top}
-                active={guidesActive}
+                visible={guidesVisible({ dragging: guideGesture.active, pinching: false })}
+                centered={guideGesture.centered}
               />
             )}
           </View>
@@ -3917,6 +3991,25 @@ export default function EditScreen() {
         )}
 
 
+        {selectedClipId && clips.length > 0 && (
+          <View style={styles.cutActionRow}>
+            <Pressable onPress={handleDeletePart} style={styles.deletePartBtn} accessibilityRole="button" accessibilityLabel="Delete this part">
+              <Trash2 size={18} color="#fff" strokeWidth={2.2} />
+              <UiText style={styles.cutActionText}>Delete this part</UiText>
+            </Pressable>
+          </View>
+        )}
+        {cutMarker && !selectedClipId && (
+          <View style={styles.cutActionRow}>
+            <Pressable onPress={handleUndoThisCut} style={styles.undoCutBtn} accessibilityRole="button" accessibilityLabel="Undo this cut">
+              <Undo2 size={18} color="#fff" strokeWidth={2.2} />
+              <UiText style={styles.cutActionText}>Undo this cut</UiText>
+            </Pressable>
+            <Pressable onPress={() => setCutMarker(null)} hitSlop={10} style={styles.cutActionClose} accessibilityRole="button" accessibilityLabel="Close">
+              <UiText style={styles.cutActionCloseText}>✕</UiText>
+            </Pressable>
+          </View>
+        )}
         <View style={styles.toolbar}>
           {/* Trim — video only */}
           {isVideo && (
@@ -3966,14 +4059,26 @@ export default function EditScreen() {
 
         </View>
         <View style={[styles.bottomSection, { paddingBottom: insets.bottom + 8 }]}>
-          <Pressable
-            onPress={goNext}
-            style={({ pressed }) => [styles.postBtn, pressed && { opacity: 0.8 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Done with cuts"
-          >
-            <UiText style={styles.postBtnText}>Done</UiText>
-          </Pressable>
+          <View style={styles.actionRow}>
+            {isVideo && aiEditsEnabled && (autoEditSession || editModel) && (
+              <Pressable
+                onPress={handleKeepOriginal}
+                style={({ pressed }) => [styles.draftBtn, pressed && { opacity: 0.7 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Keep original"
+              >
+                <UiText style={styles.draftBtnText}>Keep original</UiText>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={goNext}
+              style={({ pressed }) => [styles.postBtn, pressed && { opacity: 0.8 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Done with cuts"
+            >
+              <UiText style={styles.postBtnText}>Done</UiText>
+            </Pressable>
+          </View>
         </View>
           </>
         )}
@@ -4100,9 +4205,6 @@ export default function EditScreen() {
                 </EditorRoundButton>
                 <EditorRoundButton label="Redo" onPress={handleRedo} disabled={!canRedo}>
                   <Redo2 size={18} color="#fff" strokeWidth={2} />
-                </EditorRoundButton>
-                <EditorRoundButton label="Feed guides" onPress={() => setShowGuides((v) => !v)} dim={!showGuides}>
-                  <Grid3x3 size={18} color="#fff" strokeWidth={2} />
                 </EditorRoundButton>
               </View>
             </View>
@@ -4299,6 +4401,7 @@ export default function EditScreen() {
         }
         onDone={handleTextEditorDone}
         onCancel={handleTextEditorCancel}
+        onRemove={handleTextEditorRemove}
         onLiveChange={(text, backgroundStyle) => setLiveText({ text, backgroundStyle })}
       />
     </GestureHandlerRootView>
@@ -4417,6 +4520,12 @@ const styles = StyleSheet.create({
     zIndex: 30,
   },
   eNextText: { color: "#fff", fontSize: 16, fontWeight: "900" as const },
+  cutActionRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 8 },
+  deletePartBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 48, backgroundColor: "#E8291C" },
+  undoCutBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 48, backgroundColor: theme.text },
+  cutActionText: { color: "#fff", fontSize: 15, fontWeight: "900" as const },
+  cutActionClose: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  cutActionCloseText: { color: theme.textMuted, fontSize: 18, fontWeight: "700" as const },
   postScroll: { flex: 1 },
   postScrollContent: { paddingHorizontal: 16, paddingTop: 8, gap: 12 },
   thumbWrap: { alignItems: "center", paddingVertical: 8 },

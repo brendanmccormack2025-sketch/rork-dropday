@@ -24,6 +24,8 @@ interface TextOverlayEditorProps {
   initialBackgroundStyle: TextBackgroundStyle;
   onDone: (text: string, backgroundStyle: TextBackgroundStyle) => void;
   onCancel: () => void;
+  /** The Cancel button: a new text is discarded, an existing one is removed (undo brings it back). Defaults to onCancel. */
+  onRemove?: () => void;
   /** Called as the text or style changes, so the video preview shows it live. */
   onLiveChange?: (text: string, backgroundStyle: TextBackgroundStyle) => void;
 }
@@ -34,6 +36,7 @@ export default function TextOverlayEditor({
   initialBackgroundStyle,
   onDone,
   onCancel,
+  onRemove,
   onLiveChange,
 }: TextOverlayEditorProps) {
   const [text, setText] = useState(initialText);
@@ -106,7 +109,7 @@ export default function TextOverlayEditor({
 
         {/* Controls, above the dim: normal, enabled buttons. */}
         <View style={[styles.controls, { top: layout.controls.top, height: layout.controls.height }]} pointerEvents="box-none">
-          <Pressable onPress={onCancel} hitSlop={10} style={styles.cancelBtn} accessibilityRole="button" accessibilityLabel="Cancel">
+          <Pressable onPress={onRemove ?? onCancel} hitSlop={10} style={styles.cancelBtn} accessibilityRole="button" accessibilityLabel="Cancel">
             <UiText style={styles.cancelText}>Cancel</UiText>
           </Pressable>
           <View style={styles.controlsRight}>

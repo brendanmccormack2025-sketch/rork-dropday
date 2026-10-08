@@ -3,7 +3,7 @@
  *
  * Pure; erasable TypeScript only (see decisions.ts).
  */
-import { DECISION_TYPES, keepRangesOf, setCategoryEnabled, type DecisionType, type EditState } from "./decisions.ts";
+import { CUT_TYPES, DECISION_TYPES, keepRangesOf, setCategoryEnabled, type DecisionType, type EditState } from "./decisions.ts";
 
 export type CategoryId = "cuts" | "hook" | "fillers" | "ums" | "protect" | "zooms" | "captions";
 
@@ -51,6 +51,16 @@ export function categoryRows(
 export function allCategoriesOff(state: EditState): EditState {
   const categoryEnabled = { ...state.categoryEnabled };
   for (const t of DECISION_TYPES) categoryEnabled[t] = false;
+  return { ...state, categoryEnabled };
+}
+
+/**
+ * "Keep original": the automatic CUT categories (silences, hook, fillers, ums) off. Nothing else changes: not the
+ * laugh protection, zooms or captions, not a part the creator deleted by hand, not the text overlays.
+ */
+export function cutCategoriesOff(state: EditState): EditState {
+  const categoryEnabled = { ...state.categoryEnabled };
+  for (const t of CUT_TYPES) categoryEnabled[t] = false;
   return { ...state, categoryEnabled };
 }
 

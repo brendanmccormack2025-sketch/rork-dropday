@@ -59,3 +59,12 @@ export function effectiveFontSize(ov: { fontSize: number; scale?: number }): num
   'worklet';
   return (ov.fontSize ?? 26) * clampScale(ov.scale);
 }
+
+/**
+ * The text editor's Cancel: a new text (no overlay yet) is discarded and nothing changes; an existing overlay is
+ * removed. `snapshot` says whether an undo step must be taken first, so undo brings the overlay back.
+ */
+export function cancelTextEdit<T extends { id: string }>(overlays: T[], editingId: string | null): { overlays: T[]; snapshot: boolean } {
+  if (!editingId || !overlays.some((o) => o.id === editingId)) return { overlays, snapshot: false };
+  return { overlays: overlays.filter((o) => o.id !== editingId), snapshot: true };
+}
