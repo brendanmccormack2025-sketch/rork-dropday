@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,7 +16,9 @@ import * as Haptics from "expo-haptics";
 
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
+import ArrangeClips from "@/components/ArrangeClips";
 import { MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
+import { MAX_IMPORT_VIDEOS, validateSelection, type ImportClip } from "@/lib/importSelection";
 import { launchLibraryWithRetry } from "@/lib/pickerRetry";
 import { PICKER_ERROR_MESSAGES, classifyPickerError } from "@/lib/pickerErrors";
 
@@ -43,6 +45,8 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
   const router = useRouter();
   const [isPicking, setIsPicking] = useState<boolean>(false);
   const [isRetrying, setIsRetrying] = useState<number>(0);
+  // Several videos picked: the "Arrange" step (order them) comes before the editor.
+  const [arranging, setArranging] = useState<ImportClip[] | null>(null);
 
   const openCamera = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -98,7 +102,9 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
                 ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
             }
           : {}),
-        allowsMultipleSelection: false,
+        // Several videos can be combined (in the order they were picked); a photo stays a single pick.
+        allowsMultipleSelection: !photoCompatible,
+        ...(photoCompatible ? {} : { orderedSelection: true, selectionLimit: MAX_IMPORT_VIDEOS }),
         quality: 1,
         videoMaxDuration: MAX_VIDEO_SECONDS,
         // Without this, iCloud-hosted assets fail with PHPhotosErrorDomain 3164
@@ -107,30 +113,18 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
       }, (attempt) => setIsRetrying(attempt));
       if (cancelledRef.current || result.canceled || result.assets.length === 0) return;
 
-      const asset = result.assets[0];
-      const isVideo = asset.type === "video";
-
-      // Keep the editing pipeline identical to camera content: videos longer
-      // than the camera's hard cap can't be produced by the recorder, so
-      // reject them here instead of feeding /edit something new.
-      // expo-image-picker returns duration in MILLISECONDS — compare against
-      // the cap converted to ms, not the raw seconds value.
-      if (isVideo && (asset.duration ?? 0) > MAX_VIDEO_SECONDS * 1000) {
-        Alert.alert(
-          "Video too long",
-          `Clips can be up to ${MAX_VIDEO_SECONDS / 60} minutes. Trim the video in your photo library and try again.`,
-        );
+      // One photo or video as before, or several videos in the order they were picked. The total length of
+      // the videos must fit the same limit as one recording (expo-image-picker durations are milliseconds).
+      const checked = validateSelection(result.assets, MAX_VIDEO_SECONDS * 1000, newClipId);
+      if (!checked.ok) {
+        Alert.alert(checked.title, checked.message);
         return;
       }
-
-      const clip: PickedClip = {
-        id: newClipId(),
-        uri: asset.uri,
-        type: isVideo ? "video" : "image",
-        ...(isVideo && asset.duration
-          ? { durationMs: Math.round(asset.duration) } // already milliseconds
-          : {}),
-      };
+      if (checked.kind === "multi") {
+        setArranging(checked.clips);
+        return;
+      }
+      const clip: PickedClip = checked.clips[0]!;
 
       onClose();
       router.push({
@@ -169,6 +163,18 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
   }, [isPicking, onClose, router]);
   openLibraryRef.current = openLibrary;
 
+  useEffect(() => {
+    if (!visible) setArranging(null);
+  }, [visible]);
+
+  const finishArranging = useCallback(() => {
+    const list = arranging;
+    setArranging(null);
+    if (!list || list.length === 0) return;
+    onClose();
+    router.push({ pathname: "/edit", params: { clips: JSON.stringify(list) } });
+  }, [arranging, onClose, router]);
+
   return (
     <Modal
       visible={visible}
@@ -181,6 +187,10 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.grabber} />
+          {arranging ? (
+            <ArrangeClips clips={arranging} onChange={setArranging} onContinue={finishArranging} onBack={() => setArranging(null)} />
+          ) : (
+          <>
           <UiText weight={800} style={styles.title}>
             Create
           </UiText>
@@ -229,7 +239,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
                     : isRetrying >= 2
                     ? "Still downloading, trying again…"
                     : "Downloading from iCloud…"
-                  : "Choose a photo or video from your library"}
+                  : "Choose a photo, or up to 10 videos to combine"}
               </UiText>
             </View>
           </Pressable>
@@ -265,6 +275,8 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
               Cancel
             </UiText>
           </Pressable>
+          </>
+          )}
         </View>
       </View>
     </Modal>

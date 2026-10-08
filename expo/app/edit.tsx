@@ -58,6 +58,8 @@ import FeedSafeZones from "@/components/FeedSafeZones";
 import { defaultCaptionStyle } from "@/lib/transcription/captionStyle";
 import { guidesVisible } from "@/lib/guides";
 import { cancelTextEdit } from "@/lib/textOverlayStyle";
+import { MERGE_FAILED_TEXT, MERGE_PREPARING_TEXT, mergeVideoClips, shouldMerge } from "@/lib/mergeClips";
+import { renderMerge } from "@/lib/mergeNative";
 import { backStep, initialStep, nextStep, selectionBarSide, stepLayout, videoTapAction, type EditorStep } from "@/lib/editorFlow";
 import { DEFAULT_TEXT_OVERLAY_POS, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
@@ -320,6 +322,13 @@ export default function EditScreen() {
   }, [clipsJson, nativeVideoUrl, draftId, draftProjects]);
 
   const [clips, setClips] = useState<DraftClip[]>(initialClips);
+  // Merge first: several video clips are concatenated into ONE file before anything else, so the single-source
+  // AI pipeline runs unchanged. The originals are kept (never deleted here).
+  const [mergeUi, setMergeUi] = useState<{ kind: "idle" } | { kind: "merging"; progress: number } | { kind: "failed"; message: string }>(
+    () => (shouldMerge(initialClips, { isDraft: !!draftId }) ? { kind: "merging", progress: 0 } : { kind: "idle" }),
+  );
+  const originalClipsRef = useRef<DraftClip[]>(initialClips);
+  const mergeStartedRef = useRef(false);
   // The editor's three steps: Cuts -> full-screen editor -> Post. One component, so nothing is lost moving between them.
   const [step, setStep] = useState<EditorStep>(() =>
     initialStep({ isDraft: !!draftId, isVideo: initialClips[0]?.type !== "image" }),
@@ -526,7 +535,7 @@ export default function EditScreen() {
   const captions = useCaptions(
     features.transcription,
     clips,
-    !autoEditRunning && (autoEditFinished || !autoEditPossible),
+    mergeUi.kind === "idle" && !autoEditRunning && (autoEditFinished || !autoEditPossible),
     captionStyle,
     {
       wordEdits: editModel ? (editModel.state.captionEdits ?? NO_EDITS) : (localCaption.edits ?? NO_EDITS),
@@ -578,11 +587,11 @@ export default function EditScreen() {
       clips,
       isRoot: !reactingTo && !rootDropId,
       userId: user?.id,
-      hold: captionsBusy,
+      hold: captionsBusy || mergeUi.kind !== "idle",
     };
     aheadRef.current?.update(args);
     finalRef.current?.update({ ...args, captions: captions.overlays });
-  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captionsBusy]);
+  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captionsBusy, mergeUi.kind]);
   const aheadReady = aheadState.kind === "ready" ? aheadState : null;
   const aheadSignature = aheadRef.current?.signatureOf(clips) ?? null;
   const aheadMatches = !!aheadReady && aheadReady.signature === aheadSignature;
@@ -2282,6 +2291,38 @@ export default function EditScreen() {
     setIsPlaying(true);
     trimNeedsSnapshotRef.current = false;
   }, []);
+
+  // Run the merge (and Retry). Never throws: a failure becomes a message with Retry, and is recorded.
+  const runMerge = useCallback(async () => {
+    setMergeUi({ kind: "merging", progress: 0 });
+    const result = await mergeVideoClips({
+      clips: originalClipsRef.current,
+      render: renderMerge,
+      newId: newClipId,
+      onProgress: (p) => {
+        if (mountedRef.current) setMergeUi((prev) => (prev.kind === "merging" ? { kind: "merging", progress: p } : prev));
+      },
+    });
+    if (!mountedRef.current) return;
+    if (result.ok) {
+      replaceClips([result.clip]);
+      setMergeUi({ kind: "idle" });
+    } else {
+      void recordClientError(new Error(result.message), { kind: "mergeClips", clipCount: originalClipsRef.current.length });
+      setMergeUi({ kind: "failed", message: result.message });
+    }
+  }, [replaceClips]);
+  useEffect(() => {
+    if (mergeUi.kind !== "merging" || mergeStartedRef.current) return;
+    mergeStartedRef.current = true;
+    void runMerge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const handleMergeRetry = useCallback(() => {
+    void runMerge();
+  }, [runMerge]);
+  // Give up merging: the clips stay separate (no AI edit, as before).
+  const handleMergeSkip = useCallback(() => setMergeUi({ kind: "idle" }), []);
 
   // Back to the original clip (one undoable step); text overlays are kept.
   const handleUseOriginal = useCallback(() => {
@@ -4293,6 +4334,30 @@ export default function EditScreen() {
       />
 
       {/* ── Text overlay editor modal ─────────────────────────────── */}
+      {mergeUi.kind === "merging" && (
+        <View style={styles.renderOverlay} accessibilityLabel="Preparing your video">
+          <ActivityIndicator color={theme.accent} />
+          <UiText style={styles.renderTitle}>{MERGE_PREPARING_TEXT}</UiText>
+          <View style={styles.renderTrack}>
+            <View style={[styles.renderFill, { width: `${Math.round(Math.min(1, mergeUi.progress) * 100)}%` }]} />
+          </View>
+        </View>
+      )}
+      {mergeUi.kind === "failed" && (
+        <View style={styles.renderOverlay} accessibilityLabel="Could not prepare your video">
+          <UiText style={styles.renderTitle}>{MERGE_FAILED_TEXT}</UiText>
+          <UiText style={styles.renderCancel}>{mergeUi.message}</UiText>
+          <Pressable onPress={handleMergeRetry} style={styles.postBtn} accessibilityRole="button" accessibilityLabel="Retry">
+            <UiText style={styles.postBtnText}>Retry</UiText>
+          </Pressable>
+          <Pressable onPress={handleMergeSkip} hitSlop={10} accessibilityRole="button" accessibilityLabel="Continue without AI edits">
+            <UiText style={styles.renderCancel}>Continue without AI edits</UiText>
+          </Pressable>
+          <Pressable onPress={leaveEditor} hitSlop={10} accessibilityRole="button" accessibilityLabel="Go back">
+            <UiText style={styles.renderCancel}>Go back</UiText>
+          </Pressable>
+        </View>
+      )}
       {finishingCaptions && (
         <View style={styles.renderOverlay}>
           <ActivityIndicator color={theme.accent} />

@@ -1,0 +1,48 @@
+/**
+ * The native side of "merge first": the existing renderer (renderAsync) with no cuts and no overlays. One native
+ * render at a time (acquireNative); a render that hangs is cancelled.
+ */
+import { toRenderJson } from "@/lib/editStyles";
+import { acquireNative } from "@/lib/renderAhead";
+import { computeRenderSize } from "@/lib/renderAtPost";
+
+/** Each clip is read to its end: the renderer clamps a trim end beyond the file's length. */
+const WHOLE_FILE_MS = 3_600_000;
+/** A merge of a few minutes of video finishes well inside this. */
+const MERGE_TIMEOUT_MS = 120_000;
+
+export async function renderMerge(
+  uris: string[],
+  onProgress: (p: number) => void,
+): Promise<{ uri: string; durationMs: number }> {
+  const { width, height } = await computeRenderSize({ id: "m0", uri: uris[0]!, type: "video" });
+  const release = await acquireNative();
+  let subscription: { remove(): void } | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+  try {
+    const { addRenderProgressListener, cancelRender, renderAsync } = await import("@/modules/video-render");
+    subscription = addRenderProgressListener((e) => onProgress(e.progress));
+    timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        cancelRender();
+      } catch {
+        // best effort
+      }
+    }, MERGE_TIMEOUT_MS);
+    const json = toRenderJson({
+      version: 1,
+      clips: uris.map((uri) => ({ uri, trimStartMs: 0, trimEndMs: WHOLE_FILE_MS })),
+      overlays: [],
+    });
+    const result = await renderAsync(json, { width, height, reframe: "fit", bitrate: 3_500_000, punchIn: false });
+    if (timedOut) throw new Error("the merge took too long");
+    if (!(result.sizeBytes > 0) || !(result.actualDurationMs > 0)) throw new Error("the merged file is empty");
+    return { uri: result.uri, durationMs: result.actualDurationMs };
+  } finally {
+    if (timer) clearTimeout(timer);
+    subscription?.remove();
+    release();
+  }
+}

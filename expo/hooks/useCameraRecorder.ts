@@ -5,10 +5,6 @@ import {
   useCameraPermissions,
   useMicrophonePermissions,
 } from "expo-camera";
-import {
-  saveToLibraryAsync,
-  useMediaLibraryPermissions,
-} from "@/lib/mediaLibraryCompat";
 import { cacheDirectory, documentDirectory, getInfoAsync } from "@/lib/fileSystemCompat";
 import * as Haptics from "expo-haptics";
 
@@ -54,8 +50,6 @@ export function useCameraRecorder() {
   const cameraReadyResolveRef = useRef<(() => void) | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
-  const [mediaPermission, requestMediaPermission] =
-    useMediaLibraryPermissions();
 
   const [facing, setFacing] = useState<"back" | "front">("back");
   /** Stable ref mirror of `facing` — gesture & async callbacks read this, never the state */
@@ -193,20 +187,8 @@ export function useCameraRecorder() {
     setClips((prev) => [...prev, clip]);
   }, []);
 
-  /** Save a video to the device gallery */
-  const saveToGallery = useCallback(async (uri: string): Promise<void> => {
-    try {
-      if (!mediaPermission?.granted) {
-        const result = await requestMediaPermission();
-        if (!result.granted) return;
-      }
-      const _saveStart = Date.now();
-      await saveToLibraryAsync(uri);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown save error";
-      console.warn("[camera] gallery save failed:", msg);
-    }
-  }, [mediaPermission?.granted, requestMediaPermission]);
+  // Segments are NOT saved to the camera roll one by one: the final edited video is saved by the
+  // "Save to camera roll" switch on the Post screen.
 
   /** Start a single continuous recording up to MAX_VIDEO_SECONDS.
    *  Uses a loop so that camera flips mid-recording auto-restart on the
@@ -405,8 +387,6 @@ export function useCameraRecorder() {
           recordingSessionId: sessionId,
         };
         appendClip(clip);
-        // Save each segment to the gallery — fire-and-forget, never blocks UI.
-        saveToGallery(uri).catch(() => {});
       }
     }
 
@@ -422,7 +402,7 @@ export function useCameraRecorder() {
     // as the timer fires, while still blocking sub-100ms re-triggers
     // that could race the native session reset.
     lastTransitionRef.current = Date.now() - 300;
-  }, [requestMicPermission, canTransition, appendClip, saveToGallery, setError, setRecordStateSync, setIsLockedSync]);
+  }, [requestMicPermission, canTransition, appendClip, setError, setRecordStateSync, setIsLockedSync]);
 
   /** Stop the current recording. Safe to call at any time.
    *  Sets stopRequestedRef so the recording loop won't restart after a flip. */
