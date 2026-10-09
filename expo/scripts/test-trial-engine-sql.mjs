@@ -5,7 +5,7 @@
  * Skipped (not failed) on a machine without PostgreSQL.
  *   node --experimental-strip-types --no-warnings scripts/test-trial-engine-sql.mjs
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, chownSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -108,7 +108,7 @@ if (!BIN) {
       const reset = () => {
         Q(`delete from public.trial_engine_log; delete from public.trial_post_state; delete from public.trial_assignments; delete from public.notifications;
            delete from public.post_view_stats; delete from public.post_raw_views; delete from public.post_qualified_views; delete from public.likes;
-           delete from public.viewer_creator_affinity; delete from public.posts; delete from public.user_blocks;
+           delete from public.viewer_creator_affinity; delete from public.trial_feed_opens; delete from public.posts; delete from public.user_blocks;
            update public.trial_engine_config set engine_mode='live'`);
       };
       const score = (post) => Object.fromEntries(q(`select viewer_id::text || '=' || round(score::numeric,3) from public.trial_post_scores('${post}') order by 1`).split("\n").filter(Boolean).map((l) => l.split("=")));
@@ -358,6 +358,83 @@ if (!BIN) {
       ok("posts whose media was deleted are not served", !viewerOf(target).includes(P1));
       Q(`update public.posts set media_deleted_at = null where id='${P1}'`);
       ok("(control) restored, served again", viewerOf(target).startsWith(P1));
+
+      // 12) on-demand assignment, stalled cohorts, concurrency, empty feed
+      mkUsers(21, 30);
+      const activeIn = (post) => Number(q(`select count(*) from public.trial_assignments where post_id='${post}' and released_at is null`));
+      const asyncFeed = (uid) => new Promise((resolve) => {
+        const c = spawn("psql", ["-h", dir, "-p", port, "-U", "postgres", "-X", "-q", "-A", "-t", "-d", "t", "-c", `set role authenticated; set request.jwt.claim.sub='${uid}'; select count(*) from public.get_feed_engine(20, 0)`]);
+        c.on("close", resolve);
+      });
+
+      // a) a user created after the post is assigned on their first feed load
+      freshWorld(3);
+      mkPost(P1, U(1));
+      eq("(setup) at post time only 2 people were active: 2 of the 3 slots are filled", [activeIn(P1), q(`select stage_target from public.trial_post_state where post_id='${P1}'`)], [2, "3"]);
+      ok("(setup) the newcomer has no assignment and is not in the engine's pool yet", q(`select count(*) from public.trial_assignments where viewer_id='${U(21)}'`) === "0");
+      ok("the newcomer's first feed load assigns them to the open slot and shows the post", viewerOf(U(21)).startsWith(P1));
+      eq("...the cohort is now full: 3 of 3", activeIn(P1), 3);
+      ok("a fourth newcomer finds no open slot: not assigned, nothing to show", !viewerOf(U(22)).includes(P1) && activeIn(P1) === 3);
+      ok("a viewer is only assigned once (a second load does not add a row)", (() => { viewerOf(U(21)); return q(`select count(*) from public.trial_assignments where post_id='${P1}' and viewer_id='${U(21)}'`) === "1"; })());
+
+      // b) empty state: nothing eligible -> a sentinel row, never an error
+      const rowsOf = (uid) => q(`set role authenticated; set request.jwt.claim.sub='${uid}'; select count(*) filter (where post_id is not null) || ':' || count(*) filter (where post_id is null) from public.get_feed_engine(20, 0)`).split("\n").pop();
+      eq("a viewer with nothing eligible gets the empty-feed sentinel (one row, no post)", rowsOf(U(23)), "0:1");
+
+      // c) concurrency: eight new users load the feed at the same moment; the 3-slot cohort is never overfilled
+      freshWorld(1);
+      mkPost(P1, U(1));
+      eq("(setup) nobody was online: 0 of 3 slots filled", [activeIn(P1), q(`select stage_target from public.trial_post_state where post_id='${P1}'`)], [0, "3"]);
+      await Promise.all([11, 12, 13, 14, 15, 16, 17, 18].map((i) => asyncFeed(U(i))));
+      ok("8 concurrent first loads never overfill a cohort of 3", activeIn(P1) <= 3 && activeIn(P1) >= 1);
+      for (const i of [11, 12, 13, 14, 15, 16, 17, 18]) viewerOf(U(i));
+      eq("and the slots do get filled (3 of 3) once they load again", activeIn(P1), 3);
+      eq("exactly 3 distinct viewers hold the slots", q(`select count(distinct viewer_id) from public.trial_assignments where post_id='${P1}' and released_at is null`), "3");
+
+      // d) a stalled cohort's slots are refilled by other active viewers; no data is not a negative signal
+      freshWorld(6);
+      mkPost(P1, U(1));
+      const first = q(`select viewer_id from public.trial_assignments where post_id='${P1}' order by viewer_id`).split("\n");
+      eq("(setup) 3 of the 5 other active users hold the 3 slots", first.length, 3);
+      Q(`update public.trial_assignments set assigned_at = now() - interval '40 minutes' where post_id='${P1}'`);
+      Q(`update public.posts set created_at = now() - interval '40 minutes' where id='${P1}'`);
+      engine();
+      const nowActive = q(`select viewer_id from public.trial_assignments where post_id='${P1}' and released_at is null order by viewer_id`).split("\n").filter(Boolean);
+      eq("30+ minutes with nobody opening it: the 3 unused slots were given back and the 2 other active users took them", [q(`select count(*) from public.trial_assignments where post_id='${P1}' and released_at is not null`), nowActive.length, nowActive.every((v) => !first.includes(v))], ["3", 2, true]);
+      eq("n = 0 is no verdict: still testing, stage unchanged, no engine decision logged", [status(P1), q(`select stage from public.trial_post_state where post_id='${P1}'`), q(`select count(*) from public.trial_engine_log where post_id='${P1}' and decision in ('failed','survived','incomplete')`)], ["trial", "1", "0"]);
+      engine(); engine();
+      eq("running the engine again never fails it", [status(P1), notif("verdict_archived")], ["trial", "0"]);
+      ok("a released viewer who opens the feed later is given a slot again", (() => { Q(`update public.trial_assignments set released_at = released_at where post_id='${P1}'`); const rel = first[0]; return viewerOf(rel).startsWith(P1) && q(`select count(*) from public.trial_assignments where post_id='${P1}' and viewer_id='${rel}' and released_at is null`) === "1"; })());
+      eq("...and the cohort still never exceeds its target of 3", activeIn(P1) <= 3, true);
+      // on-demand also takes over slots that are stale but not yet released by the engine
+      freshWorld(3);
+      mkPost(P1, U(1));
+      Q(`update public.trial_assignments set assigned_at = now() - interval '2 hours' where post_id='${P1}'`);
+      Q(`insert into public.trial_assignments (post_id, viewer_id, stage, assigned_at) values ('${P1}','${U(25)}',1, now() - interval '2 hours') on conflict do nothing`);
+      ok("a full cohort of stale, unopened assignments does not block a newcomer", viewerOf(U(26)).startsWith(P1));
+
+      // e) the safety filters apply to on-demand assignment too
+      const prep = () => { freshWorld(1); mkPost(P1, U(1)); };   // nobody online: 3 open slots
+      const V = U(27);
+      const denied = (name, setup) => { prep(); Q(setup); const before = activeIn(P1); const feed = viewerOf(V); ok(name, activeIn(P1) === before && !feed.includes(P1)); };
+      prep();
+      ok("(control) with no obstacle the viewer is assigned and served", viewerOf(V).startsWith(P1));
+      denied("blocked by the viewer: not assigned", `insert into public.user_blocks (blocker_id, blocked_id) values ('${V}','${U(1)}')`);
+      denied("blocked by the creator: not assigned", `insert into public.user_blocks (blocker_id, blocked_id) values ('${U(1)}','${V}')`);
+      denied("reported by the viewer: not assigned", `insert into public.reports (reporter_id, target_type, target_id, reason) values ('${V}','post','${P1}','spam')`);
+      denied("mature content and a teen: not assigned", `update public.posts set is_mature = true where id='${P1}'; update public.profiles set birthdate = current_date - interval '15 years' where id='${V}'`);
+      Q(`update public.profiles set birthdate = null where id='${V}'`);
+      denied("moderation-hidden: not assigned", `update public.posts set moderation_status = 'hidden' where id='${P1}'`);
+      denied("media deleted: not assigned", `update public.posts set media_deleted_at = now() where id='${P1}'`);
+      denied("already seen by the viewer: not assigned", `insert into public.post_raw_views (post_id, viewer_id) values ('${P1}','${V}')`);
+      denied("a decided post (survived/incomplete): not assigned", `update public.posts set status='incomplete' where id='${P1}'`);
+      prep();
+      ok("the creator is never assigned to their own post", (() => { viewerOf(U(1)); return q(`select count(*) from public.trial_assignments where post_id='${P1}' and viewer_id='${U(1)}'`) === "0"; })());
+      Q(`update public.trial_engine_config set engine_mode='legacy'`);
+      prep(); Q(`update public.trial_engine_config set engine_mode='legacy'`);
+      ok("legacy mode: opening the feed assigns nothing", (() => { viewerOf(V); return q("select count(*) from public.trial_assignments") === "0"; })());
+      Q(`update public.trial_engine_config set engine_mode='live'`);
+      ok("a clean slate for the next run", true);
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });

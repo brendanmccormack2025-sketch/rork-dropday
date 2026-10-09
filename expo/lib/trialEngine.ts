@@ -45,3 +45,8 @@ export function creatorTrialNote(status: string | null | undefined): { title: st
   if (status === "incomplete") return { title: "TRIAL INCOMPLETE", body: TRIAL_INCOMPLETE_MESSAGE };
   return null;
 }
+
+/** The feed's empty state (nothing assigned and nothing eligible to watch): never a blank screen. */
+export const FEED_CAUGHT_UP_TITLE = "You're all caught up";
+export const FEED_CAUGHT_UP_BODY = "Be the first to put something on Trial";
+export const FEED_CAUGHT_UP_BUTTON = "Put it on Trial";

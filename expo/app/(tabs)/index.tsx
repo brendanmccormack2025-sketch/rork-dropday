@@ -27,6 +27,7 @@ import {
   Sparkles,
 } from "lucide-react-native";
 import { FeedListView } from "@/components/FeedListView";
+import { FEED_CAUGHT_UP_BODY, FEED_CAUGHT_UP_BUTTON, FEED_CAUGHT_UP_TITLE } from "@/lib/trialEngine";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post, resolveAvatarUrl } from "@/providers/PostsProvider";
 import { useNotifications } from "@/providers/NotificationsProvider";
@@ -140,7 +141,7 @@ export default function FeedScreen() {
             </View>
           </SafeAreaView>
         }
-        emptyComponent={<EmptyState error={feedError} onRetry={() => void refreshFeed()} />}
+        emptyComponent={<EmptyState error={feedError} onRetry={() => void refreshFeed()} onCreate={() => router.push("/camera")} />}
         gateComponent={
           gateActive ? (
             <GateOverlay
@@ -180,7 +181,7 @@ export default function FeedScreen() {
 
 
 
-function EmptyState({ error, onRetry }: { error: boolean; onRetry: () => void }) {
+function EmptyState({ error, onRetry, onCreate }: { error: boolean; onRetry: () => void; onCreate: () => void }) {
   return (
     <SafeAreaView style={styles.emptyWrap}>
       {error ? (
@@ -189,18 +190,20 @@ function EmptyState({ error, onRetry }: { error: boolean; onRetry: () => void })
         <Video color={theme.textDim} size={44} strokeWidth={1.5} />
       )}
       <UiText style={styles.emptyTitle}>
-        {error ? "Can't reach Trial right now" : "Nothing to test right now"}
+        {error ? "Can't reach Trial right now" : FEED_CAUGHT_UP_TITLE}
       </UiText>
       <UiText style={styles.emptySub}>
-        {error
-          ? "Check your connection and try again."
-          : "Be the first: tap + to put something on Trial."}
+        {error ? "Check your connection and try again." : FEED_CAUGHT_UP_BODY}
       </UiText>
       {error ? (
         <Pressable onPress={onRetry} style={styles.retryBtn} accessibilityRole="button">
           <UiText style={styles.retryText}>Retry</UiText>
         </Pressable>
-      ) : null}
+      ) : (
+        <Pressable onPress={onCreate} style={styles.retryBtn} accessibilityRole="button">
+          <UiText style={styles.retryText}>{FEED_CAUGHT_UP_BUTTON}</UiText>
+        </Pressable>
+      )}
     </SafeAreaView>
   );
 }

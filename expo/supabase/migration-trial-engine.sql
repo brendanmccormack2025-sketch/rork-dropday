@@ -88,6 +88,11 @@ create table if not exists public.trial_engine_config (
   updated_at timestamptz not null default now()
 );
 insert into public.trial_engine_config (id) values (true) on conflict (id) do nothing;
+-- on-demand assignment and stalled cohorts (added after the first release; idempotent)
+alter table public.trial_engine_config
+  add column if not exists stall_minutes       integer not null default 30,   -- an assignment nobody opened for this long frees its slot
+  add column if not exists ondemand_batch      integer not null default 10,   -- most posts one feed request can newly assign to a viewer
+  add column if not exists ondemand_max_unseen integer not null default 20;   -- stop assigning while this many assigned posts are unseen
 alter table public.trial_engine_config enable row level security;   -- no policies: dashboard / service role only
 
 create or replace function public.trial_cfg()
@@ -181,6 +186,7 @@ create table if not exists public.trial_assignments (
   assigned_at timestamptz not null default now(),
   primary key (post_id, viewer_id)
 );
+alter table public.trial_assignments add column if not exists released_at timestamptz;   -- slot given back (never opened); null = active
 create index if not exists trial_assignments_viewer_idx on public.trial_assignments (viewer_id, assigned_at);
 alter table public.trial_assignments enable row level security;
 
@@ -194,6 +200,7 @@ create table if not exists public.trial_post_state (
   last_logged_n    integer,
   created_at       timestamptz not null default now()
 );
+alter table public.trial_post_state add column if not exists stage_target integer;   -- viewers the current cohort should hold (not capped by who is online now)
 create index if not exists trial_post_state_decided_idx on public.trial_post_state (decided_at) where decision is not null;
 alter table public.trial_post_state enable row level security;
 
@@ -228,6 +235,12 @@ create table if not exists public.trial_active_users (
   user_id     uuid primary key,
   last_active timestamptz not null
 );
+-- Who opened the feed (so a user who only looks, and has no views yet, is in the pool): one row per user.
+create table if not exists public.trial_feed_opens (
+  user_id   uuid primary key,
+  last_open timestamptz not null default now()
+);
+alter table public.trial_feed_opens enable row level security;
 create table if not exists public.trial_engine_state (
   id boolean primary key default true check (id),
   active_refreshed_at timestamptz,
@@ -238,7 +251,7 @@ alter table public.trial_active_users enable row level security;
 alter table public.trial_engine_state enable row level security;
 
 revoke all on table public.trial_engine_config, public.trial_assignments, public.trial_post_state, public.trial_engine_log,
-  public.viewer_creator_affinity, public.trial_active_users, public.trial_engine_state, public.post_view_stats
+  public.viewer_creator_affinity, public.trial_active_users, public.trial_feed_opens, public.trial_engine_state, public.post_view_stats
   from anon, authenticated;
 
 -- ── 5. Math: Beta distribution (no extensions) ───────────────────────────────
@@ -353,6 +366,8 @@ begin
     select user_id,           created_at          from public.likes                where created_at >= since
     union all
     select user_id,           created_at          from public.posts                where created_at >= since   -- incl. video reactions
+    union all
+    select user_id,           last_open           from public.trial_feed_opens     where last_open >= since
   ) a
   group by a.uid;
 
@@ -502,6 +517,38 @@ as $$
   from public.trial_cfg() c
 $$;
 
+-- Slots, not a one-time draw: a stage has a target (stage_target, from the pool at the time the stage opened, NOT capped by
+-- who is online right now). Whoever is eligible fills the open slots, at post time, on every engine run, and on demand when
+-- a viewer opens the feed (trial_assign_on_demand), so a user who becomes active later is not left out.
+create or replace function public.trial_fill_open_slots(p_post_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  st public.trial_post_state;
+  open_slots integer;
+  n integer := 0;
+begin
+  select * into st from public.trial_post_state where post_id = p_post_id and decision is null for update;
+  if st.post_id is null then return 0; end if;
+  select coalesce(st.stage_target, public.trial_cohort_size(0, st.stage)) - count(*) into open_slots
+  from public.trial_assignments a where a.post_id = p_post_id and a.stage = st.stage and a.released_at is null;
+  if open_slots <= 0 then return 0; end if;
+  insert into public.trial_assignments (post_id, viewer_id, stage)
+  select p_post_id, c.user_id, st.stage
+  from public.trial_pool(p_post_id) c
+  where not c.exposed and not c.assigned
+  order by c.affinity asc, random()
+  limit open_slots
+  on conflict (post_id, viewer_id) do nothing;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- Opens a stage: sets its target from the current pool, then fills what it can.
 create or replace function public.trial_assign_cohort(p_post_id uuid, p_stage integer)
 returns integer
 language plpgsql
@@ -510,24 +557,136 @@ set search_path = public
 as $$
 declare
   total integer;
-  remaining integer;
-  want integer;
+begin
+  select count(*) into total from public.trial_pool(p_post_id);
+  update public.trial_post_state set stage_target = public.trial_cohort_size(total, p_stage) where post_id = p_post_id;
+  return public.trial_fill_open_slots(p_post_id);
+end;
+$$;
+
+-- A stalled slot: assigned to someone who never opened the post for stall_minutes. It is given back (released_at), so
+-- other active viewers can fill it. No data is not a negative signal: nothing here touches the verdict.
+create or replace function public.trial_release_stalled(p_post_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  cfg public.trial_engine_config := public.trial_cfg();
   n integer;
 begin
-  select count(*), count(*) filter (where not exposed and not assigned) into total, remaining from public.trial_pool(p_post_id);
-  want := least(public.trial_cohort_size(total, p_stage), remaining);
-  if want <= 0 then return 0; end if;
-  insert into public.trial_assignments (post_id, viewer_id, stage)
-  select p_post_id, c.user_id, p_stage
-  from public.trial_pool(p_post_id) c
-  where not c.exposed and not c.assigned
-  order by c.affinity asc, random()
-  limit want
-  on conflict (post_id, viewer_id) do nothing;
+  update public.trial_assignments t
+     set released_at = now()
+   where t.post_id = p_post_id and t.released_at is null
+     and t.assigned_at <= now() - (cfg.stall_minutes * interval '1 minute')
+     and not exists (select 1 from public.post_view_stats s where s.post_id = t.post_id and s.viewer_id = t.viewer_id)
+     and not exists (select 1 from public.post_raw_views r where r.post_id = t.post_id and r.viewer_id = t.viewer_id);
   get diagnostics n = row_count;
   return n;
 end;
 $$;
+
+-- Backfill for posts that were already testing before slots existed.
+update public.trial_post_state s
+   set stage_target = public.trial_cohort_size(greatest(1, (select count(*) from public.trial_assignments a where a.post_id = s.post_id and a.stage = s.stage)::integer), s.stage)
+ where s.stage_target is null and s.decision is null;
+
+-- On-demand assignment: called when a viewer loads the feed. Assigns the viewer to testing posts whose current cohort
+-- has open slots (stalled slots are given back first), strangers first, with the same safety filters as get_feed. One
+-- post at a time under a row lock (skipped, then retried once, when another request holds it), so concurrent requests
+-- can never put more viewers in a cohort than its target.
+create or replace function public.trial_assign_on_demand(p_viewer uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  cfg public.trial_engine_config := public.trial_cfg();
+  hide_mature boolean := false;
+  unseen integer;
+  got integer := 0;
+  c record;
+  skipped uuid[] := '{}';
+  pass integer;
+  cand uuid[];
+  pid uuid;
+  open_slots integer;
+  n integer;
+begin
+  if p_viewer is null or cfg.engine_mode <> 'live' then return 0; end if;
+
+  -- the viewer is active now (counts toward the pool immediately; the engine run keeps them via trial_feed_opens)
+  insert into public.trial_feed_opens (user_id, last_open) values (p_viewer, now())
+    on conflict (user_id) do update set last_open = now();
+  insert into public.trial_active_users (user_id, last_active) values (p_viewer, now())
+    on conflict (user_id) do update set last_active = greatest(public.trial_active_users.last_active, now());
+
+  select coalesce(public.age_tier(pr.birthdate) in ('under_13', 'teen'), false) into hide_mature
+  from public.profiles pr where pr.id = p_viewer;
+  hide_mature := coalesce(hide_mature, false);
+
+  select count(*) into unseen
+  from public.trial_assignments t join public.posts p on p.id = t.post_id
+  where t.viewer_id = p_viewer and t.released_at is null and p.status = 'trial'
+    and not exists (select 1 from public.post_raw_views r where r.post_id = t.post_id and r.viewer_id = p_viewer)
+    and not exists (select 1 from public.post_view_stats s where s.post_id = t.post_id and s.viewer_id = p_viewer);
+  if unseen >= cfg.ondemand_max_unseen then return 0; end if;
+
+  select coalesce(array_agg(x.post_id order by x.ord), '{}') into cand
+  from (
+    select s.post_id, row_number() over (order by coalesce(af.score, 0) asc, p.qualified_view_count asc, p.created_at asc) as ord
+    from public.trial_post_state s
+    join public.posts p on p.id = s.post_id
+    left join public.viewer_creator_affinity af on af.viewer_id = p_viewer and af.creator_id = p.user_id
+    where s.decision is null
+      and p.status = 'trial' and p.parent_post_id is null and p.checkpoint_at > now()
+      and p.user_id <> p_viewer and p.moderation_status = 'active' and p.media_deleted_at is null
+      and (not hide_mature or not p.is_mature)
+      and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
+      and not exists (select 1 from public.reports r where r.reporter_id = p_viewer and r.target_type = 'post' and r.target_id = p.id)
+      and not exists (select 1 from public.trial_assignments t where t.post_id = s.post_id and t.viewer_id = p_viewer and t.released_at is null)
+      and not exists (select 1 from public.post_raw_views r where r.post_id = s.post_id and r.viewer_id = p_viewer)
+      and not exists (select 1 from public.post_view_stats v where v.post_id = s.post_id and v.viewer_id = p_viewer)
+    limit cfg.ondemand_batch * 5
+  ) x;
+
+  for pass in 1..2 loop
+    skipped := '{}';
+    foreach pid in array cand loop
+      exit when got >= cfg.ondemand_batch or unseen + got >= cfg.ondemand_max_unseen;
+      perform 1 from public.trial_post_state where post_id = pid and decision is null for update skip locked;
+      if not found then
+        skipped := skipped || pid;
+        continue;
+      end if;
+      perform public.trial_release_stalled(pid);
+      select coalesce(s.stage_target, public.trial_cohort_size(0, s.stage)) - count(a.viewer_id) into open_slots
+      from public.trial_post_state s
+      left join public.trial_assignments a on a.post_id = s.post_id and a.stage = s.stage and a.released_at is null
+      where s.post_id = pid
+      group by s.stage_target, s.stage;
+      if coalesce(open_slots, 0) > 0 then
+        insert into public.trial_assignments (post_id, viewer_id, stage)
+        select pid, p_viewer, s.stage from public.trial_post_state s where s.post_id = pid
+        on conflict (post_id, viewer_id) do update
+          set released_at = null, stage = excluded.stage, assigned_at = now()
+          where public.trial_assignments.released_at is not null;
+        get diagnostics n = row_count;
+        got := got + n;
+      end if;
+    end loop;
+    exit when pass = 2 or coalesce(cardinality(skipped), 0) = 0;
+    cand := skipped;
+    perform pg_sleep(0.05);   -- the other request holding a post finishes within milliseconds
+  end loop;
+  return got;
+end;
+$$;
+revoke all on function public.trial_assign_on_demand(uuid) from public, anon, authenticated;
+revoke all on function public.trial_fill_open_slots(uuid) from public, anon, authenticated;
+revoke all on function public.trial_release_stalled(uuid) from public, anon, authenticated;
 
 create or replace function public.trial_start_post(p_post_id uuid)
 returns void
@@ -627,11 +786,13 @@ begin
     select count(*), count(*) filter (where exists (select 1 from public.post_view_stats s where s.post_id = p_post_id and s.viewer_id = t.viewer_id)
                                           or exists (select 1 from public.post_raw_views r where r.post_id = p_post_id and r.viewer_id = t.viewer_id))
       into assigned_stage, exposed_stage
-    from public.trial_assignments t where t.post_id = p_post_id and t.stage = st.stage;
-    ready := assigned_stage = 0
-          or exposed_stage >= cfg.expand_ready_fraction * assigned_stage
-          or (exposed_stage >= 1 and st.stage_started_at <= now() - (cfg.expand_stall_minutes * interval '1 minute'));
-    if ready and pool_left > 0 then
+    from public.trial_assignments t where t.post_id = p_post_id and t.stage = st.stage and t.released_at is null;
+    -- (the new stage's open slots are filled by whoever shows up, so a small or empty pool no longer blocks expansion;
+    -- an empty cohort is not "ready": no data means refill the slots, never expand or fail)
+    ready := assigned_stage > 0
+         and (exposed_stage >= cfg.expand_ready_fraction * assigned_stage
+              or (exposed_stage >= 1 and st.stage_started_at <= now() - (cfg.expand_stall_minutes * interval '1 minute')));
+    if ready then
       verdict := 'expand';
     end if;
   end if;
@@ -724,6 +885,8 @@ begin
     order by s.created_at
     limit 2000
   loop
+    perform public.trial_release_stalled(r.post_id);   -- slots nobody opened are given back ...
+    perform public.trial_fill_open_slots(r.post_id);    -- ... and offered to other active viewers
     d := public.trial_evaluate_post(r.post_id, bar);
     if d in ('survived', 'failed', 'incomplete') then decided := decided + 1; end if;
   end loop;
@@ -837,11 +1000,21 @@ begin
   from public.profiles pr where pr.id = me;
   hide_mature := coalesce(hide_mature, false);
 
+  -- A viewer who became active after the posts were created is assigned to open slots now (first page only).
+  -- Never allowed to break the feed.
+  if p_offset = 0 then
+    begin
+      perform public.trial_assign_on_demand(me);
+    exception when others then
+      null;
+    end;
+  end if;
+
   select coalesce(array_agg(x.post_id order by x.assigned_at), '{}') into assigned
   from (
     select t.post_id, t.assigned_at from public.trial_assignments t
     join public.posts p on p.id = t.post_id
-    where t.viewer_id = me and p.status = 'trial' and p.parent_post_id is null and p.moderation_status = 'active'
+    where t.viewer_id = me and t.released_at is null and p.status = 'trial' and p.parent_post_id is null and p.moderation_status = 'active'
       and p.user_id <> me and p.media_deleted_at is null
       and (not hide_mature or not p.is_mature)
       and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
@@ -892,7 +1065,7 @@ begin
     join public.posts p on p.id = u.id
     where not (u.id = any (front))
       and ((p.status = 'survived' and (p.distribution_expires_at is null or p.distribution_expires_at > now())
-            or (p.status = 'trial' and exists (select 1 from public.trial_assignments t where t.post_id = p.id and t.viewer_id = me)))
+            or (p.status = 'trial' and exists (select 1 from public.trial_assignments t where t.post_id = p.id and t.viewer_id = me and t.released_at is null)))
            or (p.user_id = me and p.status in ('trial', 'incomplete', 'survived')))   -- 'incomplete' / 'archived' / 'expired': never served to others
     order by u.ord
   );

@@ -4,7 +4,7 @@
  * app is wired to the new RPCs. node --experimental-strip-types --no-warnings scripts/test-trial-engine.mjs
  */
 import { readFileSync } from "node:fs";
-import { creatorTrialNote, readFeedRows, viewProgress, worthReporting, TRIAL_INCOMPLETE_MESSAGE } from "../lib/trialEngine.ts";
+import { FEED_CAUGHT_UP_BODY, FEED_CAUGHT_UP_TITLE, creatorTrialNote, readFeedRows, viewProgress, worthReporting, TRIAL_INCOMPLETE_MESSAGE } from "../lib/trialEngine.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -33,6 +33,8 @@ eq("FeedItem reports watch time and shares, and shows the progress indicator wit
 eq("the owner's own views are not reported", /if \(isOwner \|\| watchStartRef/.test(feed), true);
 eq("notifications show the incomplete verdict", [/verdict_incomplete/.test(notif), /TRIAL_INCOMPLETE_NOTIFICATION/.test(notif)], [true, true]);
 eq("the badge has its own incomplete pill (not 'failed')", /incomplete: \{ label: "TRIAL INCOMPLETE"/.test(badge), true);
+const home = read("../app/(tabs)/index.tsx");
+eq("empty feed: 'You're all caught up' + 'Be the first to put something on Trial' + a button to the camera", [FEED_CAUGHT_UP_TITLE, FEED_CAUGHT_UP_BODY, /onCreate=\{\(\) => router\.push\("\/camera"\)\}/.test(home), /FEED_CAUGHT_UP_BUTTON/.test(home)], ["You're all caught up", "Be the first to put something on Trial", true, true]);
 eq("app.json version untouched", JSON.parse(read("../app.json")).expo.version, "1.0.4");
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);
