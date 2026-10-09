@@ -876,9 +876,9 @@ begin
     from unnest(rest_ids) with ordinality as u(id, ord)
     join public.posts p on p.id = u.id
     where not (u.id = any (front))
-      and (p.status <> 'trial'
-           or p.user_id = me
-           or exists (select 1 from public.trial_assignments t where t.post_id = p.id and t.viewer_id = me))
+      and ((p.status = 'survived' and (p.distribution_expires_at is null or p.distribution_expires_at > now())
+            or (p.status = 'trial' and exists (select 1 from public.trial_assignments t where t.post_id = p.id and t.viewer_id = me)))
+           or (p.user_id = me and p.status in ('trial', 'incomplete', 'survived')))   -- 'incomplete' / 'archived' / 'expired': never served to others
     order by u.ord
   );
 

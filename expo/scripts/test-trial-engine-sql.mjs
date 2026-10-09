@@ -134,7 +134,7 @@ if (!BIN) {
       // ── scenarios ──
       // a stand-in for the dashboard's get_feed (not in the repo): every trial/survived root post, newest first
       Q(`create or replace function public.get_feed(p_limit integer, p_offset integer) returns table (post_id uuid, "position" bigint) language sql stable as $f$
-           select id, row_number() over (order by created_at desc) from public.posts where parent_post_id is null and status in ('trial','survived') limit p_limit offset p_offset $f$`);
+           select id, row_number() over (order by created_at desc) from public.posts where parent_post_id is null and status in ('trial','incomplete','survived') limit p_limit offset p_offset $f$`);
       const engine = () => Q("select public.run_survival_checkpoint()");
       const status = (id) => q(`select status from public.posts where id='${id}'`);
       const notif = (type) => q(`select count(*) from public.notifications where type='${type}'`);
@@ -296,6 +296,24 @@ if (!BIN) {
         return a && b && q(`select watch_ms || ':' || completed from public.post_view_stats where post_id='${P1}' and viewer_id='${U(4)}'`) === "3000:true";
       })());
       ok("the creator's own watch time is not recorded", (() => { psql("t", `set role authenticated; set request.jwt.claim.sub='${U(1)}'; select public.record_view_progress('${P1}', 9000, 12000, true)`); return q(`select count(*) from public.post_view_stats where viewer_id='${U(1)}'`) === "0"; })());
+
+      // 10) expiry is scheduled, and 'incomplete' posts are no longer served
+      const exp = join(sqlDir, "migration-expire-posts-cron.sql");
+      const e1 = psqlFile("t", exp), e2 = psqlFile("t", exp);
+      eq("expire-posts migration applies twice and leaves exactly one 'expire-posts' job", [/ERROR/.test(e1.stderr + e2.stderr), q("select count(*) from cron.job where jobname='expire-posts'")], [false, "1"]);
+      freshWorld(20);
+      mkPost(P1, U(1));
+      Q(`update public.posts set status='survived', survived_at=now()-interval '25 hours', distribution_started_at=now()-interval '25 hours', distribution_expires_at=now()-interval '1 hour' where id='${P1}'`);
+      eq("expire_posts() expires a survived post whose 24 h window passed", [q("select public.expire_posts()"), status(P1)], ["1", "expired"]);
+      freshWorld(20);
+      mkPost(P1, U(1), 1500);
+      engine();
+      const viewerOf = (uid) => q(`set role authenticated; set request.jwt.claim.sub='${uid}'; select coalesce(string_agg(post_id::text, ','), '') from public.get_feed_engine(20, 0) where post_id is not null`).split("\n").pop();
+      eq("a post the engine marked incomplete is not served to other viewers (even if get_feed returns it) but its creator still sees it", [status(P1), viewerOf(U(5)).includes(P1), viewerOf(U(1)).includes(P1)], ["incomplete", false, true]);
+      freshWorld(20);
+      mkPost(P1, U(1));
+      Q(`update public.posts set status='survived', distribution_expires_at=now()-interval '1 minute' where id='${P1}'`);
+      ok("a survived post past its window is not served even before expire_posts() runs", !viewerOf(U(5)).includes(P1));
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });
