@@ -291,6 +291,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     const accessToken = sessionData?.session?.access_token;
     if (!accessToken) throw new Error("Not signed in.");
 
+    // Phone hash, contact hashes and the hide list go first (they also cascade with the auth user).
+    await supabase.rpc("delete_my_privacy_data").then(null, () => {});
+
     const supabaseUrl =
       process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_URL.length > 0
         ? process.env.EXPO_PUBLIC_SUPABASE_URL

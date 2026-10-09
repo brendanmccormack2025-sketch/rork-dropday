@@ -28,6 +28,9 @@ import { Montserrat_700Bold, Montserrat_800ExtraBold } from "@expo-google-fonts/
 import SaveToRollToast from "@/components/SaveToRollToast";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { UserBlocksProvider } from "@/hooks/useUserBlocks";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { syncContactsIfDue } from "@/lib/contacts";
+import { phonePromptKey } from "@/lib/phonePrompt";
 import { PostsProvider } from "@/providers/PostsProvider";
 import { GroupsProvider } from "@/providers/GroupsProvider";
 import { NotificationsProvider } from "@/providers/NotificationsProvider";
@@ -58,6 +61,20 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     setErrorContext({ userId: id });
     if (id) void flushClientErrors(id);
   }, [session?.user?.id]);
+
+  // Build in silence: re-sync contacts (only if the user turned it on) on app open, at most weekly; and offer the
+  // optional phone number step once per account (after the auth screens are gone).
+  const phoneStepChecked = React.useRef<string | null>(null);
+  useEffect(() => {
+    const id = session?.user?.id;
+    if (!id || segments[0] === "(auth)") return;
+    if (phoneStepChecked.current === id) return;
+    phoneStepChecked.current = id;
+    void syncContactsIfDue(id);
+    AsyncStorage.getItem(phonePromptKey(id)).then((seen) => {
+      if (!seen) router.push("/onboarding-phone" as never);
+    }, () => {});
+  }, [session?.user?.id, segments, router]);
 
   useEffect(() => {
     if (loading) return;

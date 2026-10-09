@@ -11,13 +11,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ban, ChevronLeft, FileText, LogOut, Scissors, Shield, Trash2, User } from "lucide-react-native";
+import { Ban, ChevronLeft, EyeOff, FileText, LogOut, Phone, Scissors, Shield, Trash2, User, Users } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import { isDebugOwner, isInternalTester } from "@/constants/debug";
 import { getPlaybackDiagnostics, setPlaybackDiagnostics } from "@/lib/playbackDiagnostics";
 import UiText from "@/components/UiText";
+import { isContactsAvailable } from "@/lib/contacts";
 import {
   getAutoEditEnabled,
   getSaveEditedToRoll,
@@ -169,6 +170,28 @@ export default function SettingsScreen() {
                 </View>
               </>
             ) : null}
+          </View>
+
+          {/* Privacy section: build in silence */}
+          <UiText style={styles.sectionLabel}>Privacy</UiText>
+          <View style={styles.sectionCard}>
+            {[
+              { label: "Your phone number", href: "/settings/phone", icon: <Phone color={theme.textMuted} size={18} strokeWidth={2} />, show: true },
+              { label: "Contacts", href: "/settings/contacts", icon: <Users color={theme.textMuted} size={18} strokeWidth={2} />, show: isContactsAvailable() },
+              { label: "Hide my trials from…", href: "/settings/hide-trials", icon: <EyeOff color={theme.textMuted} size={18} strokeWidth={2} />, show: true },
+            ]
+              .filter((r) => r.show)
+              .map((r) => (
+                <Pressable
+                  key={r.href}
+                  onPress={() => router.push(r.href as never)}
+                  style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
+                >
+                  {r.icon}
+                  <UiText style={styles.rowText}>{r.label}</UiText>
+                  <ChevronLeft color={theme.textDim} size={18} strokeWidth={2} style={{ transform: [{ rotate: "180deg" }] }} />
+                </Pressable>
+              ))}
           </View>
 
           {/* Safety section */}

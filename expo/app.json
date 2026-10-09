@@ -20,7 +20,8 @@
         "NSSpeechRecognitionUsageDescription": "Trial analyzes your speech on your phone to edit your video. Nothing is uploaded.",
         "NSMicrophoneUsageDescription": "Trial uses your microphone to record sound with your videos.",
         "NSPhotoLibraryUsageDescription": "Trial needs access to your photo library so you can choose videos to put on Trial.",
-        "NSPhotoLibraryAddUsageDescription": "Trial saves the videos you record to your photo library."
+        "NSPhotoLibraryAddUsageDescription": "Trial saves the videos you record to your photo library.",
+        "NSContactsUsageDescription": "Trial checks your contacts so friends and family only see your posts after they survive Trial. Contacts are never shared."
       },
       "usesAppleSignIn": true,
       "buildNumber": "20"
@@ -39,7 +40,8 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
-        "android.permission.READ_MEDIA_AUDIO"
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_CONTACTS"
       ]
     },
     "web": {

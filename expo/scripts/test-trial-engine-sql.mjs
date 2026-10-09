@@ -6,6 +6,7 @@
  *   node --experimental-strip-types --no-warnings scripts/test-trial-engine-sql.mjs
  */
 import { spawn, spawnSync } from "node:child_process";
+import { createHmac } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, chownSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,6 +61,11 @@ if (!BIN) {
         create function auth.uid() returns uuid language sql stable as $f$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $f$;
         grant usage on schema auth to anon, authenticated, service_role;
         grant usage on schema public to anon, authenticated, service_role;
+        create schema extensions;
+        create schema vault;
+        create table vault.secrets (name text, secret text);
+        create view vault.decrypted_secrets as select name, secret as decrypted_secret from vault.secrets;
+        insert into vault.secrets values ('trial_contact_pepper', 'test-pepper-0123456789-abcdefghijklmnop');
         create schema cron;
         create table cron.job (jobid serial primary key, jobname text, schedule text, command text);
         create function cron.schedule(n text, s text, c text) returns bigint language sql as $f$ insert into cron.job (jobname, schedule, command) values (n, s, c) returning jobid::bigint $f$;
@@ -86,6 +92,11 @@ if (!BIN) {
       if (/ERROR/.test(m1.stderr + m2.stderr)) console.log((m1.stderr + m2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 5).join("\n"));
       eq("the migration applies cleanly, and again (idempotent)", [/ERROR/.test(m1.stderr), /ERROR/.test(m2.stderr)], [false, false]);
       eq("exactly one survival-checkpoint cron job, and one affinity job", [q("select count(*) from cron.job where jobname='survival-checkpoint'"), q("select count(*) from cron.job where jobname='trial-affinity'")], ["1", "1"]);
+
+      const kc = join(sqlDir, "migration-known-connections.sql");
+      const k1 = psqlFile("t", kc), k2 = psqlFile("t", kc);
+      if (/ERROR/.test(k1.stderr + k2.stderr)) console.log((k1.stderr + k2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 5).join("\n"));
+      eq("the known-connections migration applies cleanly, and again (idempotent)", [/ERROR/.test(k1.stderr), /ERROR/.test(k2.stderr)], [false, false]);
 
       // ── math ──
       near("Beta math: P(mean > 0.30) for Beta(4,5) = 0.8059", 1 - Number(q("select public.trial_beta_cdf(0.30, 4, 5)")), 0.8059, 1e-3);
@@ -499,6 +510,73 @@ if (!BIN) {
       ok("after it survives, the follower sees it normally", viewerOf(FU).includes(P1));
       ok("known_connections lists both directions from one source", q(`select string_agg(distinct source, ',') || ':' || count(*) from public.known_connections`) === "follow:2");
       ok("clients cannot read known_connections", psql("t", "set role authenticated; select * from public.known_connections", ["-v", "ON_ERROR_STOP=1"]).status !== 0);
+
+      // 16) contacts, phone hashes, hide list (build in silence, part 2)
+      const PEPPER = "test-pepper-0123456789-abcdefghijklmnop";
+      const hmacOf = (n) => createHmac("sha256", PEPPER).update(n).digest("hex");
+      const asUser = (uid, sql) => psql("t", `set role authenticated; set request.jwt.claim.sub='${uid}'; ${sql}`, ["-v", "ON_ERROR_STOP=1"]);
+      const NUM = { 2: "+14155550102", 3: "+14155550103", 4: "+14155550104", 1: "+14155550101" };
+      const wipePrivacy = () => Q(`delete from public.user_phone_hash; delete from public.contact_hashes; delete from public.contact_sync_state; delete from public.hide_from_list`);
+      wipePrivacy();
+      ok("a user stores their phone: only the HMAC-SHA256 hash (with the Vault pepper) is saved", asUser(U(2), `select public.set_my_phone('${NUM[2]}')`).status === 0 && q(`select hash from public.user_phone_hash where user_id='${U(2)}'`) === hmacOf(NUM[2]));
+      ok("duplicates are allowed (two accounts, one unverified number)", asUser(U(9), `select public.set_my_phone('${NUM[2]}')`).status === 0 && q(`select count(*) from public.user_phone_hash where hash='${hmacOf(NUM[2])}'`) === "2");
+      ok("an invalid number is rejected without echoing it", (() => { const r = asUser(U(2), `select public.set_my_phone('12345')`); return r.status !== 0 && !r.stderr.includes("12345"); })());
+      eq("syncing contacts keeps only valid numbers, hashed (3 valid of 5, one duplicate)", asUser(U(1), `select public.sync_my_contacts(array['${NUM[2]}','${NUM[3]}','${NUM[3]}','not a number','0123'])`).stdout.trim().split("\n").pop(), "2");
+      ok("raw numbers appear in no table, column or the hash text", (() => {
+        const dump = q(`select row_to_json(t)::text from public.user_phone_hash t union all select row_to_json(t)::text from public.contact_hashes t union all select row_to_json(t)::text from public.contact_sync_state t`);
+        return !/\+?1415555010[0-9]/.test(dump) && !/4155550102/.test(dump);
+      })());
+      ok("clients cannot read the phone/contact tables or ask who knows whom", ["user_phone_hash", "contact_hashes", "contact_sync_state", "known_connections"].every((t) => asUser(U(1), `select * from public.${t}`).status !== 0) && asUser(U(1), `select public.trial_is_silenced('${U(1)}','${U(2)}')`).status !== 0);
+
+      // contact match, either direction
+      freshWorld(6);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      wipePrivacy();
+      asUser(U(2), `select public.set_my_phone('${NUM[2]}')`); asUser(U(1), `select public.set_my_phone('${NUM[1]}')`);
+      asUser(U(1), `select public.sync_my_contacts(array['${NUM[2]}'])`);          // creator's contacts contain viewer 2
+      asUser(U(3), `select public.sync_my_contacts(array['${NUM[1]}'])`);          // viewer 3's contacts contain the creator
+      mkPost(P1, U(1));
+      eq("viewers matched in either direction are not assigned (even in a small app); the others are", [q(`select count(*) from public.trial_assignments where post_id='${P1}' and viewer_id in ('${U(2)}','${U(3)}')`), activeIn(P1)], ["0", 3]);
+      ok("neither matched viewer is served the testing post", !viewerOf(U(2)).includes(P1) && !viewerOf(U(3)).includes(P1));
+      ok("a stranger is", viewerOf(U(4)).startsWith(P1));
+      for (const v of [4, 5, 6]) view(P1, U(v), { watch: 500 });
+      view(P1, U(2), { watch: 12000, dur: 12000, done: true, like: true, react: true }); view(P1, U(3), { watch: 12000, dur: 12000, done: true, like: true });
+      eq("their likes and reaction do not count toward the verdict", [Object.keys(score(P1)).sort().join(), (engine(), status(P1))], [[4, 5, 6].map(U).join(), "archived"]);
+      freshWorld(6);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      mkPost(P1, U(1));
+      Q(`update public.posts set status='survived', survived_at=now(), distribution_started_at=now(), distribution_expires_at=now()+interval '24 hours' where id='${P1}'`);
+      ok("once it survives, the matched viewers see it normally", viewerOf(U(2)).includes(P1) && viewerOf(U(3)).includes(P1));
+      freshWorld(6);
+      Q(`update public.trial_engine_config set small_pool_everyone=50, build_in_silence=false`);
+      asUser(U(2), `select public.set_my_phone('${NUM[2]}')`); asUser(U(1), `select public.sync_my_contacts(array['${NUM[2]}'])`);
+      mkPost(P1, U(1));
+      ok("flag off: a contact match no longer excludes the viewer", viewerOf(U(2)).startsWith(P1));
+
+      // hide-from list
+      freshWorld(6);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      wipePrivacy();
+      ok("a user adds someone to their own hide list", asUser(U(1), `insert into public.hide_from_list (owner_id, hidden_user_id) values ('${U(1)}','${U(4)}')`).status === 0);
+      ok("...but cannot add to someone else's list, nor read it", asUser(U(5), `insert into public.hide_from_list (owner_id, hidden_user_id) values ('${U(1)}','${U(5)}')`).status !== 0 && asUser(U(4), `select count(*) from public.hide_from_list where owner_id='${U(1)}'`).stdout.trim().split("\n").pop() === "0");
+      mkPost(P1, U(1));
+      ok("a hidden person is not assigned or served the testing post; others are", !viewerOf(U(4)).includes(P1) && viewerOf(U(5)).startsWith(P1));
+      ok("the list is one direction: the hidden person's own posts still reach the owner's feed pool", (() => { mkPost(P2, U(4)); return viewerOf(U(1)).includes(P2); })());
+      ok("removing them from the list lets them see it", (() => { asUser(U(1), `delete from public.hide_from_list where hidden_user_id='${U(4)}'`); return viewerOf(U(4)).includes(P1); })());
+
+      // removal and account deletion
+      asUser(U(1), `select public.sync_my_contacts(array['${NUM[2]}'])`);
+      asUser(U(1), `select public.remove_my_contacts()`);
+      eq("'Remove my contacts data' deletes the contact hashes and sync state", [q(`select count(*) from public.contact_hashes where owner_id='${U(1)}'`), q(`select count(*) from public.contact_sync_state where owner_id='${U(1)}'`)], ["0", "0"]);
+      mkUsers(40, 40);
+      asUser(U(40), `select public.set_my_phone('${NUM[3]}')`); asUser(U(40), `select public.sync_my_contacts(array['${NUM[2]}'])`); asUser(U(40), `insert into public.hide_from_list (owner_id, hidden_user_id) values ('${U(40)}','${U(5)}')`);
+      asUser(U(40), `select public.delete_my_privacy_data()`);
+      eq("delete_my_privacy_data removes the phone hash, contact hashes and hide list", q(`select (select count(*) from public.user_phone_hash where user_id='${U(40)}') + (select count(*) from public.contact_hashes where owner_id='${U(40)}') + (select count(*) from public.hide_from_list where owner_id='${U(40)}')`), "0");
+      mkUsers(41, 41);
+      asUser(U(41), `select public.set_my_phone('${NUM[4]}')`); asUser(U(41), `select public.sync_my_contacts(array['${NUM[2]}'])`);
+      Q(`delete from auth.users where id='${U(41)}'`);
+      eq("deleting the account cascades to the phone hash and contact hashes", q(`select (select count(*) from public.user_phone_hash where user_id='${U(41)}') + (select count(*) from public.contact_hashes where owner_id='${U(41)}')`), "0");
+      wipePrivacy();
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });
