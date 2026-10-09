@@ -45,6 +45,7 @@ import * as Updates from "expo-updates";
 import { isInternalTester } from "@/constants/debug";
 import { isVideoRenderAvailable } from "@/lib/renderAtPost";
 import { usePlaybackDiagnostics } from "@/lib/playbackDiagnostics";
+import { creatorTrialNote, viewProgress, worthReporting } from "@/lib/trialEngine";
 import { formatRenderStats, useLastRenderStats } from "@/lib/renderReport";
 import {
   TAB_BAR_HEIGHT,
@@ -664,6 +665,70 @@ export const FeedItem = memo(function FeedItem({
         rawViewRecorded.delete(post.id);
       });
   }, [active, post.id]);
+
+  // Watch time per view: how long this post was the active feed item. Reported when it stops being active (or the
+  // item unmounts) and once at 6 s, so a long watch still counts if the app is closed. The server keeps the max,
+  // ignores the creator's own views, and scores the viewer (progressive-testing engine). Failures are ignored: the
+  // migration may not be applied yet.
+  const watchStartRef = useRef<number | null>(null);
+  const watchSentMsRef = useRef(0);
+  const reportWatch = useCallback(() => {
+    if (isOwner || watchStartRef.current == null) return;
+    const watched = Date.now() - watchStartRef.current;
+    if (!worthReporting(watched) || watched <= watchSentMsRef.current) return;
+    watchSentMsRef.current = watched;
+    let dur = 0;
+    try {
+      dur = (playerA.duration ?? 0) * 1000;
+    } catch {
+      dur = 0;
+    }
+    const prog = viewProgress(watched, dur);
+    supabase
+      .rpc("record_view_progress", {
+        p_post_id: post.id,
+        p_watch_ms: prog.watch_ms,
+        p_duration_ms: prog.duration_ms,
+        p_completed: prog.completed,
+      })
+      .then(null, () => {});
+  }, [isOwner, post.id, playerA]);
+  useEffect(() => {
+    if (!active) return;
+    watchStartRef.current = Date.now();
+    watchSentMsRef.current = 0;
+    const timer = setTimeout(reportWatch, 6000);
+    return () => {
+      clearTimeout(timer);
+      reportWatch();
+      watchStartRef.current = null;
+    };
+  }, [active, post.id, reportWatch]);
+  const handleShareWithSignal = useCallback(() => {
+    if (!isOwner) supabase.rpc("record_post_share", { p_post_id: post.id }).then(null, () => {});
+    onShare();
+  }, [isOwner, post.id, onShare]);
+
+  // The creator's own testing note + a progress bar (no numbers): refreshed while this item is on screen.
+  const trialNote = isOwner ? creatorTrialNote(post.status) : null;
+  const [trialProgress, setTrialProgress] = useState<number | null>(null);
+  useEffect(() => {
+    if (!active || !isOwner || post.status !== "trial") return;
+    let cancelled = false;
+    const load = () =>
+      supabase.rpc("trial_post_progress", { p_post_id: post.id }).then(
+        (res: { data: unknown }) => {
+          if (!cancelled && typeof res.data === "number") setTrialProgress(res.data);
+        },
+        () => {},
+      );
+    void load();
+    const id = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [active, isOwner, post.id, post.status]);
 
   // Clear prebuffer safety timer on unmount or when post changes
   useEffect(() => {
@@ -1783,7 +1848,7 @@ export const FeedItem = memo(function FeedItem({
         />
         <ActionButton
           icon={<Send color="#fff" size={26} strokeWidth={2} />}
-          onPress={onShare}
+          onPress={handleShareWithSignal}
         />
         <ActionButton
           icon={<MoreHorizontal color="#fff" size={26} strokeWidth={2} />}
@@ -1807,6 +1872,17 @@ export const FeedItem = memo(function FeedItem({
         <View style={styles.badgeSlot} pointerEvents="none">
           <TrialStatusBadge status={post.status} distributionExpiresAt={post.distribution_expires_at} />
         </View>
+        {trialNote ? (
+          <View style={styles.trialNote} pointerEvents="none">
+            <UiText style={styles.trialNoteTitle}>{trialNote.title}</UiText>
+            {post.status === "trial" ? (
+              <View style={styles.trialBar}>
+                <View style={[styles.trialBarFill, { width: `${Math.round(Math.max(0.05, Math.min(1, trialProgress ?? 0)) * 100)}%` }]} />
+              </View>
+            ) : null}
+            {trialNote.body ? <UiText style={styles.trialNoteBody}>{trialNote.body}</UiText> : null}
+          </View>
+        ) : null}
         <View style={styles.userRow}>
           <Pressable onPress={openCreatorProfile} hitSlop={4}>
             <UiText style={styles.username}>
@@ -1904,6 +1980,11 @@ const styles = StyleSheet.create({
     zIndex: 999,
   },
   badgeSlot: { marginBottom: 4 },
+  trialNote: { marginBottom: 6, maxWidth: 260 },
+  trialNoteTitle: { color: "#fff", fontSize: 11, fontWeight: "600" as const, letterSpacing: 0.6 },
+  trialBar: { height: 3, borderRadius: 2, marginTop: 5, backgroundColor: "rgba(255,255,255,0.25)", overflow: "hidden" as const },
+  trialBarFill: { height: 3, borderRadius: 2, backgroundColor: theme.accent },
+  trialNoteBody: { color: "rgba(255,255,255,0.85)", fontSize: 12, marginTop: 4, lineHeight: 16 },
   userRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   username: {
     color: "#fff",

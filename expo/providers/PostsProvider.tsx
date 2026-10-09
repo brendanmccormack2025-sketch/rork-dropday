@@ -19,6 +19,7 @@ import {
   postingBlockedKind,
 } from "@/lib/creatorStatus";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
+import { readFeedRows, type EngineFeedRow } from "@/lib/trialEngine";
 import { concatMP4Files } from "@/src/integrations/concatMP4";
 
 /**
@@ -1019,14 +1020,25 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           fn: string,
           args: Record<string, unknown>,
         ) => Promise<{ data: unknown; error: { message: string } | null }>;
-      }).rpc("get_feed", { p_limit: FEED_PAGE_SIZE, p_offset: offset });
+      }).rpc("get_feed_engine", { p_limit: FEED_PAGE_SIZE, p_offset: offset });
+      let feedRpc = rpc;
       if (rpc.error) {
-        logQueryError("feed", rpc.error);
-        throw new Error(rpc.error.message);
+        // The engine migration has not been run yet: fall back to the plain server feed.
+        feedRpc = await (supabase as unknown as {
+          rpc: (
+            fn: string,
+            args: Record<string, unknown>,
+          ) => Promise<{ data: unknown; error: { message: string } | null }>;
+        }).rpc("get_feed", { p_limit: FEED_PAGE_SIZE, p_offset: offset });
       }
-      const rows = (rpc.data ?? []) as Array<{ post_id: string; position: number }>;
+      if (feedRpc.error) {
+        logQueryError("feed", feedRpc.error);
+        throw new Error(feedRpc.error.message);
+      }
+      const read = readFeedRows((feedRpc.data ?? []) as EngineFeedRow[]);
+      const rows = read.ids;
       const ids = rows.map((r) => r.post_id);
-      if (ids.length === 0) return { posts: [], offset, rows: 0 };
+      if (ids.length === 0) return { posts: [], offset, rows: read.rowCount };
       const res = await supabase
         .from("posts")
         .select(FEED_POST_SELECT)
@@ -1048,7 +1060,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         .sort((a, b) => a.position - b.position)
         .map((r) => byId.get(r.post_id))
         .filter((p): p is Post => !!p);
-      return { posts, offset, rows: rows.length };
+      return { posts, offset, rows: read.rowCount };
     },
     getNextPageParam: (last) =>
       last.rows < FEED_PAGE_SIZE ? undefined : last.offset + FEED_PAGE_SIZE,

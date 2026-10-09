@@ -7,6 +7,7 @@ import UiText from "@/components/UiText";
 import { FeedAvatar } from "@/components/Avatar";
 import { theme } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
+import { TRIAL_INCOMPLETE_NOTIFICATION } from "@/lib/trialEngine";
 import type { NotificationRow } from "@/providers/NotificationsProvider";
 
 /**
@@ -15,7 +16,7 @@ import type { NotificationRow } from "@/providers/NotificationsProvider";
  * follow_request, follow_accept, followed_post_survived) and anything unknown
  * render nothing.
  */
-const DISPLAYED_TYPES: string[] = ["like", "reaction", "verdict_survived", "verdict_archived"];
+const DISPLAYED_TYPES: string[] = ["like", "reaction", "verdict_survived", "verdict_archived", "verdict_incomplete"];
 
 export function isDisplayedNotification(notif: { type: string }): boolean {
   return DISPLAYED_TYPES.includes(notif.type);
@@ -64,7 +65,7 @@ export default function NotificationItem({
   };
   const thumbUri = resolveThumbUrl(notif.post?.thumbnail_url ?? null);
   const isVerdict =
-    notif.type === "verdict_survived" || notif.type === "verdict_archived";
+    notif.type === "verdict_survived" || notif.type === "verdict_archived" || notif.type === "verdict_incomplete";
 
   let icon = <Bell color={theme.textMuted} size={15} strokeWidth={2} />;
   let actionText = "";
@@ -85,6 +86,9 @@ export default function NotificationItem({
   } else if (notif.type === "verdict_archived") {
     icon = <Archive color={theme.textDim} size={15} strokeWidth={2} />;
     actionText = "Your trial ended. Your post didn't earn enough engagement to survive. Try again!";
+  } else if (notif.type === "verdict_incomplete") {
+    icon = <Archive color={theme.textDim} size={15} strokeWidth={2} />;
+    actionText = TRIAL_INCOMPLETE_NOTIFICATION;
   }
 
   return (

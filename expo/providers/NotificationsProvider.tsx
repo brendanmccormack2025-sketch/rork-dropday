@@ -12,6 +12,7 @@ export type NotificationType =
   | "group_post"
   | "verdict_survived"
   | "verdict_archived"
+  | "verdict_incomplete"
   | "followed_post_survived";
 
 export type NotificationRow = {

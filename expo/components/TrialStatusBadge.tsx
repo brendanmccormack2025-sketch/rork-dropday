@@ -7,11 +7,11 @@ import type { Post } from "@/providers/PostsProvider";
 
 type SurvivalStatus = NonNullable<Post["status"]>;
 
-/** Pill copy + color per survival status. `incomplete` shares the ON TRIAL
- *  look — an underexposed post is still being judged, not failed. */
+/** Pill copy + color per survival status. `incomplete` is its own pill: there
+ *  was not enough testing activity to judge the post, which is not a failure. */
 const BADGES: Record<SurvivalStatus, { label: string; color: string }> = {
   trial: { label: "ON TRIAL", color: theme.accent },
-  incomplete: { label: "ON TRIAL", color: theme.accent },
+  incomplete: { label: "TRIAL INCOMPLETE", color: theme.textMuted },
   survived: { label: "SURVIVED", color: theme.success },
   archived: { label: "TRIAL ENDED", color: "rgba(10,10,10,0.65)" },
   expired: { label: "EXPIRED", color: theme.textMuted },
