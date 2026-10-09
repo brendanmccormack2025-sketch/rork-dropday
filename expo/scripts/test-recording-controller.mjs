@@ -252,7 +252,7 @@ function rig(opts = {}) {
   ok("circle record button, 72 pt+ target, red with a pulse while recording", /RECORD_TOUCH = 88/.test(cam) && /RECORD_SIZE = 76/.test(cam) && /recordDiscRecording/.test(cam) && /Animated\.loop/.test(cam) && /borderRadius: \(RECORD_SIZE - 12\) \/ 2/.test(cam));
   ok("haptic on start and stop", /onState: \(s\) =>[\s\S]{0,300}Haptics\.ImpactFeedbackStyle\.Medium/.test(hook));
   ok("delete-last (backspace icon) left, Next (check) right, both outside recording", /<Delete /.test(cam) && /<Check /.test(cam) && /sideSlot/.test(cam));
-  ok("flip and flash in a right-side column of 48 pt buttons; flash only on the back camera", /styles\.toolColumn/.test(cam) && /TOOL_SIZE = 48/.test(cam) && /facing === "back" && \(/.test(cam));
+  ok("flip and flash in a right-side column of 48 pt buttons; flash on both cameras (torch on the back, screen light on the front)", /styles\.toolColumn/.test(cam) && /TOOL_SIZE = 48/.test(cam) && /onPress=\{toggleFlash\}/.test(cam) && !/facing === "back" && \(\s*<Pressable\s+onPress=\{toggleTorch\}/.test(cam));
   ok("the flip icon spins and gives a light haptic", /rotate: spinDeg/.test(cam) && /hapticLight\(\)/.test(cam));
   ok("double-tap flip only on the preview zone, clear of the controls and tools; single taps do nothing", /numberOfTaps\(2\)/.test(cam) && /styles\.previewZone, \{ bottom: insets\.bottom \+ CONTROLS_ZONE, right: TOOLS_ZONE \}/.test(cam) && !/numberOfTaps\(1\)/.test(cam));
   ok("the hint text", /Tap to record  ·  Tap again to stop/.test(cam));
