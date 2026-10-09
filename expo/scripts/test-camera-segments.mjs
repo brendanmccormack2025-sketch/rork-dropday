@@ -74,7 +74,7 @@ const seg = (id, runId, ms, type = "video") => ({ id, uri: `file:///${id}.mov`, 
   const hook = read("../hooks/useCameraRecorder.ts");
   const ctl = read("../lib/recordingController.ts");
   ok("the recorder gets the remaining time as maxDuration, and a full take refuses to start", /maxDurationSeconds\(segments\)/.test(ctl) && /!canRecordMore\(this\.deps\.getSegments\(\)\)/.test(ctl));
-  ok("each file's recorded length is kept for the bar and the cap", /measuredMs: Math\.max\(0, this\.deps\.now\(\) - startedAt\)/.test(ctl) && /measuredMs: seg\.measuredMs/.test(hook));
+  ok("each file's recorded length is kept for the bar and the cap", /const ranMs = Math\.max\(0, this\.deps\.now\(\) - startedAt\)/.test(ctl) && /measuredMs: ranMs/.test(ctl) && /measuredMs: seg\.measuredMs/.test(hook));
 }
 
 // ── Next: >= 1 s, then merge, then transcription + planning ──

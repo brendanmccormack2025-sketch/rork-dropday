@@ -27,11 +27,11 @@ export const MAX_VIDEO_SECONDS = 300;
 /** The camera used last time (default: front). */
 const FACING_KEY = "trial:cameraFacing";
 /**
- * After a flip the next segment starts the moment the camera reports ready. This is only the longest we wait if it
- * never does (expo-camera may not fire onCameraReady again on a facing change); the controller then tries to record
- * and retries at once if the camera still refuses.
+ * Device data: onCameraReady never fires after a facing change, and the camera is ready well before 450 ms. So the
+ * first try at the next recording is made after this short delay (earlier if onCameraReady does fire); if the camera
+ * refuses, the controller retries every 50 ms.
  */
-const FLIP_READY_TIMEOUT_MS = 450;
+const FLIP_FIRST_TRY_MS = 150;
 const READY_TIMEOUT_MS = 2000;
 
 const newId = (): string => `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -135,16 +135,19 @@ export function useCameraRecorder() {
           return cameraReadyRef.current && !!cameraRef.current;
         },
         switchFacing: () => setFacing(facingRef.current === "back" ? "front" : "back"),
-        // The moment onCameraReady fires (no fixed delay); the timeout only covers a camera that never says.
+        // onCameraReady as an early trigger if it ever fires; otherwise the first try after FLIP_FIRST_TRY_MS.
         afterFlipSettled: () =>
           new Promise<void>((resolve) => {
-            const t = setTimeout(resolve, FLIP_READY_TIMEOUT_MS);
+            const t = setTimeout(resolve, FLIP_FIRST_TRY_MS);
             readyWaitersRef.current.push(() => {
               clearTimeout(t);
               resolve();
             });
           }),
         getSegments: () => clipsRef.current as CameraSegment[],
+        discardFile: (uri) => {
+          deleteAsync(uri, { idempotent: true }).catch(() => {});
+        },
         onSegment: (seg) => {
           const clip: Clip = { id: seg.id, uri: seg.uri, type: "video", recordingSessionId: seg.runId, measuredMs: seg.measuredMs };
           clipsRef.current = [...clipsRef.current, clip];

@@ -22,11 +22,16 @@ export type RecordingDeps = {
   ensureReady(): Promise<boolean>;
   /** Switch front/back. */
   switchFacing(): void;
-  /** Resolves the moment the camera after a switch reports ready (a timeout inside covers a camera that never says). */
+  /**
+   * When the next segment may first be tried after a switch: at once if the camera reports ready, otherwise after a
+   * short first-try delay. The controller then tries and retries until the camera accepts.
+   */
   afterFlipSettled(): Promise<void>;
   /** The segments recorded so far (the 60 s cap is worked out from them). */
   getSegments(): CameraSegment[];
   onSegment(segment: CameraSegment & { uri: string; type: "video" }): void;
+  /** Delete a file of a segment that was dropped as empty. */
+  discardFile?(uri: string): void;
   onState(state: RecState): void;
   onError(message: string | null): void;
   /** True while a flip is switching cameras (for the blur over the preview). */
@@ -50,8 +55,11 @@ const STOP_RETRY_MS = 300;
 const STOP_RETRIES = 6;
 /** After a flip: a recording still running this long after it was asked for counts as accepted. */
 const ACCEPT_AFTER_MS = 120;
-const MAX_START_RETRIES = 8;
-const RETRY_SPACING_MS = 60;
+const MAX_START_RETRIES = 15;
+const RETRY_SPACING_MS = 50;
+/** A segment shorter than this is a failed or accidental start, not footage: it is discarded. */
+export const MIN_SEGMENT_MS = 200;
+export const CANT_CONTINUE_TEXT = "Couldn't continue after the flip. Tap to record again.";
 
 export class RecordingController {
   state: RecState = "idle";
@@ -199,8 +207,11 @@ export class RecordingController {
             (err: unknown) => ({ err }),
           );
           const early = await Promise.race([attempt, this.deps.delay(ACCEPT_AFTER_MS).then(() => null)]);
-          if (early && "err" in early) {
-            if (this.stopRequested || retries >= MAX_START_RETRIES) throw early.err;
+          // Refused: it failed, or ended at once with no file. Nothing was recorded; try again straight away,
+          // without a message or a segment (only giving up after all the tries is reported).
+          const refused = early !== null && ("err" in early || !early.r?.uri);
+          if (refused) {
+            if (this.stopRequested || retries >= MAX_START_RETRIES) throw "err" in early ? early.err : new Error(CANT_CONTINUE_TEXT);
             retries++;
             await this.deps.delay(RETRY_SPACING_MS);
             continue;
@@ -229,14 +240,18 @@ export class RecordingController {
     this.recording = false;
     this.token++;
     this.lastResolvedAt = this.deps.now();
-    if (result?.uri) {
+    const ranMs = Math.max(0, this.deps.now() - startedAt);
+    if (result?.uri && ranMs < MIN_SEGMENT_MS) {
+      // Too short to be footage (a start that was cut off at once): dropped here, so it never reaches the merge.
+      this.deps.discardFile?.(result.uri);
+    } else if (result?.uri) {
       this.deps.onSegment({
         id: this.deps.newId(),
         uri: result.uri,
         type: "video",
         // Every segment of a take (flips included) shares the take's id: one bar stretch, one "Delete last".
         runId: this.takeId,
-        measuredMs: Math.max(0, this.deps.now() - startedAt),
+        measuredMs: ranMs,
       });
     } else {
       this.deps.onError(NOT_SAVED_TEXT);

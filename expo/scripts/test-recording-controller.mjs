@@ -27,6 +27,7 @@ function rig(opts = {}) {
   const states = [];
   const errors = [];
   const gaps = [];
+  const discarded = [];
   let failStarts = opts.failStarts ?? 0;
   let pending = null;
   let n = 0;
@@ -35,7 +36,7 @@ function rig(opts = {}) {
   const deps = {
     record: (max) => {
       log.push(`record(${max})`);
-      if (failStarts > 0 && log.includes("settled")) { failStarts--; return Promise.reject(new Error("camera busy")); }
+      if (failStarts > 0 && log.includes("settled")) { failStarts--; return opts.refuseWithNull ? Promise.resolve(null) : Promise.reject(new Error("camera busy")); }
       return new Promise((resolve) => {
         pending = { resolve, max };
         if (opts.autoEndAfterMs !== undefined) setTimeout(() => { if (pending) { t += opts.autoEndAfterMs; const p = pending; pending = null; p.resolve({ uri: `file:///seg${++n}.mov` }); } }, 1);
@@ -50,6 +51,7 @@ function rig(opts = {}) {
     afterFlipSettled: async () => { log.push("settling"); await tick(); await tick(); t += 180; log.push("settled"); },
     getSegments: () => segments,
     onSegment: (s) => { segments.push(s); log.push(`segment:${s.uri.split("/").pop()}`); },
+    discardFile: (u) => { discarded.push(u); },
     onState: (s) => states.push(s),
     onError: (m) => { if (m) errors.push(m); },
     onSwitching: (b) => log.push(`switching=${b}`),
@@ -59,7 +61,7 @@ function rig(opts = {}) {
     newId: () => `id${++n}`,
     delay: (ms) => (ms >= 1000 ? new Promise(() => {}) : new Promise((r) => setTimeout(r, Math.min(ms, 5)))),
   };
-  return { deps, log, segments, states, errors, gaps, get facing() { return facing; }, get pending() { return pending; }, advance: (ms) => { t += ms; } };
+  return { deps, log, segments, states, errors, gaps, discarded, get facing() { return facing; }, get pending() { return pending; }, advance: (ms) => { t += ms; } };
 }
 
 // ── start / stop / no auto-restart ──
@@ -105,7 +107,7 @@ function rig(opts = {}) {
   // The first two stop requests are ignored by the (fake) camera; the third works.
   let resolveRec; let started = false;
   stubborn.record = () => { started = true; return new Promise((res) => { resolveRec = res; }); };
-  stubborn.stopNative = () => { calls++; if (calls >= 3 && resolveRec) { const f = resolveRec; resolveRec = null; f({ uri: "file:///x.mov" }); } };
+  stubborn.stopNative = () => { calls++; if (calls >= 3 && resolveRec) { const f = resolveRec; resolveRec = null; r.advance(2000); f({ uri: "file:///x.mov" }); } };
   const c = new RecordingController(stubborn);
   c.start(); await tick(); await tick();
   ok("the native recording is running", started);
@@ -172,6 +174,7 @@ function rig(opts = {}) {
 
   // the handoff is measured
   eq("the gap (previous segment resolved -> next recording accepted) is reported once, with no retries", [r2.gaps.length, r2.gaps[0].retries, r2.gaps[0].ms], [1, 0, 180]);
+  eq("(the report carries gapMs and retries, as logged to client_errors)", Object.keys(r2.gaps[0]).sort(), ["ms", "retries"]);
 
   // the camera refuses the first tries: retried at once, still one take, gap reported with the retries
   const r4 = rig({ failStarts: 2 });
@@ -180,7 +183,28 @@ function rig(opts = {}) {
   for (let i = 0; i < 40 && r4.gaps.length === 0; i++) await tick();
   eq("a camera that is still settling is retried immediately", [r4.gaps.length, r4.gaps[0]?.retries, r4.log.filter((l) => l.startsWith("record(")).length], [1, 2, 4]);
   f.stop(); await f.settled();
-  eq("(and the take still has both parts)", r4.segments.length, 2);
+  eq("(and the take still has both parts, no error shown, no extra segment)", [r4.segments.length, r4.errors.length], [2, 0]);
+
+  // a refusal that comes back as 'no file' is retried the same way, with no segment and no message
+  const r5 = rig({ failStarts: 3, refuseWithNull: true });
+  const g = new RecordingController(r5.deps);
+  g.start(); await tick(); await tick(); g.flip();
+  for (let i = 0; i < 40 && r5.gaps.length === 0; i++) await tick();
+  eq("an early 'nothing recorded' answer counts as refused: retried, no error toast, no empty segment", [r5.gaps[0]?.retries, r5.errors.length, r5.segments.length], [3, 0, 1]);
+  g.stop(); await g.settled();
+  eq("(finally two real segments)", r5.segments.length, 2);
+
+  // the camera never accepts: after 15 tries the take ends with ONE message, the first part is kept
+  const r6 = rig({ failStarts: 99 });
+  const h = new RecordingController(r6.deps);
+  h.start(); await tick(); await tick(); h.flip(); await h.settled();
+  eq("15 retries, then it gives up cleanly: first part kept, one message, idle", [r6.log.filter((l) => l.startsWith("record(")).length, r6.segments.length, r6.errors.length, h.state], [17, 1, 1, "idle"]);
+
+  // a segment cut off at once (shorter than 200 ms) is dropped and its file deleted, so it never reaches the merge
+  const r7 = rig({ runMs: 80 });
+  const k = new RecordingController(r7.deps);
+  k.start(); await tick(); await tick(); k.stop(); await k.settled();
+  eq("an empty segment is discarded (file deleted, nothing added, no message)", [r7.segments.length, r7.discarded.length, r7.errors.length, k.state], [0, 1, 0, "idle"]);
 
   // tap during the switch ends the take; no new segment starts
   const r3 = rig();
@@ -234,7 +258,10 @@ function rig(opts = {}) {
   ok("the hint text", /Tap to record  ·  Tap again to stop/.test(cam));
   ok("the last used camera is remembered, the default is the front camera", /trial:cameraFacing/.test(hook) && /useState<"back" \| "front">\("front"\)/.test(hook) && /AsyncStorage\.setItem\(FACING_KEY/.test(hook));
   ok("the view waits for the remembered camera, then stays mounted (no remount on a flip)", /\{facingLoaded && \(\s*<CameraView/.test(cam));
-  ok("a flip while recording waits for onCameraReady only (a timeout just covers a camera that never says), no fixed delay", /afterFlipSettled/.test(hook) && /readyWaitersRef/.test(hook) && /FLIP_READY_TIMEOUT_MS/.test(hook) && !/FLIP_AFTER_SETTLE_MS|FLIP_SETTLE_MS/.test(hook));
+  ok("a flip while recording waits for onCameraReady only (a timeout just covers a camera that never says), no fixed delay", /afterFlipSettled/.test(hook) && /readyWaitersRef/.test(hook) && /FLIP_FIRST_TRY_MS = 150/.test(hook) && !/FLIP_READY_TIMEOUT_MS|FLIP_AFTER_SETTLE_MS|FLIP_SETTLE_MS/.test(hook));
+  const ctl2 = read("../lib/recordingController.ts");
+  ok("after a flip: first try ~150 ms (earlier on onCameraReady), then a retry every 50 ms, up to 15 tries", /MAX_START_RETRIES = 15/.test(ctl2) && /RETRY_SPACING_MS = 50/.test(ctl2) && /setTimeout\(resolve, FLIP_FIRST_TRY_MS\)/.test(hook) && /readyWaitersRef\.current\.push/.test(hook));
+  ok("empty segments never reach the merge (dropped at the recorder and filtered again before Next)", /MIN_SEGMENT_MS = 200/.test(ctl2) && /discardFile\?\.\(result\.uri\)/.test(ctl2) && /usableSegments\(clips\)/.test(cam));
   ok("the gap is logged in dev and to client_errors as flipGap", /kind: "flipGap"/.test(hook) && /__DEV__/.test(hook) && /gapMs/.test(hook));
   ok("the bar and timer follow the take, so they keep advancing through a flip", /takeLiveMs/.test(cam) && /runId: takeRef\.current\?\.id/.test(cam));
   ok("the blur is brief and subtle", /intensity=\{22\}/.test(cam) && /duration: switching \? 60 : 90/.test(cam));

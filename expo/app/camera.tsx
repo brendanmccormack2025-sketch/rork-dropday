@@ -25,7 +25,7 @@ import { Camera as CameraIcon, Check, Delete, RefreshCw, X, Zap, ZapOff } from "
 import PrimaryButton from "@/components/PrimaryButton";
 import { theme } from "@/constants/theme";
 import { useCameraRecorder } from "@/hooks/useCameraRecorder";
-import { MAX_CAMERA_MS, barSegments, canProceed, totalMs } from "@/lib/cameraSegments";
+import { MAX_CAMERA_MS, barSegments, canProceed, totalMs, usableSegments } from "@/lib/cameraSegments";
 
 /** Record button: a 76 pt circle inside an 88 pt touch target (the minimum is 72). */
 const RECORD_SIZE = 76;
@@ -199,7 +199,7 @@ export default function CameraScreen() {
   const goToEdit = useCallback(() => {
     if (!canProceed(clips) || isRecording) return;
     // The recorder's own timing is only for the bar; the editor measures the real lengths.
-    const forEditor = clips.map(({ measuredMs: _m, ...clip }) => clip);
+    const forEditor = usableSegments(clips).map(({ measuredMs: _m, ...clip }) => clip);
     const params: Record<string, string> = { clips: JSON.stringify(forEditor) };
     if (reactingTo) params.reactingTo = reactingTo;
     if (rootDropId) params.rootDropId = rootDropId;

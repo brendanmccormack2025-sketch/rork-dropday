@@ -16,6 +16,11 @@ export type CameraSegment = { id: string; uri: string; type: "video" | "image"; 
 /** Length of one clip as measured while recording (photos and unknowns count as 0). */
 const lengthOf = (s: CameraSegment) => (s.type === "video" ? Math.max(0, s.measuredMs ?? 0) : 0);
 
+/** The segments worth merging: a video whose recorded length is known to be empty (< 200 ms) is left out. */
+export function usableSegments<T extends CameraSegment>(segments: ReadonlyArray<T>): T[] {
+  return segments.filter((s) => s.type !== "video" || s.measuredMs === undefined || s.measuredMs >= 200);
+}
+
 export function totalMs(segments: ReadonlyArray<CameraSegment>): number {
   return segments.reduce((n, s) => n + lengthOf(s), 0);
 }
