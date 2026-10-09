@@ -676,6 +676,9 @@ private func render(
     let start = CMTime(value: Int64(max(0, clip.startMs).rounded()), timescale: 1000)
     var end = CMTime(value: Int64(clip.endMs.rounded()), timescale: 1000)
     if end > asset.duration { end = asset.duration }
+    // The picture stops where the video track stops (the movie can be longer than its video, e.g. when the audio is):
+    // a part of the range with no video would leave a hole in the picture at the join with the next clip.
+    if end > sourceVideo.timeRange.end { end = sourceVideo.timeRange.end }
     guard end > start else { continue }
     let range = CMTimeRange(start: start, end: end)
 

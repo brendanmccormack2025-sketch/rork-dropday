@@ -105,6 +105,9 @@ import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/
 import { analysisSource, loadLoudnessChecked } from "@/lib/mergeTiming";
 import { AUTO_EDIT_STALL_MS, transcriptionGate } from "@/lib/captionsGate";
 import { exitPreviewPlan, isPlayingWholeSource } from "@/lib/autoEdit/noCuts";
+import { enforceMergedSource, playerUris } from "@/lib/mergedSource";
+import { DURATION_TOLERANCE_MS, joinTimesMs, verifyJoins } from "@/lib/mergeVerify";
+import { createVerifyPlayer } from "@/lib/mergeVerifyNative";
 import { aiBoundariesOf, describeEdgeDrag, reshapeCutAtEdge } from "@/lib/autoEdit/reshape";
 import { buildSeamHandles, remapOverlayTimes, type SeamEdgeInfo } from "@/lib/autoEdit/seams";
 import { allCategoriesOff, cutCategoriesOff, cutsRows, cutsSummary, setCutsRowEnabled, type CutsRow } from "@/lib/autoEdit/editPanel";
@@ -2287,7 +2290,21 @@ export default function EditScreen() {
   useEffect(() => { uploadingRef.current = uploading; }, [uploading]);
 
   // Swap the whole clip list (same playback reset as undo/redo, text untouched).
-  const replaceClips = useCallback((next: DraftClip[]) => {
+  const replaceClips = useCallback((requested: DraftClip[]) => {
+    // A merged project plays the merged file only: a clip of a pre-merge segment never reaches the player.
+    const { clips: next, dropped } = enforceMergedSource(
+      requested,
+      mergedRef.current,
+      originalClipsRef.current.map((c) => c.uri),
+    );
+    if (dropped.length > 0) {
+      void recordClientError(new Error("a pre-merge segment reached the editor timeline"), {
+        kind: "segmentInTimeline",
+        dropped: dropped.map((c) => c.uri),
+        merged: mergedRef.current?.uri,
+      });
+    }
+    if (next.length === 0) return;
     clipsRef.current = next;
     activeIndexRef.current = 0;
     selectedClipIdxRef.current = -1;
@@ -2332,6 +2349,29 @@ export default function EditScreen() {
       if (timing?.issues?.length) void recordClientError(new Error(`merge timing: ${timing.issues.join("; ")}`), { kind: "mergeTiming", ...(timing as object) });
       replaceClips([result.clip]);
       setMergeUi({ kind: "idle" });
+      // Check in the background that the merged file plays straight through, past every join; the numbers are logged.
+      const segmentMs = (timing as { sourceDurationsMs?: Array<number | null> } | undefined)?.sourceDurationsMs;
+      if (segmentMs && segmentMs.every((m): m is number => typeof m === "number")) {
+        const sum = segmentMs.reduce((n, m) => n + m, 0);
+        void verifyJoins({
+          createPlayer: () => createVerifyPlayer(result.clip.uri),
+          joinsMs: joinTimesMs(segmentMs),
+          expectedMs: sum,
+          delay: (ms) => new Promise((r) => setTimeout(r, ms)),
+        })
+          .then((v) => {
+            if (__DEV__) console.log("[merge] verify", JSON.stringify(v));
+            if (v.stalled || !v.durationOk) {
+              void recordClientError(new Error(v.stalled ? "merged file stalls at a join" : "merged file length differs from its segments"), {
+                kind: "mergeVerify",
+                toleranceMs: DURATION_TOLERANCE_MS,
+                ...v,
+                timing,
+              });
+            }
+          })
+          .catch(() => {});
+      }
     } else {
       void recordClientError(new Error(result.message), { kind: "mergeClips", clipCount: originalClipsRef.current.length });
       setMergeUi({ kind: "failed", message: result.message });
@@ -2915,6 +2955,8 @@ export default function EditScreen() {
 
   // "Keep original": the automatic cuts off, nothing else (captions, text and the creator's own deletes stay).
   const handleKeepOriginal = useCallback(() => {
+    // For a merged project the original is the merged file: say which file(s) the player will load.
+    if (__DEV__) console.log("[keepOriginal] player loads", JSON.stringify(playerUris(clipsRef.current)), "merged:", mergedRef.current?.uri ?? null);
     if (editStateRef.current) userEdit(cutCategoriesOff);
     else handleUseOriginal();
   }, [userEdit, handleUseOriginal]);

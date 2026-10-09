@@ -35,6 +35,8 @@ export type MergeTimingReport = {
   lengthDiffMs: number | null;
   /** Per source: its own audio offset (ms), to see which part is off. */
   sourceAudioOffsetsMs: Array<number | null>;
+  /** Per source: its movie length (ms), in order; null when it could not be probed. */
+  sourceDurationsMs: Array<number | null>;
   issues: string[];
 };
 
@@ -60,6 +62,7 @@ export function mergeTimingReport(sources: Array<TrackTiming | null>, merged: Tr
     mergedAudioMs: merged.audioDurationMs,
     audioOffsetMs,
     lengthDiffMs,
+    sourceDurationsMs: sources.map((s) => (s && s.durationMs > 0 ? s.durationMs : null)),
     sourceAudioOffsetsMs: sources.map((s) => (s && s.audioStartMs >= 0 && s.videoStartMs >= 0 ? s.audioStartMs - s.videoStartMs : null)),
     issues,
   };
