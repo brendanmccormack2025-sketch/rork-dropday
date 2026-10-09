@@ -25,7 +25,7 @@ import { Camera as CameraIcon, Check, Delete, RefreshCw, X, Zap, ZapOff } from "
 import PrimaryButton from "@/components/PrimaryButton";
 import { theme } from "@/constants/theme";
 import { useCameraRecorder } from "@/hooks/useCameraRecorder";
-import { SCREEN_LIGHT_RING } from "@/lib/cameraFlash";
+import { SCREEN_LIGHT_COLOR } from "@/lib/cameraFlash";
 import { createScreenLight, nativeBrightness } from "@/lib/screenLight";
 import { MAX_CAMERA_MS, barSegments, canProceed, totalMs, usableSegments } from "@/lib/cameraSegments";
 
@@ -323,13 +323,10 @@ export default function CameraScreen() {
         </GestureDetector>
       </View>
 
-      {/* Front camera + flash: a bright white ring around the preview (the screen is the light). It stays on through
-          recording and flips; the preview stays visible in the middle. */}
-      {flash === "screen" && (
-        <View pointerEvents="none" style={styles.screenLight} accessibilityLabel="Screen light on">
-          <View style={styles.screenLightHole} />
-        </View>
-      )}
+      {/* Front camera + flash (Snapchat style): a warm white glow over the whole screen, about 80% opaque, so the
+          preview is still faintly visible through it. It is only drawn over the screen, so the recording is
+          unaffected, and it stays on through recording and flips. Static: no fade on start or stop. */}
+      {flash === "screen" && <View pointerEvents="none" style={styles.screenLight} accessibilityLabel="Screen light on" />}
 
       {/* While a flip switches cameras: a dark blur over the preview, never white. */}
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: blurOpacity, zIndex: 6 }]}>
@@ -487,9 +484,8 @@ const styles = StyleSheet.create({
   },
 
   toolBtnOn: { backgroundColor: "rgba(255,214,10,0.28)", borderWidth: 2, borderColor: "#FFD60A" },
-  // Screen light: a white ring (border) around a see-through middle, under the controls.
-  screenLight: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4, borderWidth: SCREEN_LIGHT_RING, borderColor: "rgba(255,255,255,0.97)" },
-  screenLightHole: { flex: 1, borderRadius: 18, borderWidth: 2, borderColor: "rgba(255,255,255,0.6)" },
+  // Screen light: warm white over the whole screen, under the controls.
+  screenLight: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4, backgroundColor: SCREEN_LIGHT_COLOR },
 
   hintWrap: { position: "absolute", left: 0, right: 0, alignItems: "center", zIndex: 5 },
   hintText: {

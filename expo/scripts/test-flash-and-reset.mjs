@@ -4,7 +4,7 @@
  *   node --experimental-strip-types --no-warnings scripts/test-flash-and-reset.mjs
  */
 import { readFileSync } from "node:fs";
-import { flashMode } from "../lib/cameraFlash.ts";
+import { SCREEN_LIGHT_COLOR, flashMode } from "../lib/cameraFlash.ts";
 import { createScreenLight } from "../lib/screenLightCore.ts";
 import { resetPlayer } from "../lib/playerReset.ts";
 
@@ -31,7 +31,9 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
   const cam = read("../app/camera.tsx");
   ok("one flash switch in the hook, the mode derived from the camera (a flip never resets it)", /const \[flashOn, setFlashOn\] = useState\(false\)/.test(hook) && /const flash = flashMode\(facing, flashOn\)/.test(hook) && !/setFlashOn\(false\)/.test(hook));
   ok("the back camera uses enableTorch, only in torch mode", /enableTorch=\{flash === "torch"\}/.test(cam));
-  ok("the front camera shows a white ring around a see-through preview, under the controls", /flash === "screen" && \(/.test(cam) && /styles\.screenLight/.test(cam) && /borderWidth: SCREEN_LIGHT_RING/.test(cam) && /zIndex: 4/.test(cam));
+  ok("the front camera shows a warm white glow (#FFF4E0, 80%) over the whole screen, under the controls, drawn on the screen only (the recording is unaffected)", /flash === "screen" && <View/.test(cam) && /styles\.screenLight/.test(cam) && /backgroundColor: SCREEN_LIGHT_COLOR/.test(cam) && /zIndex: 4/.test(cam));
+  eq("the glow colour is #FFF4E0 at 80%", SCREEN_LIGHT_COLOR, "rgba(255,244,224,0.8)");
+  ok("it is see-through enough to show the preview: 80% opacity, not solid", /,0\.8\)$/.test(SCREEN_LIGHT_COLOR));
   ok("the flash button is there for both cameras and shows on/off clearly (filled yellow bolt + ringed button vs crossed bolt)", /onPress=\{toggleFlash\}/.test(cam) && /flashOn \? <Zap color="#FFD60A"/.test(cam) && /<ZapOff/.test(cam) && /toolBtnOn/.test(cam) && /accessibilityLabel=\{flashOn \? "Flash on" : "Flash off"\}/.test(cam));
   ok("no animated white flash on start/stop: the ring is static", !/frontFlash|flipFlash/.test(cam));
 }
@@ -39,9 +41,10 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 // ── screen brightness (only with expo-brightness) ──
 {
   const pkg = JSON.parse(read("../package.json"));
-  ok("expo-brightness is not installed (no native package added)", !pkg.dependencies?.["expo-brightness"]);
+  ok("expo-brightness is in package.json (the SDK 57 version) for the next native build", pkg.dependencies?.["expo-brightness"] === "~57.0.2");
   const src = read("../lib/screenLight.ts");
-  ok("brightness is looked up at run time, so a later build with the package picks it up", /requireOptionalNativeModule/.test(src) && !/from "expo-brightness"/.test(src));
+  ok("brightness is looked up at run time, so builds WITHOUT the module do not crash (no static import of expo-brightness)", /requireOptionalNativeModule<BrightnessModule>\("ExpoBrightness"\)/.test(src) && !/from "expo-brightness"/.test(src) && !/require\("expo-brightness"\)/.test(src));
+  ok("a missing or broken module just means no brightness change", /catch \{\s*return null;/.test(src));
   const none = createScreenLight(null);
   await none.on(); await none.off();
   eq("without the module: nothing happens, reported unavailable", none.available, false);

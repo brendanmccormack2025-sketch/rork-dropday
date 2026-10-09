@@ -55,6 +55,8 @@ export type AiDebugInput = {
   transcription?: TranscriptionInfo | null;
   /** Why the transcription has not started, when it has not (shown after "not run"). */
   transcriptionWaitingFor?: string | null;
+  /** What the editor's players have loaded (owner debug): merged file, segments, Keep original. */
+  playback?: PlaybackDebug;
   /** The transcript after dedupe (ms on the source clip). */
   transcriptWords?: Array<{ text: string; startMs: number; endMs: number }> | null;
 };
@@ -62,6 +64,41 @@ export type AiDebugInput = {
 function outputTime(clips: EditClip[], uri: string, sourceMs: number): string {
   const out = sourceToOutputMs(clips, sourceMs, uri);
   return out === null ? "cut" : formatClock(out);
+}
+
+export type PlaybackDebug = {
+  merged: { uri: string; durationMs: number } | null;
+  segmentUris: string[];
+  clips: Array<{ uri: string; trimStartMs: number; trimEndMs: number }>;
+  /** What each player has loaded now (the uri the editor gave it, and what the player reports). */
+  players: Array<{ name: string; uri: string | null; durationMs: number | null; status: string | null; positionMs: number | null }>;
+  /** The last Keep original / undo reset: which files were loaded and how the reset went. */
+  lastReset?: { at: number; uris: string[]; ready: boolean; steps: string[]; ms: number };
+};
+
+const fileName = (u: string | null | undefined) => (u ? u.split("/").slice(-1)[0] : "none");
+
+/** Owner debug: exactly which file(s) the editor plays, next to the merged file and the pre-merge segments. */
+export function formatPlaybackDebug(p: PlaybackDebug): string[] {
+  const lines: string[] = ["", "Playback"];
+  lines.push(p.merged ? `Merged file: ${p.merged.uri} (${formatClock(p.merged.durationMs)})` : "Merged file: none (not a merged project)");
+  lines.push(`Pre-merge segments: ${p.segmentUris.length === 0 ? "none" : p.segmentUris.map(fileName).join(", ")}`);
+  lines.push(`Timeline clips: ${p.clips.map((c) => `${fileName(c.uri)} ${formatClock(c.trimStartMs)}-${formatClock(c.trimEndMs)}`).join(" | ") || "none"}`);
+  const onlyMerged = p.merged ? p.clips.every((c) => c.uri === p.merged!.uri) : null;
+  if (onlyMerged !== null) lines.push(`Timeline uses only the merged file: ${onlyMerged ? "yes" : "NO"}`);
+  for (const pl of p.players) {
+    lines.push(
+      `Player ${pl.name}: ${pl.uri ?? "nothing loaded"}; duration ${pl.durationMs === null ? "?" : formatClock(pl.durationMs)}; status ${pl.status ?? "?"}; position ${pl.positionMs === null ? "?" : formatClock(pl.positionMs)}`,
+    );
+  }
+  if (p.merged) {
+    const strays = p.players.filter((pl) => pl.uri && p.segmentUris.includes(pl.uri));
+    lines.push(`A player holds a pre-merge segment: ${strays.length > 0 ? `YES (${strays.map((s) => s.name).join(", ")})` : "no"}`);
+  }
+  if (p.lastReset) {
+    lines.push(`Last reset (Keep original/undo): ${p.lastReset.uris.map(fileName).join(", ")}; ready ${p.lastReset.ready ? "yes" : "NO (timed out)"}; ${p.lastReset.steps.join(" > ")}; ${p.lastReset.ms} ms`);
+  }
+  return lines;
 }
 
 export function formatAiDebug(input: AiDebugInput): string {
@@ -258,5 +295,6 @@ export function formatAiDebug(input: AiDebugInput): string {
     lines.push(`'${p.text ?? ""}'  source ${formatClock(d.sourceStartMs)}-${formatClock(d.sourceEndMs)}`);
   }
 
+  if (input.playback) lines.push(...formatPlaybackDebug(input.playback));
   return lines.join("\n");
 }

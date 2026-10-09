@@ -107,6 +107,7 @@ import { AUTO_EDIT_STALL_MS, transcriptionGate } from "@/lib/captionsGate";
 import { exitPreviewPlan, isPlayingWholeSource } from "@/lib/autoEdit/noCuts";
 import { enforceMergedSource, playerUris } from "@/lib/mergedSource";
 import { resetPlayer } from "@/lib/playerReset";
+import type { PlaybackDebug } from "@/lib/autoEdit/debugText";
 import { adaptPlayer } from "@/lib/playerResetNative";
 import { DURATION_TOLERANCE_MS, joinTimesMs, verifyJoins } from "@/lib/mergeVerify";
 import { createVerifyPlayer } from "@/lib/mergeVerifyNative";
@@ -494,6 +495,8 @@ export default function EditScreen() {
   const videoRefB = useRef<VideoPlayer | null>(null);
   const videoRef = useRef<VideoPlayer | null>(null);
   // URIs the players were last asked to load (replace() dedupe)
+  // The last player reset (Keep original / undo), for the owner's debug text.
+  const lastResetRef = useRef<PlaybackDebug["lastReset"] | undefined>(undefined);
   const loadedAUriRef = useRef<string | null>(null);
   const loadedBUriRef = useRef<string | null>(null);
   // Keep imperative player refs in sync with the player instances
@@ -2198,9 +2201,20 @@ export default function EditScreen() {
     [clips, textOverlays, pushSnapshot],
   );
 
+  // A saved snapshot never brings back a pre-merge segment in a merged project (the merged file is the only source).
+  const withMergedSource = useCallback(<S extends { clips: DraftClip[] }>(snapshot: S): S | null => {
+    const { clips: safe, dropped } = enforceMergedSource(snapshot.clips, mergedRef.current, originalClipsRef.current.map((c) => c.uri));
+    if (dropped.length > 0) {
+      void recordClientError(new Error("a pre-merge segment was in an undo snapshot"), { kind: "segmentInTimeline", dropped: dropped.map((c) => c.uri), via: "undoRedo" });
+    }
+    return safe.length > 0 ? { ...snapshot, clips: safe } : null;
+  }, []);
+
   // ── Undo / Redo handlers ─────────────────────────────────────────────
   const handleUndo = useCallback(() => {
-    const snapshot = undo();
+    const raw = undo();
+    if (!raw) return;
+    const snapshot = withMergedSource(raw);
     if (!snapshot) return;
     triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
     pushRedo(clipsForUndoRef.current, textOverlaysForUndoRef.current);
@@ -2233,10 +2247,12 @@ export default function EditScreen() {
     setIsPlaying(true);
     trimNeedsSnapshotRef.current = false;
     textEditSnapshotTakenRef.current = false;
-  }, [undo, pushRedo]);
+  }, [undo, pushRedo, withMergedSource]);
 
   const handleRedo = useCallback(() => {
-    const snapshot = redo();
+    const raw = redo();
+    if (!raw) return;
+    const snapshot = withMergedSource(raw);
     if (!snapshot) return;
     triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
     pushSnapshot(clipsForUndoRef.current, textOverlaysForUndoRef.current);
@@ -2269,7 +2285,7 @@ export default function EditScreen() {
     setIsPlaying(true);
     trimNeedsSnapshotRef.current = false;
     textEditSnapshotTakenRef.current = false;
-  }, [redo, pushSnapshot]);
+  }, [redo, pushSnapshot, withMergedSource]);
 
   // ── Auto-edit: background silence analysis ───────────────────────────
   // Root posts only, one untrimmed video clip, once per editor session. Never
@@ -2711,11 +2727,13 @@ export default function EditScreen() {
         lastPositionUpdate.current = 0;
         trimEndHandledRef.current = false;
         setVideoReady(false);
+        const resetStartedAt = Date.now();
         void resetPlayer({
           player: adaptPlayer(live),
           uri: produced[0]!.uri,
           seekToMs: newPosition + (produced[0]!.trimStartMs ?? 0),
-        }).then(() => {
+        }).then((r) => {
+          lastResetRef.current = { at: Date.now(), uris: playerUris(produced), ready: r.ready, steps: r.steps, ms: Date.now() - resetStartedAt };
           commitInFlightRef.current = false;
           if (!mountedRef.current) return;
           setVideoReady(true);
@@ -3043,6 +3061,17 @@ export default function EditScreen() {
       protection: protectionReport(model.state),
       userCuts: model.state.decisions.filter((d) => d.type === "umCut" && d.origin === "user"),
       transcription: captions.transcriptionInfo,
+      playback: {
+        merged: mergedRef.current,
+        segmentUris: originalClipsRef.current.map((c) => c.uri),
+        clips: clipsRef.current.map((c) => ({ uri: c.uri, trimStartMs: c.trimStartMs ?? 0, trimEndMs: c.trimEndMs ?? c.durationMs ?? 0 })),
+        players: [
+          { name: "A", uri: loadedAUriRef.current, durationMs: Math.round((playerA.duration || 0) * 1000), status: String(playerA.status), positionMs: Math.round((playerA.currentTime || 0) * 1000) },
+          { name: "B", uri: loadedBUriRef.current, durationMs: Math.round((playerB.duration || 0) * 1000), status: String(playerB.status), positionMs: Math.round((playerB.currentTime || 0) * 1000) },
+          { name: "preview", uri: previewUriRef.current, durationMs: Math.round((playerR.duration || 0) * 1000), status: String(playerR.status), positionMs: Math.round((playerR.currentTime || 0) * 1000) },
+        ],
+        lastReset: lastResetRef.current,
+      },
       transcriptionWaitingFor: transcriptionGate({ merge: mergeUi.kind, autoEditPossible, autoEditRunning, autoEditFinished, autoEditStalled }).waitingFor,
       transcriptWords: captions.words,
       speechBaselineDb,
@@ -3191,54 +3220,65 @@ export default function EditScreen() {
       const draftDir = `${documentDirectory}drafts/${draftIdFinal}/`;
       await makeDirectoryAsync(draftDir, { intermediates: true });
 
-      const permanentClips = await Promise.all(
-        clips.map(async (c, i) => {
-          // Verify the source file exists and is non-zero BEFORE attempting copy.
-          const srcInfo = await getInfoAsync(c.uri);
-          if (!srcInfo.exists || (srcInfo.size ?? 0) === 0) {
-            console.warn(
-              `[edit] executeSaveDraft: source clip[${i}] missing or empty — keeping original URI`,
-            );
-            return c;
-          }
-          const srcSize = srcInfo.size ?? 0;
-
-          const ext = c.uri.match(/\.(\w+)(?:\?|$)/)?.[1] ?? (c.type === "video" ? "mp4" : "jpg");
-          const destUri = `${draftDir}${c.id}.${ext}`;
-          if (c.uri !== destUri) {
-            try {
-              await copyAsync({ from: c.uri, to: destUri });
-              // Verify destination size matches source size
-              const destInfo = await getInfoAsync(destUri);
-              if (!destInfo.exists) {
-                console.warn(
-                  `[edit] executeSaveDraft: copy failed for clip[${i}] — destination missing, keeping original URI`,
-                );
-                return c;
-              }
-              const destSize = destInfo.size;
-              if (destSize === 0) {
-                console.warn(
-                  `[edit] executeSaveDraft: copy produced empty file for clip[${i}] — keeping original URI`,
-                );
-                return c;
-              }
-              if (destSize !== srcSize) {
-                console.error(
-                  `[edit] executeSaveDraft: SIZE MISMATCH clip[${i}] — source: ${srcSize}, dest: ${destSize}. Keeping original URI.`,
-                );
-                return c;
-              }
-              // clip copied & verified
-            } catch {
+      // Every distinct source file is copied ONCE and all clips of it share that copy: a timeline of several clips of one
+      // file (a merged video with cuts) must stay one source, or the saved draft loses its edit state and plays N files.
+      const copies = new Map<string, Promise<string>>();
+      const copyOnce = (c: DraftClip, i: number): Promise<string> => {
+        let job = copies.get(c.uri);
+        if (!job) {
+          job = (async (): Promise<string> => {
+            // Verify the source file exists and is non-zero BEFORE attempting copy.
+            const srcInfo = await getInfoAsync(c.uri);
+            if (!srcInfo.exists || (srcInfo.size ?? 0) === 0) {
               console.warn(
-                `[edit] executeSaveDraft: copy threw for clip[${i}] — keeping original URI`,
+                `[edit] executeSaveDraft: source clip[${i}] missing or empty — keeping original URI`,
               );
-              return c;
+              return c.uri;
             }
-          }
-          return { ...c, uri: destUri };
-        }),
+            const srcSize = srcInfo.size ?? 0;
+
+            const ext = c.uri.match(/\.(\w+)(?:\?|$)/)?.[1] ?? (c.type === "video" ? "mp4" : "jpg");
+            const destUri = `${draftDir}${c.id}.${ext}`;
+            if (c.uri !== destUri) {
+              try {
+                await copyAsync({ from: c.uri, to: destUri });
+                // Verify destination size matches source size
+                const destInfo = await getInfoAsync(destUri);
+                if (!destInfo.exists) {
+                  console.warn(
+                    `[edit] executeSaveDraft: copy failed for clip[${i}] — destination missing, keeping original URI`,
+                  );
+                  return c.uri;
+                }
+                const destSize = destInfo.size;
+                if (destSize === 0) {
+                  console.warn(
+                    `[edit] executeSaveDraft: copy produced empty file for clip[${i}] — keeping original URI`,
+                  );
+                  return c.uri;
+                }
+                if (destSize !== srcSize) {
+                  console.error(
+                    `[edit] executeSaveDraft: SIZE MISMATCH clip[${i}] — source: ${srcSize}, dest: ${destSize}. Keeping original URI.`,
+                  );
+                  return c.uri;
+                }
+                // clip copied & verified
+              } catch {
+                console.warn(
+                  `[edit] executeSaveDraft: copy threw for clip[${i}] — keeping original URI`,
+                );
+                return c.uri;
+              }
+            }
+            return destUri;
+          })();
+          copies.set(c.uri, job);
+        }
+        return job;
+      };
+      const permanentClips = await Promise.all(
+        clips.map(async (c, i) => ({ ...c, uri: await copyOnce(c, i) })),
       );
 
       // The decisions behind the clips, only while they still match (no hand edits since).
