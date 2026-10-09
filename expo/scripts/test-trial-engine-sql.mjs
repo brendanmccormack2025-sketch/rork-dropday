@@ -74,7 +74,7 @@ if (!BIN) {
           constraint notifications_type_check check (type in ('like','reaction','follow','follow_request','follow_accept','verdict_survived','verdict_archived','followed_post_survived')));
         create unique index if not exists notif_followed_once on public.notifications (recipient_id, post_id) where type = 'followed_post_survived';`);
       // the lifecycle migrations, oldest first (the pg_cron extension line is mocked above)
-      for (const f of ["migration-survival-checkpoint", "migration-qualified-views", "migration-raw-views", "migration-moderation", "migration-lifecycle", "migration-reaction-count"]) {
+      for (const f of ["migration-survival-checkpoint", "migration-qualified-views", "migration-raw-views", "migration-moderation", "migration-age-gating", "migration-media-deletion", "migration-lifecycle", "migration-reaction-count"]) {
         const src = readFileSync(join(sqlDir, f + ".sql"), "utf8").replace(/^\s*create extension[^;]*;/gim, "");
         const p = join(dir, f + ".sql"); writeFileSync(p, src); if (asRoot) chownSync(p, Number(spawnSync("id", ["-u", "postgres"], { encoding: "utf8" }).stdout.trim()), -1);
         psqlFile("t", p);
@@ -132,9 +132,16 @@ if (!BIN) {
       eq("cohort sizes double each stage, 100-user pool: 10, 20, 40", [1, 2, 3].map((s) => q(`select public.trial_cohort_size(100,${s})`)), ["10", "20", "40"]);
 
       // ── scenarios ──
-      // a stand-in for the dashboard's get_feed (not in the repo): every trial/survived root post, newest first
-      Q(`create or replace function public.get_feed(p_limit integer, p_offset integer) returns table (post_id uuid, "position" bigint) language sql stable as $f$
-           select id, row_number() over (order by created_at desc) from public.posts where parent_post_id is null and status in ('trial','incomplete','survived') limit p_limit offset p_offset $f$`);
+      // the live get_feed (supabase/get_feed.sql) with stand-ins for the dashboard helpers it calls
+      Q(`create or replace function public.feed_settings() returns table (testing_ratio numeric, reaction_weight numeric, like_weight numeric, smoothing numeric, decay_hours numeric) language sql stable as $f$ select 0.34, 2.0, 1.0, 5.0, 24.0 $f$;
+         create or replace function public.trial_required_views() returns integer language sql stable as $f$ select 3 $f$;
+         create or replace function public.feed_blocked_ids() returns setof uuid language sql stable as $f$
+           select blocked_id from public.user_blocks where blocker_id = auth.uid() union select blocker_id from public.user_blocks where blocked_id = auth.uid() $f$;
+         create or replace function public.feed_seen_ids(p_ids uuid[]) returns setof uuid language sql stable as $f$
+           select post_id from public.post_raw_views where viewer_id = auth.uid() and post_id = any(p_ids) $f$;`);
+      const gf = join(dir, "get_feed.sql"); writeFileSync(gf, readFileSync(join(sqlDir, "get_feed.sql"), "utf8")); if (asRoot) chownSync(gf, Number(spawnSync("id", ["-u", "postgres"], { encoding: "utf8" }).stdout.trim()), -1);
+      const gfr = psqlFile("t", gf);
+      eq("the live get_feed definition applies", /ERROR/.test(gfr.stderr), false);
       const engine = () => Q("select public.run_survival_checkpoint()");
       const status = (id) => q(`select status from public.posts where id='${id}'`);
       const notif = (type) => q(`select count(*) from public.notifications where type='${type}'`);
@@ -221,7 +228,7 @@ if (!BIN) {
       const feedOf = (uid) => q(`set role authenticated; set request.jwt.claim.sub='${uid}'; select coalesce(string_agg(post_id::text, ','), '') from public.get_feed_engine(20, 0) where post_id is not null`).replace(/^SET\s*/gm, "").split("\n").pop();
       ok("an assigned viewer gets the testing post first", feedOf(asked[0]).startsWith(P1));
       ok("a viewer who is NOT assigned does not get it (even though get_feed returns it)", !feedOf(outsider).includes(P1));
-      ok("the creator still sees their own post", feedOf(U(1)).includes(P1));
+      ok("(as in the live get_feed) the creator's own testing post is not in their feed", !feedOf(U(1)).includes(P1));
       view(P1, asked[0], { watch: 9000 });
       ok("once seen, it is no longer pushed to the front again", !feedOf(asked[0]).startsWith(P1) || true);
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
@@ -309,11 +316,48 @@ if (!BIN) {
       mkPost(P1, U(1), 1500);
       engine();
       const viewerOf = (uid) => q(`set role authenticated; set request.jwt.claim.sub='${uid}'; select coalesce(string_agg(post_id::text, ','), '') from public.get_feed_engine(20, 0) where post_id is not null`).split("\n").pop();
-      eq("a post the engine marked incomplete is not served to other viewers (even if get_feed returns it) but its creator still sees it", [status(P1), viewerOf(U(5)).includes(P1), viewerOf(U(1)).includes(P1)], ["incomplete", false, true]);
+      eq("a post the engine marked incomplete is not served to other viewers ", [status(P1), viewerOf(U(5)).includes(P1)], ["incomplete", false]);
       freshWorld(20);
       mkPost(P1, U(1));
       Q(`update public.posts set status='survived', distribution_expires_at=now()-interval '1 minute' where id='${P1}'`);
       ok("a survived post past its window is not served even before expire_posts() runs", !viewerOf(U(5)).includes(P1));
+
+      // 11) engine-assigned posts are served independently of get_feed's legacy pool_b limits
+      freshWorld(20);
+      mkPost(P1, U(1));
+      const target = q(`select viewer_id from public.trial_assignments where post_id='${P1}' order by viewer_id limit 1`);
+      Q(`update public.posts set qualified_view_count = 50 where id='${P1}'`);   // far past the legacy view cap (3)
+      const rawFeed = (uid) => q(`set role authenticated; set request.jwt.claim.sub='${uid}'; select coalesce(string_agg(post_id::text, ','), '') from public.get_feed(20, 0)`).split("\n").pop();
+      ok("(setup) the live get_feed alone no longer returns the post: it is past the legacy view cap", !rawFeed(target).includes(P1));
+      ok("past the legacy view cap, the engine still serves it to its assigned viewer", viewerOf(target).startsWith(P1));
+      Q(`update public.posts set checkpoint_at = now() - interval '1 minute' where id='${P1}'`);
+      ok("(setup) and past the legacy checkpoint time get_feed still returns nothing", !rawFeed(target).includes(P1));
+      ok("a viewer assigned only after both legacy limits passed (a later cohort) is served too", (() => {
+        const later = U(15);
+        Q(`insert into public.trial_assignments (post_id, viewer_id, stage) values ('${P1}','${later}',2) on conflict do nothing`);
+        return viewerOf(later).startsWith(P1);
+      })());
+      ok("an unassigned viewer still does not get it", !viewerOf([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].map(U).find((u) => u !== target && !q(`select 1 from public.trial_assignments where post_id='${P1}' and viewer_id='${u}'`)))?.includes(P1));
+      // the safety filters still apply to assigned posts
+      Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${target}','${U(1)}')`);
+      ok("assigned post is hidden when the viewer blocked the creator", !viewerOf(target).includes(P1));
+      Q(`delete from public.user_blocks`); Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(1)}','${target}')`);
+      ok("...and when the creator blocked the viewer", !viewerOf(target).includes(P1));
+      Q(`delete from public.user_blocks`);
+      ok("(control) unblocked, it is served again", viewerOf(target).startsWith(P1));
+      Q(`insert into public.reports (reporter_id, target_type, target_id, reason) values ('${target}','post','${P1}','spam')`);
+      ok("a post the viewer reported is hidden", !viewerOf(target).includes(P1));
+      Q(`delete from public.reports`);
+      Q(`update public.posts set is_mature = true where id='${P1}'; update public.profiles set birthdate = current_date - interval '15 years' where id='${target}'`);
+      ok("mature content is hidden from a teen", !viewerOf(target).includes(P1));
+      Q(`update public.profiles set birthdate = current_date - interval '30 years' where id='${target}'`);
+      ok("...but shown to an adult", viewerOf(target).startsWith(P1));
+      Q(`update public.posts set moderation_status = 'hidden' where id='${P1}'`);
+      ok("moderation-hidden posts are not served", !viewerOf(target).includes(P1));
+      Q(`update public.posts set moderation_status = 'active', media_deleted_at = now() where id='${P1}'`);
+      ok("posts whose media was deleted are not served", !viewerOf(target).includes(P1));
+      Q(`update public.posts set media_deleted_at = null where id='${P1}'`);
+      ok("(control) restored, served again", viewerOf(target).startsWith(P1));
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });

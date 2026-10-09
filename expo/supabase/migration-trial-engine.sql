@@ -810,6 +810,7 @@ as $$
 declare
   me uuid := auth.uid();
   cfg public.trial_engine_config := public.trial_cfg();
+  hide_mature boolean := false;
   assigned uuid[] := '{}';
   boosted uuid[] := '{}';
   front uuid[];
@@ -829,11 +830,22 @@ begin
     return;
   end if;
 
+  -- The same safety filters as get_feed (supabase/get_feed.sql): blocked either way, reported by me, mature content
+  -- for under-18s, moderation, deleted media. Assigned posts do NOT depend on get_feed's pool_b (legacy view cap and
+  -- checkpoint time): a cohort the engine opens later is served to its viewers whatever the legacy counters say.
+  select coalesce(public.age_tier(pr.birthdate) in ('under_13', 'teen'), false) into hide_mature
+  from public.profiles pr where pr.id = me;
+  hide_mature := coalesce(hide_mature, false);
+
   select coalesce(array_agg(x.post_id order by x.assigned_at), '{}') into assigned
   from (
     select t.post_id, t.assigned_at from public.trial_assignments t
     join public.posts p on p.id = t.post_id
     where t.viewer_id = me and p.status = 'trial' and p.parent_post_id is null and p.moderation_status = 'active'
+      and p.user_id <> me and p.media_deleted_at is null
+      and (not hide_mature or not p.is_mature)
+      and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
+      and not exists (select 1 from public.reports r where r.reporter_id = me and r.target_type = 'post' and r.target_id = p.id)
       and not exists (select 1 from public.post_raw_views r where r.post_id = t.post_id and r.viewer_id = me)
       and not exists (select 1 from public.post_view_stats s where s.post_id = t.post_id and s.viewer_id = me)
   ) x;
@@ -844,7 +856,10 @@ begin
     join public.viewer_creator_affinity a on a.creator_id = p.user_id and a.viewer_id = me and a.score >= cfg.affinity_threshold
     where p.status = 'survived' and p.parent_post_id is null and p.moderation_status = 'active'
       and (p.distribution_expires_at is null or p.distribution_expires_at > now())
-      and p.user_id <> me
+      and p.user_id <> me and p.media_deleted_at is null
+      and (not hide_mature or not p.is_mature)
+      and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
+      and not exists (select 1 from public.reports r where r.reporter_id = me and r.target_type = 'post' and r.target_id = p.id)
       and not exists (select 1 from public.post_raw_views r where r.post_id = p.id and r.viewer_id = me)
     order by a.score desc, p.survived_at desc nulls last
     limit cfg.affinity_feed_boost
