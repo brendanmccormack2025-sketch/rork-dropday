@@ -61,7 +61,8 @@ export default function CameraScreen() {
     switching,
     isRecording,
     recordState,
-    recordingStartedAtRef,
+    takeLiveMs,
+    takeRef,
     toggleRecording,
     deleteLastClip,
     clips,
@@ -101,21 +102,19 @@ export default function CameraScreen() {
   // The blur over the preview while a flip switches cameras (never white).
   const blurOpacity = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.timing(blurOpacity, { toValue: switching ? 1 : 0, duration: switching ? 120 : 220, useNativeDriver: true }).start();
+    // Brief and subtle: it comes in fast and goes as soon as the new camera records.
+    Animated.timing(blurOpacity, { toValue: switching ? 1 : 0, duration: switching ? 60 : 90, useNativeDriver: true }).start();
   }, [switching, blurOpacity]);
 
-  // The segment in progress: ticks while recording.
+  // The take in progress: ticks while recording, and keeps going through a flip (the take is one recording to the user).
   useEffect(() => {
     if (!isRecording) {
       setLiveMs(0);
       return;
     }
-    const id = setInterval(() => {
-      const start = recordingStartedAtRef.current;
-      setLiveMs(start ? Math.max(0, Date.now() - start) : 0);
-    }, 100);
+    const id = setInterval(() => setLiveMs(takeLiveMs()), 100);
     return () => clearInterval(id);
-  }, [isRecording, recordingStartedAtRef]);
+  }, [isRecording, takeLiveMs]);
 
   // Audio session: allow recording while the camera is mounted.
   useEffect(() => {
@@ -314,13 +313,12 @@ export default function CameraScreen() {
 
       {/* While a flip switches cameras: a dark blur over the preview, never white. */}
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: blurOpacity, zIndex: 6 }]}>
-        <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.35)" }]} />
+        <BlurView intensity={22} tint="dark" style={StyleSheet.absoluteFill} />
       </Animated.View>
 
       {/* Segmented progress bar: the take against 60 s, a notch where each segment starts */}
       <View style={[styles.segBar, { top: insets.top + 6 }]} pointerEvents="none" accessibilityLabel="Recording progress">
-        {barSegments(clips, isRecording ? { ms: liveMs } : undefined).map((seg, i) => (
+        {barSegments(clips, isRecording ? { ms: liveMs, runId: takeRef.current?.id } : undefined).map((seg, i) => (
           <View
             key={i}
             style={[

@@ -1,10 +1,11 @@
 /**
  * The camera's recording state machine: idle -> recording -> stopping -> idle.
  *
- * One tap starts ONE segment (one recordAsync call). Nothing restarts by itself: when a segment ends, the state
- * is idle again. The only automatic start is after a flip made WHILE recording: the segment is ended, the camera
- * is switched, and a new segment starts once the new camera is ready (see flip()). Taps while stopping (or
- * switching) are ignored, so a double tap can never start twice or stop twice.
+ * One tap starts a TAKE. A take is one or more segments (one recordAsync call each). Nothing restarts by itself:
+ * when the take's segment ends, the state is idle again. The only automatic start is after a flip made WHILE
+ * recording: the segment is ended, the camera is switched, and the next segment of the SAME take starts the moment
+ * the new camera is ready (see flip()). The state stays "recording" through the flip, so the UI never shows a
+ * stop. Taps while stopping are ignored; a flip while a flip is switching is ignored.
  *
  * Pure apart from the injected deps (the native camera); erasable TypeScript only so the Node tests can run it.
  */
@@ -21,7 +22,7 @@ export type RecordingDeps = {
   ensureReady(): Promise<boolean>;
   /** Switch front/back. */
   switchFacing(): void;
-  /** Resolves when the camera after a switch is ready to record. */
+  /** Resolves the moment the camera after a switch reports ready (a timeout inside covers a camera that never says). */
   afterFlipSettled(): Promise<void>;
   /** The segments recorded so far (the 60 s cap is worked out from them). */
   getSegments(): CameraSegment[];
@@ -30,7 +31,11 @@ export type RecordingDeps = {
   onError(message: string | null): void;
   /** True while a flip is switching cameras (for the blur over the preview). */
   onSwitching?(switching: boolean): void;
+  /** A take (tap to start -> tap to stop, flips included) began. */
+  onTakeStart?(takeId: string, startedAt: number): void;
   onRunStart?(startedAt: number): void;
+  /** Flip handoff measured: the previous segment resolved -> the next recording was accepted by the camera (ms). */
+  onFlipGap?(gapMs: number, info: { retries: number }): void;
   now(): number;
   newId(): string;
   delay(ms: number): Promise<void>;
@@ -43,6 +48,10 @@ export const NOT_SAVED_TEXT = "Recording could not be saved. Please try again.";
 /** After asking the camera to stop, ask again this often while it is still recording. */
 const STOP_RETRY_MS = 300;
 const STOP_RETRIES = 6;
+/** After a flip: a recording still running this long after it was asked for counts as accepted. */
+const ACCEPT_AFTER_MS = 120;
+const MAX_START_RETRIES = 8;
+const RETRY_SPACING_MS = 60;
 
 export class RecordingController {
   state: RecState = "idle";
@@ -53,6 +62,10 @@ export class RecordingController {
   private running: Promise<void> = Promise.resolve();
   /** Identifies the native recording in progress, so an old cap timer never stops a newer segment. */
   private token = 0;
+  private switching = false;
+  private takeId = "";
+  /** When the last segment resolved (the start of the flip gap). */
+  private lastResolvedAt = 0;
 
   constructor(deps: RecordingDeps) {
     this.deps = deps;
@@ -79,6 +92,8 @@ export class RecordingController {
     this.deps.onError(null);
     this.stopRequested = false;
     this.flipRequested = false;
+    this.takeId = this.deps.newId();
+    this.deps.onTakeStart?.(this.takeId, this.deps.now());
     this.set("recording");
     this.running = this.run();
     return true;
@@ -101,17 +116,17 @@ export class RecordingController {
   }
 
   /**
-   * Flip the camera. Idle: just switch. Recording: end this segment, switch, wait until the new camera is ready,
-   * then start a new segment. While stopping/switching: ignored.
+   * Flip the camera. Idle: just switch. Recording: end this segment, switch, and start the next segment of the same
+   * take the moment the new camera is ready; the state stays "recording" throughout. Ignored while stopping or
+   * while a flip is already switching.
    */
   flip(): boolean {
-    if (this.state === "stopping") return false;
+    if (this.state === "stopping" || this.switching || this.flipRequested) return false;
     if (this.state === "idle") {
       this.deps.switchFacing();
       return true;
     }
     this.flipRequested = true;
-    this.set("stopping");
     void this.stopNativeUntilEnded();
     return true;
   }
@@ -128,19 +143,20 @@ export class RecordingController {
   }
 
   private async run(): Promise<void> {
+    let continuation = false;
     try {
       for (;;) {
-        await this.recordOne();
+        await this.recordOne(continuation);
         if (!this.flipRequested) break;
         // A flip while recording: the segment has ended; switch cameras and start again when the new one is ready.
         this.flipRequested = false;
-        this.set("stopping");
+        this.switching = true;
         this.deps.onSwitching?.(true);
         this.deps.switchFacing();
         await this.deps.afterFlipSettled();
-        this.deps.onSwitching?.(false);
+        this.switching = false;
         if (this.stopRequested || !canRecordMore(this.deps.getSegments())) break;
-        this.set("recording");
+        continuation = true;
       }
     } catch (e) {
       this.deps.onError(e instanceof Error ? e.message : "Recording failed.");
@@ -151,7 +167,7 @@ export class RecordingController {
     }
   }
 
-  private async recordOne(): Promise<void> {
+  private async recordOne(continuation: boolean): Promise<void> {
     const ready = await this.deps.ensureReady();
     if (!ready) {
       this.deps.onError(NOT_READY_TEXT);
@@ -163,8 +179,7 @@ export class RecordingController {
     if (this.stopRequested || this.flipRequested) return;
     const segments = this.deps.getSegments();
     const maxSec = maxDurationSeconds(segments);
-    const startedAt = this.deps.now();
-    this.deps.onRunStart?.(startedAt);
+    let startedAt = this.deps.now();
     this.recording = true;
     const mine = ++this.token;
     // Safety net: the recorder is given the remaining time, but if it does not stop by itself, stop it.
@@ -173,7 +188,35 @@ export class RecordingController {
     });
     let result: { uri?: string } | null | undefined;
     try {
-      result = await this.deps.record(maxSec);
+      if (continuation) {
+        // The camera may refuse the first try while it is still settling: try again at once (no fixed wait), and
+        // call the handoff done when a recording is accepted (still running shortly after it was asked for).
+        let retries = 0;
+        for (;;) {
+          startedAt = this.deps.now();
+          const attempt = this.deps.record(maxSec).then(
+            (r) => ({ r }),
+            (err: unknown) => ({ err }),
+          );
+          const early = await Promise.race([attempt, this.deps.delay(ACCEPT_AFTER_MS).then(() => null)]);
+          if (early && "err" in early) {
+            if (this.stopRequested || retries >= MAX_START_RETRIES) throw early.err;
+            retries++;
+            await this.deps.delay(RETRY_SPACING_MS);
+            continue;
+          }
+          this.deps.onSwitching?.(false);
+          this.deps.onRunStart?.(startedAt);
+          this.deps.onFlipGap?.(Math.max(0, startedAt - this.lastResolvedAt), { retries });
+          const done = early ?? (await attempt);
+          if ("err" in done) throw done.err;
+          result = done.r;
+          break;
+        }
+      } else {
+        this.deps.onRunStart?.(startedAt);
+        result = await this.deps.record(maxSec);
+      }
     } catch (e) {
       this.recording = false;
       this.token++;
@@ -185,12 +228,14 @@ export class RecordingController {
     }
     this.recording = false;
     this.token++;
+    this.lastResolvedAt = this.deps.now();
     if (result?.uri) {
       this.deps.onSegment({
         id: this.deps.newId(),
         uri: result.uri,
         type: "video",
-        runId: this.deps.newId(),
+        // Every segment of a take (flips included) shares the take's id: one bar stretch, one "Delete last".
+        runId: this.takeId,
         measuredMs: Math.max(0, this.deps.now() - startedAt),
       });
     } else {

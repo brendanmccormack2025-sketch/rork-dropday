@@ -5,6 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 
 import { deleteAsync } from "@/lib/fileSystemCompat";
+import { recordClientError } from "@/lib/clientErrors";
 import { deleteLastRun, type CameraSegment } from "@/lib/cameraSegments";
 import { RecordingController, type RecState } from "@/lib/recordingController";
 
@@ -25,9 +26,12 @@ export const MAX_VIDEO_SECONDS = 300;
 
 /** The camera used last time (default: front). */
 const FACING_KEY = "trial:cameraFacing";
-/** A camera switch is given this long to settle (onCameraReady does not fire again on a facing change). */
-const FLIP_SETTLE_MS = 700;
-const FLIP_AFTER_SETTLE_MS = 120;
+/**
+ * After a flip the next segment starts the moment the camera reports ready. This is only the longest we wait if it
+ * never does (expo-camera may not fire onCameraReady again on a facing change); the controller then tries to record
+ * and retries at once if the camera still refuses.
+ */
+const FLIP_READY_TIMEOUT_MS = 450;
 const READY_TIMEOUT_MS = 2000;
 
 const newId = (): string => `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -86,6 +90,8 @@ export function useCameraRecorder() {
   const recordStateRef = useRef<RecState>("idle");
   const [switching, setSwitching] = useState(false);
   const recordingStartedAtRef = useRef<number | null>(null);
+  /** The take in progress (tap to start -> tap to stop, flips included): when it began and its id. */
+  const takeRef = useRef<{ id: string; startedAt: number } | null>(null);
   const startingRef = useRef(false);
 
   const handleCameraReady = useCallback((): void => {
@@ -129,17 +135,15 @@ export function useCameraRecorder() {
           return cameraReadyRef.current && !!cameraRef.current;
         },
         switchFacing: () => setFacing(facingRef.current === "back" ? "front" : "back"),
-        // expo-camera does not fire onCameraReady again on a facing change: wait for it if it does, else a fixed settle time.
-        afterFlipSettled: async () => {
-          await new Promise<void>((resolve) => {
-            const t = setTimeout(resolve, FLIP_SETTLE_MS);
+        // The moment onCameraReady fires (no fixed delay); the timeout only covers a camera that never says.
+        afterFlipSettled: () =>
+          new Promise<void>((resolve) => {
+            const t = setTimeout(resolve, FLIP_READY_TIMEOUT_MS);
             readyWaitersRef.current.push(() => {
               clearTimeout(t);
               resolve();
             });
-          });
-          await new Promise((r) => setTimeout(r, FLIP_AFTER_SETTLE_MS));
-        },
+          }),
         getSegments: () => clipsRef.current as CameraSegment[],
         onSegment: (seg) => {
           const clip: Clip = { id: seg.id, uri: seg.uri, type: "video", recordingSessionId: seg.runId, measuredMs: seg.measuredMs };
@@ -151,10 +155,21 @@ export function useCameraRecorder() {
           if (s === "stopping" && recordStateRef.current === "recording") haptic(Haptics.ImpactFeedbackStyle.Medium);
           recordStateRef.current = s;
           setRecordState(s);
-          if (s === "idle") recordingStartedAtRef.current = null;
+          if (s === "idle") {
+            recordingStartedAtRef.current = null;
+            takeRef.current = null;
+          }
         },
         onError: setError,
         onSwitching: setSwitching,
+        onTakeStart: (id, startedAt) => {
+          takeRef.current = { id, startedAt };
+        },
+        // How long the flip handoff really took, so the numbers can be read in dev and from client_errors.
+        onFlipGap: (gapMs, info) => {
+          if (__DEV__) console.log(`[camera] flip gap ${Math.round(gapMs)} ms (retries ${info.retries})`);
+          void recordClientError(new Error("camera flip gap"), { kind: "flipGap", gapMs: Math.round(gapMs), retries: info.retries, facing: facingRef.current });
+        },
         onRunStart: (t) => {
           recordingStartedAtRef.current = t;
         },
@@ -237,6 +252,17 @@ export function useCameraRecorder() {
 
   const isRecording = recordState !== "idle";
 
+  /**
+   * How long the take in progress has run (ms), flips included: wall clock since the tap, minus what its finished
+   * segments already count for. The progress bar uses it, so it keeps advancing through a flip.
+   */
+  const takeLiveMs = useCallback((): number => {
+    const take = takeRef.current;
+    if (!take) return 0;
+    const done = clipsRef.current.filter((c) => c.recordingSessionId === take.id).reduce((n, c) => n + (c.measuredMs ?? 0), 0);
+    return Math.max(0, Date.now() - take.startedAt - done);
+  }, []);
+
   return {
     cameraRef,
     facingRef,
@@ -256,6 +282,8 @@ export function useCameraRecorder() {
     handleCameraReady,
     isCameraReady,
     recordingStartedAtRef,
+    takeLiveMs,
+    takeRef,
     toggleRecording,
     clips,
     clearClips,

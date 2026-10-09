@@ -72,19 +72,31 @@ export function deleteLastRun<T extends CameraSegment>(segments: ReadonlyArray<T
  * Segmented progress bar: each run as a fraction of the 60 s bar, and a notch at each run's start (not the
  * first). The live run, if any, is the last entry.
  */
-export function barSegments(segments: ReadonlyArray<CameraSegment>, live?: { ms: number }): Array<{ startFrac: number; widthFrac: number; live: boolean }> {
-  const out = runsOf(segments).map((r) => ({
+export function barSegments(
+  segments: ReadonlyArray<CameraSegment>,
+  live?: { ms: number; /** The take in progress: its finished segments and the live part are one stretch (a flip makes no notch). */ runId?: string },
+): Array<{ startFrac: number; widthFrac: number; live: boolean }> {
+  const runs = runsOf(segments);
+  const out = runs.map((r) => ({
     startFrac: Math.min(1, r.startMs / MAX_CAMERA_MS),
     widthFrac: Math.min(1, r.durationMs / MAX_CAMERA_MS),
     live: false,
   }));
   if (live && live.ms > 0) {
-    const start = totalMs(segments);
-    out.push({
-      startFrac: Math.min(1, start / MAX_CAMERA_MS),
-      widthFrac: Math.max(0, Math.min(1 - start / MAX_CAMERA_MS, live.ms / MAX_CAMERA_MS)),
-      live: true,
-    });
+    const last = runs[runs.length - 1];
+    const room = (ms: number) => Math.max(0, Math.min(1, ms / MAX_CAMERA_MS));
+    if (last && live.runId !== undefined && last.runId === live.runId) {
+      const entry = out[out.length - 1]!;
+      entry.widthFrac = Math.min(1 - entry.startFrac, entry.widthFrac + room(live.ms));
+      entry.live = true;
+    } else {
+      const start = totalMs(segments);
+      out.push({
+        startFrac: Math.min(1, start / MAX_CAMERA_MS),
+        widthFrac: Math.max(0, Math.min(1 - start / MAX_CAMERA_MS, live.ms / MAX_CAMERA_MS)),
+        live: true,
+      });
+    }
   }
   return out;
 }

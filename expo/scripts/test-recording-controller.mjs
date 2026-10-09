@@ -6,7 +6,8 @@
  */
 import { readFileSync } from "node:fs";
 import { RecordingController } from "../lib/recordingController.ts";
-import { canProceed, deleteLastRun, totalMs } from "../lib/cameraSegments.ts";
+import { barSegments, canProceed, deleteLastRun, totalMs } from "../lib/cameraSegments.ts";
+import { mergeVideoClips } from "../lib/mergeClips.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -25,6 +26,8 @@ function rig(opts = {}) {
   const segments = [];
   const states = [];
   const errors = [];
+  const gaps = [];
+  let failStarts = opts.failStarts ?? 0;
   let pending = null;
   let n = 0;
   let facing = "front";
@@ -32,6 +35,7 @@ function rig(opts = {}) {
   const deps = {
     record: (max) => {
       log.push(`record(${max})`);
+      if (failStarts > 0 && log.includes("settled")) { failStarts--; return Promise.reject(new Error("camera busy")); }
       return new Promise((resolve) => {
         pending = { resolve, max };
         if (opts.autoEndAfterMs !== undefined) setTimeout(() => { if (pending) { t += opts.autoEndAfterMs; const p = pending; pending = null; p.resolve({ uri: `file:///seg${++n}.mov` }); } }, 1);
@@ -43,17 +47,19 @@ function rig(opts = {}) {
     },
     ensureReady: async () => { log.push("ready?"); return opts.notReady ? false : true; },
     switchFacing: () => { facing = facing === "front" ? "back" : "front"; log.push(`facing=${facing}`); },
-    afterFlipSettled: async () => { log.push("settling"); await tick(); await tick(); log.push("settled"); },
+    afterFlipSettled: async () => { log.push("settling"); await tick(); await tick(); t += 180; log.push("settled"); },
     getSegments: () => segments,
     onSegment: (s) => { segments.push(s); log.push(`segment:${s.uri.split("/").pop()}`); },
     onState: (s) => states.push(s),
     onError: (m) => { if (m) errors.push(m); },
     onSwitching: (b) => log.push(`switching=${b}`),
+    onFlipGap: (ms, info) => { gaps.push({ ms, retries: info.retries }); },
+    onTakeStart: (id) => log.push(`take:${id}`),
     now: () => t,
     newId: () => `id${++n}`,
     delay: (ms) => (ms >= 1000 ? new Promise(() => {}) : new Promise((r) => setTimeout(r, Math.min(ms, 5)))),
   };
-  return { deps, log, segments, states, errors, get facing() { return facing; }, get pending() { return pending; }, advance: (ms) => { t += ms; } };
+  return { deps, log, segments, states, errors, gaps, get facing() { return facing; }, get pending() { return pending; }, advance: (ms) => { t += ms; } };
 }
 
 // ── start / stop / no auto-restart ──
@@ -135,31 +141,66 @@ function rig(opts = {}) {
   const r = rig();
   const c = new RecordingController(r.deps);
   eq("flip while idle: just switches", [c.flip(), r.facing, c.state], [true, "back", "idle"]);
+
   const r2 = rig();
   const d = new RecordingController(r2.deps);
   d.start(); await tick(); await tick();
   eq("flip while recording is accepted", d.flip(), true);
-  eq("(taps are ignored while it switches)", [d.toggle(), d.flip()], ["ignored", false]);
-  // let the switch finish, then the new segment records
-  for (let i = 0; i < 10; i++) await tick();
-  const order = r2.log.filter((l) => /^(record|segment|facing|settling|settled|ready\?)/.test(l.split("(")[0] + (l.startsWith("record") ? "" : "")) || l.startsWith("record("));
-  const iSeg1 = r2.log.indexOf("segment:seg1.mov");
+  eq("the UI state stays 'recording' during the flip (no stop, no pause)", d.state, "recording");
+  eq("a second flip while one is switching is ignored", d.flip(), false);
+  for (let i = 0; i < 12; i++) { await tick(); if (d.state !== "recording") break; }
+  eq("still recording after the handoff", d.state, "recording");
+  eq("the state never left 'recording' for the whole flip", r2.states, ["recording"]);
+  const iSeg1 = r2.log.indexOf(`segment:${r2.segments[0].uri.split("/").pop()}`);
   const iFace = r2.log.indexOf("facing=back");
   const iSettled = r2.log.indexOf("settled");
   const iRec2 = r2.log.findIndex((l, i) => l.startsWith("record(") && i > iSettled);
-  ok("the segment ends first, then the camera switches, then the new camera settles, THEN a new segment starts", iSeg1 >= 0 && iFace > iSeg1 && iSettled > iFace && iRec2 > iSettled);
-  eq("one segment so far and a second recording under way, on the other camera", [r2.segments.length, r2.facing, d.state], [1, "back", "recording"]);
+  ok("the segment ends, the camera switches, the new camera is ready, THEN the next recording starts", iSeg1 >= 0 && iFace > iSeg1 && iSettled > iFace && iRec2 > iSettled);
+  eq("one finished segment, and a second recording under way on the other camera", [r2.segments.length, r2.facing], [1, "back"]);
   d.stop(); await d.settled();
-  eq("two segments after stopping; the preview blur went on and off", [r2.segments.length, r2.log.filter((l) => l.startsWith("switching=")).slice(0, 2)], [2, ["switching=true", "switching=false"]]);
-  eq("each flip made its own segment (own run id), so the bar shows a notch", new Set(r2.segments.map((s) => s.runId)).size, 2);
+  eq("two segments after the user stops; the state went recording -> stopping -> idle only once", [r2.segments.length, r2.states], [2, ["recording", "stopping", "idle"]]);
+  eq("both parts are ONE take (same take id)", new Set(r2.segments.map((s) => s.runId)).size, 1);
+  eq("the blur switched on and off exactly once", r2.log.filter((l) => l.startsWith("switching=")).slice(0, 2), ["switching=true", "switching=false"]);
 
-  // stop during the switch ends the take: no new segment
+  // the take is one deletable unit
+  const del = deleteLastRun(r2.segments);
+  eq("Delete last removes both parts of a take that had a flip, as one", [del.removed.length, del.kept.length], [2, 0]);
+  const later = [...r2.segments, { id: "n", uri: "n", type: "video", runId: "take2", measuredMs: 1500 }];
+  eq("a later take is deleted on its own, then the flipped take (two parts) as one", [deleteLastRun(later).removed.map((x) => x.id), deleteLastRun(deleteLastRun(later).kept).removed.length], [["n"], 2]);
+  eq("the bar shows ONE stretch for the flipped take (no notch at the flip)", barSegments(r2.segments).length, 1);
+  eq("and keeps advancing through the flip: the live part joins the take's stretch", barSegments([r2.segments[0]], { ms: 500, runId: r2.segments[0].runId }).map((b) => [b.live, Math.round(b.widthFrac * 60000)]), [[true, 2500]]);
+
+  // the handoff is measured
+  eq("the gap (previous segment resolved -> next recording accepted) is reported once, with no retries", [r2.gaps.length, r2.gaps[0].retries, r2.gaps[0].ms], [1, 0, 180]);
+
+  // the camera refuses the first tries: retried at once, still one take, gap reported with the retries
+  const r4 = rig({ failStarts: 2 });
+  const f = new RecordingController(r4.deps);
+  f.start(); await tick(); await tick(); f.flip();
+  for (let i = 0; i < 40 && r4.gaps.length === 0; i++) await tick();
+  eq("a camera that is still settling is retried immediately", [r4.gaps.length, r4.gaps[0]?.retries, r4.log.filter((l) => l.startsWith("record(")).length], [1, 2, 4]);
+  f.stop(); await f.settled();
+  eq("(and the take still has both parts)", r4.segments.length, 2);
+
+  // tap during the switch ends the take; no new segment starts
   const r3 = rig();
   const e = new RecordingController(r3.deps);
   e.start(); await tick(); await tick(); e.flip();
-  for (let i = 0; i < 10; i++) await tick();
-  e.stop(); await e.settled();
-  eq("(flip then stop: exactly two segments, idle)", [r3.segments.length, e.state], [2, "idle"]);
+  eq("a stop tap during the switch is honoured", e.toggle(), "stopped");
+  await e.settled();
+  eq("(first part kept, nothing new recorded, idle)", [r3.segments.length, e.state, r3.log.filter((l) => l.startsWith("record(")).length], [1, "idle", 1]);
+
+  // the merge gets both parts, in order, nothing in between
+  const calls = [];
+  const merged = await mergeVideoClips({
+    clips: r2.segments.map((sg) => ({ id: sg.id, uri: sg.uri, type: "video" })), newId: () => "m",
+    render: async (uris) => { calls.push(uris); return { uri: "file:///merged.mp4", durationMs: 4000 }; },
+  });
+  eq("the merge receives both segments in recording order, with no inserted gap clip", [calls.length, calls[0], merged.ok], [1, r2.segments.map((sg) => sg.uri), true]);
+  const nat = read("../lib/mergeNative.ts");
+  ok("the native merge lays the files back to back: just those files, no black or silent filler", /clips: uris\.map\(\(uri\) => \(\{ uri, trimStartMs: 0, trimEndMs: WHOLE_FILE_MS \}\)\)/.test(nat) && /overlays: \[\]/.test(nat) && /seamFades: false/.test(nat));
+  const swift = read("../modules/video-render/ios/VideoRenderModule.swift");
+  ok("(native: each clip starts where the previous ended)", /cursor = CMTimeAdd\(cursor, range\.duration\)/.test(swift));
 }
 
 // ── delete last / Next ──
@@ -179,7 +220,7 @@ function rig(opts = {}) {
   const hook = read("../hooks/useCameraRecorder.ts");
   const layout = read("../app/_layout.tsx");
   ok("no restart loop in the hook: no while loop around recordAsync, the controller does the work", !/while \(keepRecording\)|keepRecording/.test(hook) && /new RecordingController\(/.test(hook));
-  ok("the controller has no loop that records again after a stop (only the explicit flip restart)", !/while \(true\)/.test(read("../lib/recordingController.ts")) && (read("../lib/recordingController.ts").match(/this\.deps\.record\(/g) ?? []).length === 1);
+  ok("the controller records again only for a flip made while recording (never after a stop)", !/while \(true\)/.test(read("../lib/recordingController.ts")) && (read("../lib/recordingController.ts").match(/this\.deps\.record\(/g) ?? []).length === 2 && /if \(continuation\)/.test(read("../lib/recordingController.ts")));
   ok("the camera view is created once, with the facing prop, and is not keyed", (cam.match(/<CameraView/g) ?? []).length === 1 && /facing=\{facing\}/.test(cam) && !/<CameraView[^>]*key=/.test(cam));
   ok("no white overlays or flashes: no #fff full-screen fills, no front flash", !/backgroundColor: "#fff"[\s\S]{0,40}opacity/.test(cam) && !/frontFlash|flipFlash/.test(cam) && /fullscreen: \{ flex: 1, backgroundColor: "#000" \}/.test(cam));
   ok("the camera screen's own background is black (the light app background never shows through)", /contentStyle: \{ backgroundColor: "#000" \}/.test(layout));
@@ -193,7 +234,10 @@ function rig(opts = {}) {
   ok("the hint text", /Tap to record  ·  Tap again to stop/.test(cam));
   ok("the last used camera is remembered, the default is the front camera", /trial:cameraFacing/.test(hook) && /useState<"back" \| "front">\("front"\)/.test(hook) && /AsyncStorage\.setItem\(FACING_KEY/.test(hook));
   ok("the view waits for the remembered camera, then stays mounted (no remount on a flip)", /\{facingLoaded && \(\s*<CameraView/.test(cam));
-  ok("a flip while recording waits for the camera: onCameraReady or a settle time, then a new segment", /afterFlipSettled/.test(hook) && /readyWaitersRef/.test(hook) && /FLIP_SETTLE_MS/.test(hook));
+  ok("a flip while recording waits for onCameraReady only (a timeout just covers a camera that never says), no fixed delay", /afterFlipSettled/.test(hook) && /readyWaitersRef/.test(hook) && /FLIP_READY_TIMEOUT_MS/.test(hook) && !/FLIP_AFTER_SETTLE_MS|FLIP_SETTLE_MS/.test(hook));
+  ok("the gap is logged in dev and to client_errors as flipGap", /kind: "flipGap"/.test(hook) && /__DEV__/.test(hook) && /gapMs/.test(hook));
+  ok("the bar and timer follow the take, so they keep advancing through a flip", /takeLiveMs/.test(cam) && /runId: takeRef\.current\?\.id/.test(cam));
+  ok("the blur is brief and subtle", /intensity=\{22\}/.test(cam) && /duration: switching \? 60 : 90/.test(cam));
 }
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
