@@ -106,6 +106,8 @@ import { analysisSource, loadLoudnessChecked } from "@/lib/mergeTiming";
 import { AUTO_EDIT_STALL_MS, transcriptionGate } from "@/lib/captionsGate";
 import { exitPreviewPlan, isPlayingWholeSource } from "@/lib/autoEdit/noCuts";
 import { enforceMergedSource, playerUris } from "@/lib/mergedSource";
+import { resetPlayer } from "@/lib/playerReset";
+import { adaptPlayer } from "@/lib/playerResetNative";
 import { DURATION_TOLERANCE_MS, joinTimesMs, verifyJoins } from "@/lib/mergeVerify";
 import { createVerifyPlayer } from "@/lib/mergeVerifyNative";
 import { aiBoundariesOf, describeEdgeDrag, reshapeCutAtEdge } from "@/lib/autoEdit/reshape";
@@ -1020,12 +1022,17 @@ export default function EditScreen() {
   const previewUri = previewMode ? aheadReady!.uri : null;
   useEffect(() => {
     if (previewUri) {
+      playerR.loop = true;
       if (previewUriRef.current !== previewUri) {
         previewUriRef.current = previewUri;
-        playerR.replace({ uri: previewUri });
+        // A fresh item, ready, then ONE seek to the playhead (a seek before the file is ready is ignored), then play
+        // if the editor is playing: the same clean state an app resume leaves (also when undo brings the cuts back).
+        void resetPlayer({ player: adaptPlayer(playerR), uri: previewUri, seekToMs: positionMsRef.current }).then(() => {
+          if (previewUriRef.current === previewUri && isPlayingRef.current) playerR.play();
+        });
+      } else {
+        playerR.currentTime = Math.max(0, positionMsRef.current) / 1000;
       }
-      playerR.loop = true;
-      playerR.currentTime = Math.max(0, positionMsRef.current) / 1000;
     } else if (previewUriRef.current) {
       previewUriRef.current = null;
       playerR.pause();
@@ -2688,14 +2695,34 @@ export default function EditScreen() {
       const wasPlaying = isPlayingRef.current;
       const base = current[0]!;
       commitInFlightRef.current = true;
-      replaceClips(
-        derived.map((c) => ({ ...base, id: newClipId(), trimStartMs: c.trimStartMs, trimEndMs: c.trimEndMs })),
-      );
+      const produced = derived.map((c) => ({ ...base, id: newClipId(), trimStartMs: c.trimStartMs, trimEndMs: c.trimEndMs }));
+      replaceClips(produced);
       // One seek, below: replaceClips' own pending seek (to the clip start) and start-trim seek are dropped.
       pendingSeekRef.current = null;
       trimSeekDoneRef.current = true;
       setPositionMs(newPosition);
       setIsPlaying(false);
+      if (isPlayingWholeSource(produced, next, model.durationMs)) {
+        // Keep original: the source plays directly. The live player is put in the same clean state as after an app
+        // resume (fresh item, ready, one seek) and playback resumes only if it was playing. Nothing waits for a render.
+        const live = activeSlotRef.current === 0 ? playerA : playerB;
+        segmentOffsetRef.current = 0;
+        durationSetRef.current = true;
+        lastPositionUpdate.current = 0;
+        trimEndHandledRef.current = false;
+        setVideoReady(false);
+        void resetPlayer({
+          player: adaptPlayer(live),
+          uri: produced[0]!.uri,
+          seekToMs: newPosition + (produced[0]!.trimStartMs ?? 0),
+        }).then(() => {
+          commitInFlightRef.current = false;
+          if (!mountedRef.current) return;
+          setVideoReady(true);
+          setIsPlaying(wasPlaying);
+        });
+        return;
+      }
       setTimeout(() => {
         handleSeek(newPosition);
         if (wasPlaying) {
@@ -2709,7 +2736,7 @@ export default function EditScreen() {
         }
       }, 50);
     },
-    [setEditModel, replaceClips, handleSeek, setTextOverlays],
+    [setEditModel, replaceClips, handleSeek, setTextOverlays, playerA, playerB],
   );
 
   // With manual edits the model does not contain, an AI-edit action asks first.

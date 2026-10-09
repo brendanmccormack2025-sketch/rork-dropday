@@ -7,6 +7,7 @@ import * as Haptics from "expo-haptics";
 import { deleteAsync } from "@/lib/fileSystemCompat";
 import { recordClientError } from "@/lib/clientErrors";
 import { deleteLastRun, type CameraSegment } from "@/lib/cameraSegments";
+import { flashMode } from "@/lib/cameraFlash";
 import { RecordingController, type RecState } from "@/lib/recordingController";
 
 export type Clip = {
@@ -79,7 +80,9 @@ export function useCameraRecorder() {
     AsyncStorage.setItem(FACING_KEY, next).catch(() => {});
   }, []);
 
-  const [torch, setTorch] = useState(false);
+  // One flash switch for both cameras: it survives flips (also mid-recording); the camera decides what it does.
+  const [flashOn, setFlashOn] = useState(false);
+  const flash = flashMode(facing, flashOn);
   const [zoom, setZoom] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [cameraMountError, setCameraMountError] = useState<string | null>(null);
@@ -220,9 +223,9 @@ export function useCameraRecorder() {
     return did;
   }, [controller]);
 
-  const toggleTorch = useCallback(() => {
+  const toggleFlash = useCallback(() => {
     haptic(Haptics.ImpactFeedbackStyle.Light);
-    setTorch((t) => !t);
+    setFlashOn((on) => !on);
   }, []);
 
   /** "Delete last": the most recent segment (and its file) goes. Not while recording. Repeatable. */
@@ -275,8 +278,9 @@ export function useCameraRecorder() {
     requestMicPermission,
     facing,
     facingLoaded,
-    torch,
-    toggleTorch,
+    flashOn,
+    flash,
+    toggleFlash,
     flipCamera,
     switching,
     recordState,

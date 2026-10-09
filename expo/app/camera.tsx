@@ -25,6 +25,8 @@ import { Camera as CameraIcon, Check, Delete, RefreshCw, X, Zap, ZapOff } from "
 import PrimaryButton from "@/components/PrimaryButton";
 import { theme } from "@/constants/theme";
 import { useCameraRecorder } from "@/hooks/useCameraRecorder";
+import { SCREEN_LIGHT_RING } from "@/lib/cameraFlash";
+import { createScreenLight, nativeBrightness } from "@/lib/screenLight";
 import { MAX_CAMERA_MS, barSegments, canProceed, totalMs, usableSegments } from "@/lib/cameraSegments";
 
 /** Record button: a 76 pt circle inside an 88 pt touch target (the minimum is 72). */
@@ -55,8 +57,9 @@ export default function CameraScreen() {
     requestMicPermission,
     facing,
     facingLoaded,
-    torch,
-    toggleTorch,
+    flashOn,
+    flash,
+    toggleFlash,
     flipCamera,
     switching,
     isRecording,
@@ -115,6 +118,15 @@ export default function CameraScreen() {
     const id = setInterval(() => setLiveMs(takeLiveMs()), 100);
     return () => clearInterval(id);
   }, [isRecording, takeLiveMs]);
+
+  // Front camera + flash = the screen is the light: brightness to max while it is on (only when the build has
+  // expo-brightness; otherwise just the white glow), restored when it goes off or the camera closes.
+  const screenLight = useMemo(() => createScreenLight(nativeBrightness()), []);
+  useEffect(() => {
+    if (flash === "screen") void screenLight.on();
+    else void screenLight.off();
+  }, [flash, screenLight]);
+  useEffect(() => () => void screenLight.off(), [screenLight]);
 
   // Audio session: allow recording while the camera is mounted.
   useEffect(() => {
@@ -289,7 +301,7 @@ export default function CameraScreen() {
           facing={facing}
           mode="video"
           mute={false}
-          enableTorch={torch && facing === "back"}
+          enableTorch={flash === "torch"}
           zoom={zoom}
           mirror={facing === "front"}
           responsiveOrientationWhenOrientationLocked
@@ -310,6 +322,14 @@ export default function CameraScreen() {
           <View style={{ flex: 1 }} accessibilityLabel="Camera preview. Double-tap to flip the camera, swipe up or down to zoom" />
         </GestureDetector>
       </View>
+
+      {/* Front camera + flash: a bright white ring around the preview (the screen is the light). It stays on through
+          recording and flips; the preview stays visible in the middle. */}
+      {flash === "screen" && (
+        <View pointerEvents="none" style={styles.screenLight} accessibilityLabel="Screen light on">
+          <View style={styles.screenLightHole} />
+        </View>
+      )}
 
       {/* While a flip switches cameras: a dark blur over the preview, never white. */}
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: blurOpacity, zIndex: 6 }]}>
@@ -340,17 +360,16 @@ export default function CameraScreen() {
 
       {/* Right-side tool column: flash (back camera only) and flip */}
       <View style={[styles.toolColumn, { top: insets.top + 22 }]} pointerEvents="box-none">
-        {facing === "back" && (
-          <Pressable
-            onPress={toggleTorch}
-            style={styles.toolBtn}
-            hitSlop={6}
-            accessibilityRole="button"
-            accessibilityLabel="Toggle flash"
-          >
-            {torch ? <Zap color={theme.accent} size={22} fill={theme.accent} /> : <ZapOff color="#fff" size={22} />}
-          </Pressable>
-        )}
+        <Pressable
+          onPress={toggleFlash}
+          style={[styles.toolBtn, flashOn && styles.toolBtnOn]}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityState={{ selected: flashOn }}
+          accessibilityLabel={flashOn ? "Flash on" : "Flash off"}
+        >
+          {flashOn ? <Zap color="#FFD60A" size={22} fill="#FFD60A" /> : <ZapOff color="#fff" size={22} />}
+        </Pressable>
         <Pressable
           onPress={handleFlip}
           disabled={switching}
@@ -450,7 +469,7 @@ const styles = StyleSheet.create({
 
   previewZone: { position: "absolute", top: 0, left: 0, zIndex: 5 },
 
-  segBar: { position: "absolute", left: 12, right: 12, height: 4, backgroundColor: "rgba(255,255,255,0.28)", zIndex: 11 },
+  segBar: { position: "absolute", left: 12, right: 12, height: 4, backgroundColor: "rgba(0,0,0,0.35)", zIndex: 11 },
   segFill: { position: "absolute", top: 0, bottom: 0, backgroundColor: theme.accent },
   segFillLive: { opacity: 0.9 },
   // A notch (a white gap) at the start of each segment after the first.
@@ -466,6 +485,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
+  toolBtnOn: { backgroundColor: "rgba(255,214,10,0.28)", borderWidth: 2, borderColor: "#FFD60A" },
+  // Screen light: a white ring (border) around a see-through middle, under the controls.
+  screenLight: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 4, borderWidth: SCREEN_LIGHT_RING, borderColor: "rgba(255,255,255,0.97)" },
+  screenLightHole: { flex: 1, borderRadius: 18, borderWidth: 2, borderColor: "rgba(255,255,255,0.6)" },
 
   hintWrap: { position: "absolute", left: 0, right: 0, alignItems: "center", zIndex: 5 },
   hintText: {
