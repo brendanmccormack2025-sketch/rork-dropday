@@ -33,6 +33,8 @@ import { useAuth } from "@/providers/AuthProvider";
 import { usePosts, isOnTrialNow, type MyProfile, type Post, type DraftProject } from "@/providers/PostsProvider";
 import { TrialStatusBadge } from "@/components/TrialStatusBadge";
 import CreatorLinkPills from "@/components/CreatorLinkPills";
+import VerifiedCreatorBadge from "@/components/VerifiedCreatorBadge";
+import { linkSourceFor, showsVerifiedBadge } from "@/lib/creatorStatus";
 import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_W } = Dimensions.get("window");
@@ -123,6 +125,7 @@ function ProfileHeader({
             {displayName}
           </UiText>
           <UiText style={styles.username}>@{username}</UiText>
+          {showsVerifiedBadge(myProfile) ? <VerifiedCreatorBadge /> : null}
         </View>
         <Pressable onPress={onSettings} style={styles.signOutBtn} hitSlop={8}>
           <Settings color={theme.textDim} size={16} strokeWidth={2} />
@@ -154,7 +157,7 @@ function ProfileHeader({
       ) : null}
 
       {/* Links row (shared helper: only valid https links) */}
-      <CreatorLinkPills profile={myProfile} />
+      <CreatorLinkPills profile={linkSourceFor(myProfile)} />
 
       {/* Tab switcher */}
       <TabBar tab={tab} onTab={onTab} isOwnProfile={isOwnProfile} />

@@ -107,6 +107,7 @@ import { AUTO_EDIT_STALL_MS, transcriptionGate } from "@/lib/captionsGate";
 import { exitPreviewPlan, isPlayingWholeSource } from "@/lib/autoEdit/noCuts";
 import { enforceMergedSource, playerUris } from "@/lib/mergedSource";
 import { resetPlayer } from "@/lib/playerReset";
+import { blockForKind, postingBlockedKind } from "@/lib/creatorStatus";
 import type { PlaybackDebug } from "@/lib/autoEdit/debugText";
 import { adaptPlayer } from "@/lib/playerResetNative";
 import { DURATION_TOLERANCE_MS, joinTimesMs, verifyJoins } from "@/lib/mergeVerify";
@@ -3680,6 +3681,16 @@ export default function EditScreen() {
 
       setSuccess("Posted!");
     } catch (postErr) {
+      // Posting is not available for this creator (graduated / restricted): the matching message, no Retry (retrying
+      // cannot work), and the editor stays as it is.
+      const blockedKind = postingBlockedKind(postErr);
+      if (blockedKind) {
+        const block = blockForKind(blockedKind);
+        setError(`${block.title}. ${block.body}`);
+        resumeRenders();
+        setUploading(false);
+        return;
+      }
       const errMsg = postErr instanceof Error ? postErr.message : "Could not post. Please try again.";
       const errAny = postErr as unknown as Record<string, unknown> | undefined;
       console.error("[edit] executePost: FAILED —", errMsg);

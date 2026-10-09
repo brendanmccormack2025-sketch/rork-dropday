@@ -28,6 +28,8 @@ import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
 import { resolveAvatarUrl, isOnTrialNow, type Post } from "@/providers/PostsProvider";
 import CreatorLinkPills from "@/components/CreatorLinkPills";
+import VerifiedCreatorBadge from "@/components/VerifiedCreatorBadge";
+import { graduationColumns, linkSourceFor, noteMissingGraduationColumns, parseCreatorStatus, showsVerifiedBadge } from "@/lib/creatorStatus";
 import { noteMissingYoutubeColumn, profileLinkColumns } from "@/lib/creatorLinks";
 import { supabase } from "@/lib/supabase";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
@@ -57,7 +59,7 @@ export default function PublicProfileScreen() {
       const run = async () =>
         (await supabase
           .from("profiles")
-          .select(`id, username, display_name, avatar_url, bio, ${profileLinkColumns()}`)
+          .select(`id, username, display_name, avatar_url, bio, ${profileLinkColumns()}${graduationColumns()}`)
           .eq("id", id)
           .maybeSingle()) as unknown as {
           data: Record<string, unknown> | null;
@@ -65,6 +67,8 @@ export default function PublicProfileScreen() {
         };
       let { data, error } = await run();
       if (noteMissingYoutubeColumn(error)) ({ data, error } = await run());
+      // The graduation columns do not exist until migration-graduation.sql is run: ask again without them.
+      if (noteMissingGraduationColumns(error)) ({ data, error } = await run());
       if (error) {
         console.warn("[user/profile] error", error.message);
         return null;
@@ -80,6 +84,11 @@ export default function PublicProfileScreen() {
             instagram_handle: (data.instagram_handle as string | null) ?? null,
             tiktok_handle: (data.tiktok_handle as string | null) ?? null,
             youtube_url: (data.youtube_url as string | null | undefined) ?? null,
+            creator_status: parseCreatorStatus(data.creator_status),
+            graduation_reason: (data.graduation_reason as string | null | undefined) ?? null,
+            graduated_at: (data.graduated_at as string | null | undefined) ?? null,
+            instagram_url: (data.instagram_url as string | null | undefined) ?? null,
+            tiktok_url: (data.tiktok_url as string | null | undefined) ?? null,
           }
         : null;
     },
@@ -226,6 +235,7 @@ export default function PublicProfileScreen() {
                         {displayName}
                       </UiText>
                       <UiText style={styles.usernameText}>@{username}</UiText>
+                      {showsVerifiedBadge(profile) ? <VerifiedCreatorBadge /> : null}
                     </View>
                   </View>
 
@@ -235,7 +245,7 @@ export default function PublicProfileScreen() {
                   ) : null}
 
                   {/* Links (shared helper: only valid https links) */}
-                  <CreatorLinkPills profile={profile} />
+                  <CreatorLinkPills profile={linkSourceFor(profile)} />
 
                   {/* Block button */}
                   {!isOwnProfile && (

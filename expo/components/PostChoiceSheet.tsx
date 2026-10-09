@@ -15,7 +15,10 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 
 import UiText from "@/components/UiText";
+import PostingBlockedView from "@/components/PostingBlockedView";
 import { theme } from "@/constants/theme";
+import { parseCreatorStatus, postingBlock } from "@/lib/creatorStatus";
+import { usePosts } from "@/providers/PostsProvider";
 import { MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
 import { launchLibraryWithRetry } from "@/lib/pickerRetry";
 import { PICKER_ERROR_MESSAGES, classifyPickerError } from "@/lib/pickerErrors";
@@ -169,6 +172,10 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
   }, [isPicking, onClose, router]);
   openLibraryRef.current = openLibrary;
 
+  // A graduated or restricted creator cannot start a new post: the entry shows why instead of the options.
+  const { myProfile } = usePosts();
+  const block = postingBlock(parseCreatorStatus(myProfile?.creator_status));
+
   return (
     <Modal
       visible={visible}
@@ -181,6 +188,10 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.grabber} />
+          {block ? (
+            <PostingBlockedView block={block} onClose={onClose} />
+          ) : (
+          <>
           <UiText weight={800} style={styles.title}>
             Create
           </UiText>
@@ -265,6 +276,8 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
               Cancel
             </UiText>
           </Pressable>
+          </>
+          )}
         </View>
       </View>
     </Modal>

@@ -9,6 +9,15 @@ import { router } from "expo-router";
 import { showAlert } from "@/lib/showAlert";
 import { swapOptimistic } from "@/lib/postingFeed";
 import { noteMissingYoutubeColumn, profileLinkColumns } from "@/lib/creatorLinks";
+import {
+  blockForKind,
+  blockFromBackendError,
+  graduationColumns,
+  noteMissingGraduationColumns,
+  parseCreatorStatus,
+  postingBlockedError,
+  postingBlockedKind,
+} from "@/lib/creatorStatus";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { concatMP4Files } from "@/src/integrations/concatMP4";
 
@@ -225,6 +234,12 @@ export type MyProfile = {
   birthdate: string | null;
   /** Demo/reviewer flag: skip the 8-10 PM Drop posting window. */
   bypass_drop_window: boolean;
+  /** 'active' | 'graduated' | 'restricted' (migration-graduation.sql; 'active' until it is run). */
+  creator_status?: string | null;
+  graduation_reason?: string | null;
+  graduated_at?: string | null;
+  instagram_url?: string | null;
+  tiktok_url?: string | null;
 };
 
 /** Age tier derived from a birthdate. "unknown" when birthdate is missing. */
@@ -633,6 +648,24 @@ async function deleteStagedFiles(uris: Array<string | undefined>): Promise<void>
 }
 
 /** True for the database error raised when reacting to an archived/expired (or missing) parent post. */
+/**
+ * Before anything is uploaded: is this user allowed to start a new (root) post? 'graduated' or 'restricted' says no.
+ * Any problem reading it (offline, the column not there yet) says "go ahead": the database enforces it anyway.
+ */
+async function fetchPostingBlockKind(userId: string): Promise<"graduated" | "restricted" | null> {
+  try {
+    const { data, error } = await supabase.from("profiles").select("creator_status").eq("id", userId).maybeSingle();
+    if (error) {
+      noteMissingGraduationColumns(error);
+      return null;
+    }
+    const status = parseCreatorStatus((data as { creator_status?: unknown } | null)?.creator_status);
+    return status === "active" ? null : status;
+  } catch {
+    return null;
+  }
+}
+
 function isParentUnavailableError(message: string | null | undefined): boolean {
   return /cannot react/i.test(message ?? "");
 }
@@ -1351,7 +1384,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       const runProfileQuery = async () =>
         (await supabase
           .from("profiles")
-          .select(`id, username, display_name, avatar_url, bio, ${profileLinkColumns()}, birthdate, bypass_drop_window`)
+          .select(`id, username, display_name, avatar_url, bio, ${profileLinkColumns()}, birthdate, bypass_drop_window${graduationColumns()}`)
           .eq("id", user.id)
           .maybeSingle()) as unknown as {
           data: Record<string, unknown> | null;
@@ -1360,6 +1393,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       let { data, error } = await runProfileQuery();
       // youtube_url may not exist until migration-profile-links.sql is run.
       if (noteMissingYoutubeColumn(error)) ({ data, error } = await runProfileQuery());
+      // The graduation columns do not exist until migration-graduation.sql is run: ask again without them.
+      if (noteMissingGraduationColumns(error)) ({ data, error } = await runProfileQuery());
 
       if (error) {
         console.warn("[profile:query] ERROR", {
@@ -1384,6 +1419,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           youtube_url: (data.youtube_url as string | null | undefined) ?? null,
           birthdate: (data.birthdate as string | null) ?? null,
           bypass_drop_window: (data.bypass_drop_window as boolean | null) ?? false,
+          creator_status: parseCreatorStatus(data.creator_status),
+          graduation_reason: (data.graduation_reason as string | null | undefined) ?? null,
+          graduated_at: (data.graduated_at as string | null | undefined) ?? null,
+          instagram_url: (data.instagram_url as string | null | undefined) ?? null,
+          tiktok_url: (data.tiktok_url as string | null | undefined) ?? null,
         };
       }
 
@@ -1873,6 +1913,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         throw new Error("Not signed in.");
       }
 
+      // A graduated or restricted creator cannot start a new post (a reaction is always fine): stop before uploading.
+      if (!rawInput.parentPostId) {
+        const blocked = await fetchPostingBlockKind(user.id);
+        if (blocked) throw postingBlockedError(blocked);
+      }
+
       const cancel: UploadCancel = { cancelled: false, abort: null, paths: [] };
       if (rawInput.optimisticTempId) uploadCancels.set(rawInput.optimisticTempId, cancel);
       const throwIfCancelled = () => {
@@ -2167,6 +2213,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           status: insErrAny?.status,
           statusCode: insErrAny?.statusCode,
         };
+        // The database refused the post because of the creator status: the matching message, not a generic failure.
+        const refusedFor = blockFromBackendError(insErr);
+        if (refusedFor) throw postingBlockedError(refusedFor);
         console.error("[createPost] insert FAIL", errMeta);
         // Persist the error so we can retrieve it after the fact
         AsyncStorage.setItem("dropday:lastInsertError", JSON.stringify({ ...errMeta, ts: Date.now() })).catch(() => {});
@@ -2301,6 +2350,16 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (isUploadCancelled(err)) {
         const rec = variables.optimisticTempId ? uploadCancels.get(variables.optimisticTempId) : undefined;
         void cleanupCancelledUpload(variables, rec?.paths ?? [], null);
+        return;
+      }
+      // Posting not available for this creator (graduated / restricted): say so plainly, drop the placeholder, and
+      // refresh the profile so the + entry shows the same message from now on.
+      const blockedKind = postingBlockedKind(err);
+      if (blockedKind) {
+        const block = blockForKind(blockedKind);
+        showAlert(block.title, block.body);
+        if (variables.optimisticTempId) removeOptimisticPost(variables.optimisticTempId);
+        void myProfileQuery.refetch();
         return;
       }
       const errAny = err as unknown as Record<string, unknown> | undefined;

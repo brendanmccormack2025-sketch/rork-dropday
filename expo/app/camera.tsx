@@ -23,6 +23,9 @@ import { setAudioModeAsync } from "expo-audio";
 import { Camera as CameraIcon, Check, Delete, RefreshCw, X, Zap, ZapOff } from "lucide-react-native";
 
 import PrimaryButton from "@/components/PrimaryButton";
+import PostingBlockedView from "@/components/PostingBlockedView";
+import { parseCreatorStatus, postingBlock } from "@/lib/creatorStatus";
+import { usePosts } from "@/providers/PostsProvider";
 import { recordClientError } from "@/lib/clientErrors";
 import { CAMERA_FAILED_TEXT, startFailure } from "@/lib/cameraStart";
 import { theme } from "@/constants/theme";
@@ -84,12 +87,26 @@ class CameraBoundary extends React.Component<
 export default function CameraRoute() {
   const router = useRouter();
   const navigation = useNavigation();
+  const { reactingTo, rootDropId } = useLocalSearchParams<{ reactingTo?: string; rootDropId?: string }>();
+  const { myProfile } = usePosts();
   // Retry mounts the whole camera screen again (new key), so every native camera object starts clean.
   const [attempt, setAttempt] = useState(0);
   const close = useCallback(() => {
     if (navigation.canGoBack()) router.back();
     else router.replace("/(tabs)");
   }, [router, navigation]);
+  // A new post is not available to a graduated or restricted creator; a reaction always is.
+  const block = reactingTo || rootDropId ? null : postingBlock(parseCreatorStatus(myProfile?.creator_status));
+  if (block) {
+    return (
+      <View style={[styles.fullscreen, styles.failedWrap]}>
+        <StatusBar style="light" />
+        <View style={styles.blockedCard}>
+          <PostingBlockedView block={block} onClose={close} />
+        </View>
+      </View>
+    );
+  }
   return (
     <CameraBoundary key={attempt} onRetry={() => setAttempt((a) => a + 1)} onClose={close}>
       {(fail) => <CameraScreen onFailure={fail} />}
@@ -620,6 +637,7 @@ const styles = StyleSheet.create({
   zoomBarFill: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: theme.accent },
   zoomBarLabel: { color: "#fff", fontSize: 11, fontWeight: "700" as const, fontVariant: ["tabular-nums"], textShadowColor: "rgba(0,0,0,0.5)", textShadowRadius: 4 },
 
+  blockedCard: { backgroundColor: theme.bg, width: "100%", maxWidth: 420 },
   failedWrap: { alignItems: "center", justifyContent: "center", gap: 18, padding: 32 },
   failedTitle: { color: "#fff", fontSize: 18, fontWeight: "800" as const },
   failedClose: { color: "rgba(255,255,255,0.7)", fontSize: 14, fontWeight: "600" as const, padding: 8 },
