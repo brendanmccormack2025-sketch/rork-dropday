@@ -108,8 +108,8 @@ if (!BIN) {
       const reset = () => {
         Q(`delete from public.trial_engine_log; delete from public.trial_post_state; delete from public.trial_assignments; delete from public.notifications;
            delete from public.post_view_stats; delete from public.post_raw_views; delete from public.post_qualified_views; delete from public.likes;
-           delete from public.viewer_creator_affinity; delete from public.trial_feed_opens; delete from public.posts; delete from public.user_blocks;
-           update public.trial_engine_config set engine_mode='live'`);
+           delete from public.viewer_creator_affinity; delete from public.trial_feed_opens; delete from public.follows; delete from public.posts; delete from public.user_blocks;
+           update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, build_in_silence=true`);
       };
       const score = (post) => Object.fromEntries(q(`select viewer_id::text || '=' || round(score::numeric,3) from public.trial_post_scores('${post}') order by 1`).split("\n").filter(Boolean).map((l) => l.split("=")));
 
@@ -233,7 +233,7 @@ if (!BIN) {
       ok("once seen, it is no longer pushed to the front again", !feedOf(asked[0]).startsWith(P1) || true);
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       ok("legacy mode: the feed is the plain get_feed again (outsider sees it)", feedOf(outsider).includes(P1));
-      Q(`update public.trial_engine_config set engine_mode='live'`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, build_in_silence=true`);
       const pg = q(`set role authenticated; set request.jwt.claim.sub='${outsider}'; select count(*) || ':' || max(page_rows) from public.get_feed_engine(20, 0)`).split("\n").pop();
       ok("page_rows reports the source rows so the app can detect the end of the feed", /^\d+:\d+$/.test(pg));
 
@@ -289,7 +289,7 @@ if (!BIN) {
       eq("legacy: a new post is NOT given a cohort or engine state", [q(`select count(*) from public.trial_post_state`), q(`select count(*) from public.trial_assignments`)], ["0", "0"]);
       engine();
       eq("legacy: the old rule ran (25 h, below the exposure gate -> silent 'incomplete', no engine notification, no engine log)", [status(P1), notif("verdict_incomplete"), q("select count(*) from public.trial_engine_log")], ["incomplete", "0", "0"]);
-      Q(`update public.trial_engine_config set engine_mode='live'`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, build_in_silence=true`);
       freshWorld(20);
       mkPost(P1, U(1), 1500);
       engine();
@@ -433,8 +433,72 @@ if (!BIN) {
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       prep(); Q(`update public.trial_engine_config set engine_mode='legacy'`);
       ok("legacy mode: opening the feed assigns nothing", (() => { viewerOf(V); return q("select count(*) from public.trial_assignments") === "0"; })());
-      Q(`update public.trial_engine_config set engine_mode='live'`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, build_in_silence=true`);
       ok("a clean slate for the next run", true);
+
+      // 13) A. small-app rule: while the active pool is small, everybody gets every testing post
+      const P2 = "aaaaaaaa-0000-0000-0000-000000000003";
+      freshWorld(3);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      mkPost(P1, U(1)); mkPost(P2, U(2));
+      const sees = (uid, ...posts) => { const f = viewerOf(uid); return posts.every((p) => f.includes(p)); };
+      ok("small app: a newcomer sees BOTH users' testing posts (not only the first cohort's)", sees(U(21), P1, P2));
+      ok("...and the 4th and 5th newcomers do too", sees(U(22), P1, P2) && sees(U(23), P1, P2));
+      eq("each post is assigned to everyone eligible (all 5 non-creators for P1 here)", activeIn(P1), 5);
+      ok("the creator still does not get their own post", !viewerOf(U(1)).includes(P1));
+      freshWorld(3);
+      Q(`update public.trial_engine_config set small_pool_everyone=1`);
+      mkPost(P1, U(1)); mkPost(P2, U(2));
+      viewerOf(U(21)); viewerOf(U(22));
+      ok("above the threshold the progressive cohorts apply again (a 3-slot cohort is not exceeded)", activeIn(P1) <= 3 && activeIn(P2) <= 3);
+
+      // 14) B. prior strength scales with the pool; a tiny pool's strong viewers carry a post
+      eq("prior strength k = clamp(0.25 * pool, 1, 4): pools 1, 3, 4, 8, 12, 16, 100", [1, 3, 4, 8, 12, 16, 100].map((p) => Number(q(`select public.trial_prior_strength(${p})`))), [1, 1, 1, 2, 3, 4, 4]);
+      freshWorld(4);
+      mkPost(P1, U(1));
+      for (const v of [2, 3, 4]) view(P1, U(v), { watch: 12000, dur: 12000, done: true, like: true, react: v === 2 });
+      engine();
+      eq("pool of 3: all 3 watch fully + like, one reacts -> survives", [status(P1), lastLog(P1), q(`select pool from public.trial_engine_log where post_id='${P1}' order by id desc limit 1`)], ["survived", "survived|3", "3"]);
+      // for the record: how the same three viewers fare under other conditions (k=1 vs k=4, bar 0.30)
+      for (const [name, sc] of [["old accounts, watch>=6s + like, one reaction", [0.7, 0.7, 1.0]], ["new accounts (x0.5), same", [0.35, 0.35, 0.5]], ["no watch data (old app build): likes only", [0.3, 0.3, 0.6]], ["like-everything viewers, watch + like", [0.55, 0.55, 1.0]]]) {
+        const s = sc.reduce((a, b) => a + b, 0);
+        const p = (k) => (1 - Number(q(`select public.trial_beta_cdf(0.3, ${k * 0.3 + s}, ${k * 0.7 + 3 - s})`))).toFixed(3);
+        console.log(`INFO  3 viewers, ${name}: P(mean>bar) k=4 ${p(4)} | k=1 ${p(1)}   (survive needs 0.80)`);
+      }
+
+      // 15) C. build in silence
+      const FU = U(2), FD = U(3);   // 2 follows the creator, the creator follows 3
+      freshWorld(6);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      Q(`insert into public.follows (follower_id, followee_id) values ('${FU}','${U(1)}'), ('${U(1)}','${FD}')`);
+      mkPost(P1, U(1));
+      eq("known people (a follower, and someone the creator follows) are not assigned, even in a small app; strangers all are", [q(`select count(*) from public.trial_assignments where post_id='${P1}' and viewer_id in ('${FU}','${FD}')`), activeIn(P1)], ["0", 3]);
+      ok("a follower never gets the testing post", !viewerOf(FU).includes(P1));
+      ok("...nor does someone the creator follows (either direction)", !viewerOf(FD).includes(P1));
+      Q(`insert into public.trial_assignments (post_id, viewer_id, stage) values ('${P1}','${FU}',1)`);
+      ok("...even if an assignment row exists for them", !viewerOf(FU).includes(P1));
+      Q(`delete from public.trial_assignments where viewer_id='${FU}'`);
+      ok("a stranger still gets it", viewerOf(U(4)).startsWith(P1));
+      for (const v of [4, 5, 6]) view(P1, U(v), { watch: 500 });
+      view(P1, FU, { watch: 12000, dur: 12000, done: true, like: true, react: true }); view(P1, FD, { watch: 12000, dur: 12000, done: true, like: true });
+      eq("their views, likes and reaction are not scored", Object.keys(score(P1)).sort(), [4, 5, 6].map(U));
+      engine();
+      eq("so perfect engagement from people the creator knows cannot rescue the post", [status(P1), lastLog(P1)], ["archived", "failed|3"]);
+      Q(`update public.trial_engine_config set build_in_silence=false`);
+      eq("flag off: known viewers' engagement counts again", Object.keys(score(P1)).length, 5);
+      freshWorld(6);
+      Q(`update public.trial_engine_config set small_pool_everyone=50, build_in_silence=false`);
+      Q(`insert into public.follows (follower_id, followee_id) values ('${FU}','${U(1)}')`);
+      mkPost(P1, U(1));
+      ok("flag off: a follower is assigned and served the testing post", viewerOf(FU).startsWith(P1));
+      freshWorld(6);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      Q(`insert into public.follows (follower_id, followee_id) values ('${FU}','${U(1)}')`);
+      mkPost(P1, U(1));
+      Q(`update public.posts set status='survived', survived_at=now(), distribution_started_at=now(), distribution_expires_at=now()+interval '24 hours' where id='${P1}'`);
+      ok("after it survives, the follower sees it normally", viewerOf(FU).includes(P1));
+      ok("known_connections lists both directions from one source", q(`select string_agg(distinct source, ',') || ':' || count(*) from public.known_connections`) === "follow:2");
+      ok("clients cannot read known_connections", psql("t", "set role authenticated; select * from public.known_connections", ["-v", "ON_ERROR_STOP=1"]).status !== 0);
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });

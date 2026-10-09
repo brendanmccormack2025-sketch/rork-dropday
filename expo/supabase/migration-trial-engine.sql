@@ -92,7 +92,11 @@ insert into public.trial_engine_config (id) values (true) on conflict (id) do no
 alter table public.trial_engine_config
   add column if not exists stall_minutes       integer not null default 30,   -- an assignment nobody opened for this long frees its slot
   add column if not exists ondemand_batch      integer not null default 10,   -- most posts one feed request can newly assign to a viewer
-  add column if not exists ondemand_max_unseen integer not null default 20;   -- stop assigning while this many assigned posts are unseen
+  add column if not exists ondemand_max_unseen integer not null default 20,   -- stop assigning while this many assigned posts are unseen
+  add column if not exists small_pool_everyone integer not null default 50,   -- active pool this small or smaller: everybody gets every testing post
+  add column if not exists prior_min           double precision not null default 1,     -- prior strength k = clamp(prior_pool_fraction * pool, prior_min, prior_strength)
+  add column if not exists prior_pool_fraction double precision not null default 0.25,
+  add column if not exists build_in_silence    boolean not null default true;           -- people you know never see (or influence) your post while it is on trial
 alter table public.trial_engine_config enable row level security;   -- no policies: dashboard / service role only
 
 create or replace function public.trial_cfg()
@@ -384,6 +388,59 @@ begin
 end;
 $$;
 
+-- ── People you know ──────────────────────────────────────────────────────────
+-- ONE place that says who knows whom. Rows are directional pairs (both directions are listed). Today the only source is
+-- follows (either direction, any status: over-hiding is the safe side). The messaging feature's friends table and
+-- contacts matching are added later as extra UNION ALL branches here; the engine and the feed only ever call
+-- trial_is_silenced() and never change.
+create or replace view public.known_connections as
+  select f.follower_id as user_id, f.followee_id as other_id, 'follow'::text as source from public.follows f
+  union all
+  select f.followee_id, f.follower_id, 'follow'::text from public.follows f;
+  -- union all select ... from public.friends ...        (messaging, later)
+  -- union all select ... from public.contact_matches ...  (contacts, later)
+revoke all on public.known_connections from anon, authenticated;
+
+-- Build in silence: while a post is on trial, a viewer who knows its creator never gets it and never counts toward its
+-- verdict. Once it survives, nothing here applies.
+create or replace function public.trial_is_silenced(p_creator uuid, p_viewer uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select c.build_in_silence
+     and exists (select 1 from public.known_connections k where k.user_id = p_creator and k.other_id = p_viewer)
+  from public.trial_cfg() c
+$$;
+
+-- Small-app rule: with this few active people (the creator not counted), everybody is in every cohort.
+create or replace function public.trial_small_pool(p_creator uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select count(*) <= (select small_pool_everyone from public.trial_engine_config where id)
+  from (
+    select 1 from public.trial_active_users u
+    where u.user_id <> coalesce(p_creator, '00000000-0000-0000-0000-000000000000'::uuid)
+      and u.last_active >= now() - ((select active_window_hours from public.trial_engine_state where id) * interval '1 hour')
+    limit (select small_pool_everyone + 1 from public.trial_engine_config where id)
+  ) x
+$$;
+
+-- Prior strength: a tiny pool cannot carry a prior as heavy as a big one.
+create or replace function public.trial_prior_strength(p_pool integer)
+returns double precision
+language sql
+stable
+as $$
+  select greatest(c.prior_min, least(c.prior_strength, c.prior_pool_fraction * p_pool)) from public.trial_cfg() c
+$$;
+
 -- Eligible viewers for a post: active, not the creator, not blocked either way. `exposed` = has seen it, `assigned` =
 -- already in a cohort. Total pool = all rows; remaining pool = not exposed and not assigned.
 create or replace function public.trial_pool(p_post_id uuid)
@@ -403,6 +460,7 @@ as $$
   left join public.viewer_creator_affinity a on a.viewer_id = u.user_id and a.creator_id = p.user_id
   where u.last_active >= now() - ((select active_window_hours from public.trial_engine_state where id) * interval '1 hour')
     and u.user_id <> p.user_id
+    and not public.trial_is_silenced(p.user_id, u.user_id)
     and not exists (
       select 1 from public.user_blocks b
       where (b.blocker_id = u.user_id and b.blocked_id = p.user_id)
@@ -433,6 +491,8 @@ as $$
       select r.viewer_id, r.created_at from public.post_raw_views r where r.post_id = p_post_id
     ) v
     join post on post.user_id <> v.viewer_id
+    where not exists (select 1 from cfg, public.known_connections k
+                      where cfg.build_in_silence and k.user_id = post.user_id and k.other_id = v.viewer_id)   -- build in silence
     group by v.viewer_id
   ),
   base as (
@@ -535,6 +595,9 @@ begin
   if st.post_id is null then return 0; end if;
   select coalesce(st.stage_target, public.trial_cohort_size(0, st.stage)) - count(*) into open_slots
   from public.trial_assignments a where a.post_id = p_post_id and a.stage = st.stage and a.released_at is null;
+  if public.trial_small_pool((select user_id from public.posts where id = p_post_id)) then
+    open_slots := 1000000;   -- small app: the whole eligible pool, and later newcomers too
+  end if;
   if open_slots <= 0 then return 0; end if;
   insert into public.trial_assignments (post_id, viewer_id, stage)
   select p_post_id, c.user_id, st.stage
@@ -576,6 +639,7 @@ declare
   cfg public.trial_engine_config := public.trial_cfg();
   n integer;
 begin
+  if public.trial_small_pool((select user_id from public.posts where id = p_post_id)) then return 0; end if;   -- nobody is short of a slot
   update public.trial_assignments t
      set released_at = now()
    where t.post_id = p_post_id and t.released_at is null
@@ -644,6 +708,7 @@ begin
       and p.status = 'trial' and p.parent_post_id is null and p.checkpoint_at > now()
       and p.user_id <> p_viewer and p.moderation_status = 'active' and p.media_deleted_at is null
       and (not hide_mature or not p.is_mature)
+      and not public.trial_is_silenced(p.user_id, p_viewer)
       and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
       and not exists (select 1 from public.reports r where r.reporter_id = p_viewer and r.target_type = 'post' and r.target_id = p.id)
       and not exists (select 1 from public.trial_assignments t where t.post_id = s.post_id and t.viewer_id = p_viewer and t.released_at is null)
@@ -667,6 +732,7 @@ begin
       left join public.trial_assignments a on a.post_id = s.post_id and a.stage = s.stage and a.released_at is null
       where s.post_id = pid
       group by s.stage_target, s.stage;
+      if public.trial_small_pool((select user_id from public.posts where id = pid)) then open_slots := 1; end if;
       if coalesce(open_slots, 0) > 0 then
         insert into public.trial_assignments (post_id, viewer_id, stage)
         select pid, p_viewer, s.stage from public.trial_post_state s where s.post_id = pid
@@ -748,6 +814,7 @@ declare
   n integer;
   sum_s double precision;
   mean_s double precision;
+  k double precision;
   alpha double precision;
   beta double precision;
   p double precision;
@@ -768,8 +835,9 @@ begin
   select count(*), coalesce(sum(score), 0) into n, sum_s from public.trial_post_scores(p_post_id);
   select count(*), count(*) filter (where not exposed and not assigned) into pool_total, pool_left from public.trial_pool(p_post_id);
 
-  alpha := cfg.prior_strength * p_bar + sum_s;
-  beta  := cfg.prior_strength * (1 - p_bar) + (n - sum_s);
+  k := public.trial_prior_strength(pool_total);
+  alpha := k * p_bar + sum_s;
+  beta  := k * (1 - p_bar) + (n - sum_s);
   p := 1 - public.trial_beta_cdf(p_bar, alpha, beta);
   mean_s := case when n > 0 then sum_s / n else null end;
 
@@ -1017,6 +1085,7 @@ begin
     where t.viewer_id = me and t.released_at is null and p.status = 'trial' and p.parent_post_id is null and p.moderation_status = 'active'
       and p.user_id <> me and p.media_deleted_at is null
       and (not hide_mature or not p.is_mature)
+      and not public.trial_is_silenced(p.user_id, me)
       and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
       and not exists (select 1 from public.reports r where r.reporter_id = me and r.target_type = 'post' and r.target_id = p.id)
       and not exists (select 1 from public.post_raw_views r where r.post_id = t.post_id and r.viewer_id = me)
@@ -1065,7 +1134,7 @@ begin
     join public.posts p on p.id = u.id
     where not (u.id = any (front))
       and ((p.status = 'survived' and (p.distribution_expires_at is null or p.distribution_expires_at > now())
-            or (p.status = 'trial' and exists (select 1 from public.trial_assignments t where t.post_id = p.id and t.viewer_id = me and t.released_at is null)))
+            or (p.status = 'trial' and not public.trial_is_silenced(p.user_id, me) and exists (select 1 from public.trial_assignments t where t.post_id = p.id and t.viewer_id = me and t.released_at is null)))
            or (p.user_id = me and p.status in ('trial', 'incomplete', 'survived')))   -- 'incomplete' / 'archived' / 'expired': never served to others
     order by u.ord
   );
