@@ -61,6 +61,15 @@ export function recordClientError(error: unknown, extra: { kind: string } & Reco
   return recorder.reportNow(error, extra);
 }
 
+/**
+ * Record a measurement (not a failure): kind "metric", the name as the message, no stack. Uploaded at once; never
+ * throws. Use it for numbers worth reading later (a flip gap), so they do not look like crashes.
+ */
+export function recordMetric(name: string, data: Record<string, unknown> = {}): Promise<void> {
+  if (__DEV__) console.log("[metric]", name, JSON.stringify(data));
+  return recorder.reportNow(`${name} ${Object.entries(data).map(([k, v]) => `${k}=${String(v)}`).join(" ")}`.trim(), { kind: "metric", metric: name, ...data });
+}
+
 /** Upload the reports saved by earlier runs (call once the user is signed in). */
 export function flushClientErrors(userId: string | null): Promise<{ uploaded: number }> {
   return recorder.flush(userId);

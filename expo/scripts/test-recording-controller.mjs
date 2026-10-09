@@ -262,7 +262,7 @@ function rig(opts = {}) {
   const ctl2 = read("../lib/recordingController.ts");
   ok("after a flip: first try ~150 ms (earlier on onCameraReady), then a retry every 50 ms, up to 15 tries", /MAX_START_RETRIES = 15/.test(ctl2) && /RETRY_SPACING_MS = 50/.test(ctl2) && /setTimeout\(resolve, FLIP_FIRST_TRY_MS\)/.test(hook) && /readyWaitersRef\.current\.push/.test(hook));
   ok("empty segments never reach the merge (dropped at the recorder and filtered again before Next)", /MIN_SEGMENT_MS = 200/.test(ctl2) && /discardFile\?\.\(result\.uri\)/.test(ctl2) && /usableSegments\(clips\)/.test(cam));
-  ok("the gap is logged in dev and to client_errors as flipGap", /kind: "flipGap"/.test(hook) && /__DEV__/.test(hook) && /gapMs/.test(hook));
+  ok("the gap is logged in dev and to client_errors as a flipGap metric", /recordMetric\("flipGap"/.test(hook) && /__DEV__/.test(hook) && /gapMs/.test(hook));
   ok("the bar and timer follow the take, so they keep advancing through a flip", /takeLiveMs/.test(cam) && /runId: takeRef\.current\?\.id/.test(cam));
   ok("the blur is brief and subtle", /intensity=\{22\}/.test(cam) && /duration: switching \? 60 : 90/.test(cam));
 }

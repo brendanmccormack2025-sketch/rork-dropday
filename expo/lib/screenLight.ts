@@ -17,7 +17,10 @@ type BrightnessModule = {
   setBrightnessAsync(value: number): Promise<void>;
 };
 
-/** The platform's brightness, or null when expo-brightness is not part of this build. */
+/**
+ * The platform's brightness, or null when expo-brightness is not part of this build (1.0.4 and older). The module is
+ * found by name at run time and never imported, so a build without it just has no brightness control.
+ */
 export function nativeBrightness(): BrightnessApi | null {
   try {
     const mod = requireOptionalNativeModule<BrightnessModule>("ExpoBrightness");

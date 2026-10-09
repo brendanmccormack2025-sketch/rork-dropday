@@ -5,7 +5,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 
 import { deleteAsync } from "@/lib/fileSystemCompat";
-import { recordClientError } from "@/lib/clientErrors";
+import { recordMetric } from "@/lib/clientErrors";
+import { FACING_READ_TIMEOUT_MS, withTimeout } from "@/lib/cameraStart";
 import { deleteLastRun, type CameraSegment } from "@/lib/cameraSegments";
 import { flashMode } from "@/lib/cameraFlash";
 import { RecordingController, type RecState } from "@/lib/recordingController";
@@ -58,7 +59,8 @@ export function useCameraRecorder() {
   const facingRef = useRef<"back" | "front">("front");
   useEffect(() => {
     let cancelled = false;
-    AsyncStorage.getItem(FACING_KEY)
+    // The remembered camera is read with a time limit: if storage is slow the camera opens on the default.
+    withTimeout(AsyncStorage.getItem(FACING_KEY), FACING_READ_TIMEOUT_MS, null)
       .then((v) => {
         if (cancelled) return;
         if (v === "back" || v === "front") {
@@ -174,7 +176,7 @@ export function useCameraRecorder() {
         // How long the flip handoff really took, so the numbers can be read in dev and from client_errors.
         onFlipGap: (gapMs, info) => {
           if (__DEV__) console.log(`[camera] flip gap ${Math.round(gapMs)} ms (retries ${info.retries})`);
-          void recordClientError(new Error("camera flip gap"), { kind: "flipGap", gapMs: Math.round(gapMs), retries: info.retries, facing: facingRef.current });
+          void recordMetric("flipGap", { gapMs: Math.round(gapMs), retries: info.retries, facing: facingRef.current });
         },
         onRunStart: (t) => {
           recordingStartedAtRef.current = t;

@@ -23,6 +23,8 @@ import { setAudioModeAsync } from "expo-audio";
 import { Camera as CameraIcon, Check, Delete, RefreshCw, X, Zap, ZapOff } from "lucide-react-native";
 
 import PrimaryButton from "@/components/PrimaryButton";
+import { recordClientError } from "@/lib/clientErrors";
+import { CAMERA_FAILED_TEXT, startFailure } from "@/lib/cameraStart";
 import { theme } from "@/constants/theme";
 import { useCameraRecorder } from "@/hooks/useCameraRecorder";
 import { SCREEN_LIGHT_COLOR } from "@/lib/cameraFlash";
@@ -43,7 +45,59 @@ const hapticLight = () => {
   if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 };
 
-export default function CameraScreen() {
+/**
+ * The camera route: any render error, a mount error or a camera that does not come up in time shows "Camera couldn't
+ * start. Retry" (and is logged to client_errors as kind "cameraStart") instead of a frozen screen.
+ */
+class CameraBoundary extends React.Component<
+  { children: (fail: (reason: string) => void) => React.ReactNode; onRetry: () => void; onClose: () => void },
+  { failure: string | null }
+> {
+  state = { failure: null as string | null };
+  static getDerivedStateFromError(error: unknown) {
+    return { failure: String((error as { message?: unknown } | null)?.message ?? "render error") };
+  }
+  componentDidCatch(error: unknown) {
+    void recordClientError(error, { kind: "cameraStart", stage: "render" });
+  }
+  fail = (reason: string) => {
+    if (this.state.failure) return;
+    this.setState({ failure: reason });
+    void recordClientError(new Error(`camera ${reason}`), { kind: "cameraStart", stage: reason });
+  };
+  render() {
+    if (this.state.failure === null) return this.props.children(this.fail);
+    return (
+      <View style={[styles.fullscreen, styles.failedWrap]}>
+        <StatusBar style="light" />
+        <CameraIcon color="#fff" size={44} />
+        <UiText style={styles.failedTitle}>{CAMERA_FAILED_TEXT}</UiText>
+        <PrimaryButton label="Retry" onPress={this.props.onRetry} />
+        <Pressable onPress={this.props.onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close camera">
+          <UiText style={styles.failedClose}>Close</UiText>
+        </Pressable>
+      </View>
+    );
+  }
+}
+
+export default function CameraRoute() {
+  const router = useRouter();
+  const navigation = useNavigation();
+  // Retry mounts the whole camera screen again (new key), so every native camera object starts clean.
+  const [attempt, setAttempt] = useState(0);
+  const close = useCallback(() => {
+    if (navigation.canGoBack()) router.back();
+    else router.replace("/(tabs)");
+  }, [router, navigation]);
+  return (
+    <CameraBoundary key={attempt} onRetry={() => setAttempt((a) => a + 1)} onClose={close}>
+      {(fail) => <CameraScreen onFailure={fail} />}
+    </CameraBoundary>
+  );
+}
+
+function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
   const router = useRouter();
   const navigation = useNavigation();
   const { reactingTo, rootDropId } = useLocalSearchParams<{ reactingTo?: string; rootDropId?: string }>();
@@ -76,6 +130,7 @@ export default function CameraScreen() {
     handleMountError,
     teardown,
     handleCameraReady,
+    isCameraReady,
   } = useCameraRecorder();
 
   const clipsRef = useRef(clips);
@@ -121,12 +176,30 @@ export default function CameraScreen() {
 
   // Front camera + flash = the screen is the light: brightness to max while it is on (only when the build has
   // expo-brightness; otherwise just the white glow), restored when it goes off or the camera closes.
-  const screenLight = useMemo(() => createScreenLight(nativeBrightness()), []);
+  // Nothing here waits: the light looks the module up on first use, every call is fire-and-forget with a time limit,
+  // and a failure only means the brightness stays where it was (the glow is drawn either way).
+  const screenLight = useMemo(() => createScreenLight(nativeBrightness), []);
   useEffect(() => {
-    if (flash === "screen") void screenLight.on();
-    else void screenLight.off();
+    if (flash === "screen") void screenLight.on().catch(() => {});
+    else void screenLight.off().catch(() => {});
   }, [flash, screenLight]);
-  useEffect(() => () => void screenLight.off(), [screenLight]);
+  useEffect(() => () => void screenLight.off().catch(() => {}), [screenLight]);
+
+  // Start watchdog: a camera that has not reported ready in time (or failed to mount) is a failed start, not a freeze.
+  const viewMounted = !!permission?.granted && facingLoaded;
+  useEffect(() => {
+    if (cameraMountError) {
+      onFailure("mount-error");
+      return;
+    }
+    if (!viewMounted || isCameraReady) return;
+    const startedAt = Date.now();
+    const id = setInterval(() => {
+      const f = startFailure({ viewMounted: true, ready: false, mountError: null, elapsedMs: Date.now() - startedAt });
+      if (f) onFailure(f);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [viewMounted, isCameraReady, cameraMountError, onFailure]);
 
   // Audio session: allow recording while the camera is mounted.
   useEffect(() => {
@@ -547,6 +620,9 @@ const styles = StyleSheet.create({
   zoomBarFill: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: theme.accent },
   zoomBarLabel: { color: "#fff", fontSize: 11, fontWeight: "700" as const, fontVariant: ["tabular-nums"], textShadowColor: "rgba(0,0,0,0.5)", textShadowRadius: 4 },
 
+  failedWrap: { alignItems: "center", justifyContent: "center", gap: 18, padding: 32 },
+  failedTitle: { color: "#fff", fontSize: 18, fontWeight: "800" as const },
+  failedClose: { color: "rgba(255,255,255,0.7)", fontSize: 14, fontWeight: "600" as const, padding: 8 },
   cameraErrorBanner: { alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.85)", padding: 32 },
   cameraErrorBannerText: { color: theme.danger, fontSize: 14, fontWeight: "600" as const, textAlign: "center", lineHeight: 20 },
 });
