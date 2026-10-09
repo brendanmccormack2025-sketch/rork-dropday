@@ -104,6 +104,7 @@ import { addManualCut } from "@/lib/autoEdit/decisions";
 import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/lib/autoEdit/deletePart";
 import { analysisSource, loadLoudnessChecked } from "@/lib/mergeTiming";
 import { AUTO_EDIT_STALL_MS, transcriptionGate } from "@/lib/captionsGate";
+import { exitPreviewPlan, isPlayingWholeSource } from "@/lib/autoEdit/noCuts";
 import { aiBoundariesOf, describeEdgeDrag, reshapeCutAtEdge } from "@/lib/autoEdit/reshape";
 import { buildSeamHandles, remapOverlayTimes, type SeamEdgeInfo } from "@/lib/autoEdit/seams";
 import { allCategoriesOff, cutCategoriesOff, cutsRows, cutsSummary, setCutsRowEnabled, type CutsRow } from "@/lib/autoEdit/editPanel";
@@ -590,6 +591,9 @@ export default function EditScreen() {
       if (finalRef.current === final) finalRef.current = null;
     };
   }, []);
+  // No cut is active (Keep original / every cut category off) and the timeline is the source file: it is played
+  // directly. The cuts-only preview is not rendered for it and the editor never waits for one.
+  const noCuts = isPlayingWholeSource(clips, editModel?.state, editModel?.durationMs ?? 0);
   useEffect(() => {
     const args = {
       clips,
@@ -597,9 +601,11 @@ export default function EditScreen() {
       userId: user?.id,
       hold: captionsBusy || mergeUi.kind !== "idle",
     };
-    aheadRef.current?.update(args);
+    // The preview render is skipped when there is nothing cut (isRoot false = "not eligible", so it goes idle and
+    // drops any render in flight); the final render for Post below is unaffected (captions are still burned in).
+    aheadRef.current?.update({ ...args, isRoot: args.isRoot && !noCuts });
     finalRef.current?.update({ ...args, captions: captions.overlays });
-  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captionsBusy, mergeUi.kind]);
+  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captionsBusy, mergeUi.kind, noCuts]);
   const aheadReady = aheadState.kind === "ready" ? aheadState : null;
   const aheadSignature = aheadRef.current?.signatureOf(clips) ?? null;
   const aheadMatches = !!aheadReady && aheadReady.signature === aheadSignature;
@@ -615,7 +621,7 @@ export default function EditScreen() {
   const [pendingPlay, setPendingPlay] = useState(false);
   const [roughPlay, setRoughPlay] = useState(false);
   const aheadBusy = aheadState.kind === "waiting" || aheadState.kind === "rendering";
-  const waitForPreview = aheadBusy && !aheadMatches && selectedClipId === null && !roughPlay;
+  const waitForPreview = aheadBusy && !aheadMatches && selectedClipId === null && !roughPlay && !noCuts;
   const waitForPreviewRef = useRef(false);
   waitForPreviewRef.current = waitForPreview;
   const renderStartedAtRef = useRef(0);
@@ -1715,6 +1721,8 @@ export default function EditScreen() {
       setIsPlaying(false);
       setPositionMs(targetMs);
     } else {
+      // This is the one seek: a pending seek left by replaceClips (to the clip start) must not seek again afterwards.
+      pendingSeekRef.current = null;
       if (videoRef.current) videoRef.current.currentTime = sourcePos / 1000;
       setIsPlaying(false);
       setPositionMs(targetMs);
@@ -1738,12 +1746,18 @@ export default function EditScreen() {
   // Leaving rendered-file preview (an edit, or a clip selected): put the live
   // players at the same output time and keep the play state.
   const wasPreviewRef = useRef(false);
+  // True from the moment a decision change replaces the clips until it has seeked and resumed playback itself.
+  const commitInFlightRef = useRef(false);
   useEffect(() => {
     if (!previewMode && wasPreviewRef.current) {
-      const pos = positionMsRef.current;
-      const was = isPlayingRef.current;
-      handleSeek(pos);
-      setTimeout(() => setIsPlaying(was), 60);
+      // A decision change (Keep original, undo, a cut) seeks and resumes by itself: leaving the preview must not
+      // seek and restore the play state a second time, or the later of the two wins and playback stays paused.
+      const plan = exitPreviewPlan({ commitInFlight: commitInFlightRef.current, isPlaying: isPlayingRef.current });
+      if (plan.seek) handleSeek(positionMsRef.current);
+      if (plan.resumeTo !== null) {
+        const resumeTo = plan.resumeTo;
+        setTimeout(() => setIsPlaying(resumeTo), 60);
+      }
     }
     wasPreviewRef.current = previewMode;
   }, [previewMode, handleSeek]);
@@ -2633,14 +2647,26 @@ export default function EditScreen() {
       });
       const wasPlaying = isPlayingRef.current;
       const base = current[0]!;
+      commitInFlightRef.current = true;
       replaceClips(
         derived.map((c) => ({ ...base, id: newClipId(), trimStartMs: c.trimStartMs, trimEndMs: c.trimEndMs })),
       );
+      // One seek, below: replaceClips' own pending seek (to the clip start) and start-trim seek are dropped.
+      pendingSeekRef.current = null;
+      trimSeekDoneRef.current = true;
       setPositionMs(newPosition);
       setIsPlaying(false);
       setTimeout(() => {
         handleSeek(newPosition);
-        if (wasPlaying) setTimeout(() => setIsPlaying(true), 60);
+        if (wasPlaying) {
+          // Resume only if it was playing.
+          setTimeout(() => {
+            setIsPlaying(true);
+            commitInFlightRef.current = false;
+          }, 60);
+        } else {
+          commitInFlightRef.current = false;
+        }
       }, 50);
     },
     [setEditModel, replaceClips, handleSeek, setTextOverlays],
