@@ -3,9 +3,10 @@
 #
 #   ./ship.sh "what changed"
 #
-# Needs these environment variables (never printed):
+# Needs this environment variable (never printed):
 #   SUPABASE_DB_URL        Postgres connection string of the project (Supabase > Project Settings > Database)
-#   SUPABASE_ACCESS_TOKEN  Supabase personal access token (used by the supabase CLI)
+# Optional: SUPABASE_ACCESS_TOKEN (a personal access token that starts with sbp_) deploys the Edge Functions. Without it,
+# or if it is not an sbp_ token, "skipping function deploy" is printed and the rest of the release goes ahead.
 # And an EAS login (EXPO_TOKEN, or `npx eas-cli login` once).
 #
 # Lists:  supabase/MIGRATIONS_ORDER.txt (migrations, in order)   supabase/FUNCTIONS.txt (functions to deploy)
@@ -30,10 +31,13 @@ list_entries() { sed -e 's/#.*//' "$1" | awk 'NF { print $1 }'; }
 step "check arguments and environment"
 MESSAGE="${1:-}"
 [ -n "$MESSAGE" ] || fail 'usage: ./ship.sh "what changed"'
-for var in SUPABASE_DB_URL SUPABASE_ACCESS_TOKEN; do
-  [ -n "${!var:-}" ] || fail "environment variable $var is not set (it is never printed)"
-done
-export SUPABASE_ACCESS_TOKEN
+[ -n "${SUPABASE_DB_URL:-}" ] || fail "environment variable SUPABASE_DB_URL is not set (it is never printed)"
+# Edge function deploys are optional: they need a Supabase personal access token (sbp_...).
+DEPLOY_FUNCTIONS=""
+case "${SUPABASE_ACCESS_TOKEN:-}" in
+  sbp_*) DEPLOY_FUNCTIONS=1; export SUPABASE_ACCESS_TOKEN ;;
+  *) unset SUPABASE_ACCESS_TOKEN ;;
+esac
 [ -f "$MIGRATIONS_FILE" ] || fail "$MIGRATIONS_FILE is missing"
 [ -f "$FUNCTIONS_FILE" ] || fail "$FUNCTIONS_FILE is missing"
 
@@ -79,9 +83,9 @@ else
 fi
 step "check the EAS login"
 if [ -n "$DRY" ]; then
-  echo "[dry run] npx eas-cli whoami"
+  echo "[dry run] npx --yes eas-cli whoami"
 else
-  npx eas-cli whoami >/dev/null 2>&1 || fail "not logged in to EAS: set EXPO_TOKEN, or run: npx eas-cli login"
+  npx --yes eas-cli whoami >/dev/null 2>&1 || fail "not logged in to EAS: set EXPO_TOKEN, or run: npx eas-cli login"
 fi
 
 # ── 3. Migrations ────────────────────────────────────────────────────────────
@@ -98,22 +102,27 @@ done
 
 # ── 4. Edge Functions ────────────────────────────────────────────────────────
 DEPLOYED=()
-for f in "${FUNCTIONS[@]}"; do
-  step "deploy function $f"
-  if [ -n "$DRY" ]; then
-    echo "[dry run] npx supabase functions deploy $f --project-ref $PROJECT_REF"
-  else
-    npx supabase functions deploy "$f" --project-ref "$PROJECT_REF"
-  fi
-  DEPLOYED+=("$f")
-done
+if [ -z "$DEPLOY_FUNCTIONS" ]; then
+  step "edge functions"
+  echo "skipping function deploy (SUPABASE_ACCESS_TOKEN is missing or is not an sbp_ token)"
+else
+  for f in "${FUNCTIONS[@]}"; do
+    step "deploy function $f"
+    if [ -n "$DRY" ]; then
+      echo "[dry run] npx --yes supabase functions deploy $f --project-ref $PROJECT_REF"
+    else
+      npx --yes supabase functions deploy "$f" --project-ref "$PROJECT_REF"
+    fi
+    DEPLOYED+=("$f")
+  done
+fi
 
 # ── 5. App update ────────────────────────────────────────────────────────────
 step "publish the app update (EAS, production)"
 if [ -n "$DRY" ]; then
-  echo "[dry run] npx eas-cli update --channel production --environment production --message \"$MESSAGE\" --non-interactive"
+  echo "[dry run] npx --yes eas-cli update --channel production --environment production --message \"$MESSAGE\" --non-interactive"
 else
-  npx eas-cli update --channel production --environment production --message "$MESSAGE" --non-interactive
+  npx --yes eas-cli update --channel production --environment production --message "$MESSAGE" --non-interactive
 fi
 
 # ── 6. Reminders (not errors) ────────────────────────────────────────────────
@@ -133,8 +142,12 @@ printf 'commit:      %s\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unk
 printf 'message:     %s\n' "$MESSAGE"
 printf 'migrations:  %s applied\n' "${#APPLIED[@]}"
 for f in "${APPLIED[@]}"; do printf '               - %s\n' "$f"; done
-printf 'functions:   %s deployed\n' "${#DEPLOYED[@]}"
-for f in "${DEPLOYED[@]}"; do printf '               - %s\n' "$f"; done
+if [ -z "$DEPLOY_FUNCTIONS" ]; then
+  printf 'functions:   skipped (no sbp_ SUPABASE_ACCESS_TOKEN)\n'
+else
+  printf 'functions:   %s deployed\n' "${#DEPLOYED[@]}"
+  for f in "${DEPLOYED[@]}"; do printf '               - %s\n' "$f"; done
+fi
 printf 'app update:  published to the production channel\n'
 if [ "${#NOTES[@]}" -gt 0 ]; then
   printf '\nTo do by hand:\n'
