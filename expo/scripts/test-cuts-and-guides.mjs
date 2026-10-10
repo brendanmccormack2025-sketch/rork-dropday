@@ -124,7 +124,7 @@ const model = (st) => ({ state: st, durationMs: DURATION });
 // ── Captions off ──
 {
   const sheet = read("../components/CaptionsSheet.tsx");
-  ok("the Captions panel starts with a prominent on/off card", sheet.indexOf("offCard") < sheet.indexOf("styleRow") && /Captions off/.test(sheet) && /offTitle/.test(sheet));
+  ok("the Captions panel starts with a clean row: the name and the switch (no bordered card)", sheet.indexOf("styles.titleRow") < sheet.indexOf("styles.styleRow") && /Captions off/.test(sheet) && !/offCard/.test(sheet));
   ok("the switch only calls onToggle (captions on/off)", /onValueChange=\{onToggle\}/.test(sheet));
   const use = read("../lib/transcription/useCaptions.ts");
   const setOn = use.slice(use.indexOf("setCaptionsOn"), use.indexOf("setCaptionsOn") + 600);
@@ -219,7 +219,7 @@ const model = (st) => ({ state: st, durationMs: DURATION });
   eq("Cuts screen: a tap toggles", videoTapAction({ step: "cuts", hasSelection: false }), "toggle");
   eq("editor: a tap toggles when nothing is selected", videoTapAction({ step: "edit", hasSelection: false }), "toggle");
   eq("editor: a tap drops a selection first", videoTapAction({ step: "edit", hasSelection: true }), "drop-selection");
-  ok("one tap layer serves both screens (any video), with the play icon feedback", /\{isVideo && \(\s*<Pressable\s+style=\{StyleSheet\.absoluteFill\}\s+accessibilityLabel=\{isPlaying \? "Pause" : "Play"\}/.test(edit) && /!isPlaying && !pendingPlay && !\(step === "edit" && hasSelection\)/.test(edit));
+  ok("one tap layer serves both screens (any video), with the play icon feedback", /\{isVideo && \(\s*<Pressable\s+style=\{StyleSheet\.absoluteFill\}\s+accessibilityLabel=\{isPlaying \? "Pause" : "Play"\}/.test(edit) && /<PlayIndicator visible=\{vis\.playButton\} \/>/.test(edit));
   ok("no second, Cuts-only play button any more", !/step === "cuts" && !isPlaying && !pendingPlay/.test(edit));
   ok("it sits below the overlays, which take no touches on the Cuts screen", edit.indexOf('accessibilityLabel={isPlaying ? "Pause" : "Play"}') < edit.indexOf("flow.touchOverlays"));
 }

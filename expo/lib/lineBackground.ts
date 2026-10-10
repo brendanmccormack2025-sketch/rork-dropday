@@ -30,6 +30,30 @@ export type BackgroundGeometry = {
 const f = (n: number) => Math.round(n * 100) / 100;
 
 /**
+ * Two neighbouring lines whose widths differ by less than two corner radii cannot show a full concave fillet and a full
+ * convex corner side by side: the step would be a tiny notch that reads as a "T" or a staircase. They are joined at
+ * the wider width instead, so the shape stays smooth (TikTok style). Lines that differ by more keep their own width and
+ * meet through an inward-curving (concave) corner. Widths only ever grow, so the text always fits.
+ */
+export function snapNeighbours(widths: number[], radius: number): number[] {
+  const w = [...widths];
+  for (let pass = 0; pass < w.length; pass++) {
+    let changed = false;
+    for (let i = 0; i < w.length - 1; i++) {
+      const d = Math.abs(w[i]! - w[i + 1]!);
+      if (d > 0.5 && d < 2 * radius) {
+        const m = Math.max(w[i]!, w[i + 1]!);
+        w[i] = m;
+        w[i + 1] = m;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return w;
+}
+
+/**
  * @param lines    the width of each line's text (px), top to bottom
  * @param lineHeight height of one line (px)
  * @param padX/padY  padding around the text (px): left and right of every line; above the first and below the last line
@@ -45,7 +69,8 @@ export function backgroundGeometry(
   mode: "lines" | "box" = "lines",
 ): BackgroundGeometry {
   const n = Math.max(1, lines.length);
-  const widths = (lines.length ? lines : [{ width: 0 }]).map((l) => Math.max(0, l.width) + 2 * padX);
+  let widths = (lines.length ? lines : [{ width: 0 }]).map((l) => Math.max(0, l.width) + 2 * padX);
+  if (mode === "lines" && n > 1) widths = snapNeighbours(widths, radius);
   const widest = Math.max(...widths);
   const height = n * lineHeight + 2 * padY;
   const cx = widest / 2;

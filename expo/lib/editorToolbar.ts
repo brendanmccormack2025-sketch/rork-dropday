@@ -9,8 +9,11 @@ export type ToolbarMode = "main" | "caption";
 /** The Cuts screen's toolbar (the timeline's tools). There is no Delete tool (a clip is removed by trimming or cutting it). */
 export const CUTS_TOOL_IDS = ["trim", "split"] as const;
 
-/** The slim tool column of the full-screen editor, top to bottom ("cuts" returns to the Cuts screen). */
-export const EDITOR_TOOL_IDS = ["text", "captions", "style", "cuts"] as const;
+/**
+ * The slim tool column of the full-screen editor, top to bottom ("cuts" returns to the Cuts screen). Style is not here:
+ * it lives in the Captions panel and in the selected caption's own bar (one entry point per place, no duplicates).
+ */
+export const EDITOR_TOOL_IDS = ["text", "captions", "cuts"] as const;
 
 /** Every tool of the editor across its screens. */
 export const MAIN_TOOL_IDS = [...CUTS_TOOL_IDS, ...EDITOR_TOOL_IDS] as const;

@@ -20,8 +20,11 @@ import {
   TouchableOpacity,
   View,
   Dimensions,
+  Keyboard,
 } from "react-native";
 import UiText from "@/components/UiText";
+import { PlayIndicator, PreviewStatusChip } from "@/components/EditorChromeBits";
+import { CAPTIONS_EDIT_BAR_HEIGHT, E_BAR, E_NEXT, E_READY, E_TOOLS, E_TOP_BAR, captionLift, chromeVisibility } from "@/lib/editorChrome";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
@@ -39,7 +42,6 @@ import {
   Trash2,
   Scissors,
   Split,
-  RectangleEllipsis,
   Undo2,
   Redo2,
   Pencil,
@@ -382,6 +384,18 @@ export default function EditScreen() {
   // The Cuts sheet (the old Review sheet and AI edits panel in one) and the Captions panel.
   const [cutsOpen, setCutsOpen] = useState(false);
   const [captionsPanelOpen, setCaptionsPanelOpen] = useState(false);
+  const [captionsSheetH, setCaptionsSheetH] = useState(0);
+  const [keyboardH, setKeyboardH] = useState(0);
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const a = Keyboard.addListener(showEvent, (e) => setKeyboardH(e.endCoordinates.height));
+    const b = Keyboard.addListener(hideEvent, () => setKeyboardH(0));
+    return () => {
+      a.remove();
+      b.remove();
+    };
+  }, []);
   // A caption is selected: the bottom toolbar shows its actions (nothing floats over the video).
   const [captionSelected, setCaptionSelected] = useState(false);
   const [captionEditRequest, setCaptionEditRequest] = useState(0);
@@ -437,7 +451,6 @@ export default function EditScreen() {
     };
   }, [user?.id]);
   const [textEditorVisible, setTextEditorVisible] = useState(false);
-  const [liveText, setLiveText] = useState<{ text: string; backgroundStyle: TextBackgroundStyle } | null>(null);
   const [editingOverlayId, setEditingOverlayId] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
@@ -2141,7 +2154,6 @@ export default function EditScreen() {
       if (editingOverlayId === selectedOverlayId) setSelectedOverlayId(null);
     }
     setEditingOverlayId(null);
-    setLiveText(null);
   }, [editingOverlayId, selectedOverlayId, clips, textOverlays, pushSnapshot]);
 
   const handleCycleBackgroundStyle = useCallback(
@@ -3839,30 +3851,9 @@ export default function EditScreen() {
 
   const fullVideoW = frameDims.w / feedCrop.visibleW;
   const fullVideoH = frameDims.h / feedCrop.visibleH;
-  // While the text editor is open the preview shows what is being typed, before it is committed.
-  const displayOverlays: TextOverlay[] = (() => {
-    if (!textEditorVisible || !liveText) return textOverlays;
-    const typed = liveText.text.trim();
-    if (editingOverlayId) {
-      return textOverlays.map((ov) =>
-        ov.id === editingOverlayId && typed ? { ...ov, text: liveText.text, backgroundStyle: liveText.backgroundStyle } : ov,
-      );
-    }
-    if (!typed) return textOverlays;
-    return [
-      ...textOverlays,
-      {
-        id: "live-new-overlay",
-        text: liveText.text,
-        x: DEFAULT_TEXT_OVERLAY_POS.x,
-        y: DEFAULT_TEXT_OVERLAY_POS.y,
-        fontSize: 26,
-        rotation: 0,
-        color: "#FFFFFF",
-        backgroundStyle: liveText.backgroundStyle,
-      },
-    ];
-  })();
+  // While the text editor is open there is ONE copy of the text: the field itself. The overlay being edited is hidden on the
+  // video (no dimmed duplicate behind the field).
+  const displayOverlays: TextOverlay[] = textEditorVisible && editingOverlayId ? textOverlays.filter((ov) => ov.id !== editingOverlayId) : textOverlays;
   const flow = stepLayout(step);
   const leaveEditor = () => {
     if (navigation.canGoBack()) router.back();
@@ -3899,6 +3890,29 @@ export default function EditScreen() {
   const selectedOverlay = selectedOverlayId ? textOverlays.find((o) => o.id === selectedOverlayId) ?? null : null;
   const captionBarOn = toolbarMode({ captionSelected, captionsOn: captions.captionsOn, hasLines: activeCaptionIndex >= 0 }) === "caption";
   const hasSelection = !!selectedOverlay || captionBarOn;
+  const panelOpen = captionsPanelOpen || styleSheetOpen || (cutsOpen && aiEditsEnabled) || !!markerSheet || captions.explainerVisible;
+  const aheadChipShown = isInternalTester(user?.id) && (aheadState.kind === "ready" || aheadState.kind === "waiting" || aheadState.kind === "rendering");
+  const vis = chromeVisibility({
+    step: step as "cuts" | "edit" | "post",
+    textEditing: textEditorVisible,
+    panelOpen,
+    keyboardUp: keyboardH > 0,
+    hasSelection,
+    isPlaying,
+    pendingPlay,
+    readyLabelActive: aheadChipShown,
+  });
+  // With the Captions panel open the video slides up so the caption stays visible above the panel (or the keyboard).
+  const screenH = Dimensions.get("window").height;
+  const previewLift = captionsPanelOpen && isVideo && captions.captionsOn
+    ? captionLift({
+        frameTop: (previewAreaSize.h - frameDims.h) / 2,
+        frameHeight: frameDims.h,
+        captionYFrac: captionStyle?.yCenter ?? defaultCaptionStyle().yCenter,
+        captionHalfHeight: 44,
+        visibleBottom: screenH - keyboardH - Math.max(captionsSheetH, keyboardH > 0 ? CAPTIONS_EDIT_BAR_HEIGHT : 0),
+      })
+    : 0;
   const selectionY = selectedOverlay ? selectedOverlay.y : (captionStyle?.yCenter ?? defaultCaptionStyle().yCenter);
   const barSide = selectionBarSide(selectionY);
   const previewUsername = ((user?.user_metadata?.username as string | undefined) ?? "").trim() || "you";
@@ -3942,19 +3956,22 @@ export default function EditScreen() {
         )}
 
         {/* ── Preview area ───────────────────────────────────────────── */}
-        {isInternalTester(user?.id) && (aheadState.kind === "ready" || aheadState.kind === "waiting" || aheadState.kind === "rendering") && (
-          <View style={[styles.aheadChip, { top: insets.top + 62 }]} pointerEvents="none">
-            <UiText style={styles.aheadChipText}>
-              {aheadMatches
+        {aheadChipShown && (
+          <PreviewStatusChip
+            text={
+              aheadMatches
                 ? "Preview ready"
                 : aheadState.kind === "rendering"
                   ? `Making preview ${Math.round(aheadState.progress * 100)}%`
-                  : "Updating preview..."}
-            </UiText>
-          </View>
+                  : "Updating preview..."
+            }
+            ready={aheadMatches}
+            hidden={!vis.readyLabel}
+            style={{ top: insets.top + E_READY.topOffset }}
+          />
         )}
-        {Platform.OS === "ios" && isRootPost && ["denied", "unavailable"].includes(captions.transcriptionInfo?.status ?? "") && (
-          <View style={[styles.speechNote, { top: insets.top + 92 }]}>
+        {Platform.OS === "ios" && isRootPost && ["denied", "unavailable"].includes(captions.transcriptionInfo?.status ?? "") && (step !== "edit" || vis.next) && (
+          <View style={[styles.speechNote, step === "edit" ? { bottom: insets.bottom + E_NEXT.bottomOffset + E_NEXT.height + 12, right: 16 } : { top: insets.top + 92 }]}>
             <UiText style={styles.speechNoteText}>Captions and um removal need speech access</UiText>
             <Pressable onPress={() => void Linking.openSettings()} hitSlop={8}>
               <UiText style={styles.speechNoteLink}>Settings</UiText>
@@ -3979,6 +3996,7 @@ export default function EditScreen() {
               styles.previewFrame,
               step === "edit" && styles.previewFrameFull,
               { width: frameDims.w, height: frameDims.h },
+              previewLift > 0 && { transform: [{ translateY: -previewLift }] },
             ]}
           >
             {/* Video or Image */}
@@ -4109,13 +4127,7 @@ export default function EditScreen() {
                 }}
               />
             )}
-            {isVideo && !isPlaying && !pendingPlay && !(step === "edit" && hasSelection) && (
-              <View pointerEvents="none" style={styles.playOverlay}>
-                <View style={styles.playCircle}>
-                  <Play size={26} color="#fff" fill="#fff" style={{ left: 2 }} />
-                </View>
-              </View>
-            )}
+            {isVideo && <PlayIndicator visible={vis.playButton} />}
 
             <View pointerEvents={flow.touchOverlays ? "box-none" : "none"} style={StyleSheet.absoluteFill}>
             {isVideo && features.captionControls && captions.captionsOn && (
@@ -4421,7 +4433,8 @@ export default function EditScreen() {
         {/* ── Full-screen editor: tools, selection bar, Next ─────────── */}
         {step === "edit" && (
           <>
-            <View style={[styles.eTopBar, { top: insets.top + 6 }]} pointerEvents="box-none">
+            {vis.topBar && (
+            <View style={[styles.eTopBar, { top: insets.top + E_TOP_BAR.top }]} pointerEvents="box-none">
               <EditorRoundButton label="Back" onPress={handleBackPress}>
                 <ArrowLeft size={20} color="#fff" strokeWidth={2.5} />
               </EditorRoundButton>
@@ -4434,8 +4447,10 @@ export default function EditScreen() {
                 </EditorRoundButton>
               </View>
             </View>
+            )}
 
-            <View style={[styles.eTools, { top: insets.top + 74 }]} pointerEvents="box-none">
+            {vis.toolColumn && (
+            <View style={[styles.eTools, { top: insets.top + E_TOOLS.top }]} pointerEvents="box-none">
               <EditorToolButton label="Text" onPress={() => { setSelectedOverlayId(null); setCaptionSelected(false); setEditingOverlayId(null); setTextEditorVisible(true); }}>
                 <Type size={22} color="#fff" strokeWidth={2} />
               </EditorToolButton>
@@ -4444,21 +4459,17 @@ export default function EditScreen() {
                   <Captions size={22} color="#fff" strokeWidth={2} />
                 </EditorToolButton>
               )}
-              {isVideo && features.captionControls && captions.captionsOn && (
-                <EditorToolButton label="Style" onPress={() => setStyleSheetOpen(true)}>
-                  <RectangleEllipsis size={22} color="#fff" strokeWidth={2} />
-                </EditorToolButton>
-              )}
               {isVideo && (
                 <EditorToolButton label="Cuts" onPress={goToCuts}>
                   <Scissors size={22} color="#fff" strokeWidth={2} />
                 </EditorToolButton>
               )}
             </View>
+            )}
 
-            {hasSelection ? (
+            {vis.selectionBar ? (
               <View
-                style={[styles.eSelectionBar, barSide === "top" ? { top: insets.top + 64 } : { bottom: insets.bottom + 14 }]}
+                style={[styles.eSelectionBar, barSide === "top" ? { top: insets.top + E_BAR.topOffset } : { bottom: insets.bottom + E_BAR.bottomOffset }]}
                 accessibilityLabel="Selected item controls"
               >
                 {captionBarOn
@@ -4492,16 +4503,16 @@ export default function EditScreen() {
                     </>
                   )}
               </View>
-            ) : (
+            ) : vis.next ? (
               <Pressable
                 onPress={goNext}
-                style={[styles.eNext, { bottom: insets.bottom + 16 }]}
+                style={[styles.eNext, { bottom: insets.bottom + E_NEXT.bottomOffset }]}
                 accessibilityRole="button"
                 accessibilityLabel="Next"
               >
                 <UiText style={styles.eNextText}>Next</UiText>
               </Pressable>
-            )}
+            ) : null}
           </>
         )}
 
@@ -4623,6 +4634,7 @@ export default function EditScreen() {
         }}
         onResetStyle={handleCaptionLookReset}
         onClose={() => setCaptionsPanelOpen(false)}
+        onHeight={setCaptionsSheetH}
       />
       <MarkerSheet
         marker={markerSheet}
@@ -4652,7 +4664,6 @@ export default function EditScreen() {
         onDone={handleTextEditorDone}
         onCancel={handleTextEditorCancel}
         onRemove={handleTextEditorRemove}
-        onLiveChange={(text, backgroundStyle) => setLiveText({ text, backgroundStyle })}
       />
     </GestureHandlerRootView>
   );

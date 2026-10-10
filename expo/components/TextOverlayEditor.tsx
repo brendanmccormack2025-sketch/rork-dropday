@@ -17,6 +17,12 @@ import { TEXT_FONT_FAMILY } from "@/lib/transcription/captionPresets";
 import { theme } from "@/constants/theme";
 import type { TextBackgroundStyle } from "@/providers/PostsProvider";
 import { BG_STYLES, resolveBgMeta } from "@/components/DraggableTextOverlay";
+import HuggingText from "@/components/HuggingText";
+import { BG_PAD_X_EM, BG_PAD_Y_EM, BG_RADIUS_EM } from "@/lib/lineBackground";
+
+const PLACEHOLDER = "Type something…";
+const FIELD_FONT_SIZE = 30;
+const FIELD_LINE_HEIGHT = 38;
 
 interface TextOverlayEditorProps {
   visible: boolean;
@@ -26,8 +32,6 @@ interface TextOverlayEditorProps {
   onCancel: () => void;
   /** The Cancel button: a new text is discarded, an existing one is removed (undo brings it back). Defaults to onCancel. */
   onRemove?: () => void;
-  /** Called as the text or style changes, so the video preview shows it live. */
-  onLiveChange?: (text: string, backgroundStyle: TextBackgroundStyle) => void;
 }
 
 export default function TextOverlayEditor({
@@ -37,13 +41,12 @@ export default function TextOverlayEditor({
   onDone,
   onCancel,
   onRemove,
-  onLiveChange,
 }: TextOverlayEditorProps) {
   const [text, setText] = useState(initialText);
   const [bgStyle, setBgStyle] = useState<TextBackgroundStyle>(initialBackgroundStyle);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const inputRef = useRef<TextInput>(null);
-  const { height: screenH } = useWindowDimensions();
+  const { height: screenH, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
   // ── Reset state when the editor opens ────────────────────────────────────
@@ -54,12 +57,6 @@ export default function TextOverlayEditor({
       setTimeout(() => inputRef.current?.focus(), 200);
     }
   }, [visible, initialText, initialBackgroundStyle]);
-
-  // ── The video behind follows what is typed ────────────────────────────────
-  useEffect(() => {
-    if (visible) onLiveChange?.(text, bgStyle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, text, bgStyle]);
 
   // ── Track keyboard height ────────────────────────────────────────────────
   useEffect(() => {
@@ -96,6 +93,13 @@ export default function TextOverlayEditor({
   const layout = editorLayout(screenH, keyboardHeight, insets.top);
   const meta = resolveBgMeta(bgStyle, "#FFFFFF");
   const boxed = meta.bgOpacity > 0 && meta.bgColor !== "transparent";
+  const fieldColor = meta.textColor === "#000000" && !boxed ? "#FFFFFF" : meta.textColor;
+  const padX = BG_PAD_X_EM * FIELD_FONT_SIZE;
+  const padY = BG_PAD_Y_EM * FIELD_FONT_SIZE;
+  const radius = BG_RADIUS_EM * FIELD_FONT_SIZE;
+  // The invisible mirror sizes the box (and the per-line background); a trailing newline still takes a line.
+  const mirrorText = text.length === 0 ? PLACEHOLDER : text.endsWith("\n") ? `${text} ` : text;
+  const fieldFont = { fontFamily: TEXT_FONT_FAMILY, fontSize: FIELD_FONT_SIZE, lineHeight: FIELD_LINE_HEIGHT };
 
   return (
     <Modal visible={visible} animationType="fade" transparent statusBarTranslucent onRequestClose={onCancel}>
@@ -129,30 +133,42 @@ export default function TextOverlayEditor({
           </View>
         </View>
 
-        {/* The field, centred in the space above the keyboard. */}
+        {/* ONE copy of the text, edited in place (Instagram style): the field looks exactly like the finished text, the
+            background hugging each line. The overlay itself is hidden on the video while this is open. */}
         <View
           style={[styles.fieldArea, { top: layout.fieldArea.top, height: layout.fieldArea.height }]}
           pointerEvents="box-none"
         >
-          <View style={[styles.fieldBox, boxed && { backgroundColor: meta.bgColor, opacity: 1 }]}>
+          <HuggingText
+            text={mirrorText}
+            maxWidth={Math.max(120, width - 48)}
+            padX={padX}
+            padY={padY}
+            radius={radius}
+            mode="lines"
+            background={boxed && text.trim().length > 0 ? meta.bgColor : null}
+            textStyle={{ ...fieldFont, color: "transparent" }}
+          >
             <TextInput
               ref={inputRef}
               value={text}
               onChangeText={setText}
-              placeholder="Type something…"
+              placeholder={PLACEHOLDER}
               placeholderTextColor="rgba(255,255,255,0.55)"
-              style={[styles.field, { color: meta.textColor === "#000000" && !boxed ? "#FFFFFF" : meta.textColor }]}
+              style={[styles.field, fieldFont, { left: padX, right: padX, top: padY, bottom: padY, color: fieldColor }]}
               maxLength={100}
               multiline
+              scrollEnabled={false}
               autoFocus
               textAlign="center"
               allowFontScaling={false}
               keyboardAppearance="dark"
+              selectionColor="#FFFFFF"
               returnKeyType="done"
               blurOnSubmit
               onSubmitEditing={handleDone}
             />
-          </View>
+          </HuggingText>
         </View>
       </View>
     </Modal>
@@ -225,16 +241,14 @@ const styles = StyleSheet.create({
   },
   doneBtnOff: { opacity: 0.5 },
   fieldArea: { position: "absolute", left: 0, right: 0, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 },
-  fieldBox: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, maxWidth: "100%" },
   field: {
-    minWidth: 120,
-    fontFamily: TEXT_FONT_FAMILY,
-    fontSize: 30,
-    lineHeight: 38,
+    position: "absolute",
     textAlign: "center",
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowRadius: 4,
     padding: 0,
+    margin: 0,
+    includeFontPadding: false,
   },
 });
 

@@ -1,10 +1,11 @@
-import React, { useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
+import React, { useEffect, useState } from "react";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, TextInput, View, useWindowDimensions } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import Swipeable from "react-native-gesture-handler/Swipeable";
 
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
+import { CAPTIONS_EDIT_BAR_HEIGHT, CAPTIONS_SHEET_MAX_FRACTION } from "@/lib/editorChrome";
 import type { EditorCaptionLine } from "@/lib/transcription/captionLines";
 
 type Props = {
@@ -20,6 +21,8 @@ type Props = {
   onStyle: () => void;
   onResetStyle: () => void;
   onClose: () => void;
+  /** The sheet's height (0 when closed), so the editor can slide the video up and keep the caption visible above it. */
+  onHeight?: (height: number) => void;
 };
 
 /**
@@ -36,132 +39,134 @@ export default function CaptionsSheet({
   onStyle,
   onResetStyle,
   onClose,
+  onHeight,
 }: Props) {
+  const { height: windowH } = useWindowDimensions();
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const commit = () => {
     if (editing !== null) onEditLine(editing, draft);
     setEditing(null);
   };
+  useEffect(() => {
+    if (!visible) {
+      setEditing(null);
+      onHeight?.(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+  // While a line is edited the panel is only that line, in a compact bar just above the keyboard: the video (with the
+  // caption on it) stays visible, and the line being typed is never hidden by the keyboard.
+  const editingLine = editing !== null && captionsOn ? lines[editing] : null;
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <GestureHandlerRootView style={styles.root}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
-        <View style={styles.sheet}>
-          <UiText style={styles.title}>Captions</UiText>
-          {/* The first thing on the panel: a big, obvious way to say no thanks (cuts and text are not touched). */}
-          <View style={[styles.offCard, !captionsOn && styles.offCardOff]}>
-            <View style={styles.offText}>
-              <UiText style={styles.offTitle}>{captionsOn ? "Captions on" : "Captions off"}</UiText>
-              <UiText style={styles.offHint}>
-                {captionsOn ? "Turn off to post without captions." : "Turn on to add captions again."}
-              </UiText>
-            </View>
-            <Switch
-              value={captionsOn}
-              onValueChange={onToggle}
-              trackColor={{ false: theme.border, true: theme.accent }}
-              thumbColor="#fff"
-              ios_backgroundColor={theme.border}
-              accessibilityLabel={captionsOn ? "Captions off" : "Captions on"}
-              style={styles.offSwitch}
-            />
-          </View>
-
-          {captionsOn && (
-            <>
-              <Pressable onPress={onStyle} style={styles.styleRow} accessibilityRole="button" accessibilityLabel="Caption style">
-                <UiText style={styles.styleLabel}>Style</UiText>
-                <UiText style={styles.chevron}>›</UiText>
+        <Pressable style={styles.backdrop} onPress={editingLine ? commit : onClose} />
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} pointerEvents="box-none">
+          {editingLine ? (
+            <View
+              style={[styles.editBar, { minHeight: CAPTIONS_EDIT_BAR_HEIGHT }]}
+              onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
+            >
+              <TextInput
+                value={draft}
+                onChangeText={setDraft}
+                onSubmitEditing={commit}
+                autoFocus
+                autoCapitalize="sentences"
+                autoCorrect={false}
+                returnKeyType="done"
+                style={styles.editInput}
+                accessibilityLabel="Caption line"
+              />
+              <Pressable onPress={commit} hitSlop={8} style={styles.target} accessibilityRole="button" accessibilityLabel="Done editing">
+                <UiText style={styles.primary}>Done</UiText>
               </Pressable>
+            </View>
+          ) : (
+            <View
+              style={[styles.sheet, { maxHeight: Math.round(windowH * CAPTIONS_SHEET_MAX_FRACTION) }]}
+              onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
+            >
+              {/* A clean row: the name and the switch (cuts and text are not touched). */}
+              <View style={styles.titleRow}>
+                <UiText style={styles.title}>Captions</UiText>
+                <Switch
+                  value={captionsOn}
+                  onValueChange={onToggle}
+                  trackColor={{ false: theme.border, true: theme.accent }}
+                  thumbColor="#fff"
+                  ios_backgroundColor={theme.border}
+                  accessibilityLabel={captionsOn ? "Captions on" : "Captions off"}
+                />
+              </View>
 
-              <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-                {lines.length === 0 ? (
-                  <UiText style={styles.empty}>No captions yet.</UiText>
-                ) : (
-                  lines.map((line, i) => (
-                    <Swipeable
-                      key={`${line.startMs}-${i}`}
-                      overshootRight={false}
-                      renderRightActions={() => (
-                        <Pressable onPress={() => onDeleteLine(i)} style={styles.delete} accessibilityRole="button" accessibilityLabel="Delete line">
-                          <UiText style={styles.deleteText}>Delete</UiText>
-                        </Pressable>
-                      )}
-                    >
-                      {editing === i ? (
-                        <View style={styles.row}>
-                          <TextInput
-                            value={draft}
-                            onChangeText={setDraft}
-                            onBlur={commit}
-                            onSubmitEditing={commit}
-                            autoFocus
-                            autoCapitalize="sentences"
-                            autoCorrect={false}
-                            returnKeyType="done"
-                            style={styles.input}
-                          />
-                        </View>
-                      ) : (
-                        <Pressable
-                          onPress={() => {
-                            setDraft(line.text);
-                            setEditing(i);
-                          }}
-                          style={styles.row}
+              {captionsOn && (
+                <>
+                  <Pressable onPress={onStyle} style={styles.styleRow} accessibilityRole="button" accessibilityLabel="Caption style">
+                    <UiText style={styles.styleLabel}>Style</UiText>
+                    <UiText style={styles.chevron}>›</UiText>
+                  </Pressable>
+
+                  <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
+                    {lines.length === 0 ? (
+                      <UiText style={styles.empty}>No captions yet.</UiText>
+                    ) : (
+                      lines.map((line, i) => (
+                        <Swipeable
+                          key={`${line.startMs}-${i}`}
+                          overshootRight={false}
+                          renderRightActions={() => (
+                            <Pressable onPress={() => onDeleteLine(i)} style={styles.delete} accessibilityRole="button" accessibilityLabel="Delete line">
+                              <UiText style={styles.deleteText}>Delete</UiText>
+                            </Pressable>
+                          )}
                         >
-                          <UiText style={styles.rowText} numberOfLines={1}>
-                            {line.text}
-                          </UiText>
-                        </Pressable>
-                      )}
-                    </Swipeable>
-                  ))
-                )}
-              </ScrollView>
+                          <Pressable
+                            onPress={() => {
+                              setDraft(line.text);
+                              setEditing(i);
+                            }}
+                            style={styles.row}
+                          >
+                            <UiText style={styles.rowText} numberOfLines={1}>
+                              {line.text}
+                            </UiText>
+                          </Pressable>
+                        </Swipeable>
+                      ))
+                    )}
+                  </ScrollView>
 
-              <View style={styles.actions}>
-                <Pressable onPress={onResetStyle} hitSlop={8} style={styles.target}>
-                  <UiText style={styles.secondary}>Reset to Trial style</UiText>
-                </Pressable>
-                <Pressable onPress={onClose} hitSlop={8} style={styles.target}>
+                  <View style={styles.actions}>
+                    <Pressable onPress={onResetStyle} hitSlop={8} style={styles.target}>
+                      <UiText style={styles.secondary}>Reset to Trial style</UiText>
+                    </Pressable>
+                    <Pressable onPress={onClose} hitSlop={8} style={styles.target}>
+                      <UiText style={styles.primary}>Done</UiText>
+                    </Pressable>
+                  </View>
+                </>
+              )}
+              {!captionsOn && (
+                <Pressable onPress={onClose} hitSlop={8} style={[styles.target, styles.doneAlone]}>
                   <UiText style={styles.primary}>Done</UiText>
                 </Pressable>
-              </View>
-            </>
+              )}
+            </View>
           )}
-          {!captionsOn && (
-            <Pressable onPress={onClose} hitSlop={8} style={[styles.target, styles.doneAlone]}>
-              <UiText style={styles.primary}>Done</UiText>
-            </Pressable>
-          )}
-        </View>
+        </KeyboardAvoidingView>
       </GestureHandlerRootView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  offCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: 14,
-    marginTop: 4,
-    marginBottom: 8,
-    borderWidth: 1.5,
-    borderColor: theme.accent,
-    backgroundColor: theme.card,
-  },
-  offCardOff: { borderColor: theme.border },
-  offText: { flex: 1, paddingRight: 12 },
-  offTitle: { color: theme.text, fontSize: 17, fontWeight: "900" as const },
-  offHint: { color: theme.textMuted, fontSize: 12, fontWeight: "600" as const, marginTop: 2 },
-  offSwitch: { transform: [{ scaleX: 1.15 }, { scaleY: 1.15 }] },
   root: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.5)" },
-  sheet: { backgroundColor: theme.card, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32, maxHeight: "70%" },
+  backdrop: { ...StyleSheet.absoluteFill },
+  sheet: { backgroundColor: theme.card, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24, borderTopWidth: 1, borderTopColor: theme.border },
+  editBar: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: theme.card, paddingHorizontal: 16, borderTopWidth: 1, borderTopColor: theme.border },
+  editInput: { flex: 1, color: theme.text, fontSize: 16, fontWeight: "700" as const, minHeight: 44, padding: 0 },
   titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44 },
   title: { color: theme.text, fontSize: 17, fontWeight: "900" as const },
   styleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44, borderTopWidth: 1, borderTopColor: theme.border },
@@ -170,7 +175,6 @@ const styles = StyleSheet.create({
   list: { flexGrow: 0, borderTopWidth: 1, borderTopColor: theme.border },
   row: { minHeight: 44, justifyContent: "center", backgroundColor: theme.card, borderBottomWidth: 1, borderBottomColor: theme.border },
   rowText: { color: theme.text, fontSize: 14, fontWeight: "700" as const },
-  input: { color: theme.text, fontSize: 14, fontWeight: "700" as const, minHeight: 44, padding: 0 },
   empty: { color: theme.textDim, fontSize: 14, paddingVertical: 12 },
   delete: { width: 88, backgroundColor: theme.accent, alignItems: "center", justifyContent: "center" },
   deleteText: { color: "#fff", fontSize: 14, fontWeight: "900" as const },

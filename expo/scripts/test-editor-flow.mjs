@@ -67,7 +67,7 @@ const edit = read("../app/edit.tsx");
   ok("tap on empty video plays or pauses (a selection is dropped first)", /accessibilityLabel=\{isPlaying \? "Pause" : "Play"\}/.test(edit) && /togglePlay\(\);/.test(edit));
   ok("text overlays and captions are edited on the video (touch layer on only in the editor)", /pointerEvents=\{flow\.touchOverlays \? "box-none" : "none"\}/.test(edit));
   ok("top: back, undo, redo (no guides button: the guides appear by themselves while dragging)", /label="Back"[\s\S]{0,300}label="Undo"[\s\S]{0,300}label="Redo"/.test(edit) && !/label="Feed guides"/.test(edit));
-  ok("right column: Text, Captions, Style, Cuts", /label="Text"[\s\S]{0,700}label="Captions"[\s\S]{0,400}label="Style"[\s\S]{0,400}label="Cuts"/.test(edit));
+  ok("right column: Text, Captions, Cuts (Style is in the Captions panel and the caption bar only)", /label="Text"[\s\S]{0,700}label="Captions"[\s\S]{0,700}label="Cuts"/.test(edit) && !/<EditorToolButton label="Style"/.test(edit));
   ok("Next, bottom-right", /styles\.eNext/.test(edit) && /right: 16,\s*minHeight: 48/.test(edit));
   eq("the caption bar: Edit, Style, Delete line, Done", CAPTION_TOOLS.map((t) => t.label), ["Edit", "Style", "Delete line", "Done"]);
   ok("the text overlay bar: Edit, Style, Delete, Done", /label="Edit text"|accessibilityLabel="Edit text"/.test(edit) && /accessibilityLabel="Change text style"/.test(edit) && /accessibilityLabel="Delete text"/.test(edit));

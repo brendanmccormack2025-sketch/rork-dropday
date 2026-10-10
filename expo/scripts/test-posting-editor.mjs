@@ -60,7 +60,7 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
   ok("the dim is rendered before the controls and the field", src.indexOf("styles.dim") < src.indexOf("styles.controls") && src.indexOf("styles.controls") < src.indexOf("styles.fieldArea"));
   ok("the confirm button is solid accent with a white check, no disabled-looking pink", /doneBtn: \{[^}]*backgroundColor: theme\.accent/.test(src) && !/rgba\(232,41,28,0\.18\)/.test(src));
   ok("the useless \u201c\u2026\u201d button is gone", !/Ellipsis/.test(src) && !/More text options/.test(src));
-  ok("the editor reports live text for the video behind", /onLiveChange\?\.\(text, bgStyle\)/.test(src) && /onLiveChange=/.test(read("../app/edit.tsx")));
+  ok("one copy of the text: the field is edited in place and the overlay being edited is hidden on the video", /HuggingText/.test(src) && !/onLiveChange/.test(src) && /textEditorVisible && editingOverlayId \? textOverlays\.filter/.test(read("../app/edit.tsx")));
 }
 
 // ── C: posting ──
