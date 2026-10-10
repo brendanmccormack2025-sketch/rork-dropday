@@ -113,7 +113,7 @@ begin
         expired_at = now()
     from public.posts p
     where c.parent_post_id = p.id
-      and c.status <> 'expired'
+      and c.status not in ('expired', 'archived')
       and (p.status = 'archived' or (p.status = 'expired' and p.survived_at is null));
     get diagnostics n = row_count;
     total := total + n;

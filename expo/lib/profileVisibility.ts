@@ -10,9 +10,6 @@ export type ProfilePost = {
   media_deleted_at?: string | null;
 };
 
-/** Ended and incomplete posts stay on the creator's own profile (privately) for this long. */
-export const RECENT_ENDED_DAYS = 7;
-
 /** A post that earned its place: it survived at some point (its status is 'survived', or 'expired' after the window). */
 export function hasSurvived(p: ProfilePost): boolean {
   return !!p.survived_at && (p.status === "survived" || p.status === "expired");
@@ -23,14 +20,12 @@ export function isOnOtherProfile(p: ProfilePost): boolean {
   return hasSurvived(p) && !p.media_deleted_at;
 }
 
-/** The creator's own profile: queued and testing posts, survived posts forever, and recent ended / incomplete ones. */
-export function isOnOwnProfilePost(p: ProfilePost, nowMs: number = Date.now()): boolean {
+/**
+ * The creator's own profile: queued and testing posts, and survived posts for good. Posts that ended or stayed incomplete
+ * are gone for everyone, the creator included (their media is deleted, nobody is told).
+ */
+export function isOnOwnProfilePost(p: ProfilePost): boolean {
   if (p.status === "queued" || p.status === "trial") return true;
   if (hasSurvived(p)) return !p.media_deleted_at;
-  if (p.status === "archived" || p.status === "incomplete") {
-    if (p.media_deleted_at) return false;
-    const created = Date.parse(p.created_at ?? "");
-    return Number.isNaN(created) ? true : nowMs - created < RECENT_ENDED_DAYS * 24 * 60 * 60 * 1000;
-  }
   return false;
 }

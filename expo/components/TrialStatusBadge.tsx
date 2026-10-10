@@ -8,13 +8,11 @@ import type { Post } from "@/providers/PostsProvider";
 
 type SurvivalStatus = NonNullable<Post["status"]>;
 
-/** Pill copy + color per survival status. `incomplete` is its own pill: there
- *  was not enough testing activity to judge the post, which is not a failure. */
-const BADGES: Record<SurvivalStatus, { label: string; color: string }> = {
+/** Pill copy + color per survival status. */
+// Posts that end or stay incomplete are never shown, so they have no badge.
+const BADGES: Partial<Record<SurvivalStatus, { label: string; color: string }>> = {
   trial: { label: "ON TRIAL", color: theme.accent },
-  incomplete: { label: "TRIAL INCOMPLETE", color: theme.textMuted },
   survived: { label: "SURVIVED", color: theme.success },
-  archived: { label: "TRIAL ENDED", color: "rgba(10,10,10,0.65)" },
   expired: { label: "EXPIRED", color: theme.textMuted },
   queued: { label: "QUEUED", color: theme.textMuted },
 };
@@ -43,7 +41,9 @@ export function TrialStatusBadge({
   if (shown === "expired" && survivedAt) shown = "survived";
   // Unknown statuses render no badge instead of crashing.
   if (!Object.prototype.hasOwnProperty.call(BADGES, shown)) return null;
-  const badge = shown === "queued" ? { ...BADGES.queued, label: queuedLabel(queuePosition).toUpperCase() } : BADGES[shown as SurvivalStatus];
+  const found = BADGES[shown as SurvivalStatus];
+  if (!found) return null;
+  const badge = shown === "queued" ? { ...found, label: queuedLabel(queuePosition).toUpperCase() } : found;
   return (
     <View style={[styles.badge, { backgroundColor: badge.color }]}>
       <View style={styles.dot} />

@@ -5,8 +5,6 @@
  */
 
 export const TRIAL_ON_TRIAL_TITLE = "YOUR VIDEO IS ON TRIAL";
-export const TRIAL_INCOMPLETE_MESSAGE = "Trial incomplete: not enough testing activity was available. Try posting again!";
-export const TRIAL_INCOMPLETE_NOTIFICATION = "Trial incomplete: not enough testing activity was available. Try posting again!";
 
 /** Seconds of watching that mean "watched to the end" when the clip is at least that long. */
 const COMPLETED_FRACTION = 0.9;
@@ -43,7 +41,6 @@ export function readFeedRows(rows: EngineFeedRow[]): { ids: { post_id: string; p
 export function creatorTrialNote(status: string | null | undefined, queuePosition?: number | null): { title: string; body: string | null } | null {
   if (status === "queued") return { title: queuedLabel(queuePosition), body: null };
   if (status === "trial") return { title: TRIAL_ON_TRIAL_TITLE, body: null };
-  if (status === "incomplete") return { title: "TRIAL INCOMPLETE", body: TRIAL_INCOMPLETE_MESSAGE };
   return null;
 }
 

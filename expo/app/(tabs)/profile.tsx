@@ -353,14 +353,11 @@ export default function ProfileScreen() {
 
 function ProfileTile({ post, onPress, queuePosition }: { post: Post; onPress: () => void; queuePosition?: number }) {
   const coverUri = post.thumbnail_url ?? post.media_url;
-  // Failed trials stay visible on the creator's own profile but read as
-  // faded — the content didn't earn its place.
-  const isArchived = post.status === "archived" || post.status === "expired";
   return (
     <Pressable onPress={onPress} style={styles.tile}>
       <Image
         source={{ uri: coverUri }}
-        style={[StyleSheet.absoluteFill, isArchived && styles.tileArchived]}
+        style={StyleSheet.absoluteFill}
         contentFit="cover"
         transition={100}
       />

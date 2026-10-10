@@ -4,7 +4,7 @@
  * app is wired to the new RPCs. node --experimental-strip-types --no-warnings scripts/test-trial-engine.mjs
  */
 import { readFileSync } from "node:fs";
-import { queuePositions, queuedLabel, FEED_CAUGHT_UP_BODY, FEED_CAUGHT_UP_TITLE, creatorTrialNote, readFeedRows, viewProgress, worthReporting, TRIAL_INCOMPLETE_MESSAGE } from "../lib/trialEngine.ts";
+import { queuePositions, queuedLabel, FEED_CAUGHT_UP_BODY, FEED_CAUGHT_UP_TITLE, creatorTrialNote, readFeedRows, viewProgress, worthReporting } from "../lib/trialEngine.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -22,17 +22,14 @@ eq("engine feed rows: ids in order, end detection uses page_rows (filtering must
   readFeedRows([{ post_id: "a", position: 1, page_rows: 20 }, { post_id: "b", position: 2, page_rows: 20 }]), { ids: [{ post_id: "a", position: 1 }, { post_id: "b", position: 2 }], rowCount: 20 });
 eq("the empty-page sentinel row has no post and keeps the source row count", readFeedRows([{ post_id: null, position: -1, page_rows: 7 }]), { ids: [], rowCount: 7 });
 eq("old get_feed rows (no page_rows) count as they are", readFeedRows([{ post_id: "a", position: 1 }]), { ids: [{ post_id: "a", position: 1 }], rowCount: 1 });
-eq("creator sees ON TRIAL, the incomplete message, and nothing for finished posts", [creatorTrialNote("trial"), creatorTrialNote("incomplete"), creatorTrialNote("survived"), creatorTrialNote("archived")],
-  [{ title: "YOUR VIDEO IS ON TRIAL", body: null }, { title: "TRIAL INCOMPLETE", body: TRIAL_INCOMPLETE_MESSAGE }, null, null]);
-eq("the exact incomplete wording", TRIAL_INCOMPLETE_MESSAGE, "Trial incomplete: not enough testing activity was available. Try posting again!");
-eq("never says failed to the creator", /fail/i.test(TRIAL_INCOMPLETE_MESSAGE) || /fail/i.test(JSON.stringify(creatorTrialNote("incomplete"))), false);
+eq("creator sees ON TRIAL for a testing post and nothing for finished, ended or incomplete ones", [creatorTrialNote("trial"), creatorTrialNote("incomplete"), creatorTrialNote("survived"), creatorTrialNote("archived")], [{ title: "YOUR VIDEO IS ON TRIAL", body: null }, null, null, null]);
 
 const feed = read("../components/FeedItem.tsx"), prov = read("../providers/PostsProvider.tsx"), notif = read("../components/NotificationItem.tsx"), badge = read("../components/TrialStatusBadge.tsx");
 eq("feed uses get_feed_engine and falls back to get_feed", [/rpc\("get_feed_engine"/.test(prov), /rpc\("get_feed", \{ p_limit/.test(prov), /readFeedRows/.test(prov)], [true, true, true]);
 eq("FeedItem reports watch time and shares, and shows the progress indicator with no numbers", [/sendViewProgress/.test(feed) && /record_view_progress/.test(read("../lib/viewProgress.ts")), /record_post_share/.test(feed), /trial_post_progress/.test(feed), /trialNote\.title/.test(feed)], [true, true, true, true]);
 eq("the owner's own views are not reported", /isOwner\s*\?\s*null/.test(feed), true);
-eq("notifications show the incomplete verdict", [/verdict_incomplete/.test(notif), /TRIAL_INCOMPLETE_NOTIFICATION/.test(notif)], [true, true]);
-eq("the badge has its own incomplete pill (not 'failed')", /incomplete: \{ label: "TRIAL INCOMPLETE"/.test(badge), true);
+eq("no ended / incomplete notifications or wording in the app (survived keeps its celebration)", [/verdict_incomplete/.test(notif), /verdict_archived/.test(notif), /verdict_survived/.test(notif), /Trial ended|Trial incomplete|didn't earn/.test(notif)], [false, false, true, false]);
+eq("no TRIAL ENDED / TRIAL INCOMPLETE badge exists", [/TRIAL ENDED|TRIAL INCOMPLETE/.test(badge), /label: "SURVIVED"/.test(badge)], [false, true]);
 const home = read("../app/(tabs)/index.tsx");
 eq("empty feed: 'You're all caught up' + 'Be the first to put something on Trial' + a button to the camera", [FEED_CAUGHT_UP_TITLE, FEED_CAUGHT_UP_BODY, /onCreate=\{\(\) => router\.push\("\/camera"\)\}/.test(home), /FEED_CAUGHT_UP_BUTTON/.test(home)], ["You're all caught up", "Be the first to put something on Trial", true, true]);
 eq("later feed pages send the ids already delivered (p_seen); the first page and pull-to-refresh do not", [/p_seen: offset > 0 \? loadedFeedIds/.test(prov), /function loadedFeedIds/.test(prov)], [true, true]);

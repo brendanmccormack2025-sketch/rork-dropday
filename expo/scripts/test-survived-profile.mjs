@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Survived posts stay on the creator's profile for good: who sees what, the badge, and the wiring. */
 import { readFileSync } from "node:fs";
-import { RECENT_ENDED_DAYS, hasSurvived, isOnOtherProfile, isOnOwnProfilePost } from "../lib/profileVisibility.ts";
+import { hasSurvived, isOnOtherProfile, isOnOwnProfilePost } from "../lib/profileVisibility.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -22,8 +22,7 @@ const neverSurvivedExpired = post({ status: "expired" });
 eq("a post that survived stays a survivor after its window (status 'expired', survived_at set)", [hasSurvived(survivedLive), hasSurvived(survivedAfterWindow), hasSurvived(neverSurvivedExpired)], [true, true, false]);
 eq("others' profiles: survived posts only, also after their window", [survivedLive, survivedAfterWindow, ended, incomplete, queued, testing, neverSurvivedExpired].map(isOnOtherProfile), [true, true, false, false, false, false, false]);
 eq("...and not when the media is missing (hidden, not faked)", isOnOtherProfile({ ...survivedAfterWindow, media_deleted_at: "2026-10-05T00:00:00Z" }), false);
-eq("own profile: queued, testing, survived (forever), recent ended / incomplete", [survivedLive, survivedAfterWindow, ended, incomplete, queued, testing].map((p) => isOnOwnProfilePost(p, now)), [true, true, true, true, true, true]);
-eq("own profile: ended / incomplete leave after the retention window; a post that never survived and expired is not shown", [isOnOwnProfilePost(post({ status: "archived", created_at: new Date(now - (RECENT_ENDED_DAYS + 1) * day).toISOString() }), now), isOnOwnProfilePost(neverSurvivedExpired, now)], [false, false]);
+eq("own profile: queued, testing and survived posts (forever); never ended or incomplete ones", [survivedLive, survivedAfterWindow, queued, testing, ended, incomplete, neverSurvivedExpired].map((p) => isOnOwnProfilePost(p)), [true, true, true, true, false, false, false]);
 
 const badge = read("../components/TrialStatusBadge.tsx"), user = read("../app/user/[id].tsx"), drops = read("../app/profile-drops.tsx"), prov = read("../providers/PostsProvider.tsx"), prof = read("../app/(tabs)/profile.tsx");
 eq("the SURVIVED badge stays after the window (expired + survived_at)", [/survivedAt/.test(badge), /shown === "expired" && survivedAt/.test(badge), /survivedAt=\{post\.survived_at\}/.test(prof)], [true, true, true]);

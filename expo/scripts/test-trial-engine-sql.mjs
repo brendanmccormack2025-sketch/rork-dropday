@@ -101,6 +101,10 @@ if (!BIN) {
       const s1 = psqlFile("t", sp), s2 = psqlFile("t", sp);
       if (/ERROR/.test(s1.stderr + s2.stderr)) console.log((s1.stderr + s2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 5).join("\n"));
       eq("the survived-profile migration applies cleanly, and again (idempotent)", [/ERROR/.test(s1.stderr), /ERROR/.test(s2.stderr)], [false, false]);
+      const he = join(sqlDir, "migration-hide-ended.sql");
+      const h1 = psqlFile("t", he), h2 = psqlFile("t", he);
+      if (/ERROR/.test(h1.stderr + h2.stderr)) console.log((h1.stderr + h2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 5).join("\n"));
+      eq("the hide-ended migration applies cleanly, and again (idempotent)", [/ERROR/.test(h1.stderr), /ERROR/.test(h2.stderr)], [false, false]);
 
       // ── math ──
       near("Beta math: P(mean > 0.30) for Beta(4,5) = 0.8059", 1 - Number(q("select public.trial_beta_cdf(0.30, 4, 5)")), 0.8059, 1e-3);
@@ -202,14 +206,14 @@ if (!BIN) {
       eq("3 swipes: below min_fail (4) -> keeps testing, never failed early", [status(P1), notif("verdict_archived")], ["trial", "0"]);
       view(P1, U(5), { watch: 500 });
       engine();
-      eq("4 swipes = min_fail and P <= 0.15 -> ended ('archived'), creator notified", [status(P1), notif("verdict_archived"), lastLog(P1)], ["archived", "1", "failed|4"]);
+      eq("4 swipes = min_fail and P <= 0.15 -> ended ('archived'), and nobody is told", [status(P1), notif("verdict_archived"), lastLog(P1)], ["archived", "0", "failed|4"]);
 
       // 3) low traffic: 24 h with no decision -> incomplete, never failed
       freshWorld(20);
       mkPost(P1, U(1), 1500);
       view(P1, U(2), { watch: 9000, like: true });
       engine();
-      eq("25 h old, 1 viewer -> incomplete (status 'incomplete', own notification type, not 'archived')", [status(P1), notif("verdict_incomplete"), notif("verdict_archived"), lastLog(P1)], ["incomplete", "1", "0", "incomplete|1"]);
+      eq("25 h old, 1 viewer -> incomplete (status 'incomplete'), and nobody is told", [status(P1), notif("verdict_incomplete"), notif("verdict_archived"), lastLog(P1)], ["incomplete", "0", "0", "incomplete|1"]);
       mkPost("aaaaaaaa-0000-0000-0000-000000000002", U(1), 30);
       view("aaaaaaaa-0000-0000-0000-000000000002", U(2), { watch: 9000 });
       engine();
@@ -309,7 +313,7 @@ if (!BIN) {
       freshWorld(20);
       mkPost(P1, U(1), 1500);
       engine();
-      eq("live again: the same post gets the engine's incomplete notification", [status(P1), notif("verdict_incomplete")], ["incomplete", "1"]);
+      eq("live again: the same post becomes incomplete quietly (no notification)", [status(P1), notif("verdict_incomplete")], ["incomplete", "0"]);
       ok("reactions are never judged by the engine", (() => { freshWorld(20); mkPost(P1, U(1)); view(P1, U(2), { react: true }); return q(`select count(*) from public.trial_post_state s join public.posts p on p.id=s.post_id where p.parent_post_id is not null`) === "0"; })());
       ok("clients cannot read the engine tables or call engine internals", ["trial_engine_config", "trial_assignments", "trial_engine_log", "viewer_creator_affinity", "post_view_stats"].every((t) => psql("t", `set role authenticated; select * from public.${t}`, ["-v", "ON_ERROR_STOP=1"]).status !== 0));
       ok("a client can record their own watch time (and it keeps the max)", (() => {
@@ -602,12 +606,12 @@ if (!BIN) {
       mkPost(P1, U(1));
       for (const v of [2, 3]) view(P1, U(v), { watch: 500 });
       engine();
-      eq("everyone saw it and swiped (mean far below 0.67 x bar) -> ended on exhaustion", [status(P1), reasonOf(P1), notif("verdict_archived")], ["archived", "pool_exhausted", "1"]);
+      eq("everyone saw it and swiped (mean far below 0.67 x bar) -> ended on exhaustion, quietly", [status(P1), reasonOf(P1), notif("verdict_archived")], ["archived", "pool_exhausted", "0"]);
       freshWorld(3);
       mkPost(P1, U(1));
       view(P1, U(2), { watch: 8000, dur: 12000 }); view(P1, U(3), { watch: 500 });
       engine();
-      eq("borderline (between 0.67 x bar and the bar) -> incomplete, never 'ended'", [status(P1), reasonOf(P1), notif("verdict_incomplete"), notif("verdict_archived")], ["incomplete", "pool_exhausted", "1", "0"]);
+      eq("borderline (between 0.67 x bar and the bar) -> incomplete, never 'ended', no notification", [status(P1), reasonOf(P1), notif("verdict_incomplete"), notif("verdict_archived")], ["incomplete", "pool_exhausted", "0", "0"]);
       freshWorld(4);
       mkPost(P1, U(1));
       view(P1, U(2), { watch: 500 }); view(P1, U(3), { watch: 500 });
@@ -632,8 +636,8 @@ if (!BIN) {
       mkPost(P1, U(1), 600);
       for (const v of [2, 3, 4]) view(P1, U(v), { watch: 8000, dur: 12000 });
       Q(`update public.trial_post_state set decision='incomplete', decided_at=now() where post_id='${P1}'; update public.posts set status='incomplete' where id='${P1}'`);
-      eq("trial_admin_reevaluate re-opens a decided post and applies the current rules", [q(`select public.trial_admin_reevaluate('${P1.slice(0, -1)}')`), status(P1)], ["survived", "survived"]);
-      ok("a survived post is never re-opened", q(`select public.trial_admin_reevaluate('${P1.slice(0, -1)}')`).startsWith("not re-opened"));
+      eq("a hidden (incomplete / ended) post is final: trial_admin_reevaluate does not re-open it", [q(`select public.trial_admin_reevaluate('${P1.slice(0, -1)}')`).startsWith("not re-opened"), status(P1)], [true, "incomplete"]);
+      ok("(and a survived post is never re-opened either)", (Q(`update public.posts set status='survived' where id='${P0}'`), q(`select public.trial_admin_reevaluate('${P0.slice(0, -1)}')`).startsWith("not re-opened")));
       ok("clients cannot run it", asUser(U(2), `select public.trial_admin_reevaluate('aaaa')`).status !== 0);
 
       // 18) qualified views from watch-time reports, exposure from any source, weights only at scale, the debug view
@@ -772,8 +776,54 @@ if (!BIN) {
       eq("...and after enough loads no post is starved: all 8 posts hold a full cohort of 3", q(`select min(c) || ':' || max(c) || ':' || count(*) from (select count(*) c from public.trial_assignments where released_at is null group by post_id) z`), "3:3:8");
       Q(`update public.trial_engine_config set ondemand_batch=10, ondemand_max_unseen=20`);
 
-      // 23) survived posts stay on the profile; media is never deleted for them
       const profileOf = (viewer, owner) => q(`set role authenticated; set request.jwt.claim.sub='${viewer}'; select coalesce(string_agg(post_id::text, ',' order by post_id), '') from public.profile_posts('${owner}', 100)`).split("\n").pop().split(",").filter(Boolean);
+      // 24) ended / incomplete posts disappear for good (media queued, hidden from every read, nobody told, scores kept)
+      freshWorld(5);
+      Q(`update public.trial_engine_config set max_active_trials=1000`);
+      const URL = (n) => `https://x.supabase.co/storage/v1/object/public/drops/u1/${n}`;
+      Q(`insert into public.posts (id, user_id, media_url, thumbnail_url, audio_url, segments, media_type) values ('${PID(1)}','${U(1)}','${URL("a.mp4")}','${URL("a.jpg")}','${URL("a.m4a")}','["${URL("s1.mp4")}","${URL("s2.mp4")}"]','video')`);
+      Q(`insert into public.posts (id, user_id, media_url, media_type, parent_post_id) values ('${PID(2)}','${U(3)}','${URL("r1.mp4")}','video','${PID(1)}')`);
+      Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${PID(3)}','${U(1)}','${URL("keep.mp4")}','video'), ('${PID(4)}','${U(1)}','${URL("surv.mp4")}','video')`);
+      Q(`insert into public.notifications (recipient_id, actor_id, type, post_id) values ('${U(1)}','${U(3)}','reaction','${PID(1)}')`);
+      Q(`insert into public.trial_post_state (post_id, stage, decision, decided_at, posterior_mean) values ('${PID(1)}',1,'failed',now(),0.12) on conflict (post_id) do update set decision='failed', decided_at=now(), posterior_mean=0.12`);
+      Q(`update public.posts set status='archived' where id='${PID(1)}'`);
+      eq("the files of the post, its reactions are queued for deletion (bucket + path)", q(`select string_agg(bucket || ':' || path, ',' order by path) from public.trial_media_delete_queue`), "drops:u1/a.jpg,drops:u1/a.m4a,drops:u1/a.mp4,drops:u1/r1.mp4,drops:u1/s1.mp4,drops:u1/s2.mp4");
+      eq("media marked deleted for the post and its reaction; the reaction is hidden too", [q(`select count(*) from public.posts where id in ('${PID(1)}','${PID(2)}') and media_deleted_at is not null`), status(PID(2))], ["2", "archived"]);
+      eq("the notifications about the deleted post are gone", q(`select count(*) from public.notifications where post_id in ('${PID(1)}','${PID(2)}')`), "0");
+      eq("not readable by any client, not even the creator (feed, profile, post viewer, deep link, reactions)", [1, 3, 2].map((v) => asUser(U(v), `select count(*) from public.posts where id in ('${PID(1)}','${PID(2)}')`).stdout.trim().split("\n").pop()), ["0", "0", "0"]);
+      ok("...and the others are", asUser(U(1), `select count(*) from public.posts where id='${PID(3)}'`).stdout.trim().split("\n").pop() === "1");
+      eq("the scoring data stays: trial_post_state keeps the post", q(`select decision || ':' || posterior_mean from public.trial_post_state where post_id='${PID(1)}'`), "failed:0.12");
+      // the bar still counts it
+      Q(`insert into public.posts (id, user_id, media_url, media_type) select gen_random_uuid(), '${U(2)}', 'u', 'video' from generate_series(1,100)`);
+      Q(`insert into public.trial_post_state (post_id, decision, decided_at, posterior_mean) select id, 'failed', now(), 0.1 from public.posts where user_id='${U(2)}' and id not in (select post_id from public.trial_post_state)`);
+      ok("the survival bar (P50 of recent posts) still uses ended posts' scores", Number(q("select public.trial_current_bar()")) < 0.3);
+      Q(`delete from public.trial_post_state where post_id in (select id from public.posts where user_id='${U(2)}')`); Q(`delete from public.posts where user_id='${U(2)}'`);
+      // final
+      Q(`update public.posts set status='trial' where id='${PID(1)}'`);
+      eq("a hidden post stays hidden: its status cannot be changed back", status(PID(1)), "archived");
+      // nobody is told
+      Q(`insert into public.notifications (recipient_id, actor_id, type, post_id) values ('${U(1)}','${U(1)}','verdict_archived','${PID(3)}'), ('${U(1)}','${U(1)}','verdict_incomplete','${PID(3)}'), ('${U(1)}','${U(1)}','verdict_survived','${PID(3)}')`);
+      eq("verdict_archived / verdict_incomplete rows are never inserted (even by the legacy function); survived keeps its notification", q(`select string_agg(type, ',' order by type) from public.notifications where post_id='${PID(3)}'`), "verdict_survived");
+      // profiles
+      eq("own profile: testing posts stay visible to the creator; others see none of them", [profileOf(U(1), U(1)).sort(), profileOf(U(2), U(1))], [[PID(3), PID(4)].sort(), []]);
+      Q(`update public.posts set status='survived', survived_at=now(), distribution_started_at=now(), distribution_expires_at=now()+interval '24 hours' where id='${PID(4)}'`);
+      eq("survived: unchanged (on both profiles)", [profileOf(U(1), U(1)).includes(PID(4)), profileOf(U(2), U(1))], [true, [PID(4)]]);
+      // the engine path: nobody is told, the post vanishes
+      freshWorld(5);
+      mkPost(P1, U(1), 1500);
+      engine();
+      eq("the engine ending a post quietly: hidden, media marked, no notification", [status(P1), q(`select media_deleted_at is not null from public.posts where id='${P1}'`), notif("verdict_incomplete") + notif("verdict_archived")], ["incomplete", "t", "00"]);
+      // backfill: posts that ended before this migration are hidden when it runs
+      freshWorld(3);
+      Q(`alter table public.posts disable trigger trial_hide_on_status`);
+      Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${PID(7)}','${U(1)}','${URL("old.mp4")}','video')`);
+      Q(`update public.posts set status='incomplete' where id='${PID(7)}'`);
+      Q(`alter table public.posts enable trigger trial_hide_on_status`);
+      eq("(setup) an old incomplete post is still unhidden", q(`select media_deleted_at is null from public.posts where id='${PID(7)}'`), "t");
+      const bf = psqlFile("t", he);
+      ok("the backfill hides it (media queued) and reports a count", q(`select media_deleted_at is not null from public.posts where id='${PID(7)}'`) === "t" && q(`select count(*) from public.trial_media_delete_queue where path='u1/old.mp4'`) === "1" && /backfill: \d+ ended\/incomplete posts hidden/.test(bf.stderr + bf.stdout));
+
+      // 23) survived posts stay on the profile; media is never deleted for them
       freshWorld(6);
       Q(`update public.trial_engine_config set max_active_trials=1000, small_pool_everyone=50`);
       Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${PID(1)}','${U(1)}','u','video'), ('${PID(2)}','${U(1)}','u','video'), ('${PID(3)}','${U(1)}','u','video'), ('${PID(4)}','${U(1)}','u','video')`);
@@ -786,29 +836,24 @@ if (!BIN) {
       eq("...survived_at stays and the media is kept", q(`select (survived_at is not null) || ':' || coalesce(media_deleted_at::text, 'kept') from public.posts where id='${PID(1)}'`), "true:kept");
       ok("it is not in anyone's feed any more", ![2, 3, 4].some((v) => feedIds(U(v)).includes(PID(1))));
       eq("a stranger's view of the profile: the survived post only (not ended, incomplete, queued or testing)", profileOf(U(2), U(1)), [PID(1)]);
-      eq("the creator's own profile: everything of theirs, privately (survived, testing, queued, ended, incomplete)", profileOf(U(1), U(1)).sort(), [PID(1), PID(2), PID(3), PID(4), PID(5)].sort());
+      eq("the creator's own profile: survived, testing and queued posts only (never ended or incomplete ones)", profileOf(U(1), U(1)).sort(), [PID(1), PID(4), PID(5)].sort());
       Q(`insert into public.hide_from_list (owner_id, hidden_user_id) values ('${U(1)}','${U(4)}')`);
       Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(5)}','${U(1)}')`);
       eq("a known viewer (hide list) sees the survived profile post, and only that one", profileOf(U(4), U(1)), [PID(1)]);
       eq("a blocked pair sees nothing", profileOf(U(5), U(1)), []);
       Q(`delete from public.user_blocks`); Q(`delete from public.hide_from_list`);
       // reactions
-      eq("reactions to the survived post stay visible (not expired); reactions to the ended post expire with it", [status(PID(10)), q(`select status from public.posts where id='${PID(11)}'`)], ["trial", "expired"]);
+      eq("reactions to the survived post stay visible; reactions to the ended post are hidden with it", [status(PID(10)), q(`select status from public.posts where id='${PID(11)}'`)], ["trial", "archived"]);
       // media deletion
       Q(`update public.posts set media_deleted_at = now() where id='${PID(1)}'`);
       eq("media of a survived post can never be marked deleted (the trigger keeps it)", q(`select media_deleted_at is null from public.posts where id='${PID(1)}'`), "t");
       Q(`update public.posts set media_deleted_at = now() where id='${PID(10)}'`);
       eq("...nor the media of a reaction under it", q(`select media_deleted_at is null from public.posts where id='${PID(10)}'`), "t");
       Q(`update public.posts set media_deleted_at = now() where id='${PID(2)}'`);
-      eq("an ended post's media can still be marked deleted (timing unchanged)", q(`select media_deleted_at is not null from public.posts where id='${PID(2)}'`), "t");
-      Q(`update public.posts set media_deleted_at = null where id='${PID(2)}'; insert into public.trial_post_state (post_id, decision, decided_at) values ('${PID(2)}','failed', now() - interval '8 days'), ('${PID(3)}','incomplete', now() - interval '8 days') on conflict (post_id) do update set decided_at = excluded.decided_at, decision = excluded.decision`);
-      Q(`insert into public.trial_config (key, value) values ('retention_days', 7) on conflict (key) do nothing`);
-      eq("the deletion candidates: ended + incomplete posts past retention and the reaction under the ended one; never the survived post or its reaction", q(`select string_agg(post_id::text, ',' order by post_id) from public.trial_media_deletion_candidates()`), [PID(2), PID(3), PID(11)].join(","));
-      ok("ended / incomplete posts are not on others' profiles, and a fresh ended post is not a candidate", !profileOf(U(2), U(1)).includes(PID(2)) && !profileOf(U(2), U(1)).includes(PID(3)));
+      eq("an ended post's media is already marked deleted (it was hidden the moment it ended)", q(`select media_deleted_at is not null from public.posts where id='${PID(2)}'`), "t");
+      eq("nothing is left for a deletion job to find in the posts table: ended / incomplete media is queued at once", q(`select count(*) from public.trial_media_deletion_candidates()`), "0");
+      ok("ended / incomplete posts are not on anyone's profile, the creator's included", ![U(1), U(2)].some((v) => profileOf(v, U(1)).includes(PID(2)) || profileOf(v, U(1)).includes(PID(3))));
       ok("clients cannot list deletion candidates", asUser(U(2), `select * from public.trial_media_deletion_candidates()`).status !== 0);
-      // an old ended post (inside the retention window) is shown to its creator only
-      Q(`update public.trial_post_state set decided_at = now() where post_id='${PID(2)}'`);
-      ok("recent ended posts stay on the creator's own profile; after retention they leave it", profileOf(U(1), U(1)).includes(PID(2)) && (Q(`update public.trial_post_state set decided_at = now() - interval '9 days' where post_id='${PID(2)}'`), !profileOf(U(1), U(1)).includes(PID(2))));
       eq("the creator can still delete any of their posts", (asUser(U(1), `delete from public.posts where id='${PID(1)}'`), q(`select count(*) from public.posts where id='${PID(1)}'`)), "0");
 
       // 22) ties survive; P50 default; per-creator trial queue

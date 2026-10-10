@@ -1165,9 +1165,7 @@ begin
   if cnt <> 1 then raise exception 'prefix matches % posts', cnt; end if;
   select status into st from public.posts where id = pid;
   if st = 'survived' or st = 'expired' then return 'not re-opened: ' || st; end if;
-  if st in ('incomplete', 'archived') then
-    update public.posts set status = 'trial' where id = pid;
-  end if;
+  if st in ('incomplete', 'archived') then return 'not re-opened: hidden (its media is deleted)'; end if;
   update public.trial_post_state set decision = null, decided_at = null where post_id = pid;
   return public.run_trial_engine_post(pid);
 end;
@@ -1209,11 +1207,11 @@ begin
      where id = p_post_id and status = 'trial';
     insert into public.notifications (recipient_id, actor_id, type, post_id) values (creator, creator, 'verdict_survived', p_post_id);
   elsif p_decision = 'failed' then
+    -- A post that ends is never shown again and nobody is told: the status change quietly hides it (trigger
+    -- trial_hide_on_status in migration-hide-ended.sql deletes its media and hides its reactions). Scoring data stays.
     update public.posts set status = 'archived' where id = p_post_id and status = 'trial';
-    insert into public.notifications (recipient_id, actor_id, type, post_id) values (creator, creator, 'verdict_archived', p_post_id);
   elsif p_decision = 'incomplete' then
     update public.posts set status = 'incomplete' where id = p_post_id and status = 'trial';
-    insert into public.notifications (recipient_id, actor_id, type, post_id) values (creator, creator, 'verdict_incomplete', p_post_id);
   end if;
   -- a testing slot just freed up: the creator's oldest queued post starts its trial
   perform public.trial_start_next_queued(creator);
@@ -1583,13 +1581,6 @@ select cron.schedule('trial-affinity', '7 * * * *', $cron$ select public.trial_r
 
 -- Rebuild affinity now so any affinity that came from old follows disappears at once (otherwise at the next hourly run).
 select public.trial_refresh_affinity();
-
--- The ties: posts the pool-exhausted rule left 'incomplete' on a mean equal to the bar are evaluated again (a tie survives).
-select public.trial_admin_reevaluate(l.post_id::text)
-from (select distinct on (post_id) post_id, decision, reason from public.trial_engine_log
-      where created_at > now() - interval '7 days' order by post_id, id desc) l
-join public.posts p on p.id = l.post_id
-where l.decision = 'incomplete' and l.reason = 'pool_exhausted' and p.status = 'incomplete';
 
 -- Re-evaluate every post still testing under these rules now (the 5-minute cron does the same from here on).
 select public.run_survival_checkpoint();

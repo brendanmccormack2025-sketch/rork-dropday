@@ -119,8 +119,8 @@ export function isOnTrialNow(post: Pick<Post, "status" | "distribution_expires_a
 }
 
 /**
- * The creator's own profile: queued and testing posts, survived posts for good (also after their 24 h window), and recent
- * ended / incomplete posts (privately). Other people's profiles use isOnOtherProfile (survived only).
+ * The creator's own profile: queued and testing posts, and survived posts for good (also after their 24 h window).
+ * Other people's profiles use isOnOtherProfile (survived only). Ended / incomplete posts are shown to no one.
  */
 export function isOnOwnProfile(post: Pick<Post, "status" | "survived_at" | "created_at" | "media_deleted_at">): boolean {
   return isOnOwnProfilePost(post);
