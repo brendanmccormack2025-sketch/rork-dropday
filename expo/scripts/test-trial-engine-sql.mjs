@@ -285,6 +285,7 @@ if (!BIN) {
       freshWorld(20);
       mkPost(P1, U(1));
       Q(`insert into public.likes (user_id, post_id) values ('${U(2)}','${P1}')`);
+      Q(`update public.trial_engine_config set known_source_follows=true`);
       Q(`insert into public.follows (follower_id, followee_id) values ('${U(3)}','${U(1)}')`);
       Q("select public.trial_refresh_affinity()");
       const af = (v) => Number(q(`select score from public.viewer_creator_affinity where viewer_id='${U(v)}' and creator_id='${U(1)}'`));
@@ -703,6 +704,22 @@ if (!BIN) {
       ok("flag off: the hide list and contacts still exclude, follows do not", !viewerOf(U(4)).includes(P1) && !viewerOf(U(3)).includes(P1) && viewerOf(U(2)).startsWith(P1));
       eq("flag off: the remaining sources are contact + hide_list", q("select string_agg(distinct source, ',' order by source) from public.known_connections"), "contact,hide_list");
       wipePrivacy();
+
+      // 20) affinity from behavior only unless known_source_follows is on
+      freshWorld(6);
+      Q(`insert into public.follows (follower_id, followee_id) values ('${U(2)}','${U(1)}')`);
+      mkPost(P1, U(1));
+      Q(`insert into public.likes (user_id, post_id) values ('${U(3)}','${P1}')`);
+      Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms, shared) values ('${P1}','${U(4)}',2000,6000,true)`);
+      Q("select public.trial_refresh_affinity()");
+      const afOf = (v) => q(`select count(*) from public.viewer_creator_affinity where viewer_id='${U(v)}' and creator_id='${U(1)}'`);
+      eq("flag off: a follow gives no affinity; a like and a share do", [afOf(2), afOf(3), afOf(4)], ["0", "1", "1"]);
+      Q(`update public.trial_engine_config set known_source_follows=true`);
+      Q("select public.trial_refresh_affinity()");
+      eq("flag on: the follow counts again", afOf(2), "1");
+      Q(`update public.trial_engine_config set known_source_follows=false`);
+      Q("select public.trial_refresh_affinity()");
+      eq("turned off again: follow-based affinity disappears on the next refresh", [afOf(2), afOf(3)], ["0", "1"]);
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });

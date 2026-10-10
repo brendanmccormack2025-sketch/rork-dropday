@@ -1148,8 +1148,9 @@ end;
 $$;
 
 -- ── 12. Affinity (viewer -> creator), with time decay ─────────────────────────
--- Built from likes, video reactions, meaningful watches and follows over the last 90 days; each event counts
--- 0.5 ^ (age / half-life). score = 1 - exp(-raw / 2), so one like is about 0.22, a follow about 0.78.
+-- Built from behavior: likes, video reactions, meaningful watches and shares over the last 90 days; each event counts
+-- 0.5 ^ (age / half-life). score = 1 - exp(-raw / 2), so one like is about 0.22. Old follows (DropDay era; Trial has no
+-- follow UI) only count while trial_engine_config.known_source_follows is true (default false).
 create or replace function public.trial_refresh_affinity()
 returns integer
 language plpgsql
@@ -1177,8 +1178,12 @@ begin
       where s.updated_at >= now() - interval '90 days' and p.user_id <> s.viewer_id
         and (s.completed or s.watch_ms >= cfg.watch_seconds * 1000)
     union all
+    select s.viewer_id, p.user_id, 1.5, s.updated_at
+      from public.post_view_stats s join public.posts p on p.id = s.post_id
+      where s.updated_at >= now() - interval '90 days' and p.user_id <> s.viewer_id and s.shared
+    union all
     select f.follower_id, f.followee_id, 3.0, coalesce(f.created_at, now())
-      from public.follows f where f.follower_id <> f.followee_id
+      from public.follows f where f.follower_id <> f.followee_id and cfg.known_source_follows
   ) e
   group by e.viewer, e.creator
   on conflict (viewer_id, creator_id) do update set score = excluded.score, updated_at = excluded.updated_at;
@@ -1348,3 +1353,6 @@ select cron.schedule('trial-affinity', '7 * * * *', $cron$ select public.trial_r
 -- Rollback (comment): update public.trial_engine_config set engine_mode = 'legacy';  -- instant, nothing else needed.
 -- Full removal: drop trigger trial_start_on_insert on public.posts; then recreate the legacy name:
 --   drop function public.run_survival_checkpoint(); alter function public.run_survival_checkpoint_legacy() rename to run_survival_checkpoint;
+
+-- Rebuild affinity now so any affinity that came from old follows disappears at once (otherwise at the next hourly run).
+select public.trial_refresh_affinity();
