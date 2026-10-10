@@ -30,7 +30,8 @@ import {
 import { theme } from "@/constants/theme";
 import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
-import { usePosts, isOnTrialNow, type MyProfile, type Post, type DraftProject } from "@/providers/PostsProvider";
+import { queuePositions } from "@/lib/trialEngine";
+import { usePosts, isOnOwnProfile, type MyProfile, type Post, type DraftProject } from "@/providers/PostsProvider";
 import { TrialStatusBadge } from "@/components/TrialStatusBadge";
 import CreatorLinkPills from "@/components/CreatorLinkPills";
 import VerifiedCreatorBadge from "@/components/VerifiedCreatorBadge";
@@ -207,9 +208,10 @@ export default function ProfileScreen() {
 
   // Only what is on trial right now (no history grid).
   const drops = useMemo(
-    () => myPosts.filter((p) => !p.parent_post_id && isOnTrialNow(p)),
+    () => myPosts.filter((p) => !p.parent_post_id && isOnOwnProfile(p)),
     [myPosts],
   );
+  const queuePos = useMemo(() => queuePositions(drops), [drops]);
   const activePosts = tab === "drops" ? drops : [];
   const isGridTab = tab === "drafts";
 
@@ -332,6 +334,7 @@ export default function ProfileScreen() {
             renderItem={({ item, index }) => (
               <ProfileTile
                 post={item}
+                queuePosition={queuePos.get(item.id)}
                 onPress={() => {
                   if (!user?.id) return;
                   router.push({
@@ -348,7 +351,7 @@ export default function ProfileScreen() {
   );
 }
 
-function ProfileTile({ post, onPress }: { post: Post; onPress: () => void }) {
+function ProfileTile({ post, onPress, queuePosition }: { post: Post; onPress: () => void; queuePosition?: number }) {
   const coverUri = post.thumbnail_url ?? post.media_url;
   // Failed trials stay visible on the creator's own profile but read as
   // faded — the content didn't earn its place.
@@ -371,7 +374,7 @@ function ProfileTile({ post, onPress }: { post: Post; onPress: () => void }) {
         style={styles.tileGrad}
       />
       <View style={styles.statusBadgeWrap}>
-        <TrialStatusBadge status={post.status} distributionExpiresAt={post.distribution_expires_at} />
+        <TrialStatusBadge status={post.status} distributionExpiresAt={post.distribution_expires_at} queuePosition={queuePosition} />
       </View>
       <View style={styles.tileBottom}>
         <View style={styles.tileStats}>

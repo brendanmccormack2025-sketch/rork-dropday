@@ -108,7 +108,7 @@ if (!BIN) {
       const mkUsers = (from, to, ageHours = 100) => {
         for (let i = from; i <= to; i++) Q(`insert into auth.users (id, raw_user_meta_data) values ('${U(i)}','{"username":"u${i}"}') on conflict do nothing; update public.profiles set created_at = now() - interval '${ageHours} hours' where id='${U(i)}'`);
       };
-      const mkPost = (id, creator, ageMin = 30) => Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${id}','${creator}','u','video'); update public.posts set created_at = now() - interval '${ageMin} minutes', checkpoint_at = now() - interval '${ageMin} minutes' + interval '24 hours' where id='${id}'`);
+      const mkPost = (id, creator, ageMin = 30) => Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${id}','${creator}','u','video'); update public.posts set created_at = now() - interval '${ageMin} minutes', testing_started_at = now() - interval '${ageMin} minutes', checkpoint_at = now() - interval '${ageMin} minutes' + interval '24 hours' where id='${id}'`);
       // a viewer's engagement with a post: watch ms, completed, like, react
       const view = (post, viewer, { watch = 8000, dur = 12000, done = false, like = false, react = false, share = false } = {}) => {
         Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms, completed, shared) values ('${post}','${viewer}',${watch},${dur},${done},${share}) on conflict (post_id, viewer_id) do update set watch_ms=excluded.watch_ms`);
@@ -120,7 +120,7 @@ if (!BIN) {
         Q(`delete from public.trial_engine_log; delete from public.trial_post_state; delete from public.trial_assignments; delete from public.notifications;
            delete from public.post_view_stats; delete from public.post_raw_views; delete from public.post_qualified_views; delete from public.likes;
            delete from public.viewer_creator_affinity; delete from public.trial_feed_opens; delete from public.follows; delete from public.hide_from_list; delete from public.contact_hashes; delete from public.user_phone_hash; delete from public.posts; delete from public.user_blocks;
-           update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false`);
+           update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
       };
       const score = (post) => Object.fromEntries(q(`select viewer_id::text || '=' || round(score::numeric,3) from public.trial_post_scores('${post}') order by 1`).split("\n").filter(Boolean).map((l) => l.split("=")));
 
@@ -219,17 +219,17 @@ if (!BIN) {
       engine();
       eq("2 of 2 viewers loved it -> survives with n=2", [status(P1), lastLog(P1)], ["survived", "survived|2"]);
 
-      // 5) the bar blends from 0.30 to the recent P60 as judged posts accumulate
+      // 5) the bar blends from 0.30 to the recent P50 as judged posts accumulate
       freshWorld(20);
       near("no judged posts: bar = 0.30", q("select public.trial_current_bar()"), 0.30, 1e-9);
       Q(`alter table public.posts disable trigger trial_start_on_insert`);
       Q(`insert into public.posts (id, user_id, media_url, media_type) select gen_random_uuid(), '${U(19)}', 'u', 'video' from generate_series(1,100)`);
       Q(`insert into public.trial_post_state (post_id, decision, decided_at, posterior_mean) select id, 'survived', now(), (row_number() over ())/100.0 from public.posts where user_id='${U(19)}'`);
-      near("100 judged (w = 0.5), means 0.01..1.00 (P60 = 0.604): bar = 0.5*0.30 + 0.5*0.604 = 0.452", q("select public.trial_current_bar()"), 0.452, 2e-3);
+      near("100 judged (w = 0.5), means 0.01..1.00 (P50 = 0.505): bar = 0.5*0.30 + 0.5*0.505 = 0.4025", q("select public.trial_current_bar()"), 0.4025, 2e-3);
       Q(`insert into public.posts (id, user_id, media_url, media_type) select gen_random_uuid(), '${U(18)}', 'u', 'video' from generate_series(1,100)`);
       Q(`insert into public.trial_post_state (post_id, decision, decided_at, posterior_mean) select id, 'failed', now(), 0.5 from public.posts where user_id='${U(18)}'`);
       Q(`alter table public.posts enable trigger trial_start_on_insert`);
-      near("200 judged (w = 1): bar = P60 of the means alone", q("select public.trial_current_bar()"), Number(q("select percentile_cont(0.6) within group (order by posterior_mean) from public.trial_post_state")), 1e-6);
+      near("200 judged (w = 1): bar = P50 of the means alone", q("select public.trial_current_bar()"), Number(q("select percentile_cont(0.5) within group (order by posterior_mean) from public.trial_post_state")), 1e-6);
 
       // 6) the feed: a testing post reaches only its assigned viewers (and its creator)
       freshWorld(20);
@@ -244,7 +244,7 @@ if (!BIN) {
       ok("once seen, it is no longer pushed to the front again", !feedOf(asked[0]).startsWith(P1) || true);
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       ok("legacy mode: the feed is the plain get_feed again (outsider sees it)", feedOf(outsider).includes(P1));
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
       const pg = q(`set role authenticated; set request.jwt.claim.sub='${outsider}'; select count(*) || ':' || max(page_rows) from public.get_feed_engine(20, 0)`).split("\n").pop();
       ok("page_rows reports the source rows so the app can detect the end of the feed", /^\d+:\d+$/.test(pg));
 
@@ -301,7 +301,7 @@ if (!BIN) {
       eq("legacy: a new post is NOT given a cohort or engine state", [q(`select count(*) from public.trial_post_state`), q(`select count(*) from public.trial_assignments`)], ["0", "0"]);
       engine();
       eq("legacy: the old rule ran (25 h, below the exposure gate -> silent 'incomplete', no engine notification, no engine log)", [status(P1), notif("verdict_incomplete"), q("select count(*) from public.trial_engine_log")], ["incomplete", "0", "0"]);
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
       freshWorld(20);
       mkPost(P1, U(1), 1500);
       engine();
@@ -445,7 +445,7 @@ if (!BIN) {
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       prep(); Q(`update public.trial_engine_config set engine_mode='legacy'`);
       ok("legacy mode: opening the feed assigns nothing", (() => { viewerOf(V); return q("select count(*) from public.trial_assignments") === "0"; })());
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
       ok("a clean slate for the next run", true);
 
       // 13) A. small-app rule: while the active pool is small, everybody gets every testing post
@@ -767,7 +767,59 @@ if (!BIN) {
       for (let round = 0; round < 4; round++) for (let v = 2; v <= 19; v++) viewerOf(U(v));
       eq("...and after enough loads no post is starved: all 8 posts hold a full cohort of 3", q(`select min(c) || ':' || max(c) || ':' || count(*) from (select count(*) c from public.trial_assignments where released_at is null group by post_id) z`), "3:3:8");
       Q(`update public.trial_engine_config set ondemand_batch=10, ondemand_max_unseen=20`);
+
+      // 22) ties survive; P50 default; per-creator trial queue
+      eq("bar growth percentile defaults to P50", q("select bar_percentile from public.trial_engine_config"), "0.5");
+      freshWorld(4);
+      mkPost(P1, U(1));
+      // scores that make the posterior mean exactly the bar (0.300): three viewers at 0.3 each (a like only: swipe watch + like 0.3)
+      for (const v of [2, 3, 4]) { Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms) values ('${P1}','${U(v)}',2500,12000)`); Q(`insert into public.likes (user_id, post_id) values ('${U(v)}','${P1}')`); }
+      eq("(setup) three viewers each score exactly 0.300", Object.values(score(P1)), ["0.300", "0.300", "0.300"]);
+      engine();
+      eq("a mean equal to the bar survives (pool exhausted, tie)", [status(P1), reasonOf(P1)], ["survived", "pool_exhausted"]);
+
+      // the queue: a creator posting 5 -> 2 testing + 3 queued
       freshWorld(5);
+      Q(`update public.trial_engine_config set max_active_trials=2, small_pool_everyone=50`);
+      for (let i = 1; i <= 5; i++) { Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${PID(i)}','${U(1)}','u','video'); update public.posts set created_at = now() - interval '${60 - i} minutes' where id='${PID(i)}'`); }
+      eq("posting 5: 2 testing + 3 queued, in order", [q(`select string_agg(status, ',' order by created_at) from public.posts where user_id='${U(1)}' and id <> '${P0}'`)], ["trial,trial,queued,queued,queued"]);
+      eq("queued posts have no 24 h window yet and no engine state", [q(`select count(*) from public.posts where status='queued' and (checkpoint_at is not null or testing_started_at is not null)`), q(`select count(*) from public.trial_post_state s join public.posts p on p.id = s.post_id where p.status='queued'`)], ["0", "0"]);
+      ok("queued posts are never assigned or served", q(`select count(*) from public.trial_assignments a join public.posts p on p.id = a.post_id where p.status='queued'`) === "0" && [2, 3, 4].every((v) => { const f = feedIds(U(v)); return !f.includes(PID(3)) && !f.includes(PID(4)) && !f.includes(PID(5)) && f.includes(PID(1)) && f.includes(PID(2)); }));
+      eq("queue positions: up next = 1", [3, 4, 5].map((i) => asUser(U(1), `select public.trial_queue_position('${PID(i)}')`).stdout.trim().split("\n").pop()), ["1", "2", "3"]);
+      ok("only the owner sees the queue position", asUser(U(2), `select public.trial_queue_position('${PID(3)}')`).stdout.trim().split("\n").pop() === "");
+      // decide the first trial: the oldest queued post starts, with its window starting now
+      view(PID(1), U(2), { watch: 8000, dur: 12000, like: true }); view(PID(1), U(3), { watch: 8000, dur: 12000, like: true }); view(PID(1), U(4), { watch: 8000, dur: 12000, like: true }); view(PID(1), U(5), { watch: 8000, dur: 12000, like: true });
+      engine();
+      eq("deciding one trial starts the oldest queued post (and only that one)", q(`select string_agg(status, ',' order by created_at) from public.posts where user_id='${U(1)}' and id <> '${P0}'`), "survived,trial,trial,queued,queued");
+      const started = q(`select extract(epoch from (checkpoint_at - now()))::int between 86300 and 86400 and testing_started_at > now() - interval '1 minute' from public.posts where id='${PID(3)}'`);
+      eq("its 24 h window starts when the trial starts (checkpoint_at = start + 24 h), not at posting", started, "t");
+      ok("the started post got its cohort and is served; the others still wait", feedIds(U(2)).includes(PID(3)) && !feedIds(U(2)).includes(PID(4)));
+      eq("positions move up: the next queued post is up next", asUser(U(1), `select public.trial_queue_position('${PID(4)}')`).stdout.trim().split("\n").pop(), "1");
+      // decide everything in order; nothing is skipped
+      for (const n of [2, 3, 4, 5]) {
+        for (const v of [2, 3, 4, 5]) if (!q(`select 1 from public.post_view_stats where post_id='${PID(n)}' and viewer_id='${U(v)}'`)) view(PID(n), U(v), { watch: 8000, dur: 12000, like: true });
+        engine();
+      }
+      eq("every post got its full trial in order: none queued, none skipped", [q(`select count(*) from public.posts where user_id='${U(1)}' and status='queued'`), q(`select count(*) from public.trial_post_state where decision is not null`)], ["0", "5"]);
+      ok("a trial started from the queue got its own engine state at its own start", q(`select count(*) from public.trial_post_state where post_id='${PID(5)}'`) === "1");
+      // the queue only counts testing posts: a survived post frees the slot, and a new post goes straight into testing
+      freshWorld(5);
+      Q(`update public.trial_engine_config set max_active_trials=2`);
+      Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${PID(1)}','${U(1)}','u','video'), ('${PID(2)}','${U(1)}','u','video')`);
+      Q(`update public.posts set status='survived', survived_at=now(), distribution_started_at=now(), distribution_expires_at=now()+interval '24 hours' where id='${PID(1)}'`);
+      Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${PID(3)}','${U(1)}','u','video')`);
+      eq("a creator with one survived + one testing post can start another trial immediately", q(`select status from public.posts where id='${PID(3)}'`), "trial");
+      Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${PID(4)}','${U(1)}','u','video')`);
+      eq("and the next one waits", q(`select status from public.posts where id='${PID(4)}'`), "queued");
+      Q(`delete from public.posts where id='${PID(2)}'`);
+      engine();
+      eq("a deleted trial frees its slot: the engine run starts the queued post", q(`select status from public.posts where id='${PID(4)}'`), "trial");
+      Q(`update public.trial_engine_config set engine_mode='legacy'`);
+      Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${PID(6)}','${U(1)}','u','video'), ('${PID(7)}','${U(1)}','u','video')`);
+      eq("legacy mode: no queue (posts start their window at once)", q(`select count(*) from public.posts where status='queued'`), "0");
+      Q(`update public.trial_engine_config set engine_mode='live', max_active_trials=1000`);
+      freshWorld(5);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
       mkPostAt(PID(1), U(1), 50);
       viewerOf(U(2));
       eq("trial_debug_feed explains each post for a viewer", [q(`select why from public.trial_debug_feed('u2') where post_id='${PID(1)}'`), q(`select why from public.trial_debug_feed('u1') where post_id='${PID(1)}'`)], ["in feed (assigned)", "own post"]);
@@ -785,7 +837,7 @@ if (!BIN) {
       Q(`update public.trial_engine_config set known_source_follows=true`);
       Q("select public.trial_refresh_affinity()");
       eq("flag on: the follow counts again", afOf(2), "1");
-      Q(`update public.trial_engine_config set known_source_follows=false`);
+      Q(`update public.trial_engine_config set known_source_follows=false, max_active_trials=1000`);
       Q("select public.trial_refresh_affinity()");
       eq("turned off again: follow-based affinity disappears on the next refresh", [afOf(2), afOf(3)], ["0", "1"]);
     }

@@ -8,7 +8,7 @@ import { ArrowLeft } from "lucide-react-native";
 
 import { FeedListView } from "@/components/FeedListView";
 import { theme } from "@/constants/theme";
-import { usePosts, isOnTrialNow, type Post } from "@/providers/PostsProvider";
+import { usePosts, isOnTrialNow, isOnOwnProfile, type Post } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { supabase } from "@/lib/supabase";
 
@@ -104,7 +104,7 @@ export default function ProfileDropsScreen() {
     () =>
       (isOtherUser ? otherUserPostsQuery.data ?? [] : myPosts)
         .filter((p) => !p.parent_post_id)
-        .filter(isOnTrialNow),
+        .filter(isOtherUser ? isOnTrialNow : isOnOwnProfile),
     [isOtherUser, myPosts, otherUserPostsQuery.data],
   );
 

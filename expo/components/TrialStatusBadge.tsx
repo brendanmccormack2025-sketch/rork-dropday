@@ -3,6 +3,7 @@ import { StyleSheet, View } from "react-native";
 
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
+import { queuedLabel } from "@/lib/trialEngine";
 import type { Post } from "@/providers/PostsProvider";
 
 type SurvivalStatus = NonNullable<Post["status"]>;
@@ -15,6 +16,7 @@ const BADGES: Record<SurvivalStatus, { label: string; color: string }> = {
   survived: { label: "SURVIVED", color: theme.success },
   archived: { label: "TRIAL ENDED", color: "rgba(10,10,10,0.65)" },
   expired: { label: "EXPIRED", color: theme.textMuted },
+  queued: { label: "QUEUED", color: theme.textMuted },
 };
 
 /**
@@ -25,10 +27,13 @@ const BADGES: Record<SurvivalStatus, { label: string; color: string }> = {
 export function TrialStatusBadge({
   status,
   distributionExpiresAt,
+  queuePosition,
 }: {
   status: Post["status"];
   /** SURVIVED shows only while this is in the future (or null: survivors with no window yet). */
   distributionExpiresAt?: string | null;
+  /** For a queued post: 1 = up next. */
+  queuePosition?: number | null;
 }) {
   let shown: string = status ?? "trial";
   if (shown === "survived" && distributionExpiresAt) {
@@ -37,7 +42,7 @@ export function TrialStatusBadge({
   }
   // Unknown statuses render no badge instead of crashing.
   if (!Object.prototype.hasOwnProperty.call(BADGES, shown)) return null;
-  const badge = BADGES[shown as SurvivalStatus];
+  const badge = shown === "queued" ? { ...BADGES.queued, label: queuedLabel(queuePosition).toUpperCase() } : BADGES[shown as SurvivalStatus];
   return (
     <View style={[styles.badge, { backgroundColor: badge.color }]}>
       <View style={styles.dot} />

@@ -40,7 +40,8 @@ export function readFeedRows(rows: EngineFeedRow[]): { ids: { post_id: string; p
 }
 
 /** The status the creator sees for their own post on the profile / feed. Never says "failed". */
-export function creatorTrialNote(status: string | null | undefined): { title: string; body: string | null } | null {
+export function creatorTrialNote(status: string | null | undefined, queuePosition?: number | null): { title: string; body: string | null } | null {
+  if (status === "queued") return { title: queuedLabel(queuePosition), body: null };
   if (status === "trial") return { title: TRIAL_ON_TRIAL_TITLE, body: null };
   if (status === "incomplete") return { title: "TRIAL INCOMPLETE", body: TRIAL_INCOMPLETE_MESSAGE };
   return null;
@@ -50,3 +51,16 @@ export function creatorTrialNote(status: string | null | undefined): { title: st
 export const FEED_CAUGHT_UP_TITLE = "You're all caught up";
 export const FEED_CAUGHT_UP_BODY = "Be the first to put something on Trial";
 export const FEED_CAUGHT_UP_BUTTON = "Put it on Trial";
+
+/** "Queued: up next" for the first post in line, "Queued: #2 in line" after that. */
+export function queuedLabel(position: number | null | undefined): string {
+  return !position || position <= 1 ? "Queued: up next" : `Queued: #${position} in line`;
+}
+
+/** A creator's place in line for each queued post, oldest first (1 = up next). */
+export function queuePositions(posts: Array<{ id: string; status?: string | null; created_at?: string | null }>): Map<string, number> {
+  const queued = posts
+    .filter((p) => p.status === "queued")
+    .sort((a, b) => (Date.parse(a.created_at ?? "") || 0) - (Date.parse(b.created_at ?? "") || 0) || a.id.localeCompare(b.id));
+  return new Map(queued.map((p, i) => [p.id, i + 1]));
+}

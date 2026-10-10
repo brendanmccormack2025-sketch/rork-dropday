@@ -208,7 +208,7 @@ begin
     from pg_proc p
     where p.pronamespace = 'public'::regnamespace
       and (p.proname like 'trial\_%' or p.proname in ('run_trial_engine', 'record_view_progress_internal'))
-      and p.proname not in ('trial_post_progress')
+      and p.proname not in ('trial_post_progress', 'trial_queue_position')
   loop
     execute format('revoke all on function %s from public, anon, authenticated', r.fn);
   end loop;

@@ -69,7 +69,7 @@ export type Post = {
   /** Moderation status: 'active' (visible), 'hidden' (auto/flagged), 'removed' (confirmed violation). */
   moderation_status?: string;
   /** Survival status: 'trial' (live, awaiting verdict), 'incomplete' (awaiting enough exposure to judge), 'survived', 'archived' (hidden from public surfaces), 'expired' (distribution window over). */
-  status?: "trial" | "incomplete" | "survived" | "archived" | "expired";
+  status?: "trial" | "incomplete" | "survived" | "archived" | "expired" | "queued";
   /** Lifecycle timestamps (set server-side). */
   survived_at?: string | null;
   distribution_started_at?: string | null;
@@ -115,6 +115,11 @@ export function isOnTrialNow(post: Pick<Post, "status" | "distribution_expires_a
   if (!post.distribution_expires_at) return true;
   const expiresMs = Date.parse(post.distribution_expires_at);
   return Number.isNaN(expiresMs) || expiresMs > Date.now();
+}
+
+/** The creator's own profile also lists posts that are waiting in their trial queue. */
+export function isOnOwnProfile(post: Pick<Post, "status" | "distribution_expires_at">): boolean {
+  return post.status === "queued" || isOnTrialNow(post);
 }
 
 /**

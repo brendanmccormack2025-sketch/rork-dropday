@@ -4,7 +4,7 @@
  * app is wired to the new RPCs. node --experimental-strip-types --no-warnings scripts/test-trial-engine.mjs
  */
 import { readFileSync } from "node:fs";
-import { FEED_CAUGHT_UP_BODY, FEED_CAUGHT_UP_TITLE, creatorTrialNote, readFeedRows, viewProgress, worthReporting, TRIAL_INCOMPLETE_MESSAGE } from "../lib/trialEngine.ts";
+import { queuePositions, queuedLabel, FEED_CAUGHT_UP_BODY, FEED_CAUGHT_UP_TITLE, creatorTrialNote, readFeedRows, viewProgress, worthReporting, TRIAL_INCOMPLETE_MESSAGE } from "../lib/trialEngine.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -36,6 +36,13 @@ eq("the badge has its own incomplete pill (not 'failed')", /incomplete: \{ label
 const home = read("../app/(tabs)/index.tsx");
 eq("empty feed: 'You're all caught up' + 'Be the first to put something on Trial' + a button to the camera", [FEED_CAUGHT_UP_TITLE, FEED_CAUGHT_UP_BODY, /onCreate=\{\(\) => router\.push\("\/camera"\)\}/.test(home), /FEED_CAUGHT_UP_BUTTON/.test(home)], ["You're all caught up", "Be the first to put something on Trial", true, true]);
 eq("later feed pages send the ids already delivered (p_seen); the first page and pull-to-refresh do not", [/p_seen: offset > 0 \? loadedFeedIds/.test(prov), /function loadedFeedIds/.test(prov)], [true, true]);
+eq("queue wording: up next, then #n in line", [queuedLabel(1), queuedLabel(2), queuedLabel(null), creatorTrialNote("queued", 3)], ["Queued: up next", "Queued: #2 in line", "Queued: up next", { title: "Queued: #3 in line", body: null }]);
+eq("queue positions: oldest queued first, other statuses ignored", [...queuePositions([
+  { id: "c", status: "queued", created_at: "2026-01-03T00:00:00Z" }, { id: "a", status: "queued", created_at: "2026-01-01T00:00:00Z" },
+  { id: "t", status: "trial", created_at: "2026-01-00T00:00:00Z" }, { id: "b", status: "queued", created_at: "2026-01-02T00:00:00Z" }]).entries()], [["a", 1], ["b", 2], ["c", 3]]);
+const profile = read("../app/(tabs)/profile.tsx"), badge2 = read("../components/TrialStatusBadge.tsx");
+eq("own profile lists queued posts with their place in line; other users' profiles do not", [/isOnOwnProfile/.test(profile), /queuePosition=\{queuePos\.get/.test(profile), /\.in\("status", \["trial", "survived"\]\)/.test(read("../app/user/[id].tsx"))], [true, true, true]);
+eq("badge has a queued pill", /queued: \{ label: "QUEUED"/.test(badge2), true);
 eq("app.json version untouched", JSON.parse(read("../app.json")).expo.version, "1.0.4");
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

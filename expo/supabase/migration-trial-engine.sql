@@ -75,7 +75,7 @@ create table if not exists public.trial_engine_config (
 
   -- bar
   bar_base              double precision not null default 0.30,
-  bar_percentile        double precision not null default 0.60,
+  bar_percentile        double precision not null default 0.50,
   bar_full_posts        integer          not null default 200,
   bar_window_days       integer          not null default 7,
 
@@ -99,7 +99,10 @@ alter table public.trial_engine_config
   add column if not exists fraud_weights_min_pool integer not null default 50,   -- new-account / like-everything / affinity weights only above this active pool
   add column if not exists exhausted_fail_ratio double precision not null default 0.67,   -- pool exhausted: ended below ratio * bar
   add column if not exists known_source_follows boolean not null default false,   -- old follows count as "people you know" (off: DropDay-era follows are ignored)
+  add column if not exists max_active_trials  integer not null default 2,      -- posts one creator can have in testing at once; extra posts wait as 'queued'
   add column if not exists build_in_silence    boolean not null default true;           -- people you know never see (or influence) your post while it is on trial
+alter table public.trial_engine_config alter column bar_percentile set default 0.50;
+update public.trial_engine_config set bar_percentile = 0.50 where bar_percentile = 0.60;   -- bar growth: P60 -> P50
 alter table public.trial_engine_config enable row level security;   -- no policies: dashboard / service role only
 
 create or replace function public.trial_cfg()
@@ -109,6 +112,28 @@ stable
 security definer
 set search_path = public
 as $$ select * from public.trial_engine_config where id limit 1 $$;
+
+-- ── 1b. Per-creator trial queue ──────────────────────────────────────────────
+-- A creator has at most max_active_trials posts in testing at once. Extra posts get the new status 'queued' (no
+-- status is renamed) and wait; when one of the creator's trials is decided the oldest queued post starts. The 24 h
+-- window starts when the trial STARTS (checkpoint_at = start + decision_hours), not at posting. Queued posts are never
+-- served or assigned. Posting itself (and saving to the camera roll) is unaffected.
+alter table public.posts add column if not exists testing_started_at timestamptz;
+
+do $$
+declare
+  c record;
+begin
+  for c in
+    select conname from pg_constraint
+    where conrelid = 'public.posts'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%survived%'
+  loop
+    execute format('alter table public.posts drop constraint %I', c.conname);
+  end loop;
+  alter table public.posts
+    add constraint posts_status_check
+    check (status in ('trial', 'incomplete', 'survived', 'archived', 'expired', 'queued'));
+end $$;
 
 -- ── 2. A new notification type for "Trial incomplete" ────────────────────────
 do $$
@@ -935,6 +960,86 @@ create trigger trial_start_on_insert
   after insert on public.posts
   for each row execute function public.trial_start_on_insert();
 
+-- Starts the oldest queued posts of a creator while they have a free testing slot.
+create or replace function public.trial_start_next_queued(p_creator uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  cfg public.trial_engine_config := public.trial_cfg();
+  started integer := 0;
+  active integer;
+  nxt uuid;
+begin
+  perform pg_advisory_xact_lock(hashtextextended('trial_queue:' || p_creator::text, 0));
+  for i in 1..50 loop
+    select count(*) into active from public.posts where user_id = p_creator and parent_post_id is null and status = 'trial';
+    exit when active >= cfg.max_active_trials;
+    select id into nxt from public.posts
+     where user_id = p_creator and parent_post_id is null and status = 'queued'
+     order by created_at, id limit 1;
+    exit when nxt is null;
+    update public.posts
+       set status = 'trial', testing_started_at = now(), checkpoint_at = now() + (cfg.decision_hours * interval '1 hour')
+     where id = nxt;
+    perform public.trial_start_post(nxt);
+    started := started + 1;
+  end loop;
+  return started;
+end;
+$$;
+
+-- New root posts: queued when the creator already has max_active_trials in testing.
+create or replace function public.trial_queue_on_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  cfg public.trial_engine_config := public.trial_cfg();
+  active integer;
+begin
+  if new.parent_post_id is not null or new.status <> 'trial' then return new; end if;
+  if cfg.engine_mode <> 'live' then
+    new.testing_started_at := coalesce(new.created_at, now());
+    return new;
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('trial_queue:' || new.user_id::text, 0));
+  select count(*) into active from public.posts where user_id = new.user_id and parent_post_id is null and status = 'trial';
+  if active >= cfg.max_active_trials then
+    new.status := 'queued';
+    new.checkpoint_at := null;
+    new.testing_started_at := null;
+  else
+    new.testing_started_at := coalesce(new.created_at, now());
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists zz_trial_queue on public.posts;   -- 'zz': fires after the other BEFORE INSERT triggers
+create trigger zz_trial_queue
+  before insert on public.posts
+  for each row execute function public.trial_queue_on_insert();
+
+-- The creator's place in line: 1 = up next. Own posts only; null when the post is not queued.
+create or replace function public.trial_queue_position(p_post_id uuid)
+returns integer
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select (select count(*)::integer + 1 from public.posts q
+          where q.user_id = p.user_id and q.parent_post_id is null and q.status = 'queued'
+            and (q.created_at, q.id) < (p.created_at, p.id))
+  from public.posts p
+  where p.id = p_post_id and p.user_id = auth.uid() and p.status = 'queued'
+$$;
+grant execute on function public.trial_queue_position(uuid) to authenticated;
+
 -- ── 10. The decision ─────────────────────────────────────────────────────────
 -- Returns 'testing' | 'expand' | 'survived' | 'failed' | 'incomplete'.
 create or replace function public.trial_evaluate_post(p_post_id uuid, p_bar double precision)
@@ -975,7 +1080,7 @@ begin
 -- slot was not given back for inactivity. Inactive / released viewers do not block a decision (they count again if they
 -- return before it: opening the feed makes them active and on-demand assignment revives their slot).
   select count(*), count(*) filter (where not exposed and not assigned),
-         count(*) filter (where not exposed and last_active >= post.created_at and not released)
+         count(*) filter (where not exposed and last_active >= coalesce(post.testing_started_at, post.created_at) and not released)
     into pool_total, pool_left, pool_unexposed from public.trial_pool(p_post_id);
 
   k := public.trial_prior_strength(pool_total);
@@ -996,7 +1101,7 @@ begin
     -- POOL EXHAUSTED: every eligible (non-known) viewer has seen it and nobody is left to assign, so waiting 24 h cannot
     -- add information. Decide on the posterior mean: survive above the bar, ended well below it, otherwise incomplete.
     reason := 'pool_exhausted';
-    if alpha / (alpha + beta) > p_bar then
+    if alpha / (alpha + beta) >= p_bar - 1e-9 then   -- a tie survives
       verdict := 'survived';
     elsif alpha / (alpha + beta) < cfg.exhausted_fail_ratio * p_bar then
       verdict := 'failed';
@@ -1110,6 +1215,8 @@ begin
     update public.posts set status = 'incomplete' where id = p_post_id and status = 'trial';
     insert into public.notifications (recipient_id, actor_id, type, post_id) values (creator, creator, 'verdict_incomplete', p_post_id);
   end if;
+  -- a testing slot just freed up: the creator's oldest queued post starts its trial
+  perform public.trial_start_next_queued(creator);
 end;
 $$;
 
@@ -1129,6 +1236,11 @@ declare
 begin
   perform public.trial_refresh_active();
   bar := public.trial_current_bar();
+
+  -- creators with queued posts and a free testing slot (a trial was deleted, the limit was raised ...)
+  for r in select distinct q.user_id as uid from public.posts q where q.status = 'queued' and q.parent_post_id is null loop
+    perform public.trial_start_next_queued(r.uid);
+  end loop;
 
   for r in
     select p.id from public.posts p
@@ -1173,6 +1285,9 @@ set search_path = public
 as $$
 begin
   if (select engine_mode from public.trial_engine_config where id) = 'legacy' then
+    -- the queue belongs to the engine: in legacy mode every queued post simply starts its 24 h window now
+    update public.posts set status = 'trial', testing_started_at = now(), checkpoint_at = now() + interval '24 hours'
+     where status = 'queued' and parent_post_id is null;
     return public.run_survival_checkpoint_legacy();
   end if;
   return public.run_trial_engine();
@@ -1468,6 +1583,13 @@ select cron.schedule('trial-affinity', '7 * * * *', $cron$ select public.trial_r
 
 -- Rebuild affinity now so any affinity that came from old follows disappears at once (otherwise at the next hourly run).
 select public.trial_refresh_affinity();
+
+-- The ties: posts the pool-exhausted rule left 'incomplete' on a mean equal to the bar are evaluated again (a tie survives).
+select public.trial_admin_reevaluate(l.post_id::text)
+from (select distinct on (post_id) post_id, decision, reason from public.trial_engine_log
+      where created_at > now() - interval '7 days' order by post_id, id desc) l
+join public.posts p on p.id = l.post_id
+where l.decision = 'incomplete' and l.reason = 'pool_exhausted' and p.status = 'incomplete';
 
 -- Re-evaluate every post still testing under these rules now (the 5-minute cron does the same from here on).
 select public.run_survival_checkpoint();

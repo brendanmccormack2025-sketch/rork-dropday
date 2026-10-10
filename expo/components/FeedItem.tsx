@@ -726,8 +726,22 @@ export const FeedItem = memo(function FeedItem({
   }, [isOwner, post.id, onShare]);
 
   // The creator's own testing note + a progress bar (no numbers): refreshed while this item is on screen.
-  const trialNote = isOwner ? creatorTrialNote(post.status) : null;
+  const [queuePos, setQueuePos] = useState<number | null>(null);
+  const trialNote = isOwner ? creatorTrialNote(post.status, queuePos) : null;
   const [trialProgress, setTrialProgress] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isOwner || post.status !== "queued") return;
+    let cancelled = false;
+    supabase.rpc("trial_queue_position", { p_post_id: post.id }).then(
+      (res: { data: unknown }) => {
+        if (!cancelled && typeof res.data === "number") setQueuePos(res.data);
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwner, post.id, post.status]);
   useEffect(() => {
     if (!active || !isOwner || post.status !== "trial") return;
     let cancelled = false;
