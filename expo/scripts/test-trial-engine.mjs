@@ -35,6 +35,7 @@ eq("notifications show the incomplete verdict", [/verdict_incomplete/.test(notif
 eq("the badge has its own incomplete pill (not 'failed')", /incomplete: \{ label: "TRIAL INCOMPLETE"/.test(badge), true);
 const home = read("../app/(tabs)/index.tsx");
 eq("empty feed: 'You're all caught up' + 'Be the first to put something on Trial' + a button to the camera", [FEED_CAUGHT_UP_TITLE, FEED_CAUGHT_UP_BODY, /onCreate=\{\(\) => router\.push\("\/camera"\)\}/.test(home), /FEED_CAUGHT_UP_BUTTON/.test(home)], ["You're all caught up", "Be the first to put something on Trial", true, true]);
+eq("later feed pages send the ids already delivered (p_seen); the first page and pull-to-refresh do not", [/p_seen: offset > 0 \? loadedFeedIds/.test(prov), /function loadedFeedIds/.test(prov)], [true, true]);
 eq("app.json version untouched", JSON.parse(read("../app.json")).expo.version, "1.0.4");
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

@@ -682,6 +682,13 @@ const FEED_PAGE_SIZE = 20;
 /** One page of the server feed. `rows` is what get_feed returned (used for end detection). */
 type FeedPage = { posts: Post[]; offset: number; rows: number };
 
+/** Ids already delivered in this feed session; the server never sends them again (offsets shift as posts are watched). */
+function loadedFeedIds(data: InfiniteData<FeedPage, number> | undefined): string[] {
+  const ids: string[] = [];
+  for (const page of data?.pages ?? []) for (const p of page.posts) ids.push(p.id);
+  return ids;
+}
+
 /** Status allow-list for the feed (second layer behind get_feed). */
 const FEED_STATUSES = ["trial", "incomplete", "survived"];
 
@@ -1020,7 +1027,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           fn: string,
           args: Record<string, unknown>,
         ) => Promise<{ data: unknown; error: { message: string } | null }>;
-      }).rpc("get_feed_engine", { p_limit: FEED_PAGE_SIZE, p_offset: offset });
+      }).rpc("get_feed_engine", { p_limit: FEED_PAGE_SIZE, p_offset: offset, p_seen: offset > 0 ? loadedFeedIds(qc.getQueryData<InfiniteData<FeedPage, number>>(serverFeedKey)) : [] });
       let feedRpc = rpc;
       if (rpc.error) {
         // The engine migration has not been run yet: fall back to the plain server feed.

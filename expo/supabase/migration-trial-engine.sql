@@ -493,8 +493,10 @@ $$;
 
 -- Eligible viewers for a post: active, not the creator, not blocked either way. `exposed` = has seen it, `assigned` =
 -- already in a cohort. Total pool = all rows; remaining pool = not exposed and not assigned.
+-- last_active = their latest activity (opened the feed, watched, liked, posted); released = their slot was given back.
+drop function if exists public.trial_pool(uuid);
 create or replace function public.trial_pool(p_post_id uuid)
-returns table (user_id uuid, affinity double precision, exposed boolean, assigned boolean)
+returns table (user_id uuid, affinity double precision, exposed boolean, assigned boolean, last_active timestamptz, released boolean)
 language sql
 stable
 security definer
@@ -503,7 +505,9 @@ as $$
   select u.user_id,
          coalesce(a.score, 0),
          public.trial_exposed(p_post_id, u.user_id),
-         exists (select 1 from public.trial_assignments t where t.post_id = p_post_id and t.viewer_id = u.user_id)
+         exists (select 1 from public.trial_assignments t where t.post_id = p_post_id and t.viewer_id = u.user_id),
+         u.last_active,
+         exists (select 1 from public.trial_assignments t where t.post_id = p_post_id and t.viewer_id = u.user_id and t.released_at is not null)
   from public.trial_active_users u
   join public.posts p on p.id = p_post_id
   left join public.viewer_creator_affinity a on a.viewer_id = u.user_id and a.creator_id = p.user_id
@@ -780,13 +784,14 @@ as $$
 declare
   cfg public.trial_engine_config := public.trial_cfg();
   hide_mature boolean := false;
+  small_global boolean;
   unseen integer;
   got integer := 0;
-  c record;
   skipped uuid[] := '{}';
   pass integer;
   cand uuid[];
   pid uuid;
+  creator uuid;
   open_slots integer;
   n integer;
 begin
@@ -802,15 +807,20 @@ begin
   from public.profiles pr where pr.id = p_viewer;
   hide_mature := coalesce(hide_mature, false);
 
+  -- Small app: NO volume caps. Every eligible testing post is assigned, however many posts a creator made.
+  small_global := public.trial_pool_at_most(null, cfg.small_pool_everyone + 1);
+
   select count(*) into unseen
   from public.trial_assignments t join public.posts p on p.id = t.post_id
   where t.viewer_id = p_viewer and t.released_at is null and p.status = 'trial'
     and not public.trial_exposed(t.post_id, p_viewer);
-  if unseen >= cfg.ondemand_max_unseen then return 0; end if;
+  if not small_global and unseen >= cfg.ondemand_max_unseen then return 0; end if;
 
+  -- Candidates: testing posts this viewer may be shown whose cohort has an open slot (or a stale one), OLDEST FIRST, so
+  -- the caps above the threshold can never starve a post: a full post drops out of the list and the next one is reached.
   select coalesce(array_agg(x.post_id order by x.ord), '{}') into cand
   from (
-    select s.post_id, row_number() over (order by coalesce(af.score, 0) asc, p.qualified_view_count asc, p.created_at asc) as ord
+    select s.post_id, row_number() over (order by p.created_at asc, coalesce(af.score, 0) asc, p.id) as ord
     from public.trial_post_state s
     join public.posts p on p.id = s.post_id
     left join public.viewer_creator_affinity af on af.viewer_id = p_viewer and af.creator_id = p.user_id
@@ -823,13 +833,31 @@ begin
       and not exists (select 1 from public.reports r where r.reporter_id = p_viewer and r.target_type = 'post' and r.target_id = p.id)
       and not exists (select 1 from public.trial_assignments t where t.post_id = s.post_id and t.viewer_id = p_viewer and t.released_at is null)
       and not public.trial_exposed(s.post_id, p_viewer)
-    limit cfg.ondemand_batch * 5
+      and (small_global
+           or coalesce(s.stage_target, public.trial_cohort_size(0, s.stage))
+              > (select count(*) from public.trial_assignments a where a.post_id = s.post_id and a.stage = s.stage and a.released_at is null)
+           or exists (select 1 from public.trial_assignments a
+                      where a.post_id = s.post_id and a.released_at is null
+                        and a.assigned_at <= now() - (cfg.stall_minutes * interval '1 minute')
+                        and not public.trial_exposed(a.post_id, a.viewer_id)))
   ) x;
 
   for pass in 1..2 loop
     skipped := '{}';
     foreach pid in array cand loop
-      exit when got >= cfg.ondemand_batch or unseen + got >= cfg.ondemand_max_unseen;
+      exit when not small_global and (got >= cfg.ondemand_batch or unseen + got >= cfg.ondemand_max_unseen);
+      select user_id into creator from public.posts where id = pid;
+      if public.trial_small_pool(creator) then
+        -- everybody gets this post: no slots to protect, so no row lock either
+        insert into public.trial_assignments (post_id, viewer_id, stage)
+        select pid, p_viewer, s.stage from public.trial_post_state s where s.post_id = pid
+        on conflict (post_id, viewer_id) do update
+          set released_at = null, stage = excluded.stage, assigned_at = now()
+          where public.trial_assignments.released_at is not null;
+        get diagnostics n = row_count;
+        got := got + n;
+        continue;
+      end if;
       perform 1 from public.trial_post_state where post_id = pid and decision is null for update skip locked;
       if not found then
         skipped := skipped || pid;
@@ -841,7 +869,6 @@ begin
       left join public.trial_assignments a on a.post_id = s.post_id and a.stage = s.stage and a.released_at is null
       where s.post_id = pid
       group by s.stage_target, s.stage;
-      if public.trial_small_pool((select user_id from public.posts where id = pid)) then open_slots := 1; end if;
       if coalesce(open_slots, 0) > 0 then
         insert into public.trial_assignments (post_id, viewer_id, stage)
         select pid, p_viewer, s.stage from public.trial_post_state s where s.post_id = pid
@@ -944,7 +971,12 @@ begin
   if post.id is null or st.post_id is null or st.decision is not null then return 'testing'; end if;
 
   select count(*), coalesce(sum(score), 0) into n, sum_s from public.trial_post_scores(p_post_id);
-  select count(*), count(*) filter (where not exposed and not assigned), count(*) filter (where not exposed) into pool_total, pool_left, pool_unexposed from public.trial_pool(p_post_id);
+  -- pool_unexposed = viewers who could still show up for this post: they have been active since it was created and their
+-- slot was not given back for inactivity. Inactive / released viewers do not block a decision (they count again if they
+-- return before it: opening the feed makes them active and on-demand assignment revives their slot).
+  select count(*), count(*) filter (where not exposed and not assigned),
+         count(*) filter (where not exposed and last_active >= post.created_at and not released)
+    into pool_total, pool_left, pool_unexposed from public.trial_pool(p_post_id);
 
   k := public.trial_prior_strength(pool_total);
   alpha := k * p_bar + sum_s;
@@ -1199,7 +1231,12 @@ $$;
 -- (2) a few survived posts from high-affinity creators are boosted, (3) get_feed's rows follow, minus testing posts
 -- the viewer is not assigned to (their own are kept). page_rows is the number of source rows (so the app can tell the
 -- end of the feed even when filtering removed rows); an empty page returns one sentinel row with a null post_id.
-create or replace function public.get_feed_engine(p_limit integer default 20, p_offset integer default 0)
+-- Feed order for the viewer: (1) unseen assigned testing posts, oldest first, interleaved round-robin across creators so
+-- one account never fills the top (nothing is dropped); (2) a few survived posts from high-affinity creators; (3) the
+-- rest of get_feed. p_seen = ids already delivered in this feed session: they are never sent again, and pagination
+-- does not depend on offsets (which shift as the viewer watches). Without p_seen the old offset paging still works.
+drop function if exists public.get_feed_engine(integer, integer);
+create or replace function public.get_feed_engine(p_limit integer default 20, p_offset integer default 0, p_seen uuid[] default '{}')
 returns table (post_id uuid, "position" integer, page_rows integer)
 language plpgsql
 security definer
@@ -1209,6 +1246,8 @@ declare
   me uuid := auth.uid();
   cfg public.trial_engine_config := public.trial_cfg();
   hide_mature boolean := false;
+  seen uuid[] := coalesce(p_seen, '{}');
+  use_seen boolean := coalesce(cardinality(p_seen), 0) > 0;
   assigned uuid[] := '{}';
   boosted uuid[] := '{}';
   front uuid[];
@@ -1220,6 +1259,7 @@ declare
   src_rows integer := 0;
   feed_ok boolean := to_regprocedure('public.get_feed(integer,integer)') is not null;
   out_ids uuid[];
+  avail integer;
 begin
   if cfg.engine_mode = 'legacy' or me is null then
     if feed_ok then
@@ -1237,7 +1277,7 @@ begin
 
   -- A viewer who became active after the posts were created is assigned to open slots now (first page only).
   -- Never allowed to break the feed.
-  if p_offset = 0 then
+  if p_offset = 0 and not use_seen then
     begin
       perform public.trial_assign_on_demand(me);
     exception when others then
@@ -1245,9 +1285,11 @@ begin
     end;
   end if;
 
-  select coalesce(array_agg(x.post_id order by x.assigned_at), '{}') into assigned
+  select coalesce(array_agg(x.post_id order by x.rr, x.created_at, x.post_id), '{}') into assigned
   from (
-    select t.post_id, t.assigned_at from public.trial_assignments t
+    select t.post_id, p.created_at,
+           row_number() over (partition by p.user_id order by p.created_at, p.id) as rr   -- 1 = each creator's oldest
+    from public.trial_assignments t
     join public.posts p on p.id = t.post_id
     where t.viewer_id = me and t.released_at is null and p.status = 'trial' and p.parent_post_id is null and p.moderation_status = 'active'
       and p.user_id <> me and p.media_deleted_at is null
@@ -1256,6 +1298,7 @@ begin
       and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
       and not exists (select 1 from public.reports r where r.reporter_id = me and r.target_type = 'post' and r.target_id = p.id)
       and not public.trial_exposed(t.post_id, me)
+      and not (t.post_id = any (seen))
   ) x;
 
   select coalesce(array_agg(x.id), '{}') into boosted
@@ -1269,6 +1312,7 @@ begin
       and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
       and not exists (select 1 from public.reports r where r.reporter_id = me and r.target_type = 'post' and r.target_id = p.id)
       and not public.trial_exposed(p.id, me)
+      and not (p.id = any (seen))
     order by a.score desc, p.survived_at desc nulls last
     limit cfg.affinity_feed_boost
   ) x;
@@ -1276,7 +1320,11 @@ begin
   front := assigned || array(select b from unnest(boosted) b where not (b = any (assigned)));
   a_count := coalesce(cardinality(front), 0);
 
-  if p_offset < a_count then
+  if use_seen then
+    take_front := front[1 : least(a_count, p_limit)];
+    rest_limit := p_limit - coalesce(cardinality(take_front), 0);
+    rest_offset := 0;
+  elsif p_offset < a_count then
     take_front := front[p_offset + 1 : least(a_count, p_offset + p_limit)];
     rest_limit := p_limit - coalesce(cardinality(take_front), 0);
     rest_offset := 0;
@@ -1286,37 +1334,50 @@ begin
     rest_offset := p_offset - a_count;
   end if;
 
-  if feed_ok and rest_limit > 0 then
-    execute $q$
-      select coalesce(array_agg(f.post_id order by f.position), '{}'), count(*)::integer
-      from public.get_feed($1, $2) f
-    $q$ into rest_ids, src_rows using rest_limit, rest_offset;
+  if feed_ok and (rest_limit > 0 or use_seen) then
+    if use_seen then
+      -- the whole of get_feed's first 100 (its maximum page); what was already delivered is filtered out below
+      execute $q$ select coalesce(array_agg(f.post_id order by f.position), '{}'), count(*)::integer from public.get_feed(100, 0) f $q$
+        into rest_ids, src_rows;
+    else
+      execute $q$ select coalesce(array_agg(f.post_id order by f.position), '{}'), count(*)::integer from public.get_feed($1, $2) f $q$
+        into rest_ids, src_rows using rest_limit, rest_offset;
+    end if;
   end if;
 
-  -- drop testing posts this viewer is not assigned to (own posts stay), and anything already placed in front
+  -- drop testing posts this viewer is not assigned to (own posts stay), and anything already placed in front or seen
   rest_ids := array(
     select u.id
     from unnest(rest_ids) with ordinality as u(id, ord)
     join public.posts p on p.id = u.id
-    where not (u.id = any (front))
+    where not (u.id = any (front)) and not (u.id = any (seen))
       and ((p.status = 'survived' and (p.distribution_expires_at is null or p.distribution_expires_at > now())
             or (p.status = 'trial' and not public.trial_is_silenced(p.user_id, me) and exists (select 1 from public.trial_assignments t where t.post_id = p.id and t.viewer_id = me and t.released_at is null)))
            or (p.user_id = me and p.status in ('trial', 'incomplete', 'survived')))   -- 'incomplete' / 'archived' / 'expired': never served to others
     order by u.ord
   );
 
-  out_ids := coalesce(take_front, '{}') || rest_ids;
+  if use_seen then
+    avail := a_count + coalesce(cardinality(rest_ids), 0);   -- everything still undelivered
+    if rest_limit < coalesce(cardinality(rest_ids), 0) then
+      rest_ids := rest_ids[1 : greatest(rest_limit, 0)];
+    end if;
+  else
+    avail := coalesce(cardinality(take_front), 0) + src_rows;
+  end if;
+
+  out_ids := coalesce(take_front, '{}') || coalesce(rest_ids, '{}');
   if coalesce(cardinality(out_ids), 0) = 0 then
-    return query select null::uuid, -1, coalesce(cardinality(take_front), 0) + src_rows;
+    return query select null::uuid, -1, avail;
     return;
   end if;
   return query
-    select o.id, (p_offset + o.ord)::integer, coalesce(cardinality(take_front), 0) + src_rows
+    select o.id, (p_offset + o.ord)::integer, avail
     from unnest(out_ids) with ordinality as o(id, ord);
 end;
 $$;
 
-grant execute on function public.get_feed_engine(integer, integer) to authenticated;
+grant execute on function public.get_feed_engine(integer, integer, uuid[]) to authenticated;
 
 -- The creator's testing-progress indicator: a 0..1 fraction, no numbers. Own posts only.
 create or replace function public.trial_post_progress(p_post_id uuid)
@@ -1341,6 +1402,57 @@ end;
 $$;
 grant execute on function public.trial_post_progress(uuid) to authenticated;
 
+-- Debug (SQL editor only): for one viewer, every recent testing post and why it is (not) in their feed.
+--   select * from public.trial_debug_feed('mhmm');
+create or replace function public.trial_debug_feed(p_username text)
+returns table (
+  post_id uuid, creator text, created_at timestamptz, status text, decision text, stage integer, stage_target integer,
+  active_assigned integer, my_assignment text, exposed boolean, known text, blocked boolean, reported boolean,
+  moderation text, media_deleted boolean, why text
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v uuid;
+begin
+  select id into v from public.profiles where lower(username) = lower(p_username);
+  if v is null then raise exception 'no such user'; end if;
+  return query
+  select p.id, cr.username, p.created_at, p.status, s.decision, s.stage, s.stage_target,
+         (select count(*)::integer from public.trial_assignments a where a.post_id = p.id and a.stage = s.stage and a.released_at is null),
+         coalesce((select case when a.released_at is null then 'active' else 'released' end from public.trial_assignments a where a.post_id = p.id and a.viewer_id = v), 'none'),
+         public.trial_exposed(p.id, v),
+         (select string_agg(distinct k.source, '+') from public.known_connections k where k.user_id = p.user_id and k.other_id = v),
+         exists (select 1 from public.user_blocks b where (b.blocker_id = v and b.blocked_id = p.user_id) or (b.blocker_id = p.user_id and b.blocked_id = v)),
+         exists (select 1 from public.reports r where r.reporter_id = v and r.target_type = 'post' and r.target_id = p.id),
+         p.moderation_status, p.media_deleted_at is not null,
+         case
+           when p.user_id = v then 'own post'
+           when p.status <> 'trial' then 'not testing (' || p.status || ')'
+           when s.post_id is null then 'engine has not started it yet'
+           when s.decision is not null then 'decided: ' || s.decision
+           when public.trial_is_silenced(p.user_id, v) then 'build in silence (known)'
+           when exists (select 1 from public.user_blocks b where (b.blocker_id = v and b.blocked_id = p.user_id) or (b.blocker_id = p.user_id and b.blocked_id = v)) then 'blocked'
+           when exists (select 1 from public.reports r where r.reporter_id = v and r.target_type = 'post' and r.target_id = p.id) then 'reported by viewer'
+           when p.moderation_status <> 'active' or p.media_deleted_at is not null then 'moderation / media deleted'
+           when public.trial_exposed(p.id, v) then 'already seen'
+           when exists (select 1 from public.trial_assignments a where a.post_id = p.id and a.viewer_id = v and a.released_at is null) then 'in feed (assigned)'
+           when exists (select 1 from public.trial_assignments a where a.post_id = p.id and a.viewer_id = v) then 'released: revived on the next feed load'
+           else 'not assigned yet: assigned on the next feed load'
+         end
+  from public.posts p
+  join public.profiles cr on cr.id = p.user_id
+  left join public.trial_post_state s on s.post_id = p.id
+  where p.parent_post_id is null and p.created_at > now() - interval '3 days'
+  order by p.created_at desc
+  limit 100;
+end;
+$$;
+revoke all on function public.trial_debug_feed(text) from public, anon, authenticated;
+
 -- ── 14. Cron ─────────────────────────────────────────────────────────────────
 -- Verdicts: the existing 5-minute job 'survival-checkpoint' already calls run_survival_checkpoint() (now the switch).
 -- Re-created here so it exists on a database that never had it. Affinity: hourly.
@@ -1356,3 +1468,6 @@ select cron.schedule('trial-affinity', '7 * * * *', $cron$ select public.trial_r
 
 -- Rebuild affinity now so any affinity that came from old follows disappears at once (otherwise at the next hourly run).
 select public.trial_refresh_affinity();
+
+-- Re-evaluate every post still testing under these rules now (the 5-minute cron does the same from here on).
+select public.run_survival_checkpoint();

@@ -705,6 +705,74 @@ if (!BIN) {
       eq("flag off: the remaining sources are contact + hide_list", q("select string_agg(distinct source, ',' order by source) from public.known_connections"), "contact,hide_list");
       wipePrivacy();
 
+      // 21) volume: every post reaches every eligible stranger; feed order; inactive viewers; no starvation at scale
+      const PID = (n) => `cccccccc-0000-0000-0000-${String(n).padStart(12, "0")}`;
+      const mkPostAt = (id, creator, minutesAgo) => mkPost(id, creator, minutesAgo);
+      const feedIds = (uid, limit = 100, offset = 0, seenIds = []) => q(`set role authenticated; set request.jwt.claim.sub='${uid}'; select coalesce(string_agg(post_id::text, ',' order by "position"), '') from public.get_feed_engine(${limit}, ${offset}, array[${seenIds.map((i) => `'${i}'`).join(",")}]::uuid[]) where post_id is not null`).split("\n").pop().split(",").filter(Boolean);
+
+      freshWorld(5);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      for (let i = 1; i <= 15; i++) mkPostAt(PID(i), U(1), 100 - i);
+      const all15 = Array.from({ length: 15 }, (_, i) => PID(i + 1));
+      ok("small app: a creator with 15 testing posts -> every eligible stranger gets all 15 (batch/unseen caps do not apply)", [2, 3, 4, 5].every((v) => { const f = feedIds(U(v)); return all15.every((id) => f.includes(id)); }));
+      eq("...each post is assigned to all 4 strangers", q(`select min(c) || ':' || max(c) from (select count(*) c from public.trial_assignments where released_at is null group by post_id) z`), "4:4");
+      freshWorld(5);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      for (let i = 1; i <= 25; i++) mkPostAt(PID(i), U(1), 200 - i);
+      const page1 = feedIds(U(2), 20);
+      const page2 = feedIds(U(2), 20, 20, page1);
+      eq("25 posts: page 1 has 20, page 2 (with the ids already delivered) the other 5, no repeats, nothing lost", [page1.length, page2.length, new Set([...page1, ...page2]).size], [20, 5, 25]);
+      eq("oldest first", page1[0], PID(1));
+
+      // feed order: round-robin across creators, oldest first, watched posts not re-pinned
+      freshWorld(5);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      mkPostAt(PID(1), U(1), 100); mkPostAt(PID(2), U(1), 99); mkPostAt(PID(3), U(1), 98); mkPostAt(PID(4), U(1), 97); mkPostAt(PID(5), U(1), 96);
+      mkPostAt(PID(6), U(2), 95); mkPostAt(PID(7), U(2), 94); mkPostAt(PID(8), U(3), 93);
+      const order = feedIds(U(4));
+      const creatorOf = (id) => q(`select user_id from public.posts where id='${id}'`);
+      eq("round-robin by creator, oldest first inside each round, no post dropped", [order.length, order.slice(0, 3).map(creatorOf).join(), order.slice(3, 5).map(creatorOf).join()], [8, [U(1), U(2), U(3)].join(), [U(1), U(2)].join()]);
+      eq("...the first round is each creator's oldest post", order.slice(0, 3), [PID(1), PID(6), PID(8)]);
+      Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${PID(1)}','${U(4)}'), ('${PID(6)}','${U(4)}')`);
+      const after = feedIds(U(4));
+      ok("posts the viewer already watched are not pinned to the top again", after[0] !== PID(1) && after[0] !== PID(6) && after.slice(0, 5).every((id) => id !== PID(1) && id !== PID(6)));
+
+      // pool exhausted: inactive / released viewers do not block; one who returns is counted
+      freshWorld(5);
+      mkPost(P1, U(1));
+      for (const v of [2, 3]) view(P1, U(v), { watch: 8000, dur: 12000 });
+      Q(`update public.post_raw_views set created_at = now() - interval '2 hours' where viewer_id in ('${U(4)}','${U(5)}') and post_id='${P0}'`);
+      Q(`update public.trial_assignments set released_at = now() where post_id='${P1}' and viewer_id in ('${U(4)}','${U(5)}')`);
+      engine();
+      eq("two watchers + two released, inactive viewers -> pool exhausted -> decided by the mean (it survives)", [status(P1), reasonOf(P1)], ["survived", "pool_exhausted"]);
+      freshWorld(5);
+      mkPost(P1, U(1));
+      for (const v of [2, 3]) view(P1, U(v), { watch: 8000, dur: 12000 });
+      Q(`update public.post_raw_views set created_at = now() - interval '2 hours' where viewer_id in ('${U(4)}','${U(5)}') and post_id='${P0}'`);
+      Q(`update public.trial_assignments set released_at = now() where post_id='${P1}' and viewer_id in ('${U(4)}','${U(5)}')`);
+      viewerOf(U(4));   // 4 comes back before the decision
+      engine();
+      eq("an inactive viewer who returns before the decision is counted again (and blocks it until they watch)", [status(P1), q(`select released_at is null from public.trial_assignments where post_id='${P1}' and viewer_id='${U(4)}'`)], ["trial", "t"]);
+      view(P1, U(4), { watch: 8000, dur: 12000 });
+      engine();
+      eq("...then they watch and the post is decided (viewer 5 is still inactive)", [status(P1), reasonOf(P1)], ["survived", "pool_exhausted"]);
+
+      // above the threshold: caps limit assignments per load, but every post gets its cohort (oldest first)
+      freshWorld(1);
+      Q(`update public.trial_engine_config set small_pool_everyone=0, ondemand_batch=2, ondemand_max_unseen=4`);
+      for (let i = 1; i <= 8; i++) mkPostAt(PID(i), U(1), 100 - i);
+      for (let v = 2; v <= 12; v++) q(`select 1`);
+      viewerOf(U(2));
+      eq("at scale a load assigns at most the batch, oldest posts first", q(`select string_agg(post_id::text, ',' order by post_id) from public.trial_assignments where viewer_id='${U(2)}'`), [PID(1), PID(2)].join());
+      for (let round = 0; round < 4; round++) for (let v = 2; v <= 19; v++) viewerOf(U(v));
+      eq("...and after enough loads no post is starved: all 8 posts hold a full cohort of 3", q(`select min(c) || ':' || max(c) || ':' || count(*) from (select count(*) c from public.trial_assignments where released_at is null group by post_id) z`), "3:3:8");
+      Q(`update public.trial_engine_config set ondemand_batch=10, ondemand_max_unseen=20`);
+      freshWorld(5);
+      mkPostAt(PID(1), U(1), 50);
+      viewerOf(U(2));
+      eq("trial_debug_feed explains each post for a viewer", [q(`select why from public.trial_debug_feed('u2') where post_id='${PID(1)}'`), q(`select why from public.trial_debug_feed('u1') where post_id='${PID(1)}'`)], ["in feed (assigned)", "own post"]);
+      ok("clients cannot call the debug feed", asUser(U(2), `select * from public.trial_debug_feed('u2')`).status !== 0);
+
       // 20) affinity from behavior only unless known_source_follows is on
       freshWorld(6);
       Q(`insert into public.follows (follower_id, followee_id) values ('${U(2)}','${U(1)}')`);
