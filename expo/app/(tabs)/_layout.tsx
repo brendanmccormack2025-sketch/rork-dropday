@@ -1,9 +1,10 @@
 import { Tabs, useRouter } from "expo-router";
 import { Home, User } from "lucide-react-native";
 import React, { useCallback, useState } from "react";
-import { Pressable, StyleSheet } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import { Pressable, StyleSheet, View } from "react-native";
+import { BlurView } from "expo-blur";
 
+import { colors } from "@/constants/design";
 import CenterPostButton from "@/components/CenterPostButton";
 import PostChoiceSheet from "@/components/PostChoiceSheet";
 
@@ -20,18 +21,15 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#FF5A44",
-        tabBarInactiveTintColor: "rgba(255,255,255,0.75)",
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: styles.tabBar,
-        // Bottom scrim behind the tab bar: transparent → rgba(0,0,0,0.75)
-        // reached at 45% of the bar height, so icons stay legible over any
-        // full-bleed video content.
+        // Light bar for the light theme: the cream page, slightly see-through, over a subtle blur, with a hairline top border.
         tabBarBackground: () => (
-          <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.75)"]}
-            locations={[0, 0.45]}
-            style={StyleSheet.absoluteFill}
-          />
+          <View style={StyleSheet.absoluteFill}>
+            <BlurView intensity={40} tint="light" style={StyleSheet.absoluteFill} />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.tabBar }]} />
+          </View>
         ),
         tabBarLabelStyle: styles.label,
         // 3px gap between icon and label.
@@ -85,6 +83,8 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     height: 88,
     paddingTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.hairline,
   },
   label: {
     fontSize: 10,

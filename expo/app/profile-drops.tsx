@@ -11,6 +11,7 @@ import { theme } from "@/constants/theme";
 import { usePosts, isOnOwnProfile, type Post } from "@/providers/PostsProvider";
 import { profilePostIds } from "@/lib/profilePosts";
 import { isOnOtherProfile } from "@/lib/profileVisibility";
+import { postsForTab, type OwnTab } from "@/lib/profileUi";
 import { useAuth } from "@/providers/AuthProvider";
 import { supabase } from "@/lib/supabase";
 
@@ -30,7 +31,7 @@ export default function ProfileDropsScreen() {
   const { myPosts } = usePosts();
   const insets = useSafeAreaInsets();
 
-  const params = useLocalSearchParams<{ initialIndex: string; userId: string }>();
+  const params = useLocalSearchParams<{ initialIndex: string; userId: string; tab?: string }>();
   const initialIndex = parseInt(params.initialIndex ?? "0", 10);
   const userId = params.userId ?? null;
 
@@ -105,8 +106,10 @@ export default function ProfileDropsScreen() {
     () =>
       (isOtherUser ? otherUserPostsQuery.data ?? [] : myPosts)
         .filter((p) => !p.parent_post_id)
-        .filter(isOtherUser ? isOnOtherProfile : isOnOwnProfile),
-    [isOtherUser, myPosts, otherUserPostsQuery.data],
+        .filter(isOtherUser ? isOnOtherProfile : isOnOwnProfile)
+        // The own profile has tabs: the viewer shows the same list as the tab that was tapped.
+        .filter((p) => (isOtherUser || (params.tab !== "survived" && params.tab !== "trial") ? true : postsForTab([p], params.tab as OwnTab).length > 0)),
+    [isOtherUser, myPosts, otherUserPostsQuery.data, params.tab],
   );
 
   const handleReactions = useCallback(

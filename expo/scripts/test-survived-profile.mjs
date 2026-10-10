@@ -25,7 +25,7 @@ eq("...and not when the media is missing (hidden, not faked)", isOnOtherProfile(
 eq("own profile: queued, testing and survived posts (forever); never ended or incomplete ones", [survivedLive, survivedAfterWindow, queued, testing, ended, incomplete, neverSurvivedExpired].map((p) => isOnOwnProfilePost(p)), [true, true, true, true, false, false, false]);
 
 const badge = read("../components/TrialStatusBadge.tsx"), user = read("../app/user/[id].tsx"), drops = read("../app/profile-drops.tsx"), prov = read("../providers/PostsProvider.tsx"), prof = read("../app/(tabs)/profile.tsx");
-eq("the SURVIVED badge stays after the window (expired + survived_at)", [/survivedAt/.test(badge), /shown === "expired" && survivedAt/.test(badge), /survivedAt=\{post\.survived_at\}/.test(prof)], [true, true, true]);
+eq("the SURVIVED badge component keeps a survived post survived after its window (the profile tiles no longer carry a badge: everything there survived)", [/survivedAt/.test(badge), /shown === "expired" && survivedAt/.test(badge), /TrialStatusBadge/.test(prof)], [true, true, false]);
 eq("others' profiles ask the server (profile_posts) and fall back to survived-only filters", [/profilePostIds\(id\)/.test(user), /\.not\("survived_at", "is", null\)/.test(user), /profilePostIds\(userId\)/.test(drops), /isOnOtherProfile/.test(user) && /isOnOtherProfile/.test(drops)], [true, true, true, true]);
 eq("others never get the old 'trial' status query", [/\.in\("status", \["trial", "survived"\]\)/.test(user), /\.in\("status", \["trial", "survived"\]\)/.test(drops)], [false, false]);
 eq("own profile keeps room for a creator who posts a lot", /\.limit\(200\)/.test(prov), true);

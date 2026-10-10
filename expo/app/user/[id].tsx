@@ -1,45 +1,24 @@
 import React, { useCallback, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Dimensions,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  View,
-} from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
-import { TrialStatusBadge } from "@/components/TrialStatusBadge";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  Ban,
-  Heart,
-  MessageCircle,
-  Sparkles,
-  Video,
-} from "lucide-react-native";
+import { ArrowLeft, Ban, Trophy } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
-import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
-import { resolveAvatarUrl, type Post } from "@/providers/PostsProvider";
+import { type Post } from "@/providers/PostsProvider";
 import { profilePostIds } from "@/lib/profilePosts";
 import { isOnOtherProfile } from "@/lib/profileVisibility";
-import CreatorLinkPills from "@/components/CreatorLinkPills";
+import { LinkIconRow, PostTile, ProfileEmpty, RoundAvatar, RoundIconButton, SoftButton, gridStyles } from "@/components/profile/ProfileParts";
+import { SIDE_MARGIN, colors, space, type } from "@/constants/design";
+import { EMPTY_OTHER_SURVIVED, GRID_COLUMNS } from "@/lib/profileUi";
 import VerifiedCreatorBadge from "@/components/VerifiedCreatorBadge";
 import { graduationColumns, linkSourceFor, noteMissingGraduationColumns, parseCreatorStatus, showsVerifiedBadge } from "@/lib/creatorStatus";
 import { noteMissingYoutubeColumn, profileLinkColumns } from "@/lib/creatorLinks";
 import { supabase } from "@/lib/supabase";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
-
-const { width: SCREEN_W } = Dimensions.get("window");
-const GAP = 4;
-const COL_WIDTH = (SCREEN_W - 32 - GAP) / 2;
 
 export default function PublicProfileScreen() {
   const router = useRouter();
@@ -182,37 +161,25 @@ export default function PublicProfileScreen() {
       <SafeAreaView edges={["top"]} style={styles.safe}>
         <FlatList
           data={visibleDrops}
+          key={`grid-${GRID_COLUMNS}`}
+          numColumns={GRID_COLUMNS}
           keyExtractor={(p) => p.id}
-          numColumns={2}
-          columnWrapperStyle={visibleDrops.length > 0 ? styles.row : undefined}
-          contentContainerStyle={styles.listContent}
+          columnWrapperStyle={visibleDrops.length > 0 ? gridStyles.row : undefined}
+          contentContainerStyle={gridStyles.list}
           showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={theme.accent}
-              progressBackgroundColor={theme.card}
-            />
-          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} progressBackgroundColor={theme.card} />}
           ListHeaderComponent={
-            <View style={styles.header}>
-              {/* Top bar */}
+            <View>
               <View style={styles.topBar}>
-                <Pressable
+                <RoundIconButton
+                  label="Back"
                   onPress={() => {
                     if (navigation.canGoBack()) router.back();
                     else router.replace("/(tabs)");
                   }}
-                  style={styles.backBtn}
-                  hitSlop={8}
                 >
-                  <ArrowLeft color={theme.text} size={20} strokeWidth={2} />
-                </Pressable>
-                <UiText style={styles.topBarTitle} numberOfLines={1}>
-                  @{username}
-                </UiText>
-                <View style={styles.backBtn} />
+                  <ArrowLeft color={colors.text} size={19} strokeWidth={2.2} />
+                </RoundIconButton>
               </View>
 
               {isLoading ? (
@@ -220,110 +187,54 @@ export default function PublicProfileScreen() {
                   <ActivityIndicator color={theme.accent} size="large" />
                 </View>
               ) : (
-                <>
-                  {/* Avatar + name */}
-                  <View style={styles.profileRow}>
-                    <View style={styles.avatarWrap}>
-                      <ProfileAvatar
-                        avatarUrl={profile?.avatar_url}
-                        name={displayName}
+                <View style={styles.identity}>
+                  <RoundAvatar avatarUrl={profile?.avatar_url} name={displayName} />
+                  <View style={styles.nameRow}>
+                    <UiText style={styles.name} numberOfLines={1}>
+                      {displayName}
+                    </UiText>
+                    {showsVerifiedBadge(profile) ? <VerifiedCreatorBadge compact /> : null}
+                  </View>
+                  <UiText style={styles.handle}>@{username}</UiText>
+                  {profile?.bio ? (
+                    <UiText style={styles.bio} numberOfLines={3}>
+                      {profile.bio}
+                    </UiText>
+                  ) : null}
+                  <LinkIconRow profile={linkSourceFor(profile)} />
+                  {!isOwnProfile && (
+                    <View style={styles.actionWrap}>
+                      <SoftButton
+                        label={userProfileBlocked ? "Unblock" : "Block"}
+                        disabled={blockPending}
+                        icon={<Ban color={colors.textSecondary} size={15} strokeWidth={2.2} />}
+                        onPress={() => (userProfileBlocked ? unblockUser(id) : blockUser(id))}
                       />
                     </View>
-                    <View style={styles.profileInfo}>
-                      <UiText style={styles.displayName} numberOfLines={1}>
-                        {displayName}
-                      </UiText>
-                      <UiText style={styles.usernameText}>@{username}</UiText>
-                      {showsVerifiedBadge(profile) ? <VerifiedCreatorBadge /> : null}
-                    </View>
-                  </View>
-
-                  {/* Bio */}
-                  {profile?.bio ? (
-                    <UiText style={styles.bio}>{profile.bio}</UiText>
-                  ) : null}
-
-                  {/* Links (shared helper: only valid https links) */}
-                  <CreatorLinkPills profile={linkSourceFor(profile)} />
-
-                  {/* Block button */}
-                  {!isOwnProfile && (
-                    <View style={styles.actionRow}>
-                      <Pressable
-                        onPress={() => {
-                          if (userProfileBlocked) {
-                            unblockUser(id);
-                          } else {
-                            blockUser(id);
-                          }
-                        }}
-                        disabled={blockPending}
-                        style={({ pressed }) => [
-                          styles.blockBtn,
-                          userProfileBlocked && styles.blockBtnActive,
-                          pressed && styles.blockBtnPressed,
-                        ]}
-                      >
-                        {blockPending ? (
-                          <ActivityIndicator color={theme.textMuted} size="small" />
-                        ) : (
-                          <>
-                            <Ban
-                              color={userProfileBlocked ? theme.textMuted : theme.textMuted}
-                              size={16}
-                              strokeWidth={2.5}
-                            />
-                            <UiText style={styles.blockBtnText}>
-                              {userProfileBlocked ? "Unblock" : "Block"}
-                            </UiText>
-                          </>
-                        )}
-                      </Pressable>
-                    </View>
                   )}
-
-                  {/* Section header — hidden when this account is blocked */}
-                  {!userProfileBlocked && (
-                    <View style={styles.sectionHeader}>
-                      <Sparkles color={theme.accent} size={14} strokeWidth={2} />
-                      <UiText style={styles.sectionLabel}>On Trial now</UiText>
-                    </View>
-                  )}
-                </>
+                </View>
               )}
+              <View style={{ height: space.lg }} />
             </View>
           }
           ListEmptyComponent={
             !isLoading ? (
               userProfileBlocked ? (
-                <View style={styles.empty}>
-                  <Ban color={theme.textDim} size={40} strokeWidth={1.5} />
-                  <UiText style={styles.emptyTitle}>
-                    You've blocked this account
-                  </UiText>
-                  <UiText style={styles.emptySub}>
-                    Unblock @{username} to see their posts again.
-                  </UiText>
-                </View>
+                <ProfileEmpty
+                  icon={<Ban color={colors.textTertiary} size={36} strokeWidth={1.6} />}
+                  title="You've blocked this account"
+                  body={`Unblock @${username} to see their posts again.`}
+                />
               ) : (
-                <View style={styles.empty}>
-                  <Video color={theme.textDim} size={40} strokeWidth={1.5} />
-                  <UiText style={styles.emptyTitle}>Nothing on trial right now</UiText>
-                  <UiText style={styles.emptySub}>
-                    @{username} has no posts on trial at the moment.
-                  </UiText>
-                </View>
+                <ProfileEmpty icon={<Trophy color={colors.textTertiary} size={36} strokeWidth={1.6} />} title={EMPTY_OTHER_SURVIVED} />
               )
             ) : null
           }
-          renderItem={({ item }) => (
-            <ProfileTile
+          renderItem={({ item, index }) => (
+            <PostTile
               post={item}
               onPress={() => {
-                router.push({
-                  pathname: "/profile-drops",
-                  params: { userId: id, initialIndex: "0" },
-                } as never);
+                router.push({ pathname: "/profile-drops", params: { userId: id, initialIndex: String(index) } } as never);
               }}
             />
           )}
@@ -333,298 +244,15 @@ export default function PublicProfileScreen() {
   );
 }
 
-function ProfileTile({ post, onPress }: { post: Post; onPress: () => void }) {
-  const coverUri = post.thumbnail_url ?? post.media_url;
-  return (
-    <Pressable onPress={onPress} style={styles.tile}>
-      <Image
-        source={{ uri: coverUri }}
-        style={StyleSheet.absoluteFill}
-        contentFit="cover"
-        transition={100}
-      />
-      {post.media_type === "video" && (
-        <View style={styles.videoBadge}>
-          <Video color="#fff" size={10} fill="#fff" />
-        </View>
-      )}
-      <LinearGradient
-        colors={["transparent", "rgba(0,0,0,0.7)"]}
-        style={styles.tileGrad}
-      />
-      {/* Everything on someone else's profile survived Trial. */}
-      <View style={styles.statusBadgeWrap}>
-        <TrialStatusBadge status="survived" />
-      </View>
-      <View style={styles.tileBottom}>
-        <View style={styles.tileStats}>
-          <Heart color={theme.danger} size={10} fill={theme.danger} />
-          <UiText style={styles.tileStatText}>{post.like_count ?? 0}</UiText>
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg },
+  root: { flex: 1, backgroundColor: colors.base },
   safe: { flex: 1 },
-  listContent: { paddingBottom: 120 },
-
-  /* Header */
-  header: { paddingHorizontal: 16, paddingTop: 8 },
-
-  /* Top bar */
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 20,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 0,
-    backgroundColor: "rgba(10,10,10,0.08)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  topBarTitle: {
-    color: theme.text,
-    fontSize: 16,
-    fontWeight: "900" as const,
-    letterSpacing: -0.2,
-  },
-
-  /* Loading */
-  loadingWrap: {
-    paddingVertical: 60,
-    alignItems: "center",
-  },
-
-  /* Profile row */
-  profileRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    marginBottom: 16,
-  },
-  avatarWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  profileInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  displayName: {
-    color: theme.text,
-    fontSize: 22,
-    fontWeight: "900" as const,
-    letterSpacing: -0.3,
-  },
-  usernameText: {
-    color: theme.textMuted,
-    fontSize: 15,
-    fontWeight: "600" as const,
-  },
-
-  /* Bio */
-  bio: {
-    color: theme.textMuted,
-    fontSize: 14,
-    fontWeight: "500" as const,
-    lineHeight: 20,
-    marginBottom: 16,
-  },
-
-  /* Follow / message buttons */
-  actionRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 18,
-  },
-  followBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: theme.accent,
-    paddingVertical: 13,
-    borderRadius: 0,
-    shadowColor: theme.accent,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  followBtnPressed: {
-    backgroundColor: theme.primaryDeep,
-    transform: [{ scale: 0.97 }],
-  },
-  followBtnActive: {
-    backgroundColor: "rgba(10,10,10,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(10,10,10,0.1)",
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  followBtnActivePressed: {
-    backgroundColor: "rgba(10,10,10,0.06)",
-  },
-  followBtnText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "700" as const,
-  },
-  followBtnTextActive: {
-    color: theme.textMuted,
-    fontSize: 15,
-    fontWeight: "600" as const,
-  },
-
-  /* Block button */
-  blockBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "rgba(10,10,10,0.07)",
-    borderWidth: 1,
-    borderColor: "rgba(10,10,10,0.1)",
-    paddingVertical: 13,
-    paddingHorizontal: 20,
-    borderRadius: 0,
-  },
-  blockBtnActive: {
-    backgroundColor: "rgba(232,41,28,0.1)",
-    borderColor: "rgba(232,41,28,0.2)",
-  },
-  blockBtnPressed: {
-    opacity: 0.7,
-  },
-  blockBtnText: {
-    color: theme.textMuted,
-    fontSize: 15,
-    fontWeight: "600" as const,
-  },
-
-  /* Stats */
-  statsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 24,
-    marginBottom: 22,
-  },
-  stat: {
-    alignItems: "center",
-    gap: 3,
-  },
-  statNum: {
-    color: theme.text,
-    fontSize: 22,
-    fontWeight: "900" as const,
-    letterSpacing: -0.4,
-  },
-  statLabel: {
-    color: theme.textMuted,
-    fontSize: 11,
-    fontWeight: "600" as const,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
-  statDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: "rgba(10,10,10,0.07)",
-  },
-
-  /* Section header */
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 12,
-  },
-  sectionLabel: {
-    color: theme.textMuted,
-    fontSize: 13,
-    fontWeight: "900" as const,
-    letterSpacing: 0.3,
-    textTransform: "uppercase",
-  },
-
-  /* Empty */
-  empty: {
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 56,
-    paddingHorizontal: 32,
-  },
-  emptyTitle: {
-    color: theme.text,
-    fontSize: 17,
-    fontWeight: "900" as const,
-  },
-  emptySub: {
-    color: theme.textMuted,
-    fontSize: 13,
-    textAlign: "center",
-    lineHeight: 19,
-  },
-
-  /* Tile grid */
-  row: { gap: GAP, marginBottom: GAP },
-  statusBadgeWrap: { position: "absolute", top: 6, left: 6 },
-  tile: {
-    flex: 1,
-    aspectRatio: 0.85,
-    borderRadius: 0,
-    overflow: "hidden",
-    backgroundColor: theme.card,
-  },
-  tileGrad: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: "50%",
-  },
-  videoBadge: {
-    position: "absolute",
-    top: 6,
-    right: 6,
-    minWidth: 20,
-    height: 20,
-    borderRadius: 0,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 5,
-  },
-  tileBottom: {
-    position: "absolute",
-    left: 8,
-    right: 8,
-    bottom: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  tileStats: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  tileStatText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "900" as const,
-  },
+  topBar: { flexDirection: "row", justifyContent: "flex-start", paddingHorizontal: SIDE_MARGIN, paddingTop: space.sm },
+  loadingWrap: { paddingVertical: space.xxl, alignItems: "center" },
+  identity: { alignItems: "center", paddingHorizontal: SIDE_MARGIN, paddingTop: space.xs },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: space.md, maxWidth: "100%" },
+  name: { color: colors.text, ...type.name, flexShrink: 1 },
+  handle: { color: colors.textSecondary, ...type.handle, marginTop: 2 },
+  bio: { color: colors.text, ...type.body, textAlign: "center", marginTop: space.md, maxWidth: 320 },
+  actionWrap: { marginTop: space.lg },
 });

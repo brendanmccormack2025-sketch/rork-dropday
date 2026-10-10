@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { Animated, Easing, Pressable, StyleSheet } from "react-native";
 import { Plus } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
+import { colors, radius } from "@/constants/design";
 import { Platform } from "react-native";
 
 type Props = {
@@ -9,8 +10,8 @@ type Props = {
 };
 
 /**
- * Center tab-bar "+" button — a 38×38 solid white rounded square with a
- * dark plus glyph. Idle pulse is a subtle scale animation only; press
+ * Center tab-bar "+" button — a 38×38 Trial-red rounded button with a
+ * white plus glyph (the one primary action of the bar). Idle pulse is a subtle scale animation only; press
  * feedback keeps its haptic + squash.
  */
 export default function CenterPostButton({ onPress }: Props) {
@@ -78,7 +79,7 @@ export default function CenterPostButton({ onPress }: Props) {
           { transform: [{ scale: Animated.multiply(pressScale, pulseAnim) }] },
         ]}
       >
-        <Plus color="#1A1A18" size={20} strokeWidth={2.5} />
+        <Plus color={colors.onPrimary} size={20} strokeWidth={2.5} />
       </Animated.View>
     </Pressable>
   );
@@ -96,8 +97,8 @@ const styles = StyleSheet.create({
   btn: {
     width: SIZE,
     height: SIZE,
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
+    borderRadius: radius.button,
+    backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
   },

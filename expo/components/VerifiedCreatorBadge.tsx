@@ -6,7 +6,15 @@ import UiText from "@/components/UiText";
 import { BADGE_LABEL } from "@/lib/creatorStatus";
 
 /** "Verified Big Creator": a gold cap-and-label pill, unlike the survival status pills (TrialStatusBadge). */
-export default function VerifiedCreatorBadge() {
+export default function VerifiedCreatorBadge({ compact }: { compact?: boolean } = {}) {
+  if (compact) {
+    // A small round badge that sits next to the name.
+    return (
+      <View style={styles.compact} accessible accessibilityRole="text" accessibilityLabel={BADGE_LABEL}>
+        <GraduationCap color="#5B4300" size={12} strokeWidth={2.4} />
+      </View>
+    );
+  }
   return (
     <View style={styles.badge} accessible accessibilityRole="text" accessibilityLabel={BADGE_LABEL}>
       <GraduationCap color="#5B4300" size={13} strokeWidth={2.4} />
@@ -16,6 +24,7 @@ export default function VerifiedCreatorBadge() {
 }
 
 const styles = StyleSheet.create({
+  compact: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#F6C945", alignItems: "center", justifyContent: "center" },
   badge: {
     alignSelf: "flex-start",
     flexDirection: "row",

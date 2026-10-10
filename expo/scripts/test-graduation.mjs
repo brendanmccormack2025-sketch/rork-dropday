@@ -63,8 +63,8 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
   ok("the badge component is distinct (gold cap + 'Verified Big Creator'), not a survival pill", /BADGE_LABEL/.test(badge) && /GraduationCap/.test(badge) && /#F6C945/.test(badge) && !/import[^;]*TrialStatusBadge/.test(badge));
   const profile = read("../app/(tabs)/profile.tsx");
   const other = read("../app/user/[id].tsx");
-  ok("own profile: badge + links through the graduated link source", /showsVerifiedBadge\(myProfile\) \? <VerifiedCreatorBadge/.test(profile) && /CreatorLinkPills profile=\{linkSourceFor\(myProfile\)\}/.test(profile));
-  ok("someone else's profile: the same", /showsVerifiedBadge\(profile\) \? <VerifiedCreatorBadge/.test(other) && /CreatorLinkPills profile=\{linkSourceFor\(profile\)\}/.test(other));
+  ok("own profile: badge + links through the graduated link source", /showsVerifiedBadge\(profile\) \? <VerifiedCreatorBadge compact/.test(profile) && /LinkIconRow profile=\{linkSourceFor\(profile\)\}/.test(profile));
+  ok("someone else's profile: the same", /showsVerifiedBadge\(profile\) \? <VerifiedCreatorBadge compact/.test(other) && /LinkIconRow profile=\{linkSourceFor\(profile\)\}/.test(other));
 }
 
 // ── the + / camera entry, and every client path ──

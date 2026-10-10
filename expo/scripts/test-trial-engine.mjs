@@ -38,7 +38,7 @@ eq("queue positions: oldest queued first, other statuses ignored", [...queuePosi
   { id: "c", status: "queued", created_at: "2026-01-03T00:00:00Z" }, { id: "a", status: "queued", created_at: "2026-01-01T00:00:00Z" },
   { id: "t", status: "trial", created_at: "2026-01-00T00:00:00Z" }, { id: "b", status: "queued", created_at: "2026-01-02T00:00:00Z" }]).entries()], [["a", 1], ["b", 2], ["c", 3]]);
 const profile = read("../app/(tabs)/profile.tsx"), badge2 = read("../components/TrialStatusBadge.tsx");
-eq("own profile lists queued posts with their place in line; other users' profiles do not", [/isOnOwnProfile/.test(profile), /queuePosition=\{queuePos\.get/.test(profile), /isOnOtherProfile/.test(read("../app/user/[id].tsx"))], [true, true, true]);
+eq("own profile lists queued posts with their place in line; other users' profiles do not", [/isOnOwnProfile/.test(profile), /status === "queued"/.test(read("../components/profile/ProfileParts.tsx")) || /queued=\{item\.post\.status === "queued"\}/.test(profile), /isOnOtherProfile/.test(read("../app/user/[id].tsx"))], [true, true, true]);
 eq("badge has a queued pill", /queued: \{ label: "QUEUED"/.test(badge2), true);
 eq("app.json version untouched", JSON.parse(read("../app.json")).expo.version, "1.0.4");
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
