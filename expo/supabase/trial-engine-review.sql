@@ -8,7 +8,7 @@ select l.created_at,
        round(l.p_above_bar::numeric, 3) as p_above_bar,
        round(l.bar::numeric, 3)         as bar,
        l.pool,
-       l.decision,                      -- testing | expand | survived | failed | incomplete
+       l.decision, l.reason,                      -- testing | expand | survived | failed | incomplete
        p.status          as post_status
 from public.trial_engine_log l
 left join public.posts p on p.id = l.post_id

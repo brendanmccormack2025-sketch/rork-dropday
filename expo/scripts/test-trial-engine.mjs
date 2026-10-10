@@ -29,8 +29,8 @@ eq("never says failed to the creator", /fail/i.test(TRIAL_INCOMPLETE_MESSAGE) ||
 
 const feed = read("../components/FeedItem.tsx"), prov = read("../providers/PostsProvider.tsx"), notif = read("../components/NotificationItem.tsx"), badge = read("../components/TrialStatusBadge.tsx");
 eq("feed uses get_feed_engine and falls back to get_feed", [/rpc\("get_feed_engine"/.test(prov), /rpc\("get_feed", \{ p_limit/.test(prov), /readFeedRows/.test(prov)], [true, true, true]);
-eq("FeedItem reports watch time and shares, and shows the progress indicator with no numbers", [/record_view_progress/.test(feed), /record_post_share/.test(feed), /trial_post_progress/.test(feed), /trialNote\.title/.test(feed)], [true, true, true, true]);
-eq("the owner's own views are not reported", /if \(isOwner \|\| watchStartRef/.test(feed), true);
+eq("FeedItem reports watch time and shares, and shows the progress indicator with no numbers", [/sendViewProgress/.test(feed) && /record_view_progress/.test(read("../lib/viewProgress.ts")), /record_post_share/.test(feed), /trial_post_progress/.test(feed), /trialNote\.title/.test(feed)], [true, true, true, true]);
+eq("the owner's own views are not reported", /isOwner\s*\?\s*null/.test(feed), true);
 eq("notifications show the incomplete verdict", [/verdict_incomplete/.test(notif), /TRIAL_INCOMPLETE_NOTIFICATION/.test(notif)], [true, true]);
 eq("the badge has its own incomplete pill (not 'failed')", /incomplete: \{ label: "TRIAL INCOMPLETE"/.test(badge), true);
 const home = read("../app/(tabs)/index.tsx");

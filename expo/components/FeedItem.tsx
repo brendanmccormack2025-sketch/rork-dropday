@@ -45,7 +45,9 @@ import * as Updates from "expo-updates";
 import { isInternalTester } from "@/constants/debug";
 import { isVideoRenderAvailable } from "@/lib/renderAtPost";
 import { usePlaybackDiagnostics } from "@/lib/playbackDiagnostics";
-import { creatorTrialNote, viewProgress, worthReporting } from "@/lib/trialEngine";
+import { creatorTrialNote } from "@/lib/trialEngine";
+import { createWatchReporter } from "@/lib/watchReport";
+import { sendViewProgress } from "@/lib/viewProgress";
 import { formatRenderStats, useLastRenderStats } from "@/lib/renderReport";
 import {
   TAB_BAR_HEIGHT,
@@ -666,44 +668,48 @@ export const FeedItem = memo(function FeedItem({
       });
   }, [active, post.id]);
 
-  // Watch time per view: how long this post was the active feed item. Reported when it stops being active (or the
-  // item unmounts) and once at 6 s, so a long watch still counts if the app is closed. The server keeps the max,
-  // ignores the creator's own views, and scores the viewer (progressive-testing engine). Failures are ignored: the
-  // migration may not be applied yet.
-  const watchStartRef = useRef<number | null>(null);
-  const watchSentMsRef = useRef(0);
-  const reportWatch = useCallback(() => {
-    if (isOwner || watchStartRef.current == null) return;
-    const watched = Date.now() - watchStartRef.current;
-    if (!worthReporting(watched) || watched <= watchSentMsRef.current) return;
-    watchSentMsRef.current = watched;
-    let dur = 0;
-    try {
-      dur = (playerA.duration ?? 0) * 1000;
-    } catch {
-      dur = 0;
-    }
-    const prog = viewProgress(watched, dur);
-    supabase
-      .rpc("record_view_progress", {
-        p_post_id: post.id,
-        p_watch_ms: prog.watch_ms,
-        p_duration_ms: prog.duration_ms,
-        p_completed: prog.completed,
-      })
-      .then(null, () => {});
+  // Watch time per view: how long this post was really on screen. Counting stops on swipe-away, screen leave and when
+  // the app goes to the background (each of those reports it), and a report is also sent at 6 s so a long watch still
+  // counts if the app is killed. Failed writes are retried and kept to flush later (lib/watchReport.ts). The server
+  // keeps the max, ignores the creator's own views, and scores the viewer (progressive-testing engine).
+  const reporterRef = useRef<ReturnType<typeof createWatchReporter> | null>(null);
+  useEffect(() => {
+    reporterRef.current = isOwner
+      ? null
+      : createWatchReporter({
+          postId: post.id,
+          send: sendViewProgress,
+          getDurationMs: () => (playerA.duration ?? 0) * 1000,
+        });
+    return () => {
+      const r = reporterRef.current;
+      reporterRef.current = null;
+      if (r) {
+        r.pause();
+        void r.report();   // unmount counts as leaving
+      }
+    };
   }, [isOwner, post.id, playerA]);
   useEffect(() => {
     if (!active) return;
-    watchStartRef.current = Date.now();
-    watchSentMsRef.current = 0;
-    const timer = setTimeout(reportWatch, 6000);
+    const r = reporterRef.current;
+    if (!r) return;
+    if (AppState.currentState === "active") r.start();
+    const timer = setTimeout(() => void r.report(), 6000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") r.start();
+      else {
+        r.pause();
+        void r.report();   // backgrounded: the app may be killed before it comes back
+      }
+    });
     return () => {
       clearTimeout(timer);
-      reportWatch();
-      watchStartRef.current = null;
+      sub.remove();
+      r.pause();
+      void r.report();   // swiped away / left the screen
     };
-  }, [active, post.id, reportWatch]);
+  }, [active, post.id, isOwner]);
   const handleShareWithSignal = useCallback(() => {
     if (!isOwner) supabase.rpc("record_post_share", { p_post_id: post.id }).then(null, () => {});
     onShare();

@@ -96,6 +96,7 @@ alter table public.trial_engine_config
   add column if not exists small_pool_everyone integer not null default 50,   -- active pool this small or smaller: everybody gets every testing post
   add column if not exists prior_min           double precision not null default 1,     -- prior strength k = clamp(prior_pool_fraction * pool, prior_min, prior_strength)
   add column if not exists prior_pool_fraction double precision not null default 0.25,
+  add column if not exists exhausted_fail_ratio double precision not null default 0.67,   -- pool exhausted: ended below ratio * bar
   add column if not exists build_in_silence    boolean not null default true;           -- people you know never see (or influence) your post while it is on trial
 alter table public.trial_engine_config enable row level security;   -- no policies: dashboard / service role only
 
@@ -220,6 +221,7 @@ create table if not exists public.trial_engine_log (
   decision     text,
   created_at   timestamptz not null default now()
 );
+alter table public.trial_engine_log add column if not exists reason text;   -- why: confidence | pool_exhausted | checkpoint_24h | expand
 create index if not exists trial_engine_log_created_idx on public.trial_engine_log (created_at desc);
 create index if not exists trial_engine_log_post_idx on public.trial_engine_log (post_id, created_at desc);
 alter table public.trial_engine_log enable row level security;
@@ -453,7 +455,8 @@ as $$
   select u.user_id,
          coalesce(a.score, 0),
          exists (select 1 from public.post_view_stats s where s.post_id = p_post_id and s.viewer_id = u.user_id)
-           or exists (select 1 from public.post_raw_views r where r.post_id = p_post_id and r.viewer_id = u.user_id),
+           or exists (select 1 from public.post_raw_views r where r.post_id = p_post_id and r.viewer_id = u.user_id)
+           or exists (select 1 from public.post_qualified_views q where q.post_id = p_post_id and q.viewer_id = u.user_id),
          exists (select 1 from public.trial_assignments t where t.post_id = p_post_id and t.viewer_id = u.user_id)
   from public.trial_active_users u
   join public.posts p on p.id = p_post_id
@@ -489,6 +492,8 @@ as $$
       select s.viewer_id, s.created_at as first_at from public.post_view_stats s where s.post_id = p_post_id
       union all
       select r.viewer_id, r.created_at from public.post_raw_views r where r.post_id = p_post_id
+      union all
+      select q.viewer_id, q.created_at from public.post_qualified_views q where q.post_id = p_post_id
     ) v
     join post on post.user_id <> v.viewer_id
     where not exists (select 1 from cfg, public.known_connections k
@@ -497,7 +502,11 @@ as $$
   ),
   base as (
     select vw.viewer_id, vw.first_at,
-           coalesce(s.watch_ms, 0) as watch_ms, coalesce(s.duration_ms, 0) as duration_ms,
+           -- a qualified view (3 s watched) whose watch time never arrived (older app, killed app, failed write) is not lost:
+           -- it counts as a meaningful watch
+           coalesce(s.watch_ms, case when exists (select 1 from public.post_qualified_views q where q.post_id = p_post_id and q.viewer_id = vw.viewer_id)
+                                     then (select (watch_seconds * 1000)::integer from cfg) else 0 end) as watch_ms,
+           coalesce(s.duration_ms, 0) as duration_ms,
            coalesce(s.completed, false) as completed, coalesce(s.shared, false) as shared,
            exists (select 1 from public.likes l where l.post_id = p_post_id and l.user_id = vw.viewer_id) as liked,
            exists (select 1 from public.posts r where r.parent_post_id = p_post_id and r.user_id = vw.viewer_id) as reacted
@@ -820,6 +829,8 @@ declare
   p double precision;
   pool_total integer;
   pool_left integer;
+  pool_unexposed integer;
+  reason text := 'testing';
   min_survive integer;
   min_fail integer;
   assigned_stage integer;
@@ -833,7 +844,7 @@ begin
   if post.id is null or st.post_id is null or st.decision is not null then return 'testing'; end if;
 
   select count(*), coalesce(sum(score), 0) into n, sum_s from public.trial_post_scores(p_post_id);
-  select count(*), count(*) filter (where not exposed and not assigned) into pool_total, pool_left from public.trial_pool(p_post_id);
+  select count(*), count(*) filter (where not exposed and not assigned), count(*) filter (where not exposed) into pool_total, pool_left, pool_unexposed from public.trial_pool(p_post_id);
 
   k := public.trial_prior_strength(pool_total);
   alpha := k * p_bar + sum_s;
@@ -846,9 +857,20 @@ begin
   min_fail    := least(public.trial_clamp_int(ceil(cfg.fail_fraction * pool_total),    cfg.fail_min,    cfg.fail_max),    greatest(cfg.fail_floor,    pool_total));
 
   if n >= min_survive and p >= cfg.p_survive then
-    verdict := 'survived';
+    verdict := 'survived'; reason := 'confidence';
   elsif n >= min_fail and p <= cfg.p_fail then
-    verdict := 'failed';
+    verdict := 'failed'; reason := 'confidence';
+  elsif pool_total >= 1 and pool_unexposed = 0 and n >= 1 then
+    -- POOL EXHAUSTED: every eligible (non-known) viewer has seen it and nobody is left to assign, so waiting 24 h cannot
+    -- add information. Decide on the posterior mean: survive above the bar, ended well below it, otherwise incomplete.
+    reason := 'pool_exhausted';
+    if alpha / (alpha + beta) > p_bar then
+      verdict := 'survived';
+    elsif alpha / (alpha + beta) < cfg.exhausted_fail_ratio * p_bar then
+      verdict := 'failed';
+    else
+      verdict := 'incomplete';
+    end if;
   elsif p >= cfg.p_expand then
     -- expand once the current cohort has mostly seen the post (or has had time)
     select count(*), count(*) filter (where exists (select 1 from public.post_view_stats s where s.post_id = p_post_id and s.viewer_id = t.viewer_id)
@@ -861,12 +883,12 @@ begin
          and (exposed_stage >= cfg.expand_ready_fraction * assigned_stage
               or (exposed_stage >= 1 and st.stage_started_at <= now() - (cfg.expand_stall_minutes * interval '1 minute')));
     if ready then
-      verdict := 'expand';
+      verdict := 'expand'; reason := 'expand';
     end if;
   end if;
 
   if verdict = 'testing' and now() >= post.checkpoint_at then
-    verdict := 'incomplete';   -- 24 h and still no decision
+    verdict := 'incomplete'; reason := 'checkpoint_24h';   -- 24 h and still no decision
   end if;
 
   if verdict = 'expand' then
@@ -882,13 +904,54 @@ begin
   select active_window_hours into window_h from public.trial_engine_state where id;
   -- log every decision, and a 'testing' line only when the number of viewers moved
   if verdict <> 'testing' or st.last_logged_n is distinct from n then
-    insert into public.trial_engine_log (post_id, stage, n, score_mean, p_above_bar, bar, pool, decision)
-    values (p_post_id, st.stage, n, mean_s, p, p_bar, pool_total, verdict);
+    insert into public.trial_engine_log (post_id, stage, n, score_mean, p_above_bar, bar, pool, decision, reason)
+    values (p_post_id, st.stage, n, mean_s, p, p_bar, pool_total, verdict, case when verdict = 'testing' then null else reason end);
     update public.trial_post_state set last_logged_n = n where post_id = p_post_id;
   end if;
   return verdict;
 end;
 $$;
+
+-- Admin (SQL editor only): re-open a post that was decided and evaluate it again under the current rules. A post that
+-- survived is never re-opened. Matches a post id prefix: select public.trial_admin_reevaluate('730792b2');
+create or replace function public.trial_admin_reevaluate(p_id_prefix text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  pid uuid;
+  cnt integer;
+  st text;
+begin
+  select count(*), min(id::text)::uuid into cnt, pid from public.posts where id::text like p_id_prefix || '%';
+  if cnt <> 1 then raise exception 'prefix matches % posts', cnt; end if;
+  select status into st from public.posts where id = pid;
+  if st = 'survived' or st = 'expired' then return 'not re-opened: ' || st; end if;
+  if st in ('incomplete', 'archived') then
+    update public.posts set status = 'trial' where id = pid;
+  end if;
+  update public.trial_post_state set decision = null, decided_at = null where post_id = pid;
+  return public.run_trial_engine_post(pid);
+end;
+$$;
+
+-- one post through the same steps as a normal engine run
+create or replace function public.run_trial_engine_post(p_post_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.trial_refresh_active();
+  perform public.trial_release_stalled(p_post_id);
+  perform public.trial_fill_open_slots(p_post_id);
+  return public.trial_evaluate_post(p_post_id, public.trial_current_bar());
+end;
+$$;
+revoke all on function public.trial_admin_reevaluate(text), public.run_trial_engine_post(uuid) from public, anon, authenticated;
 
 -- Writes the verdict into the existing lifecycle (same columns / statuses / notifications as the legacy function).
 create or replace function public.trial_apply_decision(p_post_id uuid, p_decision text)

@@ -577,6 +577,55 @@ if (!BIN) {
       Q(`delete from auth.users where id='${U(41)}'`);
       eq("deleting the account cascades to the phone hash and contact hashes", q(`select (select count(*) from public.user_phone_hash where user_id='${U(41)}') + (select count(*) from public.contact_hashes where owner_id='${U(41)}')`), "0");
       wipePrivacy();
+
+      // 17) pool exhausted: decide when nobody is left to show it to
+      const reasonOf = (id) => q(`select coalesce(reason,'-') from public.trial_engine_log where post_id='${id}' order by id desc limit 1`);
+      freshWorld(4);
+      mkPost(P1, U(1));
+      for (const v of [2, 3, 4]) view(P1, U(v), { watch: 8000, dur: 12000, like: true });
+      engine();
+      eq("pool of 3, all 3 viewers like it -> survives", status(P1), "survived");
+      freshWorld(4);
+      mkPost(P1, U(1));
+      for (const v of [2, 3, 4]) view(P1, U(v), { watch: 8000, dur: 12000 });
+      engine();
+      eq("pool of 3, modest but above the bar (not enough confidence alone) -> survives on exhaustion, reason logged", [status(P1), reasonOf(P1)], ["survived", "pool_exhausted"]);
+      freshWorld(3);
+      mkPost(P1, U(1));
+      for (const v of [2, 3]) view(P1, U(v), { watch: 500 });
+      engine();
+      eq("everyone saw it and swiped (mean far below 0.67 x bar) -> ended on exhaustion", [status(P1), reasonOf(P1), notif("verdict_archived")], ["archived", "pool_exhausted", "1"]);
+      freshWorld(3);
+      mkPost(P1, U(1));
+      view(P1, U(2), { watch: 8000, dur: 12000 }); view(P1, U(3), { watch: 500 });
+      engine();
+      eq("borderline (between 0.67 x bar and the bar) -> incomplete, never 'ended'", [status(P1), reasonOf(P1), notif("verdict_incomplete"), notif("verdict_archived")], ["incomplete", "pool_exhausted", "1", "0"]);
+      freshWorld(4);
+      mkPost(P1, U(1));
+      view(P1, U(2), { watch: 500 }); view(P1, U(3), { watch: 500 });
+      engine();
+      eq("with a live user still unexposed the pool is NOT exhausted: the normal confidence rules apply (keeps testing)", [status(P1), lastLog(P1)], ["trial", "testing|2"]);
+      freshWorld(4);
+      mkPost(P1, U(1));
+      Q(`insert into public.follows (follower_id, followee_id) values ('${U(4)}','${U(1)}')`);   // 4 knows the creator: not part of the pool
+      view(P1, U(2), { watch: 8000, dur: 12000 }); view(P1, U(3), { watch: 8000, dur: 12000 });
+      engine();
+      eq("known viewers are not in the pool, so exhaustion is judged without them", [status(P1), reasonOf(P1)], ["survived", "pool_exhausted"]);
+      freshWorld(4);
+      mkPost(P1, U(1));
+      Q(`insert into public.post_qualified_views (post_id, viewer_id) values ('${P1}','${U(4)}')`);
+      eq("a qualified view with no watch-time row is not lost: it counts as a meaningful watch (0.4)", score(P1)[U(4)], "0.400");
+      view(P1, U(2), { watch: 8000, dur: 12000 }); view(P1, U(3), { watch: 8000, dur: 12000 });
+      engine();
+      eq("...and it counts as exposure, so the pool is exhausted and the post is decided", [status(P1), reasonOf(P1)], ["survived", "pool_exhausted"]);
+      // re-evaluating a post that was decided under the old rules
+      freshWorld(4);
+      mkPost(P1, U(1), 600);
+      for (const v of [2, 3, 4]) view(P1, U(v), { watch: 8000, dur: 12000 });
+      Q(`update public.trial_post_state set decision='incomplete', decided_at=now() where post_id='${P1}'; update public.posts set status='incomplete' where id='${P1}'`);
+      eq("trial_admin_reevaluate re-opens a decided post and applies the current rules", [q(`select public.trial_admin_reevaluate('${P1.slice(0, -1)}')`), status(P1)], ["survived", "survived"]);
+      ok("a survived post is never re-opened", q(`select public.trial_admin_reevaluate('${P1.slice(0, -1)}')`).startsWith("not re-opened"));
+      ok("clients cannot run it", asUser(U(2), `select public.trial_admin_reevaluate('aaaa')`).status !== 0);
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });
