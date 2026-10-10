@@ -641,12 +641,18 @@ export const FeedItem = memo(function FeedItem({
     const timer = setTimeout(() => {
       if (qualifiedViewRecorded.has(post.id)) return;
       qualifiedViewRecorded.add(post.id);
+      // supabase RPCs resolve with { error } instead of rejecting: both outcomes clear the dedupe so a later
+      // activation retries (the watch-time report also records the qualified view server-side).
       supabase
         .rpc("record_qualified_view", { p_post_id: post.id })
-        .then(null, () => {
-          // Recording failed — clear the dedupe so a later activation retries.
-          qualifiedViewRecorded.delete(post.id);
-        });
+        .then(
+          (res: { error: unknown }) => {
+            if (res.error) qualifiedViewRecorded.delete(post.id);
+          },
+          () => {
+            qualifiedViewRecorded.delete(post.id);
+          },
+        );
     }, QUALIFIED_VIEW_MS);
     return () => clearTimeout(timer);
   }, [active, post.id]);
@@ -662,10 +668,14 @@ export const FeedItem = memo(function FeedItem({
     rawViewRecorded.add(post.id);
     supabase
       .rpc("record_raw_view", { p_post_id: post.id })
-      .then(null, () => {
-        // Recording failed — clear the dedupe so a later activation retries.
-        rawViewRecorded.delete(post.id);
-      });
+      .then(
+        (res: { error: unknown }) => {
+          if (res.error) rawViewRecorded.delete(post.id);
+        },
+        () => {
+          rawViewRecorded.delete(post.id);
+        },
+      );
   }, [active, post.id]);
 
   // Watch time per view: how long this post was really on screen. Counting stops on swipe-away, screen leave and when

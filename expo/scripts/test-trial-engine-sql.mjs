@@ -120,7 +120,7 @@ if (!BIN) {
         Q(`delete from public.trial_engine_log; delete from public.trial_post_state; delete from public.trial_assignments; delete from public.notifications;
            delete from public.post_view_stats; delete from public.post_raw_views; delete from public.post_qualified_views; delete from public.likes;
            delete from public.viewer_creator_affinity; delete from public.trial_feed_opens; delete from public.follows; delete from public.posts; delete from public.user_blocks;
-           update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, build_in_silence=true`);
+           update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true`);
       };
       const score = (post) => Object.fromEntries(q(`select viewer_id::text || '=' || round(score::numeric,3) from public.trial_post_scores('${post}') order by 1`).split("\n").filter(Boolean).map((l) => l.split("=")));
 
@@ -244,7 +244,7 @@ if (!BIN) {
       ok("once seen, it is no longer pushed to the front again", !feedOf(asked[0]).startsWith(P1) || true);
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       ok("legacy mode: the feed is the plain get_feed again (outsider sees it)", feedOf(outsider).includes(P1));
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, build_in_silence=true`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true`);
       const pg = q(`set role authenticated; set request.jwt.claim.sub='${outsider}'; select count(*) || ':' || max(page_rows) from public.get_feed_engine(20, 0)`).split("\n").pop();
       ok("page_rows reports the source rows so the app can detect the end of the feed", /^\d+:\d+$/.test(pg));
 
@@ -300,7 +300,7 @@ if (!BIN) {
       eq("legacy: a new post is NOT given a cohort or engine state", [q(`select count(*) from public.trial_post_state`), q(`select count(*) from public.trial_assignments`)], ["0", "0"]);
       engine();
       eq("legacy: the old rule ran (25 h, below the exposure gate -> silent 'incomplete', no engine notification, no engine log)", [status(P1), notif("verdict_incomplete"), q("select count(*) from public.trial_engine_log")], ["incomplete", "0", "0"]);
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, build_in_silence=true`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true`);
       freshWorld(20);
       mkPost(P1, U(1), 1500);
       engine();
@@ -444,7 +444,7 @@ if (!BIN) {
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       prep(); Q(`update public.trial_engine_config set engine_mode='legacy'`);
       ok("legacy mode: opening the feed assigns nothing", (() => { viewerOf(V); return q("select count(*) from public.trial_assignments") === "0"; })());
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, build_in_silence=true`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true`);
       ok("a clean slate for the next run", true);
 
       // 13) A. small-app rule: while the active pool is small, everybody gets every testing post
@@ -626,6 +626,57 @@ if (!BIN) {
       eq("trial_admin_reevaluate re-opens a decided post and applies the current rules", [q(`select public.trial_admin_reevaluate('${P1.slice(0, -1)}')`), status(P1)], ["survived", "survived"]);
       ok("a survived post is never re-opened", q(`select public.trial_admin_reevaluate('${P1.slice(0, -1)}')`).startsWith("not re-opened"));
       ok("clients cannot run it", asUser(U(2), `select public.trial_admin_reevaluate('aaaa')`).status !== 0);
+
+      // 18) qualified views from watch-time reports, exposure from any source, weights only at scale, the debug view
+      freshWorld(6);
+      mkPost(P1, U(1));
+      asUser(U(2), `select public.record_view_progress('${P1}', 7136, 6367, true)`);
+      eq("a completed 7.1 s watch creates the raw view AND the qualified view (and the counters follow)", [q(`select count(*) from public.post_raw_views where post_id='${P1}' and viewer_id='${U(2)}'`), q(`select count(*) from public.post_qualified_views where post_id='${P1}' and viewer_id='${U(2)}'`), q(`select qualified_view_count || ':' || view_count from public.posts where id='${P1}'`)], ["1", "1", "1:1"]);
+      asUser(U(3), `select public.record_view_progress('${P1}', 1200, 6367, false)`);
+      eq("a 1.2 s swipe is an impression but not a qualified view", [q(`select count(*) from public.post_raw_views where post_id='${P1}' and viewer_id='${U(3)}'`), q(`select count(*) from public.post_qualified_views where post_id='${P1}' and viewer_id='${U(3)}'`)], ["1", "0"]);
+      asUser(U(1), `select public.record_view_progress('${P1}', 9000, 6367, true)`);
+      eq("the creator's own watch creates nothing", q(`select count(*) from public.post_raw_views where post_id='${P1}' and viewer_id='${U(1)}'`), "0");
+      asUser(U(2), `select public.record_view_progress('${P1}', 7136, 6367, true)`);
+      eq("repeating the report does not double count", q(`select qualified_view_count from public.posts where id='${P1}'`), "1");
+
+      freshWorld(3);
+      mkPost(P1, U(1));
+      Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms, completed) values ('${P1}','${U(2)}',7136,6367,true), ('${P1}','${U(3)}',2787,6367,false)`);
+      eq("stats-only viewers (no raw, no qualified row) are exposed and scored", [q(`select public.trial_exposed('${P1}','${U(2)}')`), Object.keys(score(P1)).sort().join()], ["t", [2, 3].map(U).join()]);
+      engine();
+      eq("...so the pool counts as exhausted and the post is decided", [status(P1) !== "trial", reasonOf(P1)], [true, "pool_exhausted"]);
+
+      // the 730792b2 case: the viewer with the completed watch is on the creator's hide list
+      freshWorld(4);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      Q(`insert into public.hide_from_list (owner_id, hidden_user_id) values ('${U(1)}','${U(2)}')`);
+      mkPost(P1, U(1));
+      Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms, completed) values ('${P1}','${U(2)}',7136,6367,true), ('${P1}','${U(3)}',2787,6367,false)`);
+      Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${P1}','${U(1)}'), ('${P1}','${U(3)}')`);
+      const dbg = q(`select username || '|' || sources || '|' || watch_ms || '|' || meaningful || '|' || completed || '|' || excluded || '|' || coalesce(excluded_reason,'-') from public.trial_debug_post('${P1.slice(0, -1)}') order by username`).split("\n");
+      eq("debug view: per viewer sources, watch, meaningful, completed, exclusion and why (creator, hide list)", dbg, ["u1|raw|0|false|false|true|creator", "u2|stats|7136|true|true|true|known: hide_list", "u3|raw+stats|2787|false|false|false|-"]);
+      eq("only the non-excluded viewer is scored (n = 1)", Object.keys(score(P1)).length, 1);
+      ok("clients cannot call the debug function", asUser(U(2), `select * from public.trial_debug_post('aaaa')`).status !== 0);
+
+      // fraud-style weights only above fraud_weights_min_pool
+      freshWorld(20);
+      mkPost(P1, U(1));
+      for (let i = 1; i <= 8; i++) {
+        const pid = `bbbbbbbb-0000-0000-0000-00000000000${i}`;
+        Q(`alter table public.posts disable trigger trial_start_on_insert; insert into public.posts (id, user_id, media_url, media_type) values ('${pid}','${U(19)}','u','video'); update public.posts set status='expired' where id='${pid}'; alter table public.posts enable trigger trial_start_on_insert`);
+        Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms) values ('${pid}','${U(8)}',8000,12000)`);
+        Q(`insert into public.likes (user_id, post_id) values ('${U(8)}','${pid}')`);
+      }
+      view(P1, U(7), { watch: 8000, like: true }); view(P1, U(8), { watch: 8000, like: true }); view(P1, U(9), { watch: 8000, like: true });
+      Q(`update public.profiles set created_at = now() where id='${U(7)}'`);
+      Q(`insert into public.viewer_creator_affinity (viewer_id, creator_id, score) values ('${U(9)}','${U(1)}', 0.9)`);
+      Q(`update public.trial_engine_config set fraud_weights_min_pool = 50`);
+      const small = score(P1);
+      eq("pool of 19 <= 50: a new account, a like-everything viewer and a high-affinity viewer all weigh 1.0", [small[U(7)], small[U(8)], small[U(9)]], ["0.700", "0.700", "0.700"]);
+      Q(`update public.trial_engine_config set fraud_weights_min_pool = 10`);
+      const big = score(P1);
+      eq("pool of 19 > 10: the adjustments apply (new account x0.5, like-everything x0.5 on the like, affinity x0.5)", [big[U(7)], big[U(8)], big[U(9)]], ["0.350", "0.550", "0.350"]);
+      eq("the debug weight column shows it", q(`select round(weight::numeric,2) from public.trial_post_score_details('${P1}') where viewer_id='${U(7)}'`), "0.50");
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });

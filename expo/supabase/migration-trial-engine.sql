@@ -96,6 +96,7 @@ alter table public.trial_engine_config
   add column if not exists small_pool_everyone integer not null default 50,   -- active pool this small or smaller: everybody gets every testing post
   add column if not exists prior_min           double precision not null default 1,     -- prior strength k = clamp(prior_pool_fraction * pool, prior_min, prior_strength)
   add column if not exists prior_pool_fraction double precision not null default 0.25,
+  add column if not exists fraud_weights_min_pool integer not null default 50,   -- new-account / like-everything / affinity weights only above this active pool
   add column if not exists exhausted_fail_ratio double precision not null default 0.67,   -- pool exhausted: ended below ratio * bar
   add column if not exists build_in_silence    boolean not null default true;           -- people you know never see (or influence) your post while it is on trial
 alter table public.trial_engine_config enable row level security;   -- no policies: dashboard / service role only
@@ -153,6 +154,9 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  w integer;
+  done boolean;
 begin
   if auth.uid() is null then return; end if;
   if exists (select 1 from public.posts where id = p_post_id and user_id = auth.uid()) then return; end if;   -- own post: ignored
@@ -162,7 +166,14 @@ begin
     set watch_ms    = greatest(public.post_view_stats.watch_ms, excluded.watch_ms),
         duration_ms = greatest(public.post_view_stats.duration_ms, excluded.duration_ms),
         completed   = public.post_view_stats.completed or excluded.completed,
-        updated_at  = now();
+        updated_at  = now()
+  returning watch_ms, completed into w, done;
+  -- The watch-time report is the most reliable signal the app sends, so it also guarantees the impression and the
+  -- qualified view (3 s) exist, even if those two calls were lost (not signed in yet, offline, older build).
+  insert into public.post_raw_views (post_id, viewer_id) values (p_post_id, auth.uid()) on conflict (post_id, viewer_id) do nothing;
+  if w >= 3000 or done then
+    insert into public.post_qualified_views (post_id, viewer_id) values (p_post_id, auth.uid()) on conflict (post_id, viewer_id) do nothing;
+  end if;
 end;
 $$;
 
@@ -181,6 +192,18 @@ end;
 $$;
 
 grant execute on function public.record_view_progress(uuid, integer, integer, boolean) to authenticated;
+
+-- Backfill: watch-time rows whose impression / qualified view were never recorded (their counters follow via the triggers).
+insert into public.post_raw_views (post_id, viewer_id, created_at)
+select s.post_id, s.viewer_id, s.created_at
+from public.post_view_stats s join public.posts p on p.id = s.post_id
+where p.user_id <> s.viewer_id
+on conflict (post_id, viewer_id) do nothing;
+insert into public.post_qualified_views (post_id, viewer_id, created_at)
+select s.post_id, s.viewer_id, s.created_at
+from public.post_view_stats s join public.posts p on p.id = s.post_id
+where p.user_id <> s.viewer_id and (s.watch_ms >= 3000 or s.completed)
+on conflict (post_id, viewer_id) do nothing;
 grant execute on function public.record_post_share(uuid) to authenticated;
 
 -- ── 4. Engine tables (server side only: RLS on, no client policies) ──────────
@@ -418,6 +441,21 @@ as $$
 $$;
 
 -- Small-app rule: with this few active people (the creator not counted), everybody is in every cohort.
+create or replace function public.trial_pool_at_most(p_creator uuid, p_n integer)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select count(*) <= p_n
+  from (
+    select 1 from public.trial_active_users u
+    where u.user_id <> coalesce(p_creator, '00000000-0000-0000-0000-000000000000'::uuid)
+      and u.last_active >= now() - ((select active_window_hours from public.trial_engine_state where id) * interval '1 hour')
+    limit p_n + 1
+  ) x
+$$;
 create or replace function public.trial_small_pool(p_creator uuid)
 returns boolean
 language sql
@@ -425,13 +463,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select count(*) <= (select small_pool_everyone from public.trial_engine_config where id)
-  from (
-    select 1 from public.trial_active_users u
-    where u.user_id <> coalesce(p_creator, '00000000-0000-0000-0000-000000000000'::uuid)
-      and u.last_active >= now() - ((select active_window_hours from public.trial_engine_state where id) * interval '1 hour')
-    limit (select small_pool_everyone + 1 from public.trial_engine_config where id)
-  ) x
+  select public.trial_pool_at_most(p_creator, (select small_pool_everyone from public.trial_engine_config where id))
 $$;
 
 -- Prior strength: a tiny pool cannot carry a prior as heavy as a big one.
@@ -441,6 +473,19 @@ language sql
 stable
 as $$
   select greatest(c.prior_min, least(c.prior_strength, c.prior_pool_fraction * p_pool)) from public.trial_cfg() c
+$$;
+
+-- One definition of "this viewer has seen the post": a raw view OR a qualified view OR a watch-time row.
+create or replace function public.trial_exposed(p_post_id uuid, p_viewer uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from public.post_raw_views r where r.post_id = p_post_id and r.viewer_id = p_viewer)
+      or exists (select 1 from public.post_qualified_views q where q.post_id = p_post_id and q.viewer_id = p_viewer)
+      or exists (select 1 from public.post_view_stats s where s.post_id = p_post_id and s.viewer_id = p_viewer)
 $$;
 
 -- Eligible viewers for a post: active, not the creator, not blocked either way. `exposed` = has seen it, `assigned` =
@@ -454,9 +499,7 @@ set search_path = public
 as $$
   select u.user_id,
          coalesce(a.score, 0),
-         exists (select 1 from public.post_view_stats s where s.post_id = p_post_id and s.viewer_id = u.user_id)
-           or exists (select 1 from public.post_raw_views r where r.post_id = p_post_id and r.viewer_id = u.user_id)
-           or exists (select 1 from public.post_qualified_views q where q.post_id = p_post_id and q.viewer_id = u.user_id),
+         public.trial_exposed(p_post_id, u.user_id),
          exists (select 1 from public.trial_assignments t where t.post_id = p_post_id and t.viewer_id = u.user_id)
   from public.trial_active_users u
   join public.posts p on p.id = p_post_id
@@ -477,8 +520,12 @@ $$;
 -- reaction part is scaled by the viewer's recent engagement rate (0.5..1.5: someone who likes everything counts less).
 -- The total is capped at 1, then x new_account_weight for an account under 24 h old, then x affinity_weight when the
 -- viewer has high affinity with the creator. The creator's own activity is ignored; each viewer counts once.
-create or replace function public.trial_post_scores(p_post_id uuid)
-returns table (viewer_id uuid, score double precision)
+create or replace function public.trial_post_score_details(p_post_id uuid)
+returns table (
+  viewer_id uuid, username text, sources text, watch_ms integer, meaningful boolean, completed boolean,
+  liked boolean, reacted boolean, shared boolean, like_factor double precision, weight double precision,
+  score double precision, excluded boolean, excluded_reason text
+)
 language sql
 stable
 security definer
@@ -486,32 +533,40 @@ set search_path = public
 as $$
   with cfg as (select * from public.trial_cfg()),
   post as (select id, user_id from public.posts where id = p_post_id),
+  -- Fraud-style weights (new account, like-everything, high affinity) only matter at scale: in a tiny app every viewer is 1.0.
+  scale as (select not public.trial_pool_at_most((select user_id from post), (select fraud_weights_min_pool from cfg)) as on),
+  src as (
+    select s.viewer_id, 'stats'::text as src, s.created_at as at from public.post_view_stats s where s.post_id = p_post_id
+    union all
+    select r.viewer_id, 'raw', r.created_at from public.post_raw_views r where r.post_id = p_post_id
+    union all
+    select q.viewer_id, 'qualified', q.created_at from public.post_qualified_views q where q.post_id = p_post_id
+  ),
   viewers as (
-    select v.viewer_id, min(v.first_at) as first_at
-    from (
-      select s.viewer_id, s.created_at as first_at from public.post_view_stats s where s.post_id = p_post_id
-      union all
-      select r.viewer_id, r.created_at from public.post_raw_views r where r.post_id = p_post_id
-      union all
-      select q.viewer_id, q.created_at from public.post_qualified_views q where q.post_id = p_post_id
-    ) v
-    join post on post.user_id <> v.viewer_id
-    where not exists (select 1 from cfg, public.known_connections k
-                      where cfg.build_in_silence and k.user_id = post.user_id and k.other_id = v.viewer_id)   -- build in silence
-    group by v.viewer_id
+    select src.viewer_id, string_agg(distinct src.src, '+' order by src.src) as sources, min(src.at) as first_at
+    from src group by src.viewer_id
+  ),
+  known as (   -- build in silence: people the creator knows (follow / contact / hide list / friends)
+    select k.other_id as viewer_id, string_agg(distinct k.source, '+') as ks
+    from public.known_connections k, cfg, post
+    where cfg.build_in_silence and k.user_id = post.user_id
+    group by k.other_id
   ),
   base as (
-    select vw.viewer_id, vw.first_at,
+    select vw.viewer_id, vw.sources, vw.first_at,
            -- a qualified view (3 s watched) whose watch time never arrived (older app, killed app, failed write) is not lost:
            -- it counts as a meaningful watch
-           coalesce(s.watch_ms, case when exists (select 1 from public.post_qualified_views q where q.post_id = p_post_id and q.viewer_id = vw.viewer_id)
+           coalesce(s.watch_ms, case when 'qualified' = any (string_to_array(vw.sources, '+'))
                                      then (select (watch_seconds * 1000)::integer from cfg) else 0 end) as watch_ms,
            coalesce(s.duration_ms, 0) as duration_ms,
            coalesce(s.completed, false) as completed, coalesce(s.shared, false) as shared,
            exists (select 1 from public.likes l where l.post_id = p_post_id and l.user_id = vw.viewer_id) as liked,
-           exists (select 1 from public.posts r where r.parent_post_id = p_post_id and r.user_id = vw.viewer_id) as reacted
+           exists (select 1 from public.posts r where r.parent_post_id = p_post_id and r.user_id = vw.viewer_id) as reacted,
+           (vw.viewer_id = (select user_id from post)) as is_creator,
+           kn.ks
     from viewers vw
     left join public.post_view_stats s on s.post_id = p_post_id and s.viewer_id = vw.viewer_id
+    left join known kn on kn.viewer_id = vw.viewer_id
   ),
   rated as (
     select b.*, rt.total, rt.engaged
@@ -523,29 +578,74 @@ as $$
       from (select s2.post_id from public.post_view_stats s2 where s2.viewer_id = b.viewer_id
             order by s2.updated_at desc limit (select norm_window from cfg)) x
     ) rt on true
+  ),
+  calc as (
+    select r.*, cfg.*, sc.on as weights_on,
+           (r.watch_ms >= cfg.watch_fraction * r.duration_ms and r.duration_ms > 0) or r.watch_ms >= cfg.watch_seconds * 1000 as meaningful,
+           case when not sc.on or coalesce(r.total, 0) < cfg.norm_min_sample then 1
+                else least(cfg.norm_max, greatest(cfg.norm_min, cfg.norm_ref_rate / greatest(r.engaged::double precision / r.total, 0.01))) end as like_factor,
+           (case when sc.on and pr.created_at > r.first_at - (cfg.new_account_hours * interval '1 hour') then cfg.new_account_weight else 1 end)
+             * (case when sc.on and coalesce(af.score, 0) >= cfg.affinity_threshold then cfg.affinity_weight else 1 end) as weight,
+           pr.username
+    from rated r
+    cross join cfg
+    cross join scale sc
+    join post on true
+    left join public.profiles pr on pr.id = r.viewer_id
+    left join public.viewer_creator_affinity af on af.viewer_id = r.viewer_id and af.creator_id = post.user_id
   )
-  select r.viewer_id,
-    least(1.0,
-      (case when r.completed or r.watch_ms >= cfg.swipe_seconds * 1000 then
-          cfg.w_watch * (case when r.watch_ms >= cfg.watch_fraction * r.duration_ms and r.duration_ms > 0
-                                   or r.watch_ms >= cfg.watch_seconds * 1000 then 1 else 0 end)
-          + cfg.w_complete * (case when r.completed then 1 else 0 end)
-        else 0 end)
-      + (cfg.w_like * (case when r.liked then 1 else 0 end)
-         + cfg.w_share * (case when r.shared then 1 else 0 end)
-         + cfg.w_reaction * (case when r.reacted then 1 else 0 end))
-        * (case when coalesce(r.total, 0) < cfg.norm_min_sample then 1
-                else least(cfg.norm_max, greatest(cfg.norm_min, cfg.norm_ref_rate / greatest(r.engaged::double precision / r.total, 0.01))) end)
-    )
-    * (case when pr.created_at > r.first_at - (cfg.new_account_hours * interval '1 hour') then cfg.new_account_weight else 1 end)
-    * (case when coalesce(af.score, 0) >= cfg.affinity_threshold then cfg.affinity_weight else 1 end)
-    as score
-  from rated r
-  cross join cfg
-  join post on true
-  left join public.profiles pr on pr.id = r.viewer_id
-  left join public.viewer_creator_affinity af on af.viewer_id = r.viewer_id and af.creator_id = post.user_id;
+  select c.viewer_id, c.username, c.sources, c.watch_ms, c.meaningful, c.completed, c.liked, c.reacted, c.shared,
+         c.like_factor, c.weight,
+         least(1.0,
+           (case when c.completed or c.watch_ms >= c.swipe_seconds * 1000 then
+               c.w_watch * (case when c.meaningful then 1 else 0 end) + c.w_complete * (case when c.completed then 1 else 0 end)
+             else 0 end)
+           + (c.w_like * (case when c.liked then 1 else 0 end)
+              + c.w_share * (case when c.shared then 1 else 0 end)
+              + c.w_reaction * (case when c.reacted then 1 else 0 end)) * c.like_factor
+         ) * c.weight as score,
+         (c.is_creator or c.ks is not null) as excluded,
+         case when c.is_creator then 'creator' when c.ks is not null then 'known: ' || c.ks end as excluded_reason
+  from calc c
 $$;
+
+-- What the engine uses: every counted viewer once, with its final score.
+create or replace function public.trial_post_scores(p_post_id uuid)
+returns table (viewer_id uuid, score double precision)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select d.viewer_id, d.score from public.trial_post_score_details(p_post_id) d where not d.excluded
+$$;
+
+-- Debug (SQL editor only): per viewer of a post, why it scored what it did.
+--   select * from public.trial_debug_post('730792b2') order by excluded, score desc;
+create or replace function public.trial_debug_post(p_id_prefix text)
+returns table (
+  post_id uuid, viewer_id uuid, username text, sources text, watch_ms integer, meaningful boolean, completed boolean,
+  liked boolean, reacted boolean, shared boolean, like_factor double precision, weight double precision,
+  score double precision, excluded boolean, excluded_reason text
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  pid uuid;
+  cnt integer;
+begin
+  select count(*), min(id::text)::uuid into cnt, pid from public.posts where id::text like p_id_prefix || '%';
+  if cnt <> 1 then raise exception 'prefix matches % posts', cnt; end if;
+  return query
+    select pid, d.viewer_id, d.username, d.sources, d.watch_ms, d.meaningful, d.completed, d.liked, d.reacted, d.shared,
+           d.like_factor, d.weight, d.score, d.excluded, d.excluded_reason
+    from public.trial_post_score_details(pid) d;
+end;
+$$;
+revoke all on function public.trial_debug_post(text), public.trial_post_score_details(uuid), public.trial_exposed(uuid, uuid) from public, anon, authenticated;
 
 -- ── 8. The bar ───────────────────────────────────────────────────────────────
 -- bar = (1 - w) * bar_base + w * P60(recent judged posts' posterior means), w = min(1, judged_last_7d / 200).
@@ -653,8 +753,7 @@ begin
      set released_at = now()
    where t.post_id = p_post_id and t.released_at is null
      and t.assigned_at <= now() - (cfg.stall_minutes * interval '1 minute')
-     and not exists (select 1 from public.post_view_stats s where s.post_id = t.post_id and s.viewer_id = t.viewer_id)
-     and not exists (select 1 from public.post_raw_views r where r.post_id = t.post_id and r.viewer_id = t.viewer_id);
+     and not public.trial_exposed(t.post_id, t.viewer_id);
   get diagnostics n = row_count;
   return n;
 end;
@@ -703,8 +802,7 @@ begin
   select count(*) into unseen
   from public.trial_assignments t join public.posts p on p.id = t.post_id
   where t.viewer_id = p_viewer and t.released_at is null and p.status = 'trial'
-    and not exists (select 1 from public.post_raw_views r where r.post_id = t.post_id and r.viewer_id = p_viewer)
-    and not exists (select 1 from public.post_view_stats s where s.post_id = t.post_id and s.viewer_id = p_viewer);
+    and not public.trial_exposed(t.post_id, p_viewer);
   if unseen >= cfg.ondemand_max_unseen then return 0; end if;
 
   select coalesce(array_agg(x.post_id order by x.ord), '{}') into cand
@@ -721,8 +819,7 @@ begin
       and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
       and not exists (select 1 from public.reports r where r.reporter_id = p_viewer and r.target_type = 'post' and r.target_id = p.id)
       and not exists (select 1 from public.trial_assignments t where t.post_id = s.post_id and t.viewer_id = p_viewer and t.released_at is null)
-      and not exists (select 1 from public.post_raw_views r where r.post_id = s.post_id and r.viewer_id = p_viewer)
-      and not exists (select 1 from public.post_view_stats v where v.post_id = s.post_id and v.viewer_id = p_viewer)
+      and not public.trial_exposed(s.post_id, p_viewer)
     limit cfg.ondemand_batch * 5
   ) x;
 
@@ -873,8 +970,7 @@ begin
     end if;
   elsif p >= cfg.p_expand then
     -- expand once the current cohort has mostly seen the post (or has had time)
-    select count(*), count(*) filter (where exists (select 1 from public.post_view_stats s where s.post_id = p_post_id and s.viewer_id = t.viewer_id)
-                                          or exists (select 1 from public.post_raw_views r where r.post_id = p_post_id and r.viewer_id = t.viewer_id))
+    select count(*), count(*) filter (where public.trial_exposed(p_post_id, t.viewer_id))
       into assigned_stage, exposed_stage
     from public.trial_assignments t where t.post_id = p_post_id and t.stage = st.stage and t.released_at is null;
     -- (the new stage's open slots are filled by whoever shows up, so a small or empty pool no longer blocks expansion;
@@ -1151,8 +1247,7 @@ begin
       and not public.trial_is_silenced(p.user_id, me)
       and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
       and not exists (select 1 from public.reports r where r.reporter_id = me and r.target_type = 'post' and r.target_id = p.id)
-      and not exists (select 1 from public.post_raw_views r where r.post_id = t.post_id and r.viewer_id = me)
-      and not exists (select 1 from public.post_view_stats s where s.post_id = t.post_id and s.viewer_id = me)
+      and not public.trial_exposed(t.post_id, me)
   ) x;
 
   select coalesce(array_agg(x.id), '{}') into boosted
@@ -1165,7 +1260,7 @@ begin
       and (not hide_mature or not p.is_mature)
       and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
       and not exists (select 1 from public.reports r where r.reporter_id = me and r.target_type = 'post' and r.target_id = p.id)
-      and not exists (select 1 from public.post_raw_views r where r.post_id = p.id and r.viewer_id = me)
+      and not public.trial_exposed(p.id, me)
     order by a.score desc, p.survived_at desc nulls last
     limit cfg.affinity_feed_boost
   ) x;

@@ -69,5 +69,6 @@ const mk = (send, extra = {}) => createWatchReporter({ postId: "p1", send, now, 
 const feed = read("../components/FeedItem.tsx"), vp = read("../lib/viewProgress.ts");
 eq("FeedItem reports on swipe/leave, app background and unmount; no reporter for the creator", [/AppState\.addEventListener\("change"/.test(feed), /sub\.remove\(\);\s*r\.pause\(\);\s*void r\.report\(\)/.test(feed), /isOwner\s*\?\s*null/.test(feed)], [true, true, true]);
 eq("the send function detects { error } results (supabase RPCs do not reject)", /return !error/.test(vp), true);
+eq("raw and qualified view calls clear their dedupe on an { error } result, not only on a rejection", [/res\.error\) qualifiedViewRecorded\.delete/.test(feed), /res\.error\) rawViewRecorded\.delete/.test(feed)], [true, true]);
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);
