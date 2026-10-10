@@ -20,6 +20,7 @@ import {
 } from "@/lib/creatorStatus";
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { readFeedRows, type EngineFeedRow } from "@/lib/trialEngine";
+import { isOnOwnProfilePost } from "@/lib/profileVisibility";
 import { concatMP4Files } from "@/src/integrations/concatMP4";
 
 /**
@@ -117,9 +118,12 @@ export function isOnTrialNow(post: Pick<Post, "status" | "distribution_expires_a
   return Number.isNaN(expiresMs) || expiresMs > Date.now();
 }
 
-/** The creator's own profile also lists posts that are waiting in their trial queue. */
-export function isOnOwnProfile(post: Pick<Post, "status" | "distribution_expires_at">): boolean {
-  return post.status === "queued" || isOnTrialNow(post);
+/**
+ * The creator's own profile: queued and testing posts, survived posts for good (also after their 24 h window), and recent
+ * ended / incomplete posts (privately). Other people's profiles use isOnOtherProfile (survived only).
+ */
+export function isOnOwnProfile(post: Pick<Post, "status" | "survived_at" | "created_at" | "media_deleted_at">): boolean {
+  return isOnOwnProfilePost(post);
 }
 
 /**
@@ -1233,7 +1237,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           .eq("user_id", user.id)
           .eq("moderation_status", "active")
           .order("created_at", { ascending: false })
-          .limit(50);
+          .limit(200);   // survived posts stay for good: room for a creator who posts a lot
         if (error) {
           logQueryError("mine", error);
           return [];

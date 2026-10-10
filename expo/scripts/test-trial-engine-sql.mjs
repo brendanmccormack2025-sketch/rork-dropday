@@ -97,6 +97,10 @@ if (!BIN) {
       const k1 = psqlFile("t", kc), k2 = psqlFile("t", kc);
       if (/ERROR/.test(k1.stderr + k2.stderr)) console.log((k1.stderr + k2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 5).join("\n"));
       eq("the known-connections migration applies cleanly, and again (idempotent)", [/ERROR/.test(k1.stderr), /ERROR/.test(k2.stderr)], [false, false]);
+      const sp = join(sqlDir, "migration-survived-profile.sql");
+      const s1 = psqlFile("t", sp), s2 = psqlFile("t", sp);
+      if (/ERROR/.test(s1.stderr + s2.stderr)) console.log((s1.stderr + s2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 5).join("\n"));
+      eq("the survived-profile migration applies cleanly, and again (idempotent)", [/ERROR/.test(s1.stderr), /ERROR/.test(s2.stderr)], [false, false]);
 
       // ── math ──
       near("Beta math: P(mean > 0.30) for Beta(4,5) = 0.8059", 1 - Number(q("select public.trial_beta_cdf(0.30, 4, 5)")), 0.8059, 1e-3);
@@ -767,6 +771,45 @@ if (!BIN) {
       for (let round = 0; round < 4; round++) for (let v = 2; v <= 19; v++) viewerOf(U(v));
       eq("...and after enough loads no post is starved: all 8 posts hold a full cohort of 3", q(`select min(c) || ':' || max(c) || ':' || count(*) from (select count(*) c from public.trial_assignments where released_at is null group by post_id) z`), "3:3:8");
       Q(`update public.trial_engine_config set ondemand_batch=10, ondemand_max_unseen=20`);
+
+      // 23) survived posts stay on the profile; media is never deleted for them
+      const profileOf = (viewer, owner) => q(`set role authenticated; set request.jwt.claim.sub='${viewer}'; select coalesce(string_agg(post_id::text, ',' order by post_id), '') from public.profile_posts('${owner}', 100)`).split("\n").pop().split(",").filter(Boolean);
+      freshWorld(6);
+      Q(`update public.trial_engine_config set max_active_trials=1000, small_pool_everyone=50`);
+      Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${PID(1)}','${U(1)}','u','video'), ('${PID(2)}','${U(1)}','u','video'), ('${PID(3)}','${U(1)}','u','video'), ('${PID(4)}','${U(1)}','u','video')`);
+      Q(`insert into public.posts (id, user_id, media_url, media_type, parent_post_id) values ('${PID(10)}','${U(3)}','u','video','${PID(1)}'), ('${PID(11)}','${U(3)}','u','video','${PID(2)}')`);
+      Q(`update public.posts set status='survived', survived_at=now()-interval '30 hours', distribution_started_at=now()-interval '30 hours', distribution_expires_at=now()-interval '6 hours' where id='${PID(1)}'`);
+      Q(`update public.posts set status='archived' where id='${PID(2)}'`);
+      Q(`update public.posts set status='incomplete' where id='${PID(3)}'`);
+      Q(`insert into public.posts (id, user_id, media_url, media_type, status) values ('${PID(5)}','${U(1)}','u','video','queued')`);
+      eq("expire_posts() moves the survived post out of the feed window", [q("select public.expire_posts()") !== "", status(PID(1))], [true, "expired"]);
+      eq("...survived_at stays and the media is kept", q(`select (survived_at is not null) || ':' || coalesce(media_deleted_at::text, 'kept') from public.posts where id='${PID(1)}'`), "true:kept");
+      ok("it is not in anyone's feed any more", ![2, 3, 4].some((v) => feedIds(U(v)).includes(PID(1))));
+      eq("a stranger's view of the profile: the survived post only (not ended, incomplete, queued or testing)", profileOf(U(2), U(1)), [PID(1)]);
+      eq("the creator's own profile: everything of theirs, privately (survived, testing, queued, ended, incomplete)", profileOf(U(1), U(1)).sort(), [PID(1), PID(2), PID(3), PID(4), PID(5)].sort());
+      Q(`insert into public.hide_from_list (owner_id, hidden_user_id) values ('${U(1)}','${U(4)}')`);
+      Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(5)}','${U(1)}')`);
+      eq("a known viewer (hide list) sees the survived profile post, and only that one", profileOf(U(4), U(1)), [PID(1)]);
+      eq("a blocked pair sees nothing", profileOf(U(5), U(1)), []);
+      Q(`delete from public.user_blocks`); Q(`delete from public.hide_from_list`);
+      // reactions
+      eq("reactions to the survived post stay visible (not expired); reactions to the ended post expire with it", [status(PID(10)), q(`select status from public.posts where id='${PID(11)}'`)], ["trial", "expired"]);
+      // media deletion
+      Q(`update public.posts set media_deleted_at = now() where id='${PID(1)}'`);
+      eq("media of a survived post can never be marked deleted (the trigger keeps it)", q(`select media_deleted_at is null from public.posts where id='${PID(1)}'`), "t");
+      Q(`update public.posts set media_deleted_at = now() where id='${PID(10)}'`);
+      eq("...nor the media of a reaction under it", q(`select media_deleted_at is null from public.posts where id='${PID(10)}'`), "t");
+      Q(`update public.posts set media_deleted_at = now() where id='${PID(2)}'`);
+      eq("an ended post's media can still be marked deleted (timing unchanged)", q(`select media_deleted_at is not null from public.posts where id='${PID(2)}'`), "t");
+      Q(`update public.posts set media_deleted_at = null where id='${PID(2)}'; insert into public.trial_post_state (post_id, decision, decided_at) values ('${PID(2)}','failed', now() - interval '8 days'), ('${PID(3)}','incomplete', now() - interval '8 days') on conflict (post_id) do update set decided_at = excluded.decided_at, decision = excluded.decision`);
+      Q(`insert into public.trial_config (key, value) values ('retention_days', 7) on conflict (key) do nothing`);
+      eq("the deletion candidates: ended + incomplete posts past retention and the reaction under the ended one; never the survived post or its reaction", q(`select string_agg(post_id::text, ',' order by post_id) from public.trial_media_deletion_candidates()`), [PID(2), PID(3), PID(11)].join(","));
+      ok("ended / incomplete posts are not on others' profiles, and a fresh ended post is not a candidate", !profileOf(U(2), U(1)).includes(PID(2)) && !profileOf(U(2), U(1)).includes(PID(3)));
+      ok("clients cannot list deletion candidates", asUser(U(2), `select * from public.trial_media_deletion_candidates()`).status !== 0);
+      // an old ended post (inside the retention window) is shown to its creator only
+      Q(`update public.trial_post_state set decided_at = now() where post_id='${PID(2)}'`);
+      ok("recent ended posts stay on the creator's own profile; after retention they leave it", profileOf(U(1), U(1)).includes(PID(2)) && (Q(`update public.trial_post_state set decided_at = now() - interval '9 days' where post_id='${PID(2)}'`), !profileOf(U(1), U(1)).includes(PID(2))));
+      eq("the creator can still delete any of their posts", (asUser(U(1), `delete from public.posts where id='${PID(1)}'`), q(`select count(*) from public.posts where id='${PID(1)}'`)), "0");
 
       // 22) ties survive; P50 default; per-creator trial queue
       eq("bar growth percentile defaults to P50", q("select bar_percentile from public.trial_engine_config"), "0.5");

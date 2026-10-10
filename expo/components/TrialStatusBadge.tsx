@@ -28,18 +28,19 @@ export function TrialStatusBadge({
   status,
   distributionExpiresAt,
   queuePosition,
+  survivedAt,
 }: {
   status: Post["status"];
   /** SURVIVED shows only while this is in the future (or null: survivors with no window yet). */
   distributionExpiresAt?: string | null;
+  /** Set once the post survived: a survived post keeps its SURVIVED badge for good (after its 24 h window too). */
+  survivedAt?: string | null;
   /** For a queued post: 1 = up next. */
   queuePosition?: number | null;
 }) {
   let shown: string = status ?? "trial";
-  if (shown === "survived" && distributionExpiresAt) {
-    const expiresMs = Date.parse(distributionExpiresAt);
-    if (!Number.isNaN(expiresMs) && expiresMs <= Date.now()) shown = "expired";
-  }
+  // A survived post stays SURVIVED on the profile after its window ends (it only leaves the feed).
+  if (shown === "expired" && survivedAt) shown = "survived";
   // Unknown statuses render no badge instead of crashing.
   if (!Object.prototype.hasOwnProperty.call(BADGES, shown)) return null;
   const badge = shown === "queued" ? { ...BADGES.queued, label: queuedLabel(queuePosition).toUpperCase() } : BADGES[shown as SurvivalStatus];

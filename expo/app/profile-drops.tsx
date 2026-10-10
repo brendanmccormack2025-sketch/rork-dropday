@@ -8,7 +8,9 @@ import { ArrowLeft } from "lucide-react-native";
 
 import { FeedListView } from "@/components/FeedListView";
 import { theme } from "@/constants/theme";
-import { usePosts, isOnTrialNow, isOnOwnProfile, type Post } from "@/providers/PostsProvider";
+import { usePosts, isOnOwnProfile, type Post } from "@/providers/PostsProvider";
+import { profilePostIds } from "@/lib/profilePosts";
+import { isOnOtherProfile } from "@/lib/profileVisibility";
 import { useAuth } from "@/providers/AuthProvider";
 import { supabase } from "@/lib/supabase";
 
@@ -41,18 +43,17 @@ export default function ProfileDropsScreen() {
     enabled: isOtherUser,
     queryFn: async (): Promise<Post[]> => {
       if (!userId) return [];
-      const { data, error } = await supabase
-        .from("posts")
-        .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)",
-        )
-        .eq("user_id", userId)
-        .is("parent_post_id", null)
-        .eq("moderation_status", "active")
-        // Same rule as user/[id].tsx: only posts that are testing or still live.
-        .in("status", ["trial", "survived"])
-        .order("created_at", { ascending: false })
-        .limit(50);
+      // Other people's profile: posts that survived, newest first (also after their 24 h window; media kept). The server
+      // decides which (profile_posts); without it, the same rules as a direct query.
+      const ids = await profilePostIds(userId);
+      if (ids && ids.length === 0) return [];
+      const select =
+        "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)";
+      let query = supabase.from("posts").select(select).is("parent_post_id", null).eq("moderation_status", "active");
+      query = ids
+        ? query.in("id", ids)
+        : query.eq("user_id", userId).not("survived_at", "is", null).in("status", ["survived", "expired"]).is("media_deleted_at", null);
+      const { data, error } = await query.order("created_at", { ascending: false }).limit(100);
       if (error) {
         console.warn("[profile-drops/user] error", error.message);
         return [];
@@ -104,7 +105,7 @@ export default function ProfileDropsScreen() {
     () =>
       (isOtherUser ? otherUserPostsQuery.data ?? [] : myPosts)
         .filter((p) => !p.parent_post_id)
-        .filter(isOtherUser ? isOnTrialNow : isOnOwnProfile),
+        .filter(isOtherUser ? isOnOtherProfile : isOnOwnProfile),
     [isOtherUser, myPosts, otherUserPostsQuery.data],
   );
 

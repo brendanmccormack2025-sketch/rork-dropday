@@ -374,7 +374,7 @@ function ProfileTile({ post, onPress, queuePosition }: { post: Post; onPress: ()
         style={styles.tileGrad}
       />
       <View style={styles.statusBadgeWrap}>
-        <TrialStatusBadge status={post.status} distributionExpiresAt={post.distribution_expires_at} queuePosition={queuePosition} />
+        <TrialStatusBadge status={post.status} distributionExpiresAt={post.distribution_expires_at} queuePosition={queuePosition} survivedAt={post.survived_at} />
       </View>
       <View style={styles.tileBottom}>
         <View style={styles.tileStats}>

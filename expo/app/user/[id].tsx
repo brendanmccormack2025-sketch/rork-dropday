@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import UiText from "@/components/UiText";
+import { TrialStatusBadge } from "@/components/TrialStatusBadge";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -26,7 +27,9 @@ import {
 import { theme } from "@/constants/theme";
 import { ProfileAvatar } from "@/components/Avatar";
 import { useAuth } from "@/providers/AuthProvider";
-import { resolveAvatarUrl, isOnTrialNow, type Post } from "@/providers/PostsProvider";
+import { resolveAvatarUrl, type Post } from "@/providers/PostsProvider";
+import { profilePostIds } from "@/lib/profilePosts";
+import { isOnOtherProfile } from "@/lib/profileVisibility";
 import CreatorLinkPills from "@/components/CreatorLinkPills";
 import VerifiedCreatorBadge from "@/components/VerifiedCreatorBadge";
 import { graduationColumns, linkSourceFor, noteMissingGraduationColumns, parseCreatorStatus, showsVerifiedBadge } from "@/lib/creatorStatus";
@@ -102,21 +105,17 @@ export default function PublicProfileScreen() {
     enabled: !!id,
     queryFn: async (): Promise<Post[]> => {
       if (!id) return [];
-      const { data, error } = await supabase
-        .from("posts")
-        .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)",
-        )
-        .eq("user_id", id)
-        .is("parent_post_id", null)
-        .eq("moderation_status", "active")
-        // Public profile shows content that earned its place — another
-        // user's failed trials are hidden here (the creator still sees
-        // them on their own profile).
-        // Only posts that are testing or still live (see isOnTrialNow below).
-        .in("status", ["trial", "survived"])
-        .order("created_at", { ascending: false })
-        .limit(50);
+      // Other people's profile: posts that survived, newest first (also after their 24 h window; media kept). The server
+      // decides which (profile_posts); without it, the same rules as a direct query.
+      const ids = await profilePostIds(id);
+      if (ids && ids.length === 0) return [];
+      const select =
+        "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)";
+      let query = supabase.from("posts").select(select).is("parent_post_id", null).eq("moderation_status", "active");
+      query = ids
+        ? query.in("id", ids)
+        : query.eq("user_id", id).not("survived_at", "is", null).in("status", ["survived", "expired"]).is("media_deleted_at", null);
+      const { data, error } = await query.order("created_at", { ascending: false }).limit(100);
       if (error) {
         console.warn("[user/drops] error", error.message);
         return [];
@@ -154,7 +153,7 @@ export default function PublicProfileScreen() {
   // Blocked user's content is hidden entirely — the grid renders empty and
   // the ListEmptyComponent shows a blocked notice instead of their drops.
   const visibleDrops = useMemo(
-    () => (userProfileBlocked ? [] : drops.filter(isOnTrialNow)),
+    () => (userProfileBlocked ? [] : drops.filter(isOnOtherProfile)),
     [drops, userProfileBlocked],
   );
 
@@ -353,6 +352,10 @@ function ProfileTile({ post, onPress }: { post: Post; onPress: () => void }) {
         colors={["transparent", "rgba(0,0,0,0.7)"]}
         style={styles.tileGrad}
       />
+      {/* Everything on someone else's profile survived Trial. */}
+      <View style={styles.statusBadgeWrap}>
+        <TrialStatusBadge status="survived" />
+      </View>
       <View style={styles.tileBottom}>
         <View style={styles.tileStats}>
           <Heart color={theme.danger} size={10} fill={theme.danger} />
@@ -578,6 +581,7 @@ const styles = StyleSheet.create({
 
   /* Tile grid */
   row: { gap: GAP, marginBottom: GAP },
+  statusBadgeWrap: { position: "absolute", top: 6, left: 6 },
   tile: {
     flex: 1,
     aspectRatio: 0.85,
