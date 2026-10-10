@@ -119,8 +119,8 @@ if (!BIN) {
       const reset = () => {
         Q(`delete from public.trial_engine_log; delete from public.trial_post_state; delete from public.trial_assignments; delete from public.notifications;
            delete from public.post_view_stats; delete from public.post_raw_views; delete from public.post_qualified_views; delete from public.likes;
-           delete from public.viewer_creator_affinity; delete from public.trial_feed_opens; delete from public.follows; delete from public.posts; delete from public.user_blocks;
-           update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true`);
+           delete from public.viewer_creator_affinity; delete from public.trial_feed_opens; delete from public.follows; delete from public.hide_from_list; delete from public.contact_hashes; delete from public.user_phone_hash; delete from public.posts; delete from public.user_blocks;
+           update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false`);
       };
       const score = (post) => Object.fromEntries(q(`select viewer_id::text || '=' || round(score::numeric,3) from public.trial_post_scores('${post}') order by 1`).split("\n").filter(Boolean).map((l) => l.split("=")));
 
@@ -244,7 +244,7 @@ if (!BIN) {
       ok("once seen, it is no longer pushed to the front again", !feedOf(asked[0]).startsWith(P1) || true);
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       ok("legacy mode: the feed is the plain get_feed again (outsider sees it)", feedOf(outsider).includes(P1));
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false`);
       const pg = q(`set role authenticated; set request.jwt.claim.sub='${outsider}'; select count(*) || ':' || max(page_rows) from public.get_feed_engine(20, 0)`).split("\n").pop();
       ok("page_rows reports the source rows so the app can detect the end of the feed", /^\d+:\d+$/.test(pg));
 
@@ -300,7 +300,7 @@ if (!BIN) {
       eq("legacy: a new post is NOT given a cohort or engine state", [q(`select count(*) from public.trial_post_state`), q(`select count(*) from public.trial_assignments`)], ["0", "0"]);
       engine();
       eq("legacy: the old rule ran (25 h, below the exposure gate -> silent 'incomplete', no engine notification, no engine log)", [status(P1), notif("verdict_incomplete"), q("select count(*) from public.trial_engine_log")], ["incomplete", "0", "0"]);
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false`);
       freshWorld(20);
       mkPost(P1, U(1), 1500);
       engine();
@@ -444,7 +444,7 @@ if (!BIN) {
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       prep(); Q(`update public.trial_engine_config set engine_mode='legacy'`);
       ok("legacy mode: opening the feed assigns nothing", (() => { viewerOf(V); return q("select count(*) from public.trial_assignments") === "0"; })());
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true`);
+      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false`);
       ok("a clean slate for the next run", true);
 
       // 13) A. small-app rule: while the active pool is small, everybody gets every testing post
@@ -481,6 +481,7 @@ if (!BIN) {
       const FU = U(2), FD = U(3);   // 2 follows the creator, the creator follows 3
       freshWorld(6);
       Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      Q(`update public.trial_engine_config set known_source_follows=true`);
       Q(`insert into public.follows (follower_id, followee_id) values ('${FU}','${U(1)}'), ('${U(1)}','${FD}')`);
       mkPost(P1, U(1));
       eq("known people (a follower, and someone the creator follows) are not assigned, even in a small app; strangers all are", [q(`select count(*) from public.trial_assignments where post_id='${P1}' and viewer_id in ('${FU}','${FD}')`), activeIn(P1)], ["0", 3]);
@@ -499,11 +500,13 @@ if (!BIN) {
       eq("flag off: known viewers' engagement counts again", Object.keys(score(P1)).length, 5);
       freshWorld(6);
       Q(`update public.trial_engine_config set small_pool_everyone=50, build_in_silence=false`);
+      Q(`update public.trial_engine_config set known_source_follows=true`);
       Q(`insert into public.follows (follower_id, followee_id) values ('${FU}','${U(1)}')`);
       mkPost(P1, U(1));
       ok("flag off: a follower is assigned and served the testing post", viewerOf(FU).startsWith(P1));
       freshWorld(6);
       Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      Q(`update public.trial_engine_config set known_source_follows=true`);
       Q(`insert into public.follows (follower_id, followee_id) values ('${FU}','${U(1)}')`);
       mkPost(P1, U(1));
       Q(`update public.posts set status='survived', survived_at=now(), distribution_started_at=now(), distribution_expires_at=now()+interval '24 hours' where id='${P1}'`);
@@ -607,6 +610,7 @@ if (!BIN) {
       eq("with a live user still unexposed the pool is NOT exhausted: the normal confidence rules apply (keeps testing)", [status(P1), lastLog(P1)], ["trial", "testing|2"]);
       freshWorld(4);
       mkPost(P1, U(1));
+      Q(`update public.trial_engine_config set known_source_follows=true`);
       Q(`insert into public.follows (follower_id, followee_id) values ('${U(4)}','${U(1)}')`);   // 4 knows the creator: not part of the pool
       view(P1, U(2), { watch: 8000, dur: 12000 }); view(P1, U(3), { watch: 8000, dur: 12000 });
       engine();
@@ -677,6 +681,28 @@ if (!BIN) {
       const big = score(P1);
       eq("pool of 19 > 10: the adjustments apply (new account x0.5, like-everything x0.5 on the like, affinity x0.5)", [big[U(7)], big[U(8)], big[U(9)]], ["0.350", "0.550", "0.350"]);
       eq("the debug weight column shows it", q(`select round(weight::numeric,2) from public.trial_post_score_details('${P1}') where viewer_id='${U(7)}'`), "0.50");
+
+      // 19) follows are a known source only when known_source_follows is on
+      freshWorld(6);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      Q(`insert into public.follows (follower_id, followee_id) values ('${U(2)}','${U(1)}'), ('${U(1)}','${U(3)}')`);
+      mkPost(P1, U(1));
+      eq("flag off (default): old follows are not in known_connections", q("select count(*) from public.known_connections where source='follow'"), "0");
+      ok("flag off: a follower and a followed account get the testing post like anyone else", viewerOf(U(2)).startsWith(P1) && viewerOf(U(3)).startsWith(P1));
+      view(P1, U(2), { watch: 12000, dur: 12000, done: true, like: true });
+      ok("flag off: their engagement counts toward the verdict", U(2) in score(P1));
+      Q(`update public.trial_engine_config set known_source_follows=true`);
+      eq("flag on: follows are known in both directions", q("select count(*) from public.known_connections where source='follow'"), "4");
+      ok("flag on: a follower is excluded from scoring and the feed", !(U(2) in score(P1)));
+      freshWorld(6);
+      Q(`update public.trial_engine_config set small_pool_everyone=50`);
+      Q(`insert into public.follows (follower_id, followee_id) values ('${U(2)}','${U(1)}')`);
+      Q(`insert into public.hide_from_list (owner_id, hidden_user_id) values ('${U(1)}','${U(4)}')`);
+      asUser(U(3), `select public.set_my_phone('${NUM[3]}')`); asUser(U(1), `select public.sync_my_contacts(array['${NUM[3]}'])`);
+      mkPost(P1, U(1));
+      ok("flag off: the hide list and contacts still exclude, follows do not", !viewerOf(U(4)).includes(P1) && !viewerOf(U(3)).includes(P1) && viewerOf(U(2)).startsWith(P1));
+      eq("flag off: the remaining sources are contact + hide_list", q("select string_agg(distinct source, ',' order by source) from public.known_connections"), "contact,hide_list");
+      wipePrivacy();
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });

@@ -19,6 +19,9 @@
 
 create extension if not exists pgcrypto with schema extensions;
 
+-- Old follows (DropDay era) are ignored unless this is turned on; users cannot see or manage them in Trial.
+alter table public.trial_engine_config add column if not exists known_source_follows boolean not null default false;
+
 -- ── hashing ──────────────────────────────────────────────────────────────────
 create or replace function public.trial_hash_phone(p_e164 text)
 returns text
@@ -178,8 +181,10 @@ grant execute on function public.set_my_phone(text), public.clear_my_phone(), pu
 create or replace view public.known_connections as
   -- follows, either direction
   select f.follower_id as user_id, f.followee_id as other_id, 'follow'::text as source from public.follows f
+   where (select known_source_follows from public.trial_engine_config where id)
   union all
   select f.followee_id, f.follower_id, 'follow'::text from public.follows f
+   where (select known_source_follows from public.trial_engine_config where id)
   union all
   -- contacts, either direction: the owner's contacts contain the other person's (unverified) phone hash
   select c.owner_id, p.user_id, 'contact'::text

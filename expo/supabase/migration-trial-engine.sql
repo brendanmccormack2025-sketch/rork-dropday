@@ -98,6 +98,7 @@ alter table public.trial_engine_config
   add column if not exists prior_pool_fraction double precision not null default 0.25,
   add column if not exists fraud_weights_min_pool integer not null default 50,   -- new-account / like-everything / affinity weights only above this active pool
   add column if not exists exhausted_fail_ratio double precision not null default 0.67,   -- pool exhausted: ended below ratio * bar
+  add column if not exists known_source_follows boolean not null default false,   -- old follows count as "people you know" (off: DropDay-era follows are ignored)
   add column if not exists build_in_silence    boolean not null default true;           -- people you know never see (or influence) your post while it is on trial
 alter table public.trial_engine_config enable row level security;   -- no policies: dashboard / service role only
 
@@ -420,8 +421,10 @@ $$;
 -- trial_is_silenced() and never change.
 create or replace view public.known_connections as
   select f.follower_id as user_id, f.followee_id as other_id, 'follow'::text as source from public.follows f
+   where (select known_source_follows from public.trial_engine_config where id)
   union all
-  select f.followee_id, f.follower_id, 'follow'::text from public.follows f;
+  select f.followee_id, f.follower_id, 'follow'::text from public.follows f
+   where (select known_source_follows from public.trial_engine_config where id);
   -- union all select ... from public.friends ...        (messaging, later)
   -- union all select ... from public.contact_matches ...  (contacts, later)
 revoke all on public.known_connections from anon, authenticated;
