@@ -1,0 +1,15 @@
+# Edge functions that expo/ship.sh deploys on every release (one name per line = a folder in expo/supabase/functions/).
+# Blank lines and # comments are ignored. Keep this file up to date whenever a function is added.
+
+delete-media
+
+# ── delete-media ─────────────────────────────────────────────────────────────────────────────────────────────────
+# What: removes the Storage files queued in trial_media_delete_queue when a post ends or stays incomplete.
+# Secrets: none to set. SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided to every Edge Function by Supabase.
+# Calls:   POST /functions/v1/delete-media          -> DRY RUN (lists what it would delete, deletes nothing)
+#          POST /functions/v1/delete-media?run=1    -> deletes. Header: Authorization: Bearer <service role key>.
+# Schedule: NOT set up by ship.sh. After you have looked at a dry run, run supabase/schedule-delete-media.sql once in
+#          the SQL editor (every 15 minutes through pg_cron + pg_net). It needs one Vault secret named service_role_key
+#          holding the project's service role key:
+#            select vault.create_secret('<service role key>', 'service_role_key');
+#          ship.sh prints a reminder at the end while the 'delete-media' cron job does not exist.

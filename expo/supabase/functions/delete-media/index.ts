@@ -1,12 +1,9 @@
 // Deletes the Storage files queued by trial_hide_post() (posts that ended or stayed incomplete, and their reactions).
-// Deploy:   supabase functions deploy delete-media --no-verify-jwt
+// Deploy:   done by expo/ship.sh (npx supabase functions deploy delete-media --project-ref tfdjymogbtfavdzgfqas)
 // Dry run:  POST /functions/v1/delete-media            (lists what it would delete; deletes nothing)
 // Delete:   POST /functions/v1/delete-media?run=1      (removes the files, marks the queue rows done)
 // Only the service role key may call it (Authorization: Bearer <service role key>).
-// Schedule (optional, pg_cron + pg_net; keep the key in Vault):
-//   select cron.schedule('delete-media', '*/15 * * * *', $$ select net.http_post(
-//     url := 'https://<project-ref>.supabase.co/functions/v1/delete-media?run=1',
-//     headers := jsonb_build_object('Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'))) $$);
+// Schedule: supabase/schedule-delete-media.sql (run once by hand after a dry run; see supabase/FUNCTIONS.txt).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 Deno.serve(async (req: Request) => {

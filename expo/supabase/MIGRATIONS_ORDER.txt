@@ -1,0 +1,35 @@
+# Migrations that expo/ship.sh applies, in this order, on every release.
+# One file per line (paths relative to expo/supabase/). Blank lines and # comments are ignored.
+#
+# Every file below is IDEMPOTENT (safe to run again and again) and none of them defines an older version of something a
+# later file defines. migration-known-connections.sql must stay LAST (it revokes client access to the trial_* functions
+# created by the files before it, so it has to see all of them).
+#
+# Keep this file up to date whenever a migration is added or changed.
+
+migration-age-gating.sql
+migration-moderation.sql
+migration-graduation.sql
+migration-trial-engine.sql
+migration-expire-posts-cron.sql
+migration-survived-profile.sql
+migration-hide-ended.sql
+migration-known-connections.sql
+
+# ── NOT run by ship.sh, on purpose ───────────────────────────────────────────────────────────────────────────────
+# Baseline, applied once when the database was created. Re-running them would put OLDER definitions back over newer
+# ones (several define run_survival_checkpoint(), which migration-trial-engine.sql turned into the engine switch):
+#   schema.sql (twice, see its header), migration-survival-checkpoint.sql, migration-qualified-views.sql,
+#   migration-raw-views.sql, migration-notifications-early-survival.sql, migration-lifecycle.sql,
+#   migration-reaction-count.sql, migration-engagement-floor-2.sql, migration-dynamic-exposure-gate.sql,
+#   migration-active-users-exposure-gate.sql, migration-reactions-no-verdict-engagement.sql,
+#   migration-verdict-at-n-views.sql, migration-lifecycle-expiry.sql (its expire-posts job is created by
+#   migration-expire-posts-cron.sql instead).
+# Reference copies / manual scripts (never run automatically): get_feed.sql (a copy of the dashboard function),
+#   trial-engine-review.sql (a review query), admin-graduation.sql, migration-media-deletion.sql (manual moderation
+#   helper), schedule-delete-media.sql (run once by hand, see FUNCTIONS.txt).
+# Other older migrations (friend groups, explore, terms, client errors, profile links, ...) are not part of the
+# trial engine and are not touched here.
+#
+# One manual step no script can do: the contact-hash pepper in Supabase Vault (see migration-known-connections.sql):
+#   select vault.create_secret('<64+ random characters>', 'trial_contact_pepper');
