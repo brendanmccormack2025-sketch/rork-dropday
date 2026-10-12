@@ -4,10 +4,9 @@
 #   ./ship.sh "what changed"
 #
 # Needs this environment variable (never printed):
-#   SUPABASE_DB_URL        Postgres connection string of the project (Supabase > Project Settings > Database)
-# Optional: SUPABASE_ACCESS_TOKEN (a personal access token that starts with sbp_) deploys the Edge Functions. Without it,
-# or if it is not an sbp_ token, "skipping function deploy" is printed and the rest of the release goes ahead.
-# And an EAS login (EXPO_TOKEN, or `npx eas-cli login` once).
+#   SUPABASE_ACCESS_TOKEN  Supabase personal access token (starts with sbp_). Whitespace and newlines are stripped.
+# It runs the migrations (Supabase Management API, scripts/supabase-sql.mjs: no psql, no database password) and deploys
+# the Edge Functions. And an EAS login (EXPO_TOKEN, or `npx eas-cli login` once).
 #
 # Lists:  supabase/MIGRATIONS_ORDER.txt (migrations, in order)   supabase/FUNCTIONS.txt (functions to deploy)
 # Dry run (prints what it would do, changes nothing):   SHIP_DRY_RUN=1 ./ship.sh "message"
@@ -31,13 +30,17 @@ list_entries() { sed -e 's/#.*//' "$1" | awk 'NF { print $1 }'; }
 step "check arguments and environment"
 MESSAGE="${1:-}"
 [ -n "$MESSAGE" ] || fail 'usage: ./ship.sh "what changed"'
-[ -n "${SUPABASE_DB_URL:-}" ] || fail "environment variable SUPABASE_DB_URL is not set (it is never printed)"
-# Edge function deploys are optional: they need a Supabase personal access token (sbp_...).
-DEPLOY_FUNCTIONS=""
-case "${SUPABASE_ACCESS_TOKEN:-}" in
-  sbp_*) DEPLOY_FUNCTIONS=1; export SUPABASE_ACCESS_TOKEN ;;
-  *) unset SUPABASE_ACCESS_TOKEN ;;
+# A pasted secret can carry a leading newline or spaces: strip all whitespace before use (never echoed).
+SUPABASE_ACCESS_TOKEN="$(printf '%s' "${SUPABASE_ACCESS_TOKEN:-}" | tr -d '[:space:]')"
+[ -n "$SUPABASE_ACCESS_TOKEN" ] || fail "environment variable SUPABASE_ACCESS_TOKEN is not set (it is never printed)"
+case "$SUPABASE_ACCESS_TOKEN" in
+  sbp_*) ;;
+  *) fail "SUPABASE_ACCESS_TOKEN is not a personal access token (it must start with sbp_; create one at supabase.com/dashboard/account/tokens)" ;;
 esac
+export SUPABASE_ACCESS_TOKEN
+command -v node >/dev/null 2>&1 || fail "node is not installed"
+SQL_RUNNER="scripts/supabase-sql.mjs"
+[ -f "$SQL_RUNNER" ] || fail "$SQL_RUNNER is missing"
 [ -f "$MIGRATIONS_FILE" ] || fail "$MIGRATIONS_FILE is missing"
 [ -f "$FUNCTIONS_FILE" ] || fail "$FUNCTIONS_FILE is missing"
 
@@ -53,25 +56,7 @@ if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
   echo "WARNING: you have uncommitted changes; the update is built from this working tree."
 fi
 
-# ── 1. psql ──────────────────────────────────────────────────────────────────
-step "make sure psql is installed"
-if ! command -v psql >/dev/null 2>&1; then
-  if [ -n "$DRY" ]; then
-    echo "[dry run] would install postgresql-client"
-  elif command -v apt-get >/dev/null 2>&1; then
-    SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
-    $SUDO apt-get update -y
-    $SUDO apt-get install -y postgresql-client
-  elif command -v brew >/dev/null 2>&1; then
-    brew install libpq
-    export PATH="$(brew --prefix libpq)/bin:$PATH"
-  else
-    fail "psql is missing and neither apt-get nor brew is available: install the PostgreSQL client"
-  fi
-fi
-if [ -z "$DRY" ]; then command -v psql >/dev/null 2>&1 || fail "psql is still not available after the install"; fi
-
-# ── 2. Code and dependencies ─────────────────────────────────────────────────
+# ── 1. Code and dependencies ─────────────────────────────────────────────────
 step "git pull"
 if [ -n "$DRY" ]; then echo "[dry run] git pull --ff-only"; else git pull --ff-only; fi
 step "bun install"
@@ -88,36 +73,31 @@ else
   npx --yes eas-cli whoami >/dev/null 2>&1 || fail "not logged in to EAS: set EXPO_TOKEN, or run: npx eas-cli login"
 fi
 
-# ── 3. Migrations ────────────────────────────────────────────────────────────
+# ── 2. Migrations (Supabase Management API, one request per file; stops on the first error) ────────────────────────────────────────────────────────────
 APPLIED=()
 for f in "${MIGRATIONS[@]}"; do
   step "migration $f"
   if [ -n "$DRY" ]; then
-    echo "[dry run] psql \"\$SUPABASE_DB_URL\" -v ON_ERROR_STOP=1 -f supabase/$f"
+    echo "[dry run] POST api.supabase.com/v1/projects/$PROJECT_REF/database/query  (supabase/$f, $(wc -c < "supabase/$f" | tr -d ' ') bytes)"
   else
-    psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "supabase/$f"
+    node "$SQL_RUNNER" file "supabase/$f"
   fi
   APPLIED+=("$f")
 done
 
-# ── 4. Edge Functions ────────────────────────────────────────────────────────
+# ── 3. Edge Functions ────────────────────────────────────────────────────────
 DEPLOYED=()
-if [ -z "$DEPLOY_FUNCTIONS" ]; then
-  step "edge functions"
-  echo "skipping function deploy (SUPABASE_ACCESS_TOKEN is missing or is not an sbp_ token)"
-else
-  for f in "${FUNCTIONS[@]}"; do
-    step "deploy function $f"
-    if [ -n "$DRY" ]; then
-      echo "[dry run] npx --yes supabase functions deploy $f --project-ref $PROJECT_REF"
-    else
-      npx --yes supabase functions deploy "$f" --project-ref "$PROJECT_REF"
-    fi
-    DEPLOYED+=("$f")
-  done
-fi
+for f in "${FUNCTIONS[@]}"; do
+  step "deploy function $f"
+  if [ -n "$DRY" ]; then
+    echo "[dry run] npx --yes supabase functions deploy $f --project-ref $PROJECT_REF"
+  else
+    npx --yes supabase functions deploy "$f" --project-ref "$PROJECT_REF"
+  fi
+  DEPLOYED+=("$f")
+done
 
-# ── 5. App update ────────────────────────────────────────────────────────────
+# ── 4. App update ────────────────────────────────────────────────────────────
 step "publish the app update (EAS, production)"
 if [ -n "$DRY" ]; then
   echo "[dry run] npx --yes eas-cli update --channel production --environment production --message \"$MESSAGE\" --non-interactive"
@@ -125,13 +105,13 @@ else
   npx --yes eas-cli update --channel production --environment production --message "$MESSAGE" --non-interactive
 fi
 
-# ── 6. Reminders (not errors) ────────────────────────────────────────────────
+# ── 5. Reminders (not errors) ────────────────────────────────────────────────
 NOTES=()
 if [ -z "$DRY" ]; then
-  if [ "$(psql "$SUPABASE_DB_URL" -Atqc "select count(*) from vault.decrypted_secrets where name = 'trial_contact_pepper'" 2>/dev/null || echo 0)" = "0" ]; then
+  if node "$SQL_RUNNER" query "select count(*) as n from vault.decrypted_secrets where name = 'trial_contact_pepper'" 2>/dev/null | grep -q '"n":[ ]*0'; then
     NOTES+=("Vault secret trial_contact_pepper is not set (phone numbers cannot be saved): select vault.create_secret('<64+ random characters>', 'trial_contact_pepper');")
   fi
-  if [ "$(psql "$SUPABASE_DB_URL" -Atqc "select count(*) from cron.job where jobname = 'delete-media'" 2>/dev/null || echo 0)" = "0" ]; then
+  if node "$SQL_RUNNER" query "select count(*) as n from cron.job where jobname = 'delete-media'" 2>/dev/null | grep -q '"n":[ ]*0'; then
     NOTES+=("delete-media is deployed but not scheduled: after a dry run, run supabase/schedule-delete-media.sql once (see supabase/FUNCTIONS.txt).")
   fi
 fi
@@ -142,12 +122,8 @@ printf 'commit:      %s\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unk
 printf 'message:     %s\n' "$MESSAGE"
 printf 'migrations:  %s applied\n' "${#APPLIED[@]}"
 for f in "${APPLIED[@]}"; do printf '               - %s\n' "$f"; done
-if [ -z "$DEPLOY_FUNCTIONS" ]; then
-  printf 'functions:   skipped (no sbp_ SUPABASE_ACCESS_TOKEN)\n'
-else
-  printf 'functions:   %s deployed\n' "${#DEPLOYED[@]}"
-  for f in "${DEPLOYED[@]}"; do printf '               - %s\n' "$f"; done
-fi
+printf 'functions:   %s deployed\n' "${#DEPLOYED[@]}"
+for f in "${DEPLOYED[@]}"; do printf '               - %s\n' "$f"; done
 printf 'app update:  published to the production channel\n'
 if [ "${#NOTES[@]}" -gt 0 ]; then
   printf '\nTo do by hand:\n'
