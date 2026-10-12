@@ -49,7 +49,7 @@ export default function ProfileDropsScreen() {
       const ids = await profilePostIds(userId);
       if (ids && ids.length === 0) return [];
       const select =
-        "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)";
+        "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, thumbnail_url, view_count, qualified_view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)";
       let query = supabase.from("posts").select(select).is("parent_post_id", null).eq("moderation_status", "active");
       query = ids
         ? query.in("id", ids)
@@ -79,6 +79,8 @@ export default function ProfileDropsScreen() {
         media_deleted_at: (row.media_deleted_at as string | null) ?? null,
         follower_visibility: (row.follower_visibility as boolean | null) ?? true,
         created_at: row.created_at as string,
+        view_count: (row.view_count as number | undefined) ?? 0,
+        qualified_view_count: (row.qualified_view_count as number | undefined) ?? 0,
         like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
         comment_count: (row.comment_count as number | undefined) ?? 0,
         reaction_count: (row.reaction_count as number | undefined) ?? 0,

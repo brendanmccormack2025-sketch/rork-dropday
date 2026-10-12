@@ -33,6 +33,7 @@ import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoSt
 
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { TrialStatusBadge } from "@/components/TrialStatusBadge";
+import { shouldDimPost, viewsShown } from "@/lib/postDisplay";
 import CreatorLinkIcons from "@/components/CreatorLinkIcons";
 import { theme } from "@/constants/theme";
 import { usePosts, resolveAvatarUrl, type Post, type TextOverlay, type TextBackgroundStyle } from "@/providers/PostsProvider";
@@ -1714,7 +1715,7 @@ export const FeedItem = memo(function FeedItem({
             />
           ) : null}
           <View style={styles.mediaGoneLabel}>
-            <UiText style={styles.mediaGoneText}>EXPIRED</UiText>
+            <UiText style={styles.mediaGoneText}>Video removed</UiText>
           </View>
         </View>
       ) : (
@@ -1808,7 +1809,7 @@ export const FeedItem = memo(function FeedItem({
           every non-owner surface (feeds, other-user profiles), so this only
           ever renders on the creator's own drops. Content dims; UI chrome
           (action rail, status badge, username) stays bright. */}
-      {(post.status === "archived" || post.status === "expired") && (
+      {shouldDimPost(post) && (
         <View style={styles.archivedScrim} pointerEvents="none" />
       )}
 
@@ -1886,7 +1887,7 @@ export const FeedItem = memo(function FeedItem({
         />
         <ActionButton
           icon={<Eye color="rgba(255,255,255,0.6)" size={22} strokeWidth={2} />}
-          label={String(post.view_count ?? 0)}
+          label={String(viewsShown(post))}
           muted
         />
       </View>
@@ -1900,7 +1901,7 @@ export const FeedItem = memo(function FeedItem({
         pointerEvents="box-none"
       >
         <View style={styles.badgeSlot} pointerEvents="none">
-          <TrialStatusBadge status={post.status} distributionExpiresAt={post.distribution_expires_at} />
+          <TrialStatusBadge status={post.status} distributionExpiresAt={post.distribution_expires_at} survivedAt={post.survived_at} />
         </View>
         {trialNote ? (
           <View style={styles.trialNote} pointerEvents="none">

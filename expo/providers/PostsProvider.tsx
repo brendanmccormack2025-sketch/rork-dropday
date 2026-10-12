@@ -65,6 +65,8 @@ export type Post = {
   reaction_count?: number;
   /** Raw impressions (every playback); distinct from qualified_view_count (3s+ deduped). */
   view_count?: number;
+  /** Qualified views (3 s+, author excluded): the exposure gate counter. */
+  qualified_view_count?: number;
   /** Mature-content flag (server-side filtered for teen viewers). */
   is_mature?: boolean;
   /** Moderation status: 'active' (visible), 'hidden' (auto/flagged), 'removed' (confirmed violation). */
@@ -681,7 +683,7 @@ function isParentUnavailableError(message: string | null | undefined): boolean {
 }
 
 const FEED_POST_SELECT =
-  "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)";
+  "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, qualified_view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)";
 
 /** true: For You comes from get_feed (server order). false: the old on-device query + rankFeed. */
 const USE_SERVER_FEED = true;
@@ -724,6 +726,8 @@ function mapFeedRow(row: Record<string, unknown>): Post {
     expired_at: (row.expired_at as string | null) ?? null,
     media_deleted_at: (row.media_deleted_at as string | null) ?? null,
     created_at: row.created_at as string,
+    view_count: (row.view_count as number | undefined) ?? 0,
+    qualified_view_count: (row.qualified_view_count as number | undefined) ?? 0,
     like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
     comment_count: (row.comment_count as number | undefined) ?? 0,
     reaction_count: (row.reaction_count as number | undefined) ?? 0,
@@ -1167,7 +1171,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         let q = supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, qualified_view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)"
           )
           .is("parent_post_id", null)
           .eq("moderation_status", "active")
@@ -1204,6 +1208,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           expired_at: (row.expired_at as string | null) ?? null,
           media_deleted_at: (row.media_deleted_at as string | null) ?? null,
           created_at: row.created_at as string,
+          view_count: (row.view_count as number | undefined) ?? 0,
+          qualified_view_count: (row.qualified_view_count as number | undefined) ?? 0,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
           reaction_count: (row.reaction_count as number | undefined) ?? 0,
@@ -1233,7 +1239,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       try {
         const { data, error } = await supabase
           .from("posts")
-          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, moderation_status, status, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)")
+          .select("id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, qualified_view_count, moderation_status, status, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)")
           .eq("user_id", user.id)
           .eq("moderation_status", "active")
           .order("created_at", { ascending: false })
@@ -1262,6 +1268,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           expired_at: (row.expired_at as string | null) ?? null,
           media_deleted_at: (row.media_deleted_at as string | null) ?? null,
           created_at: row.created_at as string,
+          view_count: (row.view_count as number | undefined) ?? 0,
+          qualified_view_count: (row.qualified_view_count as number | undefined) ?? 0,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
           reaction_count: (row.reaction_count as number | undefined) ?? 0,
@@ -1295,7 +1303,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data: postRows, error: postErr } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, moderation_status, status, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, qualified_view_count, moderation_status, status, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)"
           )
           .in("id", postIds)
           .eq("moderation_status", "active");
@@ -1322,6 +1330,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           expired_at: (row.expired_at as string | null) ?? null,
           media_deleted_at: (row.media_deleted_at as string | null) ?? null,
           created_at: row.created_at as string,
+          view_count: (row.view_count as number | undefined) ?? 0,
+          qualified_view_count: (row.qualified_view_count as number | undefined) ?? 0,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
           reaction_count: (row.reaction_count as number | undefined) ?? 0,
@@ -1606,7 +1616,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         const { data, error } = await supabase
           .from("posts")
           .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)"
+            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, qualified_view_count, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)"
           )
           .not("parent_post_id", "is", null)
           .eq("moderation_status", "active")
@@ -1637,6 +1647,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           media_deleted_at: (row.media_deleted_at as string | null) ?? null,
           follower_visibility: (row.follower_visibility as boolean | null) ?? true,
           created_at: row.created_at as string,
+          view_count: (row.view_count as number | undefined) ?? 0,
+          qualified_view_count: (row.qualified_view_count as number | undefined) ?? 0,
           like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
           comment_count: (row.comment_count as number | undefined) ?? 0,
           profile: (row.profiles as Post["profile"]) ?? null,
