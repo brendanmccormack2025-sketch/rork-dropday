@@ -46,16 +46,22 @@ SQL_RUNNER="scripts/supabase-sql.mjs"
 
 MIGRATIONS=()
 while IFS= read -r f; do MIGRATIONS+=("$f"); done < <(list_entries "$MIGRATIONS_FILE")
-FUNCTIONS=()        # names
-FUNCTION_FLAGS=()   # extra deploy flags for each (the rest of its line in FUNCTIONS.txt, e.g. --no-verify-jwt)
+FUNCTIONS=()          # names
+FUNCTION_FLAGS=()     # extra deploy flags for each (the rest of its line in FUNCTIONS.txt, e.g. --no-verify-jwt)
+FUNCTION_SCHEDULES=() # schedule=<sql file>: applied after the function is deployed (and its dry run looked fine)
 while IFS= read -r line; do
   name="${line%% *}"
-  flags=""; [ "$line" = "$name" ] || flags="${line#* }"
-  FUNCTIONS+=("$name"); FUNCTION_FLAGS+=("$flags")
+  rest=""; [ "$line" = "$name" ] || rest="${line#* }"
+  flags=""; sched=""
+  for w in $rest; do
+    case "$w" in schedule=*) sched="${w#schedule=}" ;; *) flags="$flags $w" ;; esac
+  done
+  FUNCTIONS+=("$name"); FUNCTION_FLAGS+=("${flags# }"); FUNCTION_SCHEDULES+=("$sched")
 done < <(sed -e 's/#.*//' "$FUNCTIONS_FILE" | awk 'NF { $1=$1; print }')
 [ "${#MIGRATIONS[@]}" -gt 0 ] || fail "$MIGRATIONS_FILE lists no migrations"
 for f in "${MIGRATIONS[@]}"; do [ -f "supabase/$f" ] || fail "migration listed but not found: supabase/$f"; done
 for f in "${FUNCTIONS[@]}"; do [ -d "supabase/functions/$f" ] || fail "function listed but not found: supabase/functions/$f"; done
+for s in "${FUNCTION_SCHEDULES[@]}"; do [ -z "$s" ] || [ -f "$s" ] || fail "schedule file listed but not found: $s"; done
 echo "migrations: ${#MIGRATIONS[@]}   functions: ${#FUNCTIONS[@]}"
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
   echo "WARNING: you have uncommitted changes; the update is built from this working tree."
@@ -93,6 +99,8 @@ done
 # ── 3. Edge Functions ────────────────────────────────────────────────────────
 # --use-api bundles on Supabase's side (no Docker needed, e.g. in a Codespace). Extra flags per function come from FUNCTIONS.txt.
 DEPLOYED=()
+SCHEDULED=()
+SCHEDULE_FAILED=()
 for i in "${!FUNCTIONS[@]}"; do
   f="${FUNCTIONS[$i]}"
   EXTRA=()
@@ -105,6 +113,25 @@ for i in "${!FUNCTIONS[@]}"; do
     npx --yes supabase functions deploy "$f" --project-ref "$PROJECT_REF" --use-api ${EXTRA[@]+"${EXTRA[@]}"}
   fi
   DEPLOYED+=("$f")
+
+  # A function with a schedule: look at its dry run, keep the pg_cron job's key in Vault, apply the (idempotent) schedule.
+  # A problem here is reported at the end but does not stop the release (the app update must not depend on it).
+  sched="${FUNCTION_SCHEDULES[$i]}"
+  if [ -n "$sched" ]; then
+    step "$f: dry run (lists what it would delete, deletes nothing)"
+    if [ -n "$DRY" ]; then
+      echo "[dry run] node scripts/supabase-service.mjs dry-run $f"
+      echo "[dry run] node scripts/supabase-service.mjs vault-sync"
+      echo "[dry run] POST api.supabase.com/v1/projects/$PROJECT_REF/database/query  ($sched)"
+      SCHEDULED+=("$f")
+    elif node scripts/supabase-service.mjs dry-run "$f" \
+      && step "$f: store the service role key in Vault" && node scripts/supabase-service.mjs vault-sync \
+      && step "$f: apply $sched" && node "$SQL_RUNNER" file "$sched"; then
+      SCHEDULED+=("$f")
+    else
+      SCHEDULE_FAILED+=("$f")
+    fi
+  fi
 done
 
 # ── 4. App update ────────────────────────────────────────────────────────────
@@ -121,9 +148,9 @@ if [ -z "$DRY" ]; then
   if node "$SQL_RUNNER" query "select count(*) as n from vault.decrypted_secrets where name = 'trial_contact_pepper'" 2>/dev/null | grep -q '"n":[ ]*0'; then
     NOTES+=("Vault secret trial_contact_pepper is not set (phone numbers cannot be saved): select vault.create_secret('<64+ random characters>', 'trial_contact_pepper');")
   fi
-  if node "$SQL_RUNNER" query "select count(*) as n from cron.job where jobname = 'delete-media'" 2>/dev/null | grep -q '"n":[ ]*0'; then
-    NOTES+=("delete-media is deployed but not scheduled: after a dry run, run supabase/schedule-delete-media.sql once (see supabase/FUNCTIONS.txt).")
-  fi
+  for f in "${SCHEDULE_FAILED[@]}"; do
+    NOTES+=("$f is deployed but its dry run / schedule did NOT go through (see the message above); the files stay queued until it does. Run ./ship.sh again after fixing it.")
+  done
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────
@@ -134,6 +161,7 @@ printf 'migrations:  %s applied\n' "${#APPLIED[@]}"
 for f in "${APPLIED[@]}"; do printf '               - %s\n' "$f"; done
 printf 'functions:   %s deployed\n' "${#DEPLOYED[@]}"
 for f in "${DEPLOYED[@]}"; do printf '               - %s\n' "$f"; done
+for f in "${SCHEDULED[@]}"; do printf 'scheduled:   %s (pg_cron, every 15 minutes)\n' "$f"; done
 printf 'app update:  published to the production channel\n'
 if [ "${#NOTES[@]}" -gt 0 ]; then
   printf '\nTo do by hand:\n'

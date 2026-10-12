@@ -50,6 +50,12 @@ eq("the function deploy uses server-side bundling (--use-api)", /functions deplo
   fs.writeFileSync(root + "supabase/FUNCTIONS.txt", orig);
   eq("flags written after the name in FUNCTIONS.txt are included", /deploy delete-media --project-ref tfdjymogbtfavdzgfqas --use-api --no-verify-jwt/.test(flagged.stdout), true);
 }
+{
+  const out = clean.stdout;
+  const i = (x) => out.indexOf(x);
+  eq("dry run: dry run of delete-media, then Vault key, then the schedule file, all after the deploy and before the update", [i("deploy function delete-media") < i("delete-media: dry run"), i("supabase-service.mjs dry-run delete-media") < i("supabase-service.mjs vault-sync"), i("vault-sync") < i("(supabase/schedule-delete-media.sql)"), i("(supabase/schedule-delete-media.sql)") < i("publish the app update"), /scheduled:\s+delete-media/.test(out)], [true, true, true, true, true]);
+  eq("FUNCTIONS.txt names the schedule file and it exists", [/^delete-media\s+schedule=supabase\/schedule-delete-media\.sql/m.test(readFileSync(root + "supabase/FUNCTIONS.txt", "utf8")), existsSync(root + "supabase/schedule-delete-media.sql")], [true, true]);
+}
 const messy = dry("\n  sbp_TOPSECRETTOKEN \r\n");
 eq("a pasted token with leading / trailing newlines and spaces still works", [messy.status, /skipping/.test(messy.stdout), messy.stdout.includes("TOPSECRET")], [0, false, false]);
 
@@ -99,6 +105,42 @@ const tooBigFile = root + "supabase/.tmp-too-big.sql";
 (await import("node:fs")).writeFileSync(tooBigFile, "-- " + "x".repeat(1_100_000));
 const huge = await run(["file", tooBigFile]);
 (await import("node:fs")).unlinkSync(tooBigFile);
+
+// ── the service-role helper against a mock Management API + functions host ──
+{
+  const seen = [];
+  let fnStatus = 200;
+  const mock = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, body });
+      if (req.url.startsWith("/v1/projects/tfdjymogbtfavdzgfqas/api-keys")) { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify([{ name: "anon", api_key: "ANONKEY" }, { name: "service_role", api_key: "SERVICE.ROLE-KEY" }])); }
+      else if (req.url.startsWith("/functions/v1/delete-media")) { res.writeHead(fnStatus, { "content-type": "application/json" }); res.end(fnStatus === 200 ? '{"dryRun":true,"wouldDelete":{"post-videos":3}}' : '{"message":"boom"}'); }
+      else if (req.url.endsWith("/database/query")) { res.writeHead(201); res.end("[]"); }
+      else { res.writeHead(404); res.end("{}"); }
+    });
+  });
+  await new Promise((r) => mock.listen(0, "127.0.0.1", r));
+  const mbase = `http://127.0.0.1:${mock.address().port}`;
+  const svc = (args) => new Promise((resolve) => {
+    const c = spawn("node", [root + "scripts/supabase-service.mjs", ...args], { env: env({ SUPABASE_ACCESS_TOKEN: "\nsbp_SVCSECRET\n", SUPABASE_API_BASE: mbase, SUPABASE_FUNCTIONS_BASE: mbase }) });
+    let stdout = "", stderr = "";
+    c.stdout.on("data", (d) => (stdout += d)); c.stderr.on("data", (d) => (stderr += d));
+    c.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+  const d = await svc(["dry-run", "delete-media"]);
+  const call = seen.find((x) => x.url.startsWith("/functions/"));
+  eq("dry run: POSTs the function WITHOUT ?run=1 using the service role key, prints the answer, never the keys", [d.status, call.method, call.url, call.auth, d.stdout.trim(), (d.stdout + d.stderr).includes("SERVICE.ROLE-KEY"), (d.stdout + d.stderr).includes("SVCSECRET")], [0, "POST", "/functions/v1/delete-media", "Bearer SERVICE.ROLE-KEY", '{"dryRun":true,"wouldDelete":{"post-videos":3}}', false, false]);
+  seen.length = 0;
+  const v = await svc(["vault-sync"]);
+  const q = JSON.parse(seen.find((x) => x.url.endsWith("/database/query")).body).query;
+  eq("vault-sync writes the key to Vault idempotently (update or create) and prints neither key", [v.status, /vault\.update_secret/.test(q), /vault\.create_secret\('SERVICE\.ROLE-KEY', 'service_role_key'\)/.test(q), (v.stdout + v.stderr).includes("SERVICE.ROLE-KEY"), (v.stdout + v.stderr).includes("SVCSECRET")], [0, true, true, false, false]);
+  fnStatus = 500;
+  const f = await svc(["dry-run", "delete-media"]);
+  eq("a failing dry run exits 1 with the message (so ship.sh does not schedule)", [f.status, /HTTP 500\): boom/.test(f.stderr)], [1, true]);
+  mock.close();
+}
 server.close();
 eq("a file over the size limit is refused before any request is made", [huge.status, /TOO LARGE for one request/.test(huge.stderr), requests.length], [1, true, 0]);
 eq("the biggest listed migration fits in one request", Math.max(...migrations.map((m) => readFileSync(root + "supabase/" + m).length)) < 1_000_000, true);

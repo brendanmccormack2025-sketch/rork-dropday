@@ -27,7 +27,7 @@ migration-known-connections.sql
 #   migration-expire-posts-cron.sql instead).
 # Reference copies / manual scripts (never run automatically): get_feed.sql (a copy of the dashboard function),
 #   trial-engine-review.sql (a review query), admin-graduation.sql, migration-media-deletion.sql (manual moderation
-#   helper), schedule-delete-media.sql (run once by hand, see FUNCTIONS.txt).
+#   helper), schedule-delete-media.sql (applied by ship.sh after the function deploy, see FUNCTIONS.txt).
 # Other older migrations (friend groups, explore, terms, client errors, profile links, ...) are not part of the
 # trial engine and are not touched here.
 #

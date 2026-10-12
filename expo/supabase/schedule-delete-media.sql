@@ -1,8 +1,9 @@
--- Schedules the delete-media Edge Function every 15 minutes (idempotent). Run it ONCE by hand, after a dry run:
+-- Schedules the delete-media Edge Function every 15 minutes (idempotent). ship.sh applies it after deploying the function
+-- (and after the dry run, and after storing the service role key in Vault). To check by hand:
 --   curl -s -X POST "https://tfdjymogbtfavdzgfqas.supabase.co/functions/v1/delete-media" -H "Authorization: Bearer <service role key>"
 -- Needs (a) pg_net, (b) pg_cron, (c) a Vault secret named service_role_key with the project's service role key:
 --   select vault.create_secret('<service role key>', 'service_role_key');
--- ship.sh does NOT run this file (it deletes Storage files for real, so it is a deliberate step).
+-- The scheduled calls delete Storage files for real (only files of hidden, ended / incomplete posts).
 create extension if not exists pg_net with schema extensions;
 
 do $$

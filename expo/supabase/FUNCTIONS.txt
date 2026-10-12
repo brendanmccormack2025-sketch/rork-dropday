@@ -1,16 +1,17 @@
 # Edge functions that expo/ship.sh deploys on every release (one per line = a folder in expo/supabase/functions/).
-# A line is: <name> [extra deploy flags], e.g. "my-webhook --no-verify-jwt". ship.sh always adds --use-api (server-side
-# bundling: no Docker needed). Blank lines and # comments are ignored. Keep this file up to date whenever a function is added.
+# A line is: <name> [extra deploy flags] [schedule=<sql file>], e.g. "my-webhook --no-verify-jwt". ship.sh always adds
+# --use-api (server-side bundling: no Docker needed). schedule=<file> is applied after the function is deployed. Blank lines
+# and # comments are ignored. Keep this file up to date whenever a function is added.
 
-delete-media        # no extra flags: the default JWT check passes with the service role key, and the function checks the key itself
+delete-media  schedule=supabase/schedule-delete-media.sql   # no extra flags: the default JWT check passes with the service role key, and the function checks the key itself
 
 # ── delete-media ─────────────────────────────────────────────────────────────────────────────────────────────────
 # What: removes the Storage files queued in trial_media_delete_queue when a post ends or stays incomplete.
 # Secrets: none to set. SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided to every Edge Function by Supabase.
 # Calls:   POST /functions/v1/delete-media          -> DRY RUN (lists what it would delete, deletes nothing)
 #          POST /functions/v1/delete-media?run=1    -> deletes. Header: Authorization: Bearer <service role key>.
-# Schedule: NOT set up by ship.sh. After you have looked at a dry run, run supabase/schedule-delete-media.sql once in
-#          the SQL editor (every 15 minutes through pg_cron + pg_net). It needs one Vault secret named service_role_key
-#          holding the project's service role key:
-#            select vault.create_secret('<service role key>', 'service_role_key');
-#          ship.sh prints a reminder at the end while the 'delete-media' cron job does not exist.
+# Schedule: set up by ship.sh (schedule= above), every release, idempotently. After the function is deployed it
+#          1) calls delete-media WITHOUT ?run=1 (the dry run) and prints what it would delete (nothing is deleted),
+#          2) stores the project's service role key in Vault as service_role_key (fetched with SUPABASE_ACCESS_TOKEN),
+#          3) applies supabase/schedule-delete-media.sql: pg_cron + pg_net call the function with ?run=1 every 15 minutes.
+#          If any of that fails, ship.sh still publishes the app update and lists what to redo.
