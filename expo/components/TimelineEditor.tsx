@@ -99,7 +99,7 @@ interface TimelineEditorProps {
 }
 
 /** One look per marker kind. "zoom" is reserved for future zoom decisions. */
-const MARKER_LOOK: Record<MarkerKind, { glyph: object; bottom: boolean }> = {
+export const MARKER_LOOK: Record<MarkerKind, { glyph: object; bottom: boolean }> = {
   cut: { glyph: { backgroundColor: theme.accent, transform: [{ rotate: "45deg" }] }, bottom: false },
   restored: {
     glyph: { borderWidth: 1.5, borderColor: theme.textMuted, transform: [{ rotate: "45deg" }], opacity: 0.8 },

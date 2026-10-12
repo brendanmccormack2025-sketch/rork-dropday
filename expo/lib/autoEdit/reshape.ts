@@ -68,7 +68,13 @@ function clipOfEdge(state: EditState, edge: SeamEdge, durationMs: number): Range
  * Where a drag of `edge` to `newSourceMs` lands and what it would do: the clamped position (the edge cannot cross
  * its own clip or leave the video) and the source range that comes back (reveal) or goes (cut).
  */
-export function describeEdgeDrag(state: EditState, edge: SeamEdge, newSourceMs: number, durationMs: number): EdgeDrag {
+export function describeEdgeDrag(
+  state: EditState,
+  edge: SeamEdge,
+  newSourceMs: number,
+  durationMs: number,
+  minDragMs: number = MIN_DRAG_MS,
+): EdgeDrag {
   const clip = clipOfEdge(state, edge, durationMs);
   if (!clip || !(durationMs > 0) || !Number.isFinite(newSourceMs)) return { kind: "none", edgeMs: edge.atMs, clampedMs: edge.atMs };
   const edgeMs = edge.side === "left" ? clip.startMs : clip.endMs;
@@ -77,7 +83,7 @@ export function describeEdgeDrag(state: EditState, edge: SeamEdge, newSourceMs: 
       ? Math.min(Math.max(0, newSourceMs), Math.max(edgeMs, clip.endMs - MIN_KEEP_MS))
       : Math.max(Math.min(durationMs, newSourceMs), Math.min(edgeMs, clip.startMs + MIN_KEEP_MS));
   const moved = clampedMs - edgeMs;
-  if (Math.abs(moved) < MIN_DRAG_MS) return { kind: "none", edgeMs, clampedMs: edgeMs };
+  if (Math.abs(moved) < minDragMs) return { kind: "none", edgeMs, clampedMs: edgeMs };
   const outward = edge.side === "left" ? moved < 0 : moved > 0;
   const range = { startMs: Math.min(edgeMs, clampedMs), endMs: Math.max(edgeMs, clampedMs) };
   return { kind: outward ? "reveal" : "cut", edgeMs, clampedMs, range };
@@ -137,10 +143,17 @@ function revealRange(state: EditState, hole: Range): EditState {
  *  - outward: the cut next to the edge shrinks (and, if the drag goes on, the next cut too) — see revealRange;
  *  - inward: the creator cuts that footage (addManualCut, like "Delete this part");
  *  - the first clip's left edge and the last clip's right edge are the start and end trim, the same way.
- * Returns the state unchanged for a tiny drag or an edge no kept clip owns.
+ * Returns the state unchanged for a tiny drag (under `minDragMs`: finger jitter; a one-frame nudge passes 1) or an
+ * edge no kept clip owns.
  */
-export function reshapeCutAtEdge(state: EditState, edge: SeamEdge, newSourceMs: number, durationMs: number): EditState {
-  const drag = describeEdgeDrag(state, edge, newSourceMs, durationMs);
+export function reshapeCutAtEdge(
+  state: EditState,
+  edge: SeamEdge,
+  newSourceMs: number,
+  durationMs: number,
+  minDragMs: number = MIN_DRAG_MS,
+): EditState {
+  const drag = describeEdgeDrag(state, edge, newSourceMs, durationMs, minDragMs);
   if (drag.kind === "none") return state;
   if (drag.kind === "cut") return addManualCut(state, drag.range.startMs, drag.range.endMs);
   return revealRange(state, drag.range);

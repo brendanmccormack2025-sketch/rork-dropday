@@ -154,6 +154,7 @@ import {
   type TextBackgroundStyle,
 } from "@/providers/PostsProvider";
 import TimelineEditor, { effectiveDurationMs } from "@/components/TimelineEditor";
+import PrecisionTimeline from "@/components/PrecisionTimeline";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import TextOverlayEditor from "@/components/TextOverlayEditor";
 import DraggableTextOverlay, {
@@ -2990,14 +2991,82 @@ export default function EditScreen() {
   }, [selectedClipId, clips, textOverlays, userEdit, pushSnapshot, replaceClips, handleDeselectAndPreview]);
 
   // A clip edge dragged on the Cuts timeline: a decision (reshapeCutAtEdge), one undo step, no free trim.
+  // `minDragMs` lowers the jitter gate for precise drags and one-frame nudges.
   const handleSeamDragEnd = useCallback(
-    (edge: SeamEdgeInfo, newSourceMs: number) => {
+    (edge: SeamEdgeInfo, newSourceMs: number, opts?: { minDragMs?: number }) => {
       const model = editStateRef.current;
       if (!model) return;
-      userEdit((st) => reshapeCutAtEdge(st, edge, newSourceMs, model.durationMs));
+      userEdit((st) => reshapeCutAtEdge(st, edge, newSourceMs, model.durationMs, opts?.minDragMs));
     },
     [userEdit],
   );
+
+  // While an edge is dragged or selected, the preview shows that frame of the source from its own paused player.
+  // It never touches the playback players, the clips or the play state.
+  const edgePlayer = useVideoPlayer(null, (p) => {
+    p.loop = false;
+    p.muted = true;
+  });
+  const [edgePreviewing, setEdgePreviewing] = useState(false);
+  const edgeUriRef = useRef<string | null>(null);
+  const edgeWantedMsRef = useRef<number | null>(null);
+  useEffect(() => {
+    const sub = edgePlayer.addListener("statusChange", ({ status }) => {
+      if (status === "readyToPlay" && edgeWantedMsRef.current !== null) {
+        edgePlayer.currentTime = edgeWantedMsRef.current / 1000;
+        edgePlayer.pause();
+      }
+    });
+    return () => sub.remove();
+  }, [edgePlayer]);
+  const handleEdgePreview = useCallback(
+    (ms: number | null) => {
+      if (ms === null) {
+        edgeWantedMsRef.current = null;
+        setEdgePreviewing(false);
+        edgePlayer.pause();
+        return;
+      }
+      const uri = editStateRef.current?.state.sourceUri;
+      if (!uri) return;
+      edgeWantedMsRef.current = ms;
+      if (edgeUriRef.current !== uri) {
+        edgeUriRef.current = uri;
+        edgePlayer.replace(uri);
+      } else {
+        edgePlayer.currentTime = ms / 1000;
+      }
+      edgePlayer.pause();
+      setIsPlaying(false);
+      setEdgePreviewing(true);
+    },
+    [edgePlayer],
+  );
+  // Playing the video ends the edge preview (the edge stays selected on the timeline).
+  useEffect(() => {
+    if (isPlaying && edgePreviewing) handleEdgePreview(null);
+  }, [isPlaying, edgePreviewing, handleEdgePreview]);
+  // Leaving the Cuts screen ends it too.
+  useEffect(() => {
+    if (step !== "cuts" && edgePreviewing) handleEdgePreview(null);
+  }, [step, edgePreviewing, handleEdgePreview]);
+
+  // The source's frame rate, for the one-frame nudge (30 when the player does not report one).
+  const [sourceFps, setSourceFps] = useState<number | null>(null);
+  useEffect(() => {
+    const read = (p: VideoPlayer) => {
+      const fr = p.videoTrack?.frameRate;
+      if (typeof fr === "number" && fr > 0) setSourceFps(fr);
+    };
+    read(playerA);
+    read(playerB);
+    const subs = [playerA, playerB].map((p) => p.addListener("videoTrackChange", ({ videoTrack }) => {
+      const fr = videoTrack?.frameRate;
+      if (typeof fr === "number" && fr > 0) setSourceFps(fr);
+    }));
+    return () => subs.forEach((sub) => sub.remove());
+  }, [playerA, playerB, videoReady, activeSlot]);
+
   const timelineSeams = useMemo(() => {
     if (!aiEditsEnabled || !editModel || !modelInSync) return undefined;
     const handles = buildSeamHandles(clips, editModel.state.sourceUri);
@@ -3005,11 +3074,15 @@ export default function EditScreen() {
     return {
       handles,
       sourceUri: editModel.state.sourceUri,
-      describe: (edge: SeamEdgeInfo, ms: number) => describeEdgeDrag(editModel.state, edge, ms, editModel.durationMs),
+      describe: (edge: SeamEdgeInfo, ms: number, minDragMs?: number) => describeEdgeDrag(editModel.state, edge, ms, editModel.durationMs, minDragMs),
       boundaries: aiBoundariesOf(editModel.state),
       onDragEnd: handleSeamDragEnd,
+      words: (captions.words ?? []).map((w) => ({ startMs: w.startMs, endMs: w.endMs })),
+      frameRate: sourceFps,
+      sourceDurationMs: editModel.durationMs,
+      onEdgePreview: handleEdgePreview,
     };
-  }, [aiEditsEnabled, editModel, modelInSync, clips, handleSeamDragEnd]);
+  }, [aiEditsEnabled, editModel, modelInSync, clips, handleSeamDragEnd, captions.words, sourceFps, handleEdgePreview]);
 
   // "Keep original": the automatic cuts off, nothing else (captions, text and the creator's own deletes stay).
   const handleKeepOriginal = useCallback(() => {
@@ -4038,6 +4111,22 @@ export default function EditScreen() {
                     pointerEvents="none"
                   />
                 )}
+                {edgePreviewing && (
+                  <VideoView
+                    player={edgePlayer}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      zIndex: 5,
+                    }}
+                    contentFit="cover"
+                    nativeControls={false}
+                    pointerEvents="none"
+                  />
+                )}
                 {previewMode && (
                   <VideoView
                     player={playerR}
@@ -4219,7 +4308,22 @@ export default function EditScreen() {
             </Pressable>
           </View>
         )}
-        {isVideo && (
+        {isVideo && timelineSeams && (
+          <PrecisionTimeline
+            clips={clips}
+            totalDurationMs={totalDurationMs}
+            positionMs={displayPosition}
+            selectedClipId={selectedClipId}
+            onSeek={handleSeekAny}
+            onSelectClip={handleSelectClip}
+            onDeselectAndPreview={() => handleDeselectAndPreview()}
+            markers={timelineMarkers}
+            onMarkerPress={handleMarkerPress}
+            bands={protectionBands}
+            seams={timelineSeams}
+          />
+        )}
+        {isVideo && !timelineSeams && (
           <TimelineEditor
             clips={clips}
             totalDurationMs={totalDurationMs}
@@ -4238,6 +4342,7 @@ export default function EditScreen() {
             seams={timelineSeams}
           />
         )}
+
 
 
         {selectedClipId && clips.length > 0 && (
