@@ -2,15 +2,29 @@
 // Deploy:   done by expo/ship.sh (npx supabase functions deploy delete-media --project-ref tfdjymogbtfavdzgfqas)
 // Dry run:  POST /functions/v1/delete-media            (lists what it would delete; deletes nothing)
 // Delete:   POST /functions/v1/delete-media?run=1      (removes the files, marks the queue rows done)
-// Only the service role key may call it (Authorization: Bearer <service role key>).
-// Schedule: supabase/schedule-delete-media.sql (run once by hand after a dry run; see supabase/FUNCTIONS.txt).
+// Only a service-level key may call it (Authorization: Bearer <key>): the legacy service_role JWT or a new sb_secret_ key.
+// The function checks the caller itself, so it is deployed with --no-verify-jwt (the gateway's JWT check would reject sb_secret_ keys).
+// Schedule: applied by ship.sh (supabase/schedule-delete-media.sql, see supabase/FUNCTIONS.txt).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
+// Is this bearer a service-level key? Exact match with the function's own key, or (for the other key kind / a rotated key)
+// proof by use: only a service-level key may call the Auth admin API.
+async function isServiceKey(bearer: string): Promise<boolean> {
+  if (!bearer) return false;
+  const own = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (own && bearer === own) return true;
+  if (!/^(sb_secret_|eyJ)/.test(bearer)) return false;
+  const probe = createClient(Deno.env.get("SUPABASE_URL") ?? "", bearer, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { error } = await probe.auth.admin.listUsers({ page: 1, perPage: 1 });
+  return !error;
+}
+
 Deno.serve(async (req: Request) => {
-  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  if (!key || req.headers.get("Authorization") !== `Bearer ${key}`) return new Response("forbidden", { status: 403 });
+  const auth = req.headers.get("Authorization") ?? "";
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!(await isServiceKey(bearer))) return new Response("forbidden", { status: 403 });
   const run = new URL(req.url).searchParams.get("run") === "1";
-  const sb = createClient(Deno.env.get("SUPABASE_URL") ?? "", key);
+  const sb = createClient(Deno.env.get("SUPABASE_URL") ?? "", bearer, { auth: { persistSession: false, autoRefreshToken: false } });
 
   const { data: rows, error } = await sb
     .from("trial_media_delete_queue")

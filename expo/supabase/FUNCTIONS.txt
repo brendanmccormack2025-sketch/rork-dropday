@@ -3,7 +3,7 @@
 # --use-api (server-side bundling: no Docker needed). schedule=<file> is applied after the function is deployed. Blank lines
 # and # comments are ignored. Keep this file up to date whenever a function is added.
 
-delete-media  schedule=supabase/schedule-delete-media.sql   # no extra flags: the default JWT check passes with the service role key, and the function checks the key itself
+delete-media  schedule=supabase/schedule-delete-media.sql   --no-verify-jwt   # the function authorizes the caller itself (legacy service_role JWT or sb_secret_ key); the gateway JWT check would reject sb_secret_ keys
 
 # ── delete-media ─────────────────────────────────────────────────────────────────────────────────────────────────
 # What: removes the Storage files queued in trial_media_delete_queue when a post ends or stays incomplete.

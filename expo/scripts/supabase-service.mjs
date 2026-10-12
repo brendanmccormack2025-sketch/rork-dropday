@@ -33,18 +33,22 @@ const messageOf = (text) => {
   try { const j = JSON.parse(text); return j.message || j.error || JSON.stringify(j); } catch { return text.trim().slice(0, 500) || "(empty response)"; }
 };
 
-// The service role key (legacy JWT, the one Edge Functions receive as SUPABASE_SERVICE_ROLE_KEY).
+// A service-level key: the legacy service_role JWT if the project has one (it is also what Edge Functions get as
+// SUPABASE_SERVICE_ROLE_KEY), otherwise a new sb_secret_ key. Only names / kinds are printed, never a key.
 const keysRes = await call(`${API}/v1/projects/${REF}/api-keys?reveal=true`, { headers: { Authorization: `Bearer ${token}` } });
 const keysText = await keysRes.text();
 if (!keysRes.ok) die(`could not read the project's API keys (HTTP ${keysRes.status}): ${messageOf(keysText)}`);
-let key = "";
-try {
-  const list = JSON.parse(keysText);
-  const hit = (Array.isArray(list) ? list : []).find((k) => k && k.name === "service_role" && typeof k.api_key === "string");
-  key = (hit?.api_key || "").replace(/\s+/g, "");
-} catch { /* handled below */ }
-if (!key) die("the project's service_role key was not found in the API keys response");
-if (!/^[A-Za-z0-9._-]+$/.test(key)) die("the service_role key has an unexpected format");
+let list = [];
+try { const j = JSON.parse(keysText); if (Array.isArray(j)) list = j.filter((k) => k && typeof k.api_key === "string"); } catch { /* handled below */ }
+const clean = (k) => k.api_key.replace(/\s+/g, "");
+const legacy = list.find((k) => k.name === "service_role");
+const secret = list.find((k) => k.type === "secret" || /^sb_secret_/.test(clean(k)));
+const chosen = legacy || secret;
+const kind = legacy ? "legacy service_role JWT" : "sb_secret_ key";
+console.error(`API keys on the project: ${list.map((k) => `${k.name}${k.type ? `(${k.type})` : ""}`).join(", ") || "none"}; using the ${chosen ? kind : "(none)"}`);
+if (!chosen) die("the project has no service_role or secret key");
+const key = clean(chosen);
+if (!/^[A-Za-z0-9._-]+$/.test(key)) die("the chosen key has an unexpected format");
 
 if (mode === "dry-run") {
   if (!arg) die("missing function name", 2);

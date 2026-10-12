@@ -110,12 +110,13 @@ const huge = await run(["file", tooBigFile]);
 {
   const seen = [];
   let fnStatus = 200;
+  let keys = [{ name: "anon", type: "legacy", api_key: "ANONKEY" }, { name: "service_role", type: "legacy", api_key: "SERVICE.ROLE-KEY" }, { name: "default", type: "secret", api_key: "sb_secret_NEWKEY" }];
   const mock = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
       seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, body });
-      if (req.url.startsWith("/v1/projects/tfdjymogbtfavdzgfqas/api-keys")) { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify([{ name: "anon", api_key: "ANONKEY" }, { name: "service_role", api_key: "SERVICE.ROLE-KEY" }])); }
+      if (req.url.startsWith("/v1/projects/tfdjymogbtfavdzgfqas/api-keys")) { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(keys)); }
       else if (req.url.startsWith("/functions/v1/delete-media")) { res.writeHead(fnStatus, { "content-type": "application/json" }); res.end(fnStatus === 200 ? '{"dryRun":true,"wouldDelete":{"post-videos":3}}' : '{"message":"boom"}'); }
       else if (req.url.endsWith("/database/query")) { res.writeHead(201); res.end("[]"); }
       else { res.writeHead(404); res.end("{}"); }
@@ -136,6 +137,12 @@ const huge = await run(["file", tooBigFile]);
   const v = await svc(["vault-sync"]);
   const q = JSON.parse(seen.find((x) => x.url.endsWith("/database/query")).body).query;
   eq("vault-sync writes the key to Vault idempotently (update or create) and prints neither key", [v.status, /vault\.update_secret/.test(q), /vault\.create_secret\('SERVICE\.ROLE-KEY', 'service_role_key'\)/.test(q), (v.stdout + v.stderr).includes("SERVICE.ROLE-KEY"), (v.stdout + v.stderr).includes("SVCSECRET")], [0, true, true, false, false]);
+  keys = keys.filter((k) => k.name !== "service_role");
+  seen.length = 0;
+  const n = await svc(["dry-run", "delete-media"]);
+  eq("without a legacy service_role key the sb_secret_ key is used; only key names / kinds are printed", [n.status, seen.find((x) => x.url.startsWith("/functions/")).auth, /using the sb_secret_ key/.test(n.stderr), /default\(secret\)/.test(n.stderr), (n.stdout + n.stderr).includes("sb_secret_NEWKEY")], [0, "Bearer sb_secret_NEWKEY", true, true, false]);
+  const fn = readFileSync(root + "supabase/functions/delete-media/index.ts", "utf8");
+  eq("delete-media authorizes both key kinds itself (own key or a proven service-level key) and FUNCTIONS.txt deploys it with --no-verify-jwt", [/sb_secret_\|eyJ/.test(fn), /auth\.admin\.listUsers/.test(fn), /^delete-media\s.*--no-verify-jwt/m.test(readFileSync(root + "supabase/FUNCTIONS.txt", "utf8"))], [true, true, true]);
   fnStatus = 500;
   const f = await svc(["dry-run", "delete-media"]);
   eq("a failing dry run exits 1 with the message (so ship.sh does not schedule)", [f.status, /HTTP 500\): boom/.test(f.stderr)], [1, true]);
