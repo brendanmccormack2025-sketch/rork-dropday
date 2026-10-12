@@ -11,7 +11,8 @@
 # Lists:  supabase/MIGRATIONS_ORDER.txt (migrations, in order)   supabase/FUNCTIONS.txt (functions to deploy)
 # Dry run (prints what it would do, changes nothing):   SHIP_DRY_RUN=1 ./ship.sh "message"
 set -Eeuo pipefail
-cd "$(dirname "$0")"
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"   # absolute: still valid after cd
+cd "$(dirname "$SELF")"
 
 PROJECT_REF="tfdjymogbtfavdzgfqas"
 MIGRATIONS_FILE="supabase/MIGRATIONS_ORDER.txt"
@@ -38,6 +39,21 @@ case "$SUPABASE_ACCESS_TOKEN" in
   *) fail "SUPABASE_ACCESS_TOKEN is not a personal access token (it must start with sbp_; create one at supabase.com/dashboard/account/tokens)" ;;
 esac
 export SUPABASE_ACCESS_TOKEN
+
+# ── Pull first, then re-run this (possibly updated) script ───────────────────
+# The lists and this script are read from disk, so a pull in the middle of a run would apply the OLD lists. Pull before
+# anything reads them, and if that changed anything, start over with the fresh files (SHIP_REEXEC stops it looping).
+if [ -z "${SHIP_REEXEC:-}" ]; then
+  step "git pull"
+  if [ -n "$DRY" ]; then
+    echo "[dry run] git pull --ff-only"
+  else
+    git pull --ff-only
+    echo "re-running ship.sh with the freshly pulled script and lists"
+    SHIP_REEXEC=1 exec bash "$SELF" "$@"
+  fi
+fi
+
 command -v node >/dev/null 2>&1 || fail "node is not installed"
 SQL_RUNNER="scripts/supabase-sql.mjs"
 [ -f "$SQL_RUNNER" ] || fail "$SQL_RUNNER is missing"
@@ -68,8 +84,6 @@ if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
 fi
 
 # ── 1. Code and dependencies ─────────────────────────────────────────────────
-step "git pull"
-if [ -n "$DRY" ]; then echo "[dry run] git pull --ff-only"; else git pull --ff-only; fi
 step "bun install"
 if [ -n "$DRY" ]; then
   echo "[dry run] bun install"

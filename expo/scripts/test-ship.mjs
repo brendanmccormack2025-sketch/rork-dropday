@@ -59,6 +59,42 @@ eq("the function deploy uses server-side bundling (--use-api)", /functions deplo
 const messy = dry("\n  sbp_TOPSECRETTOKEN \r\n");
 eq("a pasted token with leading / trailing newlines and spaces still works", [messy.status, /skipping/.test(messy.stdout), messy.stdout.includes("TOPSECRET")], [0, false, false]);
 
+// ── pull first, then re-exec: the run uses the freshly pulled script and lists ──
+{
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const git = (cwd, ...a) => { const r = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd, encoding: "utf8" }); if (r.status !== 0) throw new Error(a.join(" ") + ": " + r.stderr); return r.stdout; };
+  const tmp = fs.mkdtempSync(os.tmpdir() + "/ship-reexec-");
+  const origin = tmp + "/origin.git", a = tmp + "/a", b = tmp + "/b";
+  git(tmp, "init", "-q", "--bare", "-b", "main", origin);
+  git(tmp, "clone", "-q", origin, a);
+  fs.mkdirSync(a + "/supabase");
+  fs.writeFileSync(a + "/ship.sh", sh);
+  fs.writeFileSync(a + "/supabase/MIGRATIONS_ORDER.txt", "old.sql\n");
+  fs.writeFileSync(a + "/supabase/FUNCTIONS.txt", "f1\n");
+  git(a, "add", "-A"); git(a, "commit", "-q", "-m", "one"); git(a, "push", "-q", "origin", "HEAD:main");
+  git(tmp, "clone", "-q", "-b", "main", origin, b);
+  // the new version of the repo: a new migration in the list AND a changed script that proves it is the one running
+  const fresh = sh.replace('command -v node >/dev/null 2>&1 || fail "node is not installed"', 'echo "FRESH-SCRIPT"; echo "LIST:$(tr -d \'\\n\' < "$MIGRATIONS_FILE")"; echo "REEXEC=${SHIP_REEXEC:-}"; exit 0');
+  fs.writeFileSync(a + "/ship.sh", fresh);
+  fs.writeFileSync(a + "/supabase/MIGRATIONS_ORDER.txt", "old.sql\nnew.sql\n");
+  git(a, "add", "-A"); git(a, "commit", "-q", "-m", "two"); git(a, "push", "-q", "origin", "HEAD:main");
+  const run = (e) => spawnSync("bash", [b + "/ship.sh", "msg"], { env: env({ SUPABASE_ACCESS_TOKEN: "sbp_TOPSECRETTOKEN", ...e }), encoding: "utf8" });
+  const r = run({});
+  eq("the run pulls first, then re-execs: the pulled script and the NEW migration list are the ones used", [r.status, /FRESH-SCRIPT/.test(r.stdout), /LIST:old\.sql\s*new\.sql/.test(r.stdout), /REEXEC=1/.test(r.stdout), r.stdout.indexOf("git pull") < r.stdout.indexOf("FRESH-SCRIPT")], [0, true, true, true, true]);
+  eq("the pull happens once (the guard stops a loop) and the token is not printed", [(r.stdout.match(/==> git pull/g) || []).length, (r.stdout + r.stderr).includes("TOPSECRET")], [1, false]);
+  // already up to date, old script in a fresh clone of the old commit: guard variable set -> no second pull / exec
+  const guarded = run({ SHIP_REEXEC: "1" });
+  eq("with the guard variable set it does not pull or re-exec again", [/==> git pull/.test(guarded.stdout), /re-running ship\.sh/.test(guarded.stdout)], [false, false]);
+  // a failing pull stops the run before anything else
+  fs.writeFileSync(b + "/local.txt", "x"); fs.writeFileSync(b + "/supabase/MIGRATIONS_ORDER.txt", "diverged\n"); git(b, "commit", "-q", "-am", "local"); 
+  git(a, "commit", "-q", "--allow-empty", "-m", "three"); git(a, "push", "-q", "origin", "HEAD:main");
+  const nff = run({});
+  eq("a pull that cannot fast-forward stops the run at the git pull step", [nff.status !== 0, /FAILED at step: git pull/.test(nff.stderr), /FRESH-SCRIPT/.test(nff.stdout)], [true, true, false]);
+  eq("bad arguments / token still fail before any pull", [/==> git pull/.test(noToken.stdout), /==> git pull/.test(badToken.stdout)], [false, false]);
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 // ── the SQL runner against a local mock of the Management API ──
 const http = await import("node:http");
 const requests = [];
