@@ -112,6 +112,16 @@ export function createAnalysisCache(deps: AnalysisDeps) {
     }
   }
 
+  /** The loudness if it is already known (memory or the stored copy); never starts an analysis. */
+  async function cachedLoudness(uri: string): Promise<LoudnessData | null> {
+    const key = await keyFor(uri);
+    if (!key) return null;
+    if (loudnessMem.has(key)) return loudnessMem.get(key) ?? null;
+    const stored = await readStored<LoudnessData>("loudness", key);
+    if (stored) loudnessMem.set(key, stored);
+    return stored;
+  }
+
   async function loudness(uri: string): Promise<LoudnessData | null> {
     const key = await keyFor(uri);
     if (!key) return serial(() => deps.loadLoudness(uri));
@@ -248,5 +258,5 @@ export function createAnalysisCache(deps: AnalysisDeps) {
     return key;
   }
 
-  return { loudness, transcript, transcriptWithInfo, clear, runs };
+  return { loudness, cachedLoudness, transcript, transcriptWithInfo, clear, runs };
 }

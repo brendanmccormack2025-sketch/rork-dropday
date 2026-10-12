@@ -86,11 +86,13 @@ export type PrecisionSeams = {
   frameRate?: number | null;
   /** Length of the source video, ms. */
   sourceDurationMs: number;
+  /** The automatic edit is idle: a missing loudness analysis may be made now (otherwise only a cached one is used). */
+  canAnalyze?: boolean;
   /** Show the video frame at a source time (an edge being moved); null: back to the normal preview. */
   onEdgePreview?: (sourceMs: number | null) => void;
 };
 
-type Props = {
+export type PrecisionTimelineProps = {
   clips: DraftClip[];
   totalDurationMs: number;
   positionMs: number;
@@ -103,6 +105,8 @@ type Props = {
   /** Output-timeline ranges drawn as a subtle band (protected laughs). */
   bands?: Array<{ startMs: number; endMs: number }>;
   seams: PrecisionSeams;
+  /** An error was caught in this timeline (a handler, a worklet): the owner switches to the previous timeline. */
+  onFatal?: (error: unknown, where: string) => void;
 };
 
 type SelectedEdge = { side: "left" | "right"; atMs: number };
@@ -116,22 +120,34 @@ function haptic(kind: "light" | "select") {
   }
 }
 
-/** The loudness of the source, from the analysis the silence detector already made (computed once, cached). */
-function useLoudness(uri: string): LoudnessData | null {
+/**
+ * The loudness of the source, from the analysis the silence detector already made. Only what is already cached is
+ * used while the automatic edit is still working (`canAnalyze` false): the waveform never starts a second audio
+ * analysis next to the edit, the speech recognizer and the render. Once the edit is idle a missing analysis is made
+ * once and cached. It is read a moment after the screen opens, and any failure just means no waveform.
+ */
+function useLoudness(uri: string, canAnalyze: boolean): LoudnessData | null {
   const [data, setData] = useState<LoudnessData | null>(null);
   useEffect(() => {
     let cancelled = false;
     setData(null);
-    analysis
-      .loudness(uri)
-      .then((d) => {
-        if (!cancelled) setData(d);
-      })
-      .catch(() => {});
+    const usable = (d: LoudnessData | null) => (d && Array.isArray(d.windows) && d.windows.length > 0 && d.durationMs > 0 ? d : null);
+    const timer = setTimeout(() => {
+      (async () => {
+        try {
+          let d = usable(await analysis.cachedLoudness(uri));
+          if (!d && canAnalyze) d = usable(await analysis.loudness(uri));
+          if (!cancelled) setData(d);
+        } catch {
+          // no waveform
+        }
+      })();
+    }, 800);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [uri]);
+  }, [uri, canAnalyze]);
   return data;
 }
 
@@ -231,7 +247,8 @@ export default function PrecisionTimeline({
   onMarkerPress,
   bands,
   seams,
-}: Props) {
+  onFatal,
+}: PrecisionTimelineProps) {
   const [viewW, setViewW] = useState(0);
   const scale = useSharedValue(0.05);
   const offset = useSharedValue(0);
@@ -286,7 +303,7 @@ export default function PrecisionTimeline({
   const selectedAgainst = useRef<SeamHandleSpec[] | null>(null);
   // the edge being dragged right now (updated at most every PREVIEW_EVERY_MS from the UI thread)
   const [liveEdge, setLiveEdge] = useState<{ ms: number; atMs: number } | null>(null);
-  const loudness = useLoudness(seams.sourceUri);
+  const loudness = useLoudness(seams.sourceUri, seams.canAnalyze === true);
 
   // The latest props for the callbacks the UI thread calls (their identity never changes).
   const live = useRef({ clips, markers, seams, selected, selectedClipId, totalDurationMs, onSeek, onSelectClip, onDeselectAndPreview, onMarkerPress });
@@ -294,6 +311,26 @@ export default function PrecisionTimeline({
   const setSelected = useCallback((next: SelectedEdge | null) => {
     selectedAgainst.current = live.current.seams.handles;
     setSelectedState(next);
+  }, []);
+
+  // Anything that goes wrong in a handler or a worklet is reported to the owner (which switches to the previous
+  // timeline) instead of crashing the app.
+  const fatalRef = useRef(onFatal);
+  fatalRef.current = onFatal;
+  const guard = useMemo(
+    () =>
+      <A extends unknown[]>(where: string, fn: (...a: A) => void) =>
+      (...a: A): void => {
+        try {
+          fn(...a);
+        } catch (e) {
+          fatalRef.current?.(e, where);
+        }
+      },
+    [],
+  );
+  const reportFatal = useCallback((where: string, message: string) => {
+    fatalRef.current?.(new Error(message), where);
   }, []);
 
   // ── geometry ──
@@ -394,7 +431,20 @@ export default function PrecisionTimeline({
   const pieces = useMemo(() => wavePiecesOf(clips), [clips]);
   const drawWave = useCallback(
     (s0: number, o0: number) => {
-      if (!loudness || viewW <= 0 || loudness.windows.length === 0) return;
+      try {
+        drawWaveNow(s0, o0);
+      } catch (e) {
+        // a waveform that cannot be drawn is left out; the timeline itself carries on
+        if (__DEV__) console.warn("[precision timeline] waveform failed", (e as Error)?.message);
+        setWave(null);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [loudness, viewW, pieces],
+  );
+  const drawWaveNow = useCallback(
+    (s0: number, o0: number) => {
+      if (!loudness || viewW <= 0 || loudness.windows.length === 0 || !(s0 > 0) || !Number.isFinite(o0)) return;
       const windowMs = loudness.durationMs / loudness.windows.length;
       const width = 3 * viewW;
       const startMs = xToMs(-viewW, s0, o0);
@@ -430,10 +480,11 @@ export default function PrecisionTimeline({
     },
     [drawWave, viewW],
   );
+  const safeSettle = useMemo(() => guard("waveform", onViewSettle), [guard, onViewSettle]);
   useAnimatedReaction(
     () => scale.value * 1e6 + offset.value,
     () => {
-      runOnJS(onViewSettle)(scale.value, offset.value);
+      runOnJS(safeSettle)(scale.value, offset.value);
     },
   );
   const waveStyle = useAnimatedStyle(() => {
@@ -534,6 +585,13 @@ export default function PrecisionTimeline({
 
   const onSnapHaptic = useCallback(() => haptic("light"), []);
 
+  // What the UI thread calls goes through these: an error there is reported, not thrown into the app.
+  const safeGrab = useMemo(() => guard("grab", onGrab), [guard, onGrab]);
+  const safePreview = useMemo(() => guard("preview", onPreview), [guard, onPreview]);
+  const safeEdgeEnd = useMemo(() => guard("edgeEnd", onEdgeEnd), [guard, onEdgeEnd]);
+  const safeScrub = useMemo(() => guard("scrub", onScrub), [guard, onScrub]);
+  const safeTap = useMemo(() => guard("tap", onTap), [guard, onTap]);
+
   // ── the edge under the finger, recomputed on every move and every frame (a pause is noticed without moves) ──
   const stepEdge = () => {
     "worklet";
@@ -550,26 +608,37 @@ export default function PrecisionTimeline({
     if (ms !== lastPreviewMs.value && now - lastPreviewAt.value >= PREVIEW_EVERY_MS) {
       lastPreviewAt.value = now;
       lastPreviewMs.value = ms;
-      runOnJS(onPreview)(ms, dragAtMs.value);
+      runOnJS(safePreview)(ms, dragAtMs.value);
     }
   };
 
   const frame = useFrameCallback(() => {
     "worklet";
-    if (!dragging.value) return;
-    // near the screen edge: the timeline scrolls on by itself, and the edge goes with it
-    const w = viewWSV.value;
-    const x = fingerX.value;
-    const zone = 40;
-    if (scale.value > fitScale(totalSV.value, w) * 1.001) {
-      let v = 0;
-      if (x < zone) v = -((zone - x) / zone) * 14;
-      else if (x > w - zone) v = ((x - (w - zone)) / zone) * 14;
-      if (v !== 0) offset.value = clampOffset(offset.value + v, totalSV.value, scale.value, w);
+    try {
+      if (!dragging.value) return;
+      // near the screen edge: the timeline scrolls on by itself, and the edge goes with it
+      const w = viewWSV.value;
+      const x = fingerX.value;
+      const zone = 40;
+      if (scale.value > fitScale(totalSV.value, w) * 1.001) {
+        let v = 0;
+        if (x < zone) v = -((zone - x) / zone) * 14;
+        else if (x > w - zone) v = ((x - (w - zone)) / zone) * 14;
+        if (v !== 0) offset.value = clampOffset(offset.value + v, totalSV.value, scale.value, w);
+      }
+      stepEdge();
+    } catch (err) {
+      dragging.value = false;
+      runOnJS(reportFatal)("frame", String(err));
     }
-    stepEdge();
   }, false);
-  const setFrameActive = useCallback((on: boolean) => frame.setActive(on), [frame]);
+  const setFrameActive = useCallback((on: boolean) => {
+    try {
+      frame.setActive(on);
+    } catch (e) {
+      fatalRef.current?.(e, "frame");
+    }
+  }, [frame]);
 
   // ── gestures ──
   const gesture = useMemo(() => {
@@ -578,74 +647,104 @@ export default function PrecisionTimeline({
       .maxPointers(1)
       .onBegin((e) => {
         "worklet";
-        cancelAnimation(offset);
-        touching.value = true;
-        const g = grabAt(e.x, e.y, geomsSV.value, playMs.value, scale.value, offset.value);
-        mode.value = g.kind === "edge" ? 1 : g.kind === "playhead" ? 2 : 3;
-        modeIdx.value = g.index;
-        modeSide.value = g.side;
+        try {
+          cancelAnimation(offset);
+          touching.value = true;
+          const g = grabAt(e.x, e.y, geomsSV.value, playMs.value, scale.value, offset.value);
+          mode.value = g.kind === "edge" ? 1 : g.kind === "playhead" ? 2 : 3;
+          modeIdx.value = g.index;
+          modeSide.value = g.side;
+        } catch (err) {
+          mode.value = 0;
+          runOnJS(reportFatal)("pan.begin", String(err));
+        }
       })
       .onStart((e) => {
         "worklet";
-        if (mode.value === 1) {
-          const geom = geomsSV.value[modeIdx.value];
-          if (!geom) return;
-          dragIdx.value = modeIdx.value;
-          dragSide.value = modeSide.value;
-          dragOutputMs.value = geom.outputMs;
-          dragAtMs.value = modeSide.value === 0 ? geom.prevAtMs : geom.nextAtMs;
-          dragMs.value = dragAtMs.value;
-          dragMin.value = -1e12;   // the real bounds arrive from onGrab
-          dragMax.value = 1e12;
-          dragging.value = true;
-          dragDx.value = 0;
-          dragOffsetStart.value = offset.value;
-          fingerX.value = e.x;
-          const t = Date.now();
-          lastPreviewAt.value = 0;
-          lastPreviewMs.value = -1;
-          runOnJS(onGrab)(modeIdx.value, modeSide.value);
-          runOnJS(setFrameActive)(true);
-          snapState.value = snapStart(dragAtMs.value, t);
-        } else if (mode.value === 2) {
-          playGrabDx.value = msToX(playMs.value, scale.value, offset.value) - e.x;
-          lastSeekMs.value = -1;
-        } else {
-          offsetStart.value = offset.value;
+        try {
+          if (mode.value === 1) {
+            const geom = geomsSV.value[modeIdx.value];
+            if (!geom) {
+              mode.value = 0;
+              return;
+            }
+            dragIdx.value = modeIdx.value;
+            dragSide.value = modeSide.value;
+            dragOutputMs.value = geom.outputMs;
+            dragAtMs.value = modeSide.value === 0 ? geom.prevAtMs : geom.nextAtMs;
+            dragMs.value = dragAtMs.value;
+            dragMin.value = -1e12;   // the real bounds arrive from onGrab
+            dragMax.value = 1e12;
+            dragging.value = true;
+            dragDx.value = 0;
+            dragOffsetStart.value = offset.value;
+            fingerX.value = e.x;
+            const t = Date.now();
+            lastPreviewAt.value = 0;
+            lastPreviewMs.value = -1;
+            snapState.value = snapStart(dragAtMs.value, t);
+            runOnJS(safeGrab)(modeIdx.value, modeSide.value);
+            runOnJS(setFrameActive)(true);
+          } else if (mode.value === 2) {
+            playGrabDx.value = msToX(playMs.value, scale.value, offset.value) - e.x;
+            lastSeekMs.value = -1;
+          } else {
+            offsetStart.value = offset.value;
+          }
+        } catch (err) {
+          dragging.value = false;
+          mode.value = 0;
+          runOnJS(reportFatal)("pan.start", String(err));
         }
       })
       .onUpdate((e) => {
         "worklet";
-        if (mode.value === 1) {
-          dragDx.value = e.translationX;
-          fingerX.value = e.x;
-          stepEdge();
-        } else if (mode.value === 2) {
-          const ms = Math.min(totalSV.value, Math.max(0, xToMs(e.x + playGrabDx.value, scale.value, offset.value)));
-          playMs.value = ms;
-          if (Math.abs(ms - lastSeekMs.value) >= 1) {
-            lastSeekMs.value = ms;
-            runOnJS(onScrub)(ms);
+        try {
+          if (mode.value === 1) {
+            dragDx.value = e.translationX;
+            fingerX.value = e.x;
+            stepEdge();
+          } else if (mode.value === 2) {
+            const ms = Math.min(totalSV.value, Math.max(0, xToMs(e.x + playGrabDx.value, scale.value, offset.value)));
+            playMs.value = ms;
+            if (Math.abs(ms - lastSeekMs.value) >= 1) {
+              lastSeekMs.value = ms;
+              runOnJS(safeScrub)(ms);
+            }
+          } else if (mode.value === 3) {
+            offset.value = clampOffset(offsetStart.value - e.translationX, totalSV.value, scale.value, viewWSV.value);
           }
-        } else if (mode.value === 3) {
-          offset.value = clampOffset(offsetStart.value - e.translationX, totalSV.value, scale.value, viewWSV.value);
+        } catch (err) {
+          dragging.value = false;
+          mode.value = 0;
+          runOnJS(reportFatal)("pan.update", String(err));
         }
       })
       .onEnd((e) => {
         "worklet";
-        if (mode.value === 3) {
-          const max = Math.max(0, 2 * TL_PAD + totalSV.value * scale.value - viewWSV.value);
-          offset.value = withDecay({ velocity: -e.velocityX, clamp: [0, max], deceleration: 0.997 });
+        try {
+          if (mode.value === 3) {
+            const max = Math.max(0, 2 * TL_PAD + totalSV.value * scale.value - viewWSV.value);
+            const v = Number.isFinite(e.velocityX) ? e.velocityX : 0;
+            if (max > 0) offset.value = withDecay({ velocity: -v, clamp: [0, max], deceleration: 0.997 });
+          }
+        } catch (err) {
+          runOnJS(reportFatal)("pan.end", String(err));
         }
       })
       .onFinalize((e, success) => {
         "worklet";
-        if (mode.value === 1 && dragging.value) {
-          const moved = success && (Math.abs(e.translationX) >= TAP_SLOP || Math.abs(dragMs.value - dragAtMs.value) >= 1);
-          const ms = dragMs.value;
+        try {
+          if (mode.value === 1 && dragging.value) {
+            const moved = success && (Math.abs(e.translationX) >= TAP_SLOP || Math.abs(dragMs.value - dragAtMs.value) >= 1);
+            const ms = dragMs.value;
+            dragging.value = false;
+            runOnJS(setFrameActive)(false);
+            runOnJS(safeEdgeEnd)(dragIdx.value, dragSide.value, ms, moved);
+          }
+        } catch (err) {
           dragging.value = false;
-          runOnJS(setFrameActive)(false);
-          runOnJS(onEdgeEnd)(dragIdx.value, dragSide.value, ms, moved);
+          runOnJS(reportFatal)("pan.finalize", String(err));
         }
         mode.value = 0;
         touching.value = false;
@@ -656,9 +755,13 @@ export default function PrecisionTimeline({
       .maxDistance(10)
       .onEnd((e, ok) => {
         "worklet";
-        if (!ok) return;
-        const t = tapAt(e.x, e.y, markersSV.value, geomsSV.value, clipsSV.value, scale.value, offset.value);
-        runOnJS(onTap)(t.kind, t.index, t.side);
+        try {
+          if (!ok) return;
+          const t = tapAt(e.x, e.y, markersSV.value, geomsSV.value, clipsSV.value, scale.value, offset.value);
+          runOnJS(safeTap)(t.kind, t.index, t.side);
+        } catch (err) {
+          runOnJS(reportFatal)("tap", String(err));
+        }
       });
     const doubleTap = Gesture.Tap()
       .numberOfTaps(2)
@@ -667,30 +770,48 @@ export default function PrecisionTimeline({
       .maxDistance(24)
       .onEnd((_e, ok) => {
         "worklet";
-        if (!ok) return;
-        const target = fitView(totalSV.value, viewWSV.value);
-        cancelAnimation(offset);
-        scale.value = withTiming(target.scale, { duration: FIT_ANIM_MS, easing: Easing.out(Easing.cubic) });
-        offset.value = withTiming(target.offset, { duration: FIT_ANIM_MS, easing: Easing.out(Easing.cubic) });
+        try {
+          if (!ok) return;
+          const target = fitView(totalSV.value, viewWSV.value);
+          cancelAnimation(offset);
+          scale.value = withTiming(target.scale, { duration: FIT_ANIM_MS, easing: Easing.out(Easing.cubic) });
+          offset.value = withTiming(target.offset, { duration: FIT_ANIM_MS, easing: Easing.out(Easing.cubic) });
+        } catch (err) {
+          runOnJS(reportFatal)("doubleTap", String(err));
+        }
       });
 
     const pinch = Gesture.Pinch()
       .onBegin(() => {
         "worklet";
-        cancelAnimation(scale);
-        cancelAnimation(offset);
+        try {
+          cancelAnimation(scale);
+          cancelAnimation(offset);
+        } catch (err) {
+          runOnJS(reportFatal)("pinch.begin", String(err));
+        }
       })
       .onStart((e) => {
         "worklet";
-        pinchStart.value = { scale: scale.value, offset: offset.value, focalX: e.focalX };
-        touching.value = true;
+        try {
+          pinchStart.value = { scale: scale.value, offset: offset.value, focalX: e.focalX };
+          touching.value = true;
+        } catch (err) {
+          runOnJS(reportFatal)("pinch.start", String(err));
+        }
       })
       .onUpdate((e) => {
         "worklet";
-        const p = pinchStart.value;
-        const v = pinchView({ scale: p.scale, offset: p.offset }, e.scale, p.focalX, e.focalX, totalSV.value, viewWSV.value);
-        scale.value = v.scale;
-        offset.value = v.offset;
+        try {
+          const p = pinchStart.value;
+          const v = pinchView({ scale: p.scale, offset: p.offset }, e.scale, p.focalX, e.focalX, totalSV.value, viewWSV.value);
+          if (Number.isFinite(v.scale) && Number.isFinite(v.offset)) {
+            scale.value = v.scale;
+            offset.value = v.offset;
+          }
+        } catch (err) {
+          runOnJS(reportFatal)("pinch.update", String(err));
+        }
       })
       .onFinalize(() => {
         "worklet";
@@ -808,7 +929,7 @@ export default function PrecisionTimeline({
           {selected && selectedHandle ? (
             <>
               <Pressable
-                onPress={() => nudge(-1)}
+                onPress={guard("nudge", () => nudge(-1))}
                 accessibilityRole="button"
                 accessibilityLabel="Move edge one frame earlier"
                 style={({ pressed }) => [styles.nudge, box(rects.nudgeBack), pressed && styles.pressed]}
@@ -827,7 +948,7 @@ export default function PrecisionTimeline({
                 </UiText>
               </View>
               <Pressable
-                onPress={() => nudge(1)}
+                onPress={guard("nudge", () => nudge(1))}
                 accessibilityRole="button"
                 accessibilityLabel="Move edge one frame later"
                 style={({ pressed }) => [styles.nudge, box(rects.nudgeFwd), pressed && styles.pressed]}
@@ -835,7 +956,7 @@ export default function PrecisionTimeline({
                 <ChevronRight size={22} color={theme.text} strokeWidth={2.4} />
               </Pressable>
               <Pressable
-                onPress={clearSelection}
+                onPress={guard("clear", clearSelection)}
                 accessibilityRole="button"
                 accessibilityLabel="Done adjusting this edge"
                 style={({ pressed }) => [styles.nudge, box(rects.clearBtn), pressed && styles.pressed]}

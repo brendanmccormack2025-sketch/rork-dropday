@@ -154,7 +154,7 @@ import {
   type TextBackgroundStyle,
 } from "@/providers/PostsProvider";
 import TimelineEditor, { effectiveDurationMs } from "@/components/TimelineEditor";
-import PrecisionTimeline from "@/components/PrecisionTimeline";
+import GuardedTimeline from "@/components/GuardedTimeline";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import TextOverlayEditor from "@/components/TextOverlayEditor";
 import DraggableTextOverlay, {
@@ -3011,34 +3011,54 @@ export default function EditScreen() {
   const edgeUriRef = useRef<string | null>(null);
   const edgeWantedMsRef = useRef<number | null>(null);
   useEffect(() => {
-    const sub = edgePlayer.addListener("statusChange", ({ status }) => {
-      if (status === "readyToPlay" && edgeWantedMsRef.current !== null) {
-        edgePlayer.currentTime = edgeWantedMsRef.current / 1000;
-        edgePlayer.pause();
-      }
-    });
-    return () => sub.remove();
+    try {
+      const sub = edgePlayer.addListener("statusChange", ({ status }) => {
+        try {
+          if (status === "readyToPlay" && edgeWantedMsRef.current !== null) {
+            edgePlayer.currentTime = edgeWantedMsRef.current / 1000;
+            edgePlayer.pause();
+          }
+        } catch {
+          // the preview is optional
+        }
+      });
+      return () => {
+        try {
+          sub.remove();
+        } catch {
+          // already released
+        }
+      };
+    } catch {
+      return undefined;
+    }
   }, [edgePlayer]);
   const handleEdgePreview = useCallback(
     (ms: number | null) => {
-      if (ms === null) {
-        edgeWantedMsRef.current = null;
-        setEdgePreviewing(false);
+      // The frame preview is a nicety: if its player complains, the timeline works without it.
+      try {
+        if (ms === null) {
+          edgeWantedMsRef.current = null;
+          setEdgePreviewing(false);
+          if (edgeUriRef.current) edgePlayer.pause();
+          return;
+        }
+        const uri = editStateRef.current?.state.sourceUri;
+        if (!uri || !Number.isFinite(ms)) return;
+        edgeWantedMsRef.current = ms;
+        if (edgeUriRef.current !== uri) {
+          edgeUriRef.current = uri;
+          edgePlayer.replace(uri);
+        } else {
+          edgePlayer.currentTime = ms / 1000;
+        }
         edgePlayer.pause();
-        return;
+        setIsPlaying(false);
+        setEdgePreviewing(true);
+      } catch (e) {
+        setEdgePreviewing(false);
+        if (__DEV__) console.warn("[edge preview]", (e as Error)?.message);
       }
-      const uri = editStateRef.current?.state.sourceUri;
-      if (!uri) return;
-      edgeWantedMsRef.current = ms;
-      if (edgeUriRef.current !== uri) {
-        edgeUriRef.current = uri;
-        edgePlayer.replace(uri);
-      } else {
-        edgePlayer.currentTime = ms / 1000;
-      }
-      edgePlayer.pause();
-      setIsPlaying(false);
-      setEdgePreviewing(true);
     },
     [edgePlayer],
   );
@@ -3054,17 +3074,35 @@ export default function EditScreen() {
   // The source's frame rate, for the one-frame nudge (30 when the player does not report one).
   const [sourceFps, setSourceFps] = useState<number | null>(null);
   useEffect(() => {
+    // Only reads: a player that does not answer just leaves the default (30 fps).
     const read = (p: VideoPlayer) => {
-      const fr = p.videoTrack?.frameRate;
-      if (typeof fr === "number" && fr > 0) setSourceFps(fr);
+      try {
+        const fr = p.videoTrack?.frameRate;
+        if (typeof fr === "number" && fr > 0) setSourceFps(fr);
+      } catch {
+        // keep the default
+      }
     };
     read(playerA);
     read(playerB);
-    const subs = [playerA, playerB].map((p) => p.addListener("videoTrackChange", ({ videoTrack }) => {
-      const fr = videoTrack?.frameRate;
-      if (typeof fr === "number" && fr > 0) setSourceFps(fr);
-    }));
-    return () => subs.forEach((sub) => sub.remove());
+    const subs: Array<{ remove: () => void }> = [];
+    for (const p of [playerA, playerB]) {
+      try {
+        subs.push(p.addListener("videoTrackChange", ({ videoTrack }) => {
+          const fr = videoTrack?.frameRate;
+          if (typeof fr === "number" && fr > 0) setSourceFps(fr);
+        }));
+      } catch {
+        // no frame rate events on this build
+      }
+    }
+    return () => subs.forEach((sub) => {
+      try {
+        sub.remove();
+      } catch {
+        // already released
+      }
+    });
   }, [playerA, playerB, videoReady, activeSlot]);
 
   const timelineSeams = useMemo(() => {
@@ -3080,9 +3118,10 @@ export default function EditScreen() {
       words: (captions.words ?? []).map((w) => ({ startMs: w.startMs, endMs: w.endMs })),
       frameRate: sourceFps,
       sourceDurationMs: editModel.durationMs,
+      canAnalyze: !autoEditRunning,
       onEdgePreview: handleEdgePreview,
     };
-  }, [aiEditsEnabled, editModel, modelInSync, clips, handleSeamDragEnd, captions.words, sourceFps, handleEdgePreview]);
+  }, [aiEditsEnabled, editModel, modelInSync, clips, handleSeamDragEnd, captions.words, sourceFps, handleEdgePreview, autoEditRunning]);
 
   // "Keep original": the automatic cuts off, nothing else (captions, text and the creator's own deletes stay).
   const handleKeepOriginal = useCallback(() => {
@@ -4309,7 +4348,7 @@ export default function EditScreen() {
           </View>
         )}
         {isVideo && timelineSeams && (
-          <PrecisionTimeline
+          <GuardedTimeline
             clips={clips}
             totalDurationMs={totalDurationMs}
             positionMs={displayPosition}
@@ -4321,6 +4360,25 @@ export default function EditScreen() {
             onMarkerPress={handleMarkerPress}
             bands={protectionBands}
             seams={timelineSeams}
+            fallback={
+              <TimelineEditor
+                clips={clips}
+                totalDurationMs={totalDurationMs}
+                positionMs={displayPosition}
+                activeClipIndex={activeIndex}
+                selectedClipId={selectedClipId}
+                onSeek={handleSeekAny}
+                onSelectClip={handleSelectClip}
+                onClipUpdate={handleClipUpdate}
+                onTrimRelease={handleTrimRelease}
+                onDeselectAndPreview={() => handleDeselectAndPreview()}
+                onReorderClips={handleReorderClips}
+                markers={timelineMarkers}
+                onMarkerPress={handleMarkerPress}
+                bands={protectionBands}
+                seams={timelineSeams}
+              />
+            }
           />
         )}
         {isVideo && !timelineSeams && (
@@ -4342,8 +4400,6 @@ export default function EditScreen() {
             seams={timelineSeams}
           />
         )}
-
-
 
         {selectedClipId && clips.length > 0 && (
           <View style={styles.cutActionRow}>

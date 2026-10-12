@@ -19,6 +19,8 @@ import { addManualCut, keepRangesOf, makeDecision, newEditState, renderClipsOf, 
 import { describeEdgeDrag, reshapeCutAtEdge } from "../lib/autoEdit/reshape.ts";
 import { emptyHistory, pushEdit, redoEdit, undoEdit } from "../lib/autoEdit/history.ts";
 import { buildSeamHandles, remapOverlayTimes } from "../lib/autoEdit/seams.ts";
+import { createAnalysisCache } from "../lib/autoEdit/analysisCache.ts";
+import { GUARD_KEY, armGuard, disableGuard, disarmGuard, readGuard } from "../lib/autoEdit/precisionGuard.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -290,12 +292,73 @@ const TOTAL = 60_000;    // a one-minute video
   ok("every edit ends in the existing seam handler with the lowered jitter gate", /onDragEnd\(r\.edge, drag\.clampedMs, \{ minDragMs: 1 \}\)/.test(comp) && /onDragEnd\(edge, drag\.clampedMs, \{ minDragMs: 1 \}\)/.test(comp));
   ok("the nudge uses the video's frame rate", /nudgeFrameMs\(edge\.atMs, direction, fps/.test(comp) && /safeFps\(seams\.frameRate\)/.test(comp));
   ok("the preview seeks while dragging (throttled) and the readout is m:ss.cc", /PREVIEW_EVERY_MS/.test(comp) && /onPreview/.test(comp) && /formatTimeCs\(/.test(comp));
-  ok("Cuts screen: edit.tsx shows PrecisionTimeline for the automatic edit's seams and the old timeline otherwise", /<PrecisionTimeline/.test(edit) && /\{isVideo && timelineSeams && \(/.test(edit) && /\{isVideo && !timelineSeams && \(/.test(edit));
+  ok("Cuts screen: edit.tsx shows the guarded precision timeline for the automatic edit's seams and the old timeline otherwise", /<GuardedTimeline/.test(edit) && /\{isVideo && timelineSeams && \(/.test(edit) && /\{isVideo && !timelineSeams && \(/.test(edit));
   ok("edit.tsx passes the transcript words, the frame rate and the edge preview", /words: \(captions\.words \?\? \[\]\)/.test(edit) && /frameRate: sourceFps/.test(edit) && /onEdgePreview: handleEdgePreview/.test(edit));
   ok("the edit goes through reshapeCutAtEdge with the optional gate", /reshapeCutAtEdge\(st, edge, newSourceMs, model\.durationMs, opts\?\.minDragMs\)/.test(edit) && /userEdit\(/.test(edit));
   ok("the frame rate comes from the player (JS only)", /videoTrack\?\.frameRate/.test(edit));
   ok("the edge preview is its own paused player and ends when playback starts", /const edgePlayer = useVideoPlayer/.test(edit) && /if \(isPlaying && edgePreviewing\) handleEdgePreview\(null\)/.test(edit));
   ok("the app version is untouched", /"version": "1\.0\.4"/.test(read("../app.json")));
+}
+
+// ── 10. fail safe: the previous timeline takes over ──────────────────────────
+{
+  const memory = () => {
+    const m = new Map();
+    return { m, get: async (k) => m.get(k) ?? null, set: async (k, v) => void m.set(k, v) };
+  };
+  const B1 = "1.0.4+9:update-a";
+  const B2 = "1.0.4+9:update-b";
+  let st = memory();
+  eq("nothing stored: the precision timeline is on", await readGuard(st, B1), { enabled: true, reason: null });
+  await armGuard(st, B1, 1000);
+  await disarmGuard(st, B1);
+  eq("armed then disarmed (a normal visit): still on at the next start", (await readGuard(st, B1)).enabled, true);
+  await armGuard(st, B1, 2000);
+  eq("the app died while it was showing (still armed at the next start): off for this build", await readGuard(st, B1), { enabled: false, reason: "crash" });
+  eq("...and it stays off at every start after", (await readGuard(st, B1)).enabled, false);
+  eq("a new build or update gets another try", (await readGuard(st, B2)).enabled, true);
+  await armGuard(st, B2, 3000);
+  await disarmGuard(st, B2);
+  eq("...and a visit of the new build that ends normally keeps it on", (await readGuard(st, B2)).enabled, true);
+  // a caught error
+  st = memory();
+  await armGuard(st, B1, 1);
+  await disableGuard(st, B1, "tap: boom");
+  await disarmGuard(st, B1);   // the screen unmounts right after the failure
+  eq("an error caught in the timeline turns it off, and the late disarm does not undo that", await readGuard(st, B1), { enabled: false, reason: "tap: boom" });
+  await armGuard(st, B1, 5);
+  eq("arming again does not turn it back on", (await readGuard(st, B1)).enabled, false);
+  // writes happen in order even when asked for at the same moment
+  st = memory();
+  await Promise.all([armGuard(st, B1, 1), disableGuard(st, B1, "x"), disarmGuard(st, B1), armGuard(st, B1, 2)]);
+  eq("arm, failure, disarm and arm in the same moment end as failed", JSON.parse(st.m.get(GUARD_KEY)).disabled, true);
+  // storage trouble never blocks the screen
+  const broken = { get: async () => { throw new Error("no storage"); }, set: async () => { throw new Error("no storage"); } };
+  eq("unreadable storage: on, no throw", (await readGuard(broken, B1)).enabled, true);
+  await armGuard(broken, B1, 1);
+  await disableGuard(broken, B1, "x");
+  ok("writing to broken storage does not throw", true);
+  eq("garbage in storage is ignored", (await readGuard({ get: async () => "{nope", set: async () => {} }, B1)).enabled, true);
+
+  const comp = read("../components/PrecisionTimeline.tsx");
+  const guarded = read("../components/GuardedTimeline.tsx");
+  const edit = read("../app/edit.tsx");
+  ok("a render error shows the previous timeline (error boundary around the new one, fallback while unknown)", /getDerivedStateFromError/.test(guarded) && /componentDidCatch/.test(guarded) && /status !== "on"\) return <>\{fallback\}<\/>/.test(guarded));
+  ok("the failure is recorded (client_errors) and remembered for this build", /recordClientError\(/.test(guarded) && /kind: "precisionTimeline"/.test(guarded) && /disableGuard\(/.test(guarded));
+  ok("the crash marker is armed while it shows and disarmed on unmount / background", /armGuard\(/.test(guarded) && /disarmGuard\(/.test(guarded) && /AppState\.addEventListener/.test(guarded));
+  const catches = (comp.match(/catch \(err\)/g) || []).length;
+  ok(`every gesture and frame worklet catches its own errors and reports them (${catches} catch blocks)`, catches >= 11 && (comp.match(/runOnJS\(reportFatal\)/g) || []).length >= catches);
+  ok("what the UI thread calls on the JS side is guarded", ["safeGrab", "safePreview", "safeEdgeEnd", "safeScrub", "safeTap", "safeSettle"].every((n) => new RegExp(`runOnJS\\(${n}\\)`).test(comp)));
+  ok("button handlers are guarded and a waveform failure only drops the waveform", /guard\("nudge"/.test(comp) && /setWave\(null\)/.test(comp));
+  ok("the fallback is the previous timeline, with the same props it had", /fallback=\{\s*<TimelineEditor/.test(edit) && /onReorderClips=\{handleReorderClips\}/.test(edit));
+  ok("the frame rate and the edge preview player cannot throw into the screen", /Only reads: a player that does not answer/.test(edit) && /The frame preview is a nicety/.test(edit));
+  ok("the waveform waits for the screen to settle, uses the cache first, and swallows failures", /setTimeout\(\(\) => \{\s*\(async \(\) => \{\s*try \{\s*let d = usable\(await analysis\.cachedLoudness/.test(comp) && /if \(!d && canAnalyze\)/.test(comp) && /canAnalyze: !autoEditRunning/.test(edit));
+  // the cache lookup never starts an analysis
+  let runsLoud = 0;
+  const cache = createAnalysisCache({ stat: async (u) => ({ uri: u, size: 1, mtime: 1 }), loadLoudness: async () => { runsLoud++; return { durationMs: 1000, windows: [-30, -30] }; }, transcribe: async () => ({ status: "ok", words: [] }) });
+  eq("cachedLoudness is null when nothing is cached and starts no analysis", [await cache.cachedLoudness("a.mov"), runsLoud], [null, 0]);
+  await cache.loudness("a.mov");
+  eq("after the analysis ran once, cachedLoudness returns it without running again", [(await cache.cachedLoudness("a.mov"))?.windows.length, runsLoud], [2, 1]);
 }
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
