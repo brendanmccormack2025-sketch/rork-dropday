@@ -6,3 +6,6 @@ node_modules
 # Cloudflare Functions
 functions/node_modules
 !functions/package.json
+
+# Supabase CLI temp files
+**/supabase/.temp/
