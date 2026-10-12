@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Globe, Heart, Instagram, Music2, Youtube } from "lucide-react-native";
+import { Globe, Instagram, Music2, Play, Youtube } from "lucide-react-native";
 
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { AVATAR_SIZE, SIDE_MARGIN, colors, radius, space, type } from "@/constants/design";
 import { getCreatorLinks, openCreatorLink, type CreatorLinkKind, type CreatorLinkSource } from "@/lib/creatorLinks";
+import { formatCount, viewsShown } from "@/lib/postDisplay";
 import { avatarInitial, avatarTint, gridTileSize } from "@/lib/profileUi";
 import { resolveAvatarUrl, type Post } from "@/providers/PostsProvider";
 
@@ -114,8 +115,8 @@ export function PostTile({ post, onPress, queued }: { post: Post; onPress: () =>
         </View>
       ) : null}
       <View style={styles.tileStats} pointerEvents="none">
-        <Heart color="#fff" fill="#fff" size={11} />
-        <UiText style={styles.tileCount}>{post.like_count ?? 0}</UiText>
+        <Play color="#fff" fill="#fff" size={11} strokeWidth={2} />
+        <UiText style={styles.tileCount}>{formatCount(viewsShown(post))}</UiText>
       </View>
     </Pressable>
   );

@@ -6,7 +6,7 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { SURVIVED_BANNER_MS, shouldDimPost, showSurvivedBanner, viewsShown } from "../lib/postDisplay.ts";
+import { SURVIVED_BANNER_MS, formatCount, shouldDimPost, showSurvivedBanner, viewsShown } from "../lib/postDisplay.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -76,7 +76,7 @@ eq("views shown: raw views, or the qualified views when higher", [
   viewsShown({}),
   viewsShown({ view_count: -4, qualified_view_count: null }),
 ], [5, 3, 7, 0, 0]);
-eq("FeedItem's eye counter uses viewsShown", [/label=\{String\(viewsShown\(post\)\)\}/.test(feedItem), /post\.view_count \?\? 0/.test(feedItem)], [true, false]);
+eq("FeedItem's eye counter uses viewsShown", [/label=\{formatCount\(viewsShown\(post\)\)\}/.test(feedItem), /post\.view_count \?\? 0/.test(feedItem)], [true, false]);
 // the bug: the post mappers dropped view_count, so a post opened from the profile always showed 0
 const mappers = ["providers/PostsProvider.tsx", "app/profile-drops.tsx", "app/user/[id].tsx"].map((f) => readFileSync(join(root, f), "utf8"));
 for (const [i, src] of mappers.entries()) {
@@ -86,5 +86,21 @@ for (const [i, src] of mappers.entries()) {
   const selects = src.match(/"id, user_id, media_url, media_type, caption[^"]*"/g) || [];
   eq(`every post select in ${["PostsProvider", "profile-drops", "user/[id]"][i]} reads qualified_view_count`, selects.filter((s) => !/qualified_view_count/.test(s)).length, 0);
 }
+
+// 4. compact format and the profile grid tile
+eq("compact counts: 842, 1.2K, 3.4M", [formatCount(842), formatCount(1200), formatCount(3_400_000)], ["842", "1.2K", "3.4M"]);
+eq("edges: 0, 999, 1000, 1049, 9999, 10 000, 999 999, 1 000 000, 2.5 billion", [0, 999, 1000, 1049, 9999, 10_000, 999_999, 1_000_000, 2_500_000_000].map(formatCount), ["0", "999", "1K", "1K", "9.9K", "10K", "999.9K", "1M", "2.5B"]);
+eq("bad input shows 0", [formatCount(null), formatCount(undefined), formatCount(-5), formatCount(NaN)], ["0", "0", "0", "0"]);
+eq("fractions are dropped", formatCount(12.9), "12");
+const parts = readFileSync(join(root, "components/profile/ProfileParts.tsx"), "utf8");
+const tile = parts.slice(parts.indexOf("export function PostTile"), parts.indexOf("export function DraftTileView"));
+eq("the grid tile shows a play icon and formatCount(viewsShown(post)), bottom-left, on the same gradient; no like count", [/<Play /.test(tile), /formatCount\(viewsShown\(post\)\)/.test(tile), /tileStats/.test(tile), /rgba\(0,0,0,0\.55\)/.test(tile), /like_count|Heart/.test(tile)], [true, true, true, true, false]);
+eq("the tile and the viewer use the same count source (viewsShown on the same post fields)", [/viewsShown\(post\)/.test(tile), /formatCount\(viewsShown\(post\)\)/.test(feedItem)], [true, true]);
+// the creator's own views are excluded: client, trigger, RPC and backfill
+const mig = readFileSync(join(root, "supabase/migration-views-exclude-author.sql"), "utf8");
+eq("the creator's own views are not recorded (app) ...", /if \(!active \|\| isOwner\) return;[^\n]*\n\s*if \(rawViewRecorded/.test(feedItem), true);
+eq("... nor counted (trigger and RPC), and old author rows are removed and the counter recounted", [/user_id <> new\.viewer_id/.test(mig), /function public\.record_raw_view[\s\S]*user_id = auth\.uid\(\)\) then return/.test(mig), /delete from public\.post_raw_views/.test(mig), /set view_count = c\.n/.test(mig)], [true, true, true, true]);
+const order = readFileSync(join(root, "supabase/MIGRATIONS_ORDER.txt"), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
+eq("the migration is in MIGRATIONS_ORDER.txt, before known-connections (which stays last)", [order.includes("migration-views-exclude-author.sql"), order[order.length - 1]], [true, "migration-known-connections.sql"]);
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

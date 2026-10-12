@@ -32,3 +32,13 @@ export function viewsShown(p: { view_count?: number | null; qualified_view_count
   const n = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
   return Math.max(n(p.view_count), n(p.qualified_view_count));
 }
+
+/** Compact count: 842, 1.2K, 12.3K, 3.4M (rounded down, so 999,999 reads 999.9K, never 1000K; ".0" is dropped). */
+export function formatCount(value: number | null | undefined): string {
+  const n = typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+  const units: Array<[number, string]> = [[1e9, "B"], [1e6, "M"], [1e3, "K"]];
+  for (const [size, suffix] of units) {
+    if (n >= size) return `${(Math.floor((n / size) * 10) / 10).toString()}${suffix}`;
+  }
+  return String(n);
+}

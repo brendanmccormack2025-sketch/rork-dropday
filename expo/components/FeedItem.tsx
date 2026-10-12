@@ -33,7 +33,7 @@ import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoSt
 
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { TrialStatusBadge } from "@/components/TrialStatusBadge";
-import { shouldDimPost, viewsShown } from "@/lib/postDisplay";
+import { formatCount, shouldDimPost, viewsShown } from "@/lib/postDisplay";
 import CreatorLinkIcons from "@/components/CreatorLinkIcons";
 import { theme } from "@/constants/theme";
 import { usePosts, resolveAvatarUrl, type Post, type TextOverlay, type TextBackgroundStyle } from "@/providers/PostsProvider";
@@ -664,7 +664,7 @@ export const FeedItem = memo(function FeedItem({
   // icon. Dedupe per viewer/post is enforced server-side by post_raw_views;
   // the Set avoids repeat RPCs when scrolling back to a post.
   useEffect(() => {
-    if (!active) return;
+    if (!active || isOwner) return;   // the creator's own views are not counted
     if (rawViewRecorded.has(post.id)) return;
     rawViewRecorded.add(post.id);
     supabase
@@ -677,7 +677,7 @@ export const FeedItem = memo(function FeedItem({
           rawViewRecorded.delete(post.id);
         },
       );
-  }, [active, post.id]);
+  }, [active, isOwner, post.id]);
 
   // Watch time per view: how long this post was really on screen. Counting stops on swipe-away, screen leave and when
   // the app goes to the background (each of those reports it), and a report is also sent at 6 s so a long watch still
@@ -1887,7 +1887,7 @@ export const FeedItem = memo(function FeedItem({
         />
         <ActionButton
           icon={<Eye color="rgba(255,255,255,0.6)" size={22} strokeWidth={2} />}
-          label={String(viewsShown(post))}
+          label={formatCount(viewsShown(post))}
           muted
         />
       </View>
