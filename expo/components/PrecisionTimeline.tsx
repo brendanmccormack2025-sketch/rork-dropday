@@ -1,17 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
-import Animated, {
-  Easing,
-  cancelAnimation,
-  runOnJS,
-  useAnimatedReaction,
-  useAnimatedStyle,
-  useFrameCallback,
-  useSharedValue,
-  withDecay,
-  withTiming,
-  type SharedValue,
-} from "react-native-reanimated";
+import Animated, { useAnimatedStyle, useSharedValue, type SharedValue } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Svg, { Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
@@ -38,15 +27,16 @@ import {
   edgeDragMs,
   fitScale,
   fitView,
+  flingStep,
+  followOffset,
   formatDeltaSeconds,
   formatTimeCs,
   grabAt,
   handleGeoms,
-  msToX,
+  lerpView,
   nudgeFrameMs,
   pinchView,
   revealOffset,
-  followOffset,
   safeFps,
   tapAt,
   timelineRects,
@@ -55,22 +45,32 @@ import {
   wavePiecesOf,
   xToMs,
   type ClipGeom,
-  type HandleGeom,
   type MarkerGeom,
+  type View as ViewState,
 } from "@/lib/autoEdit/timelineView";
 import type { DraftClip } from "@/providers/PostsProvider";
 
-/** Bar pitch of the waveform, in points. */
+/**
+ * Why everything here runs on the JS thread: every other gesture in the app does (`runOnJS(true)`), and the only
+ * animation code that has ever run on the UI thread in this app is `useAnimatedStyle` on transforms and opacity
+ * (the text overlays). This timeline stays inside exactly that: gestures, snapping, fling and zoom animation are plain
+ * JS that write shared values, and the styles read those values with transform / opacity only (no layout props, no
+ * frame callbacks, no reactions, no worklet functions, nothing captured from JS on the UI thread).
+ */
+
+/** Bar pitch of the waveform, in points: a few hundred bars across the drawn window, about 125 per screen. */
 const WAVE_PITCH = 3;
 /** How far a settled drawing may drift from the live zoom before it is drawn again. */
 const WAVE_REDRAW_RATIO = 0.12;
 const FIT_ANIM_MS = 240;
 /** Finger travel under this is a tap, not a drag. */
 const TAP_SLOP = 3;
-/** Preview frames are requested at most this often while an edge is dragged. */
+/** Preview frames and the readout are updated at most this often while an edge is dragged. */
 const PREVIEW_EVERY_MS = 50;
 /** An edge selected before an edit is found again after it within this distance (source ms). */
 const EDGE_MATCH_MS = 150;
+/** Bars (clips, bands, the drag ghost) are one fixed-width view scaled sideways: no layout props are animated. */
+const BAR_BASE = 1000;
 
 export type PrecisionSeams = {
   handles: SeamHandleSpec[];
@@ -105,11 +105,31 @@ export type PrecisionTimelineProps = {
   /** Output-timeline ranges drawn as a subtle band (protected laughs). */
   bands?: Array<{ startMs: number; endMs: number }>;
   seams: PrecisionSeams;
-  /** An error was caught in this timeline (a handler, a worklet): the owner switches to the previous timeline. */
+  /** An error was caught in this timeline: the owner switches to the previous timeline. */
   onFatal?: (error: unknown, where: string) => void;
+  /** A step reached (saved at once, uploaded later): the trail a native crash leaves. */
+  onBreadcrumb?: (name: string, data?: Record<string, unknown>) => void;
 };
 
 type SelectedEdge = { side: "left" | "right"; atMs: number };
+
+type GestureState = { mode: "none" | "edge" | "playhead" | "scroll"; idx: number; side: 0 | 1; startOffset: number; grabDx: number; lastSeekMs: number };
+
+type EdgeDragState = {
+  idx: number;
+  side: 0 | 1;
+  edge: SeamEdgeInfo;
+  atMs: number;
+  min: number;
+  max: number;
+  dx: number;
+  fingerX: number;
+  offsetStart: number;
+  snap: SnapState;
+  ms: number;
+  lastPreviewAt: number;
+  lastPreviewMs: number;
+};
 
 function haptic(kind: "light" | "select") {
   try {
@@ -151,74 +171,45 @@ function useLoudness(uri: string, canAnalyze: boolean): LoudnessData | null {
   return data;
 }
 
-// ── Pieces drawn from the shared view (they animate without re-rendering) ────
+// ── Pieces drawn from the shared view: transform and opacity only ────────────
 
-function ClipBar({ startMs, durMs, selected, scale, offset }: { startMs: number; durMs: number; selected: boolean; scale: SharedValue<number>; offset: SharedValue<number> }) {
-  const style = useAnimatedStyle(() => ({
-    transform: [{ translateX: msToX(startMs, scale.value, offset.value) }],
-    width: Math.max(1, durMs * scale.value),
-  }));
-  return <Animated.View pointerEvents="none" style={[styles.clip, selected && styles.clipSelected, style]} />;
-}
-
-function Band({ startMs, endMs, scale, offset }: { startMs: number; endMs: number; scale: SharedValue<number>; offset: SharedValue<number> }) {
-  const style = useAnimatedStyle(() => ({
-    transform: [{ translateX: msToX(startMs, scale.value, offset.value) }],
-    width: Math.max(2, (endMs - startMs) * scale.value),
-  }));
-  return <Animated.View pointerEvents="none" style={[styles.band, style]} />;
-}
-
-function HandlePills({
-  geom,
-  index,
+/** A bar from `startMs` lasting `durMs`: one BAR_BASE wide view, moved and scaled sideways. */
+function Bar({
+  startMs,
+  durMs,
   scale,
   offset,
-  selIdx,
-  selSide,
+  style,
 }: {
-  geom: HandleGeom;
-  index: number;
+  startMs: number;
+  durMs: number;
   scale: SharedValue<number>;
   offset: SharedValue<number>;
-  selIdx: SharedValue<number>;
-  selSide: SharedValue<number>;
+  style: object;
 }) {
-  const prev = useAnimatedStyle(() => {
-    const sel = selIdx.value === index && selSide.value === 0;
-    return {
-      transform: [{ translateX: msToX(geom.outputMs, scale.value, offset.value) - 5 }],
-      top: LANE_TOP + (sel ? 0 : LANE_H * 0.18),
-      height: sel ? LANE_H : LANE_H * 0.64,
-      backgroundColor: sel ? theme.accent : "rgba(10,10,10,0.82)",
-      width: sel ? 5 : 4,
-    };
+  const anim = useAnimatedStyle(() => {
+    const w = Math.max(1, durMs * scale.value);
+    return { transform: [{ translateX: TL_PAD + startMs * scale.value - offset.value + (w - BAR_BASE) / 2 }, { scaleX: w / BAR_BASE }] };
   });
-  const next = useAnimatedStyle(() => {
-    const sel = selIdx.value === index && selSide.value === 1;
-    return {
-      transform: [{ translateX: msToX(geom.outputMs, scale.value, offset.value) + 1 }],
-      top: LANE_TOP + (sel ? 0 : LANE_H * 0.18),
-      height: sel ? LANE_H : LANE_H * 0.64,
-      backgroundColor: sel ? theme.accent : "rgba(10,10,10,0.82)",
-      width: sel ? 5 : 4,
-    };
-  });
+  return <Animated.View pointerEvents="none" style={[styles.bar, style, anim]} />;
+}
+
+function Pills({ outputMs, hasPrev, hasNext, scale, offset }: { outputMs: number; hasPrev: boolean; hasNext: boolean; scale: SharedValue<number>; offset: SharedValue<number> }) {
+  const prev = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - 5 }] }));
+  const next = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value + 1 }] }));
   return (
     <>
-      {geom.hasPrev ? <Animated.View pointerEvents="none" style={[styles.pill, prev]} /> : null}
-      {geom.hasNext ? <Animated.View pointerEvents="none" style={[styles.pill, next]} /> : null}
+      {hasPrev ? <Animated.View pointerEvents="none" style={[styles.pill, prev]} /> : null}
+      {hasNext ? <Animated.View pointerEvents="none" style={[styles.pill, next]} /> : null}
     </>
   );
 }
 
-function MarkerGlyph({ marker, scale, offset }: { marker: TimelineMarker; scale: SharedValue<number>; offset: SharedValue<number> }) {
-  const look = MARKER_LOOK[marker.kind];
-  const y = look.bottom ? BOTTOM_MARKER_Y : TOP_MARKER_Y;
-  const style = useAnimatedStyle(() => ({ transform: [{ translateX: msToX(marker.outputMs, scale.value, offset.value) - 6 }] }));
+function MarkerGlyph({ outputMs, glyph, y, scale, offset }: { outputMs: number; glyph: object; y: number; scale: SharedValue<number>; offset: SharedValue<number> }) {
+  const anim = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - 6 }] }));
   return (
-    <Animated.View pointerEvents="none" style={[styles.markerBox, { top: y - 6 }, style]}>
-      <View style={[styles.markerGlyph, look.glyph]} />
+    <Animated.View pointerEvents="none" style={[styles.markerBox, { top: y - 6 }, anim]}>
+      <View style={[styles.markerGlyph, glyph]} />
     </Animated.View>
   );
 }
@@ -231,9 +222,6 @@ function MarkerGlyph({ marker, scale, offset }: { marker: TimelineMarker; scale:
  * every zoom; an edge drags at the zoom's precision, snaps to word starts / ends and the silence cuts, the preview
  * shows its frame, and the arrows move a selected edge one frame. Every change ends in the existing seam drag
  * handler (reshapeCutAtEdge: one undo step, captions and text follow).
- *
- * The view (scale, offset) lives in shared values and every drawn piece reads it in a worklet, so zoom, pan and the
- * edge drag run on the UI thread; React only re-renders when the clips change or the waveform is redrawn.
  */
 export default function PrecisionTimeline({
   clips,
@@ -248,75 +236,51 @@ export default function PrecisionTimeline({
   bands,
   seams,
   onFatal,
+  onBreadcrumb,
 }: PrecisionTimelineProps) {
   const [viewW, setViewW] = useState(0);
+
+  // the view lives in refs (the truth, for the gesture code) and in shared values (for the styles)
+  const view = useRef<ViewState>({ scale: 0.05, offset: 0 });
+  const viewWRef = useRef(0);
+  const totalRef = useRef(Math.max(1, totalDurationMs));
   const scale = useSharedValue(0.05);
   const offset = useSharedValue(0);
   const viewWSV = useSharedValue(0);
-  const totalSV = useSharedValue(Math.max(1, totalDurationMs));
   const playMs = useSharedValue(positionMs);
-  const touching = useSharedValue(false);
-
-  // geometry for the UI thread
-  const geomsSV = useSharedValue<HandleGeom[]>([]);
-  const markersSV = useSharedValue<MarkerGeom[]>([]);
-  const clipsSV = useSharedValue<ClipGeom[]>([]);
-  const targetsSV = useSharedValue<number[]>([]);
-
-  // selected edge (seam index + side) and the edge drag
-  const selIdx = useSharedValue(-1);
+  const playRef = useRef(positionMs);
+  const selOutputMs = useSharedValue(-1);
   const selSide = useSharedValue(0);
-  const dragging = useSharedValue(false);
-  const dragIdx = useSharedValue(-1);
-  const dragSide = useSharedValue(0);
+  const dragOn = useSharedValue(0);
+  const dragMs = useSharedValue(0);
   const dragAtMs = useSharedValue(0);
   const dragOutputMs = useSharedValue(0);
-  const dragMs = useSharedValue(0);
-  const dragMin = useSharedValue(-1e12);
-  const dragMax = useSharedValue(1e12);
-  const dragDx = useSharedValue(0);
-  const dragOffsetStart = useSharedValue(0);
-  const fingerX = useSharedValue(0);
-  const snapState = useSharedValue<SnapState>({ target: null, released: null, anchorMs: 0, movedAt: 0 });
-  const lastPreviewAt = useSharedValue(0);
-  const lastPreviewMs = useSharedValue(-1);
-
-  // gesture bookkeeping
-  const mode = useSharedValue(0); // 1 edge, 2 playhead, 3 scroll
-  const modeIdx = useSharedValue(-1);
-  const modeSide = useSharedValue(0);
-  const offsetStart = useSharedValue(0);
-  const playGrabDx = useSharedValue(0);
-  const lastSeekMs = useSharedValue(-1);
-  const pinchStart = useSharedValue({ scale: 1, offset: 0, focalX: 0 });
-
-  // waveform: drawn for a window around the settled view, moved and scaled by the live view in between
+  const dragSide = useSharedValue(0);
   const waveS0 = useSharedValue(0);
   const waveO0 = useSharedValue(0);
-  const [wave, setWave] = useState<{ path: string; width: number } | null>(null);
-  const settledRef = useRef<{ scale: number; offset: number } | null>(null);
-  const waveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latestView = useRef({ scale: 0, offset: 0 });
 
   const [selected, setSelectedState] = useState<SelectedEdge | null>(null);
-  // the handle list the selection was made against: an edit that changes it can leave the edge nowhere
   const selectedAgainst = useRef<SeamHandleSpec[] | null>(null);
-  // the edge being dragged right now (updated at most every PREVIEW_EVERY_MS from the UI thread)
   const [liveEdge, setLiveEdge] = useState<{ ms: number; atMs: number } | null>(null);
+  const [wave, setWave] = useState<{ path: string; width: number } | null>(null);
   const loudness = useLoudness(seams.sourceUri, seams.canAnalyze === true);
 
-  // The latest props for the callbacks the UI thread calls (their identity never changes).
-  const live = useRef({ clips, markers, seams, selected, selectedClipId, totalDurationMs, onSeek, onSelectClip, onDeselectAndPreview, onMarkerPress });
-  live.current = { clips, markers, seams, selected, selectedClipId, totalDurationMs, onSeek, onSelectClip, onDeselectAndPreview, onMarkerPress };
+  // The latest props for the callbacks the gestures call (their identity never changes).
+  const live = useRef({ clips, markers, seams, selected, selectedClipId, onSeek, onSelectClip, onDeselectAndPreview, onMarkerPress, onFatal, onBreadcrumb });
+  live.current = { clips, markers, seams, selected, selectedClipId, onSeek, onSelectClip, onDeselectAndPreview, onMarkerPress, onFatal, onBreadcrumb };
   const setSelected = useCallback((next: SelectedEdge | null) => {
     selectedAgainst.current = live.current.seams.handles;
     setSelectedState(next);
   }, []);
+  const crumb = useCallback((name: string, data?: Record<string, unknown>) => {
+    try {
+      live.current.onBreadcrumb?.(name, data);
+    } catch {
+      // a breadcrumb never matters
+    }
+  }, []);
 
-  // Anything that goes wrong in a handler or a worklet is reported to the owner (which switches to the previous
-  // timeline) instead of crashing the app.
-  const fatalRef = useRef(onFatal);
-  fatalRef.current = onFatal;
+  // Anything that goes wrong in a handler is reported to the owner (which switches to the previous timeline).
   const guard = useMemo(
     () =>
       <A extends unknown[]>(where: string, fn: (...a: A) => void) =>
@@ -324,14 +288,11 @@ export default function PrecisionTimeline({
         try {
           fn(...a);
         } catch (e) {
-          fatalRef.current?.(e, where);
+          live.current.onFatal?.(e, where);
         }
       },
     [],
   );
-  const reportFatal = useCallback((where: string, message: string) => {
-    fatalRef.current?.(new Error(message), where);
-  }, []);
 
   // ── geometry ──
   const geoms = useMemo(() => handleGeoms(seams.handles), [seams.handles]);
@@ -341,69 +302,147 @@ export default function PrecisionTimeline({
     for (const c of clips) {
       const start = c.trimStartMs ?? 0;
       const end = c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0);
-      const dur = Math.max(0, end - start);
+      const raw = Math.max(0, end - start);
+      const dur = Number.isFinite(raw) ? raw : 0;
       out.push({ startMs: t, durMs: dur });
       t += dur;
     }
     return out;
   }, [clips]);
-  const markerGeoms = useMemo<MarkerGeom[]>(() => (markers ?? []).map((m) => ({ outputMs: m.outputMs, bottom: MARKER_LOOK[m.kind].bottom })), [markers]);
+  const markerGeoms = useMemo<MarkerGeom[]>(() => (markers ?? []).map((m) => ({ outputMs: m.outputMs, bottom: MARKER_LOOK[m.kind]?.bottom ?? false })), [markers]);
   const targets = useMemo(() => buildSnapTargets(seams.words, seams.boundaries), [seams.words, seams.boundaries]);
-  useEffect(() => {
-    geomsSV.value = geoms;
-    markersSV.value = markerGeoms;
-    clipsSV.value = clipGeoms;
-    targetsSV.value = targets;
-  }, [geoms, markerGeoms, clipGeoms, targets, geomsSV, markersSV, clipsSV, targetsSV]);
+  const geo = useRef({ geoms, markerGeoms, clipGeoms, targets });
+  geo.current = { geoms, markerGeoms, clipGeoms, targets };
 
-  // ── the view: fit the whole video; keep the zoom when the clips change ──
+  // ── the view ──
+  const waveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settled = useRef<{ scale: number; offset: number } | null>(null);
+  const drawWaveRef = useRef<(s: number, o: number) => void>(() => {});
+  const scheduleWave = useCallback(() => {
+    if (waveTimer.current) return;
+    waveTimer.current = setTimeout(() => {
+      waveTimer.current = null;
+      const cur = view.current;
+      const set = settled.current;
+      if (!set || Math.abs(cur.scale / set.scale - 1) > WAVE_REDRAW_RATIO || Math.abs(cur.offset - set.offset) > viewWRef.current * 0.7) {
+        drawWaveRef.current(cur.scale, cur.offset);
+      }
+    }, 110);
+  }, []);
+
+  const setView = useCallback(
+    (v: ViewState) => {
+      const w = viewWRef.current;
+      if (w <= 0 || !Number.isFinite(v.scale) || !Number.isFinite(v.offset)) return;
+      const total = totalRef.current;
+      const s = clampScale(v.scale, total, w);
+      const o = clampOffset(v.offset, total, s, w);
+      view.current = { scale: s, offset: o };
+      scale.value = s;
+      offset.value = o;
+      scheduleWave();
+    },
+    [scale, offset, scheduleWave],
+  );
+
+  // animations: one at a time, one step per frame, cancelled by any touch
+  const animId = useRef(0);
+  const raf = useRef<number | null>(null);
+  const cancelAnim = useCallback(() => {
+    animId.current += 1;
+    if (raf.current !== null) cancelAnimationFrame(raf.current);
+    raf.current = null;
+  }, []);
+  const animateTo = useCallback(
+    (target: ViewState, ms: number) => {
+      cancelAnim();
+      const id = animId.current;
+      const from = { ...view.current };
+      const t0 = Date.now();
+      const tick = () => {
+        if (animId.current !== id) return;
+        const k = Math.min(1, (Date.now() - t0) / ms);
+        setView(lerpView(from, target, k));
+        raf.current = k < 1 ? requestAnimationFrame(tick) : null;
+      };
+      raf.current = requestAnimationFrame(tick);
+    },
+    [cancelAnim, setView],
+  );
+  const fling = useCallback(
+    (velocity: number) => {
+      cancelAnim();
+      const id = animId.current;
+      let v = velocity;
+      let last = Date.now();
+      const tick = () => {
+        if (animId.current !== id) return;
+        const now = Date.now();
+        const max = Math.max(0, 2 * TL_PAD + totalRef.current * view.current.scale - viewWRef.current);
+        const step = flingStep(view.current.offset, v, (now - last) / 1000, max);
+        last = now;
+        v = step.velocity;
+        setView({ scale: view.current.scale, offset: step.offset });
+        raf.current = step.done ? null : requestAnimationFrame(tick);
+      };
+      raf.current = requestAnimationFrame(tick);
+    },
+    [cancelAnim, setView],
+  );
+
+  // fit the whole video; keep the zoom when the clips change
   const prevFit = useRef<number | null>(null);
   useEffect(() => {
-    if (viewW <= 0) return;
+    viewWRef.current = viewW;
     viewWSV.value = viewW;
-    totalSV.value = Math.max(1, totalDurationMs);
+    totalRef.current = Math.max(1, totalDurationMs);
+    if (viewW <= 0) return;
     const fit = fitScale(totalDurationMs, viewW);
-    const wasFit = prevFit.current === null || Math.abs(scale.value - prevFit.current) <= prevFit.current * 0.001;
+    const wasFit = prevFit.current === null || Math.abs(view.current.scale - prevFit.current) <= prevFit.current * 0.001;
     prevFit.current = fit;
-    if (wasFit) {
-      scale.value = fit;
-      offset.value = 0;
-    } else {
-      const s = clampScale(scale.value, totalDurationMs, viewW);
-      scale.value = s;
-      offset.value = clampOffset(offset.value, totalDurationMs, s, viewW);
-    }
-  }, [viewW, totalDurationMs, scale, offset, viewWSV, totalSV]);
+    if (wasFit) setView({ scale: fit, offset: 0 });
+    else setView(view.current);
+  }, [viewW, totalDurationMs, setView, viewWSV]);
+
+  useEffect(() => {
+    if (viewW > 0) crumb("precision timeline: mounted", { viewW, clips: clips.length, handles: seams.handles.length, markers: (markers ?? []).length });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewW > 0]);
 
   // the playhead follows the player (and scrolls into view when zoomed)
+  const touching = useRef(0);
+  const edge = useRef<EdgeDragState | null>(null);
   useEffect(() => {
-    if (!touching.value) playMs.value = positionMs;
-    if (touching.value || viewW <= 0 || dragging.value) return;
-    const next = followOffset(positionMs, scale.value, offset.value, totalDurationMs, viewW);
-    if (next !== null) offset.value = withTiming(next, { duration: 180, easing: Easing.out(Easing.cubic) });
-  }, [positionMs, viewW, totalDurationMs, touching, playMs, scale, offset, dragging]);
+    if (!touching.current) {
+      playRef.current = positionMs;
+      playMs.value = Number.isFinite(positionMs) ? positionMs : 0;
+    }
+    if (touching.current || viewW <= 0 || edge.current) return;
+    const next = followOffset(positionMs, view.current.scale, view.current.offset, totalDurationMs, viewW);
+    if (next !== null) animateTo({ scale: view.current.scale, offset: next }, 180);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positionMs, viewW, totalDurationMs]);
 
-  // ── the selected edge → shared values ──
+  // ── the selected edge ──
   const selectedHandle = useMemo(() => {
     if (!selected) return null;
-    const want = selected.side;
     let best: { index: number; edge: SeamEdgeInfo } | null = null;
     let bestD = EDGE_MATCH_MS + 1;
     seams.handles.forEach((h, index) => {
-      const edge = want === "right" ? h.prev : h.next;
-      if (!edge) return;
-      const d = Math.abs(edge.atMs - selected.atMs);
+      const e = selected.side === "right" ? h.prev : h.next;
+      if (!e) return;
+      const d = Math.abs(e.atMs - selected.atMs);
       if (d < bestD) {
         bestD = d;
-        best = { index, edge };
+        best = { index, edge: e };
       }
     });
     return best as { index: number; edge: SeamEdgeInfo } | null;
   }, [selected, seams.handles]);
   useEffect(() => {
-    selIdx.value = selectedHandle ? selectedHandle.index : -1;
+    selOutputMs.value = selectedHandle ? (seams.handles[selectedHandle.index]?.outputMs ?? -1) : -1;
     selSide.value = selected?.side === "right" ? 0 : 1;
-  }, [selectedHandle, selected, selIdx, selSide]);
+  }, [selectedHandle, selected, seams.handles, selOutputMs, selSide]);
   // an edit moved the edge somewhere we can no longer find: nothing is selected any more
   useEffect(() => {
     if (selected && !selectedHandle && seams.handles !== selectedAgainst.current) {
@@ -414,141 +453,183 @@ export default function PrecisionTimeline({
   // bring a selected edge back into view
   useEffect(() => {
     if (!selectedHandle || viewW <= 0) return;
-    const next = revealOffset(seamsOutputMs(seams.handles, selectedHandle.index), scale.value, offset.value, totalDurationMs, viewW);
-    if (next !== null) offset.value = withTiming(next, { duration: 200, easing: Easing.out(Easing.cubic) });
+    const outputMs = seams.handles[selectedHandle.index]?.outputMs ?? 0;
+    const next = revealOffset(outputMs, view.current.scale, view.current.offset, totalDurationMs, viewW);
+    if (next !== null) animateTo({ scale: view.current.scale, offset: next }, 200);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedHandle?.index, selectedHandle?.edge.atMs]);
-
-  useEffect(
-    () => () => {
-      live.current.seams.onEdgePreview?.(null);
-      if (waveTimer.current) clearTimeout(waveTimer.current);
-    },
-    [],
-  );
 
   // ── waveform ──
   const pieces = useMemo(() => wavePiecesOf(clips), [clips]);
   const drawWave = useCallback(
     (s0: number, o0: number) => {
       try {
-        drawWaveNow(s0, o0);
+        if (!loudness || viewW <= 0 || loudness.windows.length === 0 || !(s0 > 0) || !Number.isFinite(o0)) return;
+        const t0 = Date.now();
+        const windowMs = loudness.durationMs / loudness.windows.length;
+        const width = 3 * viewW;
+        const startMs = xToMs(-viewW, s0, o0);
+        const endMs = xToMs(2 * viewW, s0, o0);
+        const columns = Math.ceil(width / WAVE_PITCH);
+        const heights = waveformColumns(loudness.windows, windowMs, pieces, startMs, endMs, columns);
+        settled.current = { scale: s0, offset: o0 };
+        waveS0.value = s0;
+        waveO0.value = o0;
+        setWave({ path: waveformPath(heights, WAVE_PITCH, LANE_H), width });
+        crumb("precision timeline: waveform ready", { bars: columns, ms: Date.now() - t0 });
       } catch (e) {
         // a waveform that cannot be drawn is left out; the timeline itself carries on
         if (__DEV__) console.warn("[precision timeline] waveform failed", (e as Error)?.message);
         setWave(null);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [loudness, viewW, pieces],
+    [loudness, viewW, pieces, waveS0, waveO0, crumb],
   );
-  const drawWaveNow = useCallback(
-    (s0: number, o0: number) => {
-      if (!loudness || viewW <= 0 || loudness.windows.length === 0 || !(s0 > 0) || !Number.isFinite(o0)) return;
-      const windowMs = loudness.durationMs / loudness.windows.length;
-      const width = 3 * viewW;
-      const startMs = xToMs(-viewW, s0, o0);
-      const endMs = xToMs(2 * viewW, s0, o0);
-      const columns = Math.ceil(width / WAVE_PITCH);
-      const heights = waveformColumns(loudness.windows, windowMs, pieces, startMs, endMs, columns);
-      settledRef.current = { scale: s0, offset: o0 };
-      waveS0.value = s0;
-      waveO0.value = o0;
-      setWave({ path: waveformPath(heights, WAVE_PITCH, LANE_H), width });
-    },
-    [loudness, viewW, pieces, waveS0, waveO0],
-  );
-  // a new drawing when the data, the clips or the width change
+  drawWaveRef.current = drawWave;
   useEffect(() => {
     if (viewW <= 0) return;
-    settledRef.current = null;
-    drawWave(scale.value, offset.value);
+    settled.current = null;
+    drawWave(view.current.scale, view.current.offset);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loudness, pieces, viewW, totalDurationMs]);
-  const onViewSettle = useCallback(
-    (s: number, o: number) => {
-      latestView.current = { scale: s, offset: o };
-      if (waveTimer.current) return;
-      waveTimer.current = setTimeout(() => {
-        waveTimer.current = null;
-        const cur = latestView.current;
-        const set = settledRef.current;
-        if (!set || Math.abs(cur.scale / set.scale - 1) > WAVE_REDRAW_RATIO || Math.abs(cur.offset - set.offset) > viewW * 0.7) {
-          drawWave(cur.scale, cur.offset);
-        }
-      }, 110);
-    },
-    [drawWave, viewW],
-  );
-  const safeSettle = useMemo(() => guard("waveform", onViewSettle), [guard, onViewSettle]);
-  useAnimatedReaction(
-    () => scale.value * 1e6 + offset.value,
-    () => {
-      runOnJS(safeSettle)(scale.value, offset.value);
-    },
-  );
-  const waveStyle = useAnimatedStyle(() => {
-    const s0 = waveS0.value;
-    const a = s0 > 0 ? scale.value / s0 : 1;
-    const b = TL_PAD * (1 - a) + waveO0.value * a - offset.value;
-    return { opacity: s0 > 0 ? 1 : 0, transform: [{ translateX: b + 0.5 * viewWSV.value * (a - 1) }, { scaleX: a }] };
-  });
 
-  // ── JS side of the gestures (called from the UI thread) ──
-  const resolveEdge = useCallback((index: number, side: number): { geomIndex: number; edge: SeamEdgeInfo } | null => {
+  // ── edge drag (JS) ──
+  const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(
+    () => () => {
+      cancelAnim();
+      if (waveTimer.current) clearTimeout(waveTimer.current);
+      if (ticker.current) clearInterval(ticker.current);
+      live.current.seams.onEdgePreview?.(null);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const resolveEdge = useCallback((index: number, side: number): SeamEdgeInfo | null => {
     const h = live.current.seams.handles[index];
     if (!h) return null;
-    const edge = side === 0 ? h.prev : h.next;
-    return edge ? { geomIndex: index, edge } : null;
+    return (side === 0 ? h.prev : h.next) ?? null;
   }, []);
 
-  const selectEdge = useCallback((edge: SeamEdgeInfo) => {
-    setSelected({ side: edge.side, atMs: edge.atMs });
-    live.current.seams.onEdgePreview?.(edge.atMs);
-  }, [setSelected]);
+  const selectEdge = useCallback(
+    (e: SeamEdgeInfo) => {
+      setSelected({ side: e.side, atMs: e.atMs });
+      live.current.seams.onEdgePreview?.(e.atMs);
+    },
+    [setSelected],
+  );
 
-  const onGrab = useCallback(
-    (index: number, side: number) => {
-      const r = resolveEdge(index, side);
-      if (!r) return;
-      haptic("select");
-      selectEdge(r.edge);
-      setLiveEdge({ ms: r.edge.atMs, atMs: r.edge.atMs });
+  const stepEdge = useCallback(() => {
+    const d = edge.current;
+    if (!d) return;
+    const v = view.current;
+    const rawUnclamped = edgeDragMs(d.atMs, d.dx + (v.offset - d.offsetStart), v.scale);
+    const raw = Math.min(d.max, Math.max(d.min, rawUnclamped));
+    const now = Date.now();
+    const r = snapStep(d.snap, raw, now, geo.current.targets, snapParams(v.scale));
+    d.snap = r.state;
+    const ms = Math.min(d.max, Math.max(d.min, r.ms));
+    if (r.caught) haptic("light");
+    if (ms !== d.ms) {
+      d.ms = ms;
+      dragMs.value = ms;
+    }
+    if (ms !== d.lastPreviewMs && now - d.lastPreviewAt >= PREVIEW_EVERY_MS) {
+      d.lastPreviewAt = now;
+      d.lastPreviewMs = ms;
+      setLiveEdge({ ms, atMs: d.atMs });
+      live.current.seams.onEdgePreview?.(ms);
+    }
+  }, [dragMs]);
+
+  const stopTicker = useCallback(() => {
+    if (ticker.current) clearInterval(ticker.current);
+    ticker.current = null;
+  }, []);
+
+  const tickEdge = useMemo(
+    () =>
+      guard("edgeTick", () => {
+        const d = edge.current;
+        if (!d) return;
+        // near the screen edge: the timeline scrolls on by itself, and the edge goes with it
+        const w = viewWRef.current;
+        const zone = 40;
+        const v = view.current;
+        if (v.scale > fitScale(totalRef.current, w) * 1.001) {
+          let step = 0;
+          if (d.fingerX < zone) step = -((zone - d.fingerX) / zone) * 14;
+          else if (d.fingerX > w - zone) step = ((d.fingerX - (w - zone)) / zone) * 14;
+          if (step !== 0) setView({ scale: v.scale, offset: v.offset + step });
+        }
+        stepEdge();
+      }),
+    [guard, setView, stepEdge],
+  );
+
+  const beginEdge = useCallback(
+    (idx: number, side: 0 | 1, fingerX: number) => {
+      const e = resolveEdge(idx, side);
+      const g = geo.current.geoms[idx];
+      if (!e || !g) return false;
       const cfg = live.current.seams;
       // how far this edge can move either way (it cannot cross its own clip or leave the video)
-      const lo = cfg.describe(r.edge, -1e9, 1).clampedMs;
-      const hi = cfg.describe(r.edge, 1e9, 1).clampedMs;
-      dragMin.value = Math.min(lo, hi, r.edge.atMs);
-      dragMax.value = Math.max(lo, hi, r.edge.atMs);
+      const lo = cfg.describe(e, -1e9, 1).clampedMs;
+      const hi = cfg.describe(e, 1e9, 1).clampedMs;
+      const now = Date.now();
+      edge.current = {
+        idx,
+        side,
+        edge: e,
+        atMs: e.atMs,
+        min: Math.min(lo, hi, e.atMs),
+        max: Math.max(lo, hi, e.atMs),
+        dx: 0,
+        fingerX,
+        offsetStart: view.current.offset,
+        snap: snapStart(e.atMs, now),
+        ms: e.atMs,
+        lastPreviewAt: 0,
+        lastPreviewMs: -1,
+      };
+      dragAtMs.value = e.atMs;
+      dragMs.value = e.atMs;
+      dragOutputMs.value = g.outputMs;
+      dragSide.value = side;
+      dragOn.value = 1;
+      haptic("select");
+      selectEdge(e);
+      setLiveEdge({ ms: e.atMs, atMs: e.atMs });
+      stopTicker();
+      ticker.current = setInterval(tickEdge, 16);
+      crumb("precision timeline: edge drag started", { zoom: Math.round(view.current.scale * 1000) / 1000 });
+      return true;
     },
-    [resolveEdge, selectEdge, dragMin, dragMax],
+    [resolveEdge, dragAtMs, dragMs, dragOutputMs, dragSide, dragOn, selectEdge, stopTicker, tickEdge, crumb],
   );
 
-  const onPreview = useCallback((ms: number, atMs: number) => {
-    setLiveEdge({ ms, atMs });
-    live.current.seams.onEdgePreview?.(ms);
-  }, []);
-
-  const onEdgeEnd = useCallback(
-    (index: number, side: number, ms: number, moved: boolean) => {
+  const endEdge = useCallback(
+    (success: boolean, translationX: number) => {
+      const d = edge.current;
+      edge.current = null;
+      stopTicker();
+      dragOn.value = 0;
       setLiveEdge(null);
-      const r = resolveEdge(index, side);
-      if (!r || !moved) return;
+      if (!d) return;
+      const moved = success && (Math.abs(translationX) >= TAP_SLOP || Math.abs(d.ms - d.atMs) >= 1);
+      if (!moved) return;
       const cfg = live.current.seams;
-      const drag = cfg.describe(r.edge, ms, 1);
+      const drag = cfg.describe(d.edge, d.ms, 1);
       if (drag.kind === "none") return;
-      cfg.onDragEnd(r.edge, drag.clampedMs, { minDragMs: 1 });
-      setSelected({ side: r.edge.side, atMs: drag.clampedMs });
+      cfg.onDragEnd(d.edge, drag.clampedMs, { minDragMs: 1 });
+      setSelected({ side: d.edge.side, atMs: drag.clampedMs });
       cfg.onEdgePreview?.(drag.clampedMs);
     },
-    [resolveEdge, setSelected],
+    [stopTicker, dragOn, setSelected],
   );
 
-  const onScrub = useCallback((ms: number) => {
-    live.current.onSeek(ms);
-  }, []);
-
-  const onTap = useCallback(
+  const handleTap = useCallback(
     (kind: string, index: number, side: number) => {
       const l = live.current;
       if (kind === "marker") {
@@ -557,10 +638,10 @@ export default function PrecisionTimeline({
         return;
       }
       if (kind === "edge") {
-        const r = resolveEdge(index, side);
-        if (r) {
+        const e = resolveEdge(index, side);
+        if (e) {
           haptic("select");
-          selectEdge(r.edge);
+          selectEdge(e);
         }
         return;
       }
@@ -583,243 +664,136 @@ export default function PrecisionTimeline({
     [resolveEdge, selectEdge, setSelected],
   );
 
-  const onSnapHaptic = useCallback(() => haptic("light"), []);
+  // ── gestures: plain JS, like every other gesture in the app ──
+  const g1 = useRef<GestureState>({ mode: "none", idx: -1, side: 0, startOffset: 0, grabDx: 0, lastSeekMs: -1 });
+  const pinchStart = useRef({ scale: 1, offset: 0, focalX: 0 });
+  const firstGesture = useRef(new Set<string>());
+  const once = useCallback(
+    (kind: string) => {
+      if (firstGesture.current.has(kind)) return;
+      firstGesture.current.add(kind);
+      crumb(`precision timeline: first ${kind}`);
+    },
+    [crumb],
+  );
 
-  // What the UI thread calls goes through these: an error there is reported, not thrown into the app.
-  const safeGrab = useMemo(() => guard("grab", onGrab), [guard, onGrab]);
-  const safePreview = useMemo(() => guard("preview", onPreview), [guard, onPreview]);
-  const safeEdgeEnd = useMemo(() => guard("edgeEnd", onEdgeEnd), [guard, onEdgeEnd]);
-  const safeScrub = useMemo(() => guard("scrub", onScrub), [guard, onScrub]);
-  const safeTap = useMemo(() => guard("tap", onTap), [guard, onTap]);
-
-  // ── the edge under the finger, recomputed on every move and every frame (a pause is noticed without moves) ──
-  const stepEdge = () => {
-    "worklet";
-    if (!dragging.value) return;
-    const s = scale.value;
-    const rawUnclamped = edgeDragMs(dragAtMs.value, dragDx.value + (offset.value - dragOffsetStart.value), s);
-    const raw = Math.min(dragMax.value, Math.max(dragMin.value, rawUnclamped));
-    const now = Date.now();
-    const r = snapStep(snapState.value, raw, now, targetsSV.value, snapParams(s));
-    snapState.value = r.state;
-    const ms = Math.min(dragMax.value, Math.max(dragMin.value, r.ms));
-    if (r.caught) runOnJS(onSnapHaptic)();
-    if (ms !== dragMs.value) dragMs.value = ms;
-    if (ms !== lastPreviewMs.value && now - lastPreviewAt.value >= PREVIEW_EVERY_MS) {
-      lastPreviewAt.value = now;
-      lastPreviewMs.value = ms;
-      runOnJS(safePreview)(ms, dragAtMs.value);
-    }
-  };
-
-  const frame = useFrameCallback(() => {
-    "worklet";
-    try {
-      if (!dragging.value) return;
-      // near the screen edge: the timeline scrolls on by itself, and the edge goes with it
-      const w = viewWSV.value;
-      const x = fingerX.value;
-      const zone = 40;
-      if (scale.value > fitScale(totalSV.value, w) * 1.001) {
-        let v = 0;
-        if (x < zone) v = -((zone - x) / zone) * 14;
-        else if (x > w - zone) v = ((x - (w - zone)) / zone) * 14;
-        if (v !== 0) offset.value = clampOffset(offset.value + v, totalSV.value, scale.value, w);
-      }
-      stepEdge();
-    } catch (err) {
-      dragging.value = false;
-      runOnJS(reportFatal)("frame", String(err));
-    }
-  }, false);
-  const setFrameActive = useCallback((on: boolean) => {
-    try {
-      frame.setActive(on);
-    } catch (e) {
-      fatalRef.current?.(e, "frame");
-    }
-  }, [frame]);
-
-  // ── gestures ──
   const gesture = useMemo(() => {
     const pan = Gesture.Pan()
+      .runOnJS(true)
       .minDistance(TAP_SLOP)
       .maxPointers(1)
-      .onBegin((e) => {
-        "worklet";
-        try {
-          cancelAnimation(offset);
-          touching.value = true;
-          const g = grabAt(e.x, e.y, geomsSV.value, playMs.value, scale.value, offset.value);
-          mode.value = g.kind === "edge" ? 1 : g.kind === "playhead" ? 2 : 3;
-          modeIdx.value = g.index;
-          modeSide.value = g.side;
-        } catch (err) {
-          mode.value = 0;
-          runOnJS(reportFatal)("pan.begin", String(err));
-        }
-      })
-      .onStart((e) => {
-        "worklet";
-        try {
-          if (mode.value === 1) {
-            const geom = geomsSV.value[modeIdx.value];
-            if (!geom) {
-              mode.value = 0;
-              return;
-            }
-            dragIdx.value = modeIdx.value;
-            dragSide.value = modeSide.value;
-            dragOutputMs.value = geom.outputMs;
-            dragAtMs.value = modeSide.value === 0 ? geom.prevAtMs : geom.nextAtMs;
-            dragMs.value = dragAtMs.value;
-            dragMin.value = -1e12;   // the real bounds arrive from onGrab
-            dragMax.value = 1e12;
-            dragging.value = true;
-            dragDx.value = 0;
-            dragOffsetStart.value = offset.value;
-            fingerX.value = e.x;
-            const t = Date.now();
-            lastPreviewAt.value = 0;
-            lastPreviewMs.value = -1;
-            snapState.value = snapStart(dragAtMs.value, t);
-            runOnJS(safeGrab)(modeIdx.value, modeSide.value);
-            runOnJS(setFrameActive)(true);
-          } else if (mode.value === 2) {
-            playGrabDx.value = msToX(playMs.value, scale.value, offset.value) - e.x;
-            lastSeekMs.value = -1;
-          } else {
-            offsetStart.value = offset.value;
+      .onBegin(
+        guard("pan.begin", (e: { x: number; y: number }) => {
+          cancelAnim();
+          touching.current += 1;
+          const g = grabAt(e.x, e.y, geo.current.geoms, playRef.current, view.current.scale, view.current.offset);
+          g1.current = { mode: g.kind === "edge" ? "edge" : g.kind === "playhead" ? "playhead" : "scroll", idx: g.index, side: g.side, startOffset: view.current.offset, grabDx: 0, lastSeekMs: -1 };
+        }),
+      )
+      .onStart(
+        guard("pan.start", (e: { x: number }) => {
+          const g = g1.current;
+          if (g.mode === "edge") {
+            once("edge drag");
+            if (!beginEdge(g.idx, g.side, e.x)) g.mode = "none";
+          } else if (g.mode === "playhead") {
+            once("playhead drag");
+            const px = TL_PAD + playRef.current * view.current.scale - view.current.offset;
+            g.grabDx = px - e.x;
+          } else if (g.mode === "scroll") {
+            once("pan");
           }
-        } catch (err) {
-          dragging.value = false;
-          mode.value = 0;
-          runOnJS(reportFatal)("pan.start", String(err));
-        }
-      })
-      .onUpdate((e) => {
-        "worklet";
-        try {
-          if (mode.value === 1) {
-            dragDx.value = e.translationX;
-            fingerX.value = e.x;
+        }),
+      )
+      .onUpdate(
+        guard("pan.update", (e: { x: number; translationX: number }) => {
+          const g = g1.current;
+          if (g.mode === "edge" && edge.current) {
+            edge.current.dx = e.translationX;
+            edge.current.fingerX = e.x;
             stepEdge();
-          } else if (mode.value === 2) {
-            const ms = Math.min(totalSV.value, Math.max(0, xToMs(e.x + playGrabDx.value, scale.value, offset.value)));
+          } else if (g.mode === "playhead") {
+            const ms = Math.min(totalRef.current, Math.max(0, xToMs(e.x + g.grabDx, view.current.scale, view.current.offset)));
+            playRef.current = ms;
             playMs.value = ms;
-            if (Math.abs(ms - lastSeekMs.value) >= 1) {
-              lastSeekMs.value = ms;
-              runOnJS(safeScrub)(ms);
+            if (Math.abs(ms - g.lastSeekMs) >= 1) {
+              g.lastSeekMs = ms;
+              live.current.onSeek(ms);
             }
-          } else if (mode.value === 3) {
-            offset.value = clampOffset(offsetStart.value - e.translationX, totalSV.value, scale.value, viewWSV.value);
+          } else if (g.mode === "scroll") {
+            setView({ scale: view.current.scale, offset: g.startOffset - e.translationX });
           }
-        } catch (err) {
-          dragging.value = false;
-          mode.value = 0;
-          runOnJS(reportFatal)("pan.update", String(err));
-        }
-      })
-      .onEnd((e) => {
-        "worklet";
-        try {
-          if (mode.value === 3) {
-            const max = Math.max(0, 2 * TL_PAD + totalSV.value * scale.value - viewWSV.value);
-            const v = Number.isFinite(e.velocityX) ? e.velocityX : 0;
-            if (max > 0) offset.value = withDecay({ velocity: -v, clamp: [0, max], deceleration: 0.997 });
-          }
-        } catch (err) {
-          runOnJS(reportFatal)("pan.end", String(err));
-        }
-      })
-      .onFinalize((e, success) => {
-        "worklet";
-        try {
-          if (mode.value === 1 && dragging.value) {
-            const moved = success && (Math.abs(e.translationX) >= TAP_SLOP || Math.abs(dragMs.value - dragAtMs.value) >= 1);
-            const ms = dragMs.value;
-            dragging.value = false;
-            runOnJS(setFrameActive)(false);
-            runOnJS(safeEdgeEnd)(dragIdx.value, dragSide.value, ms, moved);
-          }
-        } catch (err) {
-          dragging.value = false;
-          runOnJS(reportFatal)("pan.finalize", String(err));
-        }
-        mode.value = 0;
-        touching.value = false;
-      });
+        }),
+      )
+      .onEnd(
+        guard("pan.end", (e: { velocityX: number }) => {
+          if (g1.current.mode !== "scroll") return;
+          const v = Number.isFinite(e.velocityX) ? -e.velocityX : 0;
+          if (Math.abs(v) > 60) fling(v);
+        }),
+      )
+      .onFinalize(
+        guard("pan.finalize", (e: { translationX: number }, success: boolean) => {
+          if (g1.current.mode === "edge" || edge.current) endEdge(success, e.translationX);
+          g1.current.mode = "none";
+          touching.current = Math.max(0, touching.current - 1);
+        }),
+      );
 
     const singleTap = Gesture.Tap()
+      .runOnJS(true)
       .maxDuration(300)
       .maxDistance(10)
-      .onEnd((e, ok) => {
-        "worklet";
-        try {
+      .onEnd(
+        guard("tap", (e: { x: number; y: number }, ok: boolean) => {
           if (!ok) return;
-          const t = tapAt(e.x, e.y, markersSV.value, geomsSV.value, clipsSV.value, scale.value, offset.value);
-          runOnJS(safeTap)(t.kind, t.index, t.side);
-        } catch (err) {
-          runOnJS(reportFatal)("tap", String(err));
-        }
-      });
+          once("tap");
+          const t = tapAt(e.x, e.y, geo.current.markerGeoms, geo.current.geoms, geo.current.clipGeoms, view.current.scale, view.current.offset);
+          handleTap(t.kind, t.index, t.side);
+        }),
+      );
     const doubleTap = Gesture.Tap()
+      .runOnJS(true)
       .numberOfTaps(2)
       .maxDuration(300)
       .maxDelay(280)
       .maxDistance(24)
-      .onEnd((_e, ok) => {
-        "worklet";
-        try {
+      .onEnd(
+        guard("doubleTap", (_e: unknown, ok: boolean) => {
           if (!ok) return;
-          const target = fitView(totalSV.value, viewWSV.value);
-          cancelAnimation(offset);
-          scale.value = withTiming(target.scale, { duration: FIT_ANIM_MS, easing: Easing.out(Easing.cubic) });
-          offset.value = withTiming(target.offset, { duration: FIT_ANIM_MS, easing: Easing.out(Easing.cubic) });
-        } catch (err) {
-          runOnJS(reportFatal)("doubleTap", String(err));
-        }
-      });
+          once("double tap");
+          animateTo(fitView(totalRef.current, viewWRef.current), FIT_ANIM_MS);
+        }),
+      );
 
     const pinch = Gesture.Pinch()
-      .onBegin(() => {
-        "worklet";
-        try {
-          cancelAnimation(scale);
-          cancelAnimation(offset);
-        } catch (err) {
-          runOnJS(reportFatal)("pinch.begin", String(err));
-        }
-      })
-      .onStart((e) => {
-        "worklet";
-        try {
-          pinchStart.value = { scale: scale.value, offset: offset.value, focalX: e.focalX };
-          touching.value = true;
-        } catch (err) {
-          runOnJS(reportFatal)("pinch.start", String(err));
-        }
-      })
-      .onUpdate((e) => {
-        "worklet";
-        try {
-          const p = pinchStart.value;
-          const v = pinchView({ scale: p.scale, offset: p.offset }, e.scale, p.focalX, e.focalX, totalSV.value, viewWSV.value);
-          if (Number.isFinite(v.scale) && Number.isFinite(v.offset)) {
-            scale.value = v.scale;
-            offset.value = v.offset;
-          }
-        } catch (err) {
-          runOnJS(reportFatal)("pinch.update", String(err));
-        }
-      })
-      .onFinalize(() => {
-        "worklet";
-        touching.value = false;
-      });
+      .runOnJS(true)
+      .onBegin(
+        guard("pinch.begin", () => {
+          cancelAnim();
+          touching.current += 1;
+        }),
+      )
+      .onStart(
+        guard("pinch.start", (e: { focalX: number }) => {
+          once("pinch");
+          pinchStart.current = { scale: view.current.scale, offset: view.current.offset, focalX: e.focalX };
+        }),
+      )
+      .onUpdate(
+        guard("pinch.update", (e: { scale: number; focalX: number }) => {
+          const p = pinchStart.current;
+          setView(pinchView({ scale: p.scale, offset: p.offset }, e.scale, p.focalX, e.focalX, totalRef.current, viewWRef.current));
+        }),
+      )
+      .onFinalize(
+        guard("pinch.finalize", () => {
+          touching.current = Math.max(0, touching.current - 1);
+        }),
+      );
 
     return Gesture.Simultaneous(pinch, Gesture.Race(pan, Gesture.Simultaneous(singleTap, doubleTap)));
-    // everything the worklets use is a shared value or a stable callback
+    // everything the handlers use is a ref, a shared value or a stable callback
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -829,16 +803,16 @@ export default function PrecisionTimeline({
     (direction: 1 | -1) => {
       const l = live.current;
       if (!selectedHandle) return;
-      const edge = selectedHandle.edge;
-      const target = nudgeFrameMs(edge.atMs, direction, fps, l.seams.sourceDurationMs);
-      const drag = l.seams.describe(edge, target, 1);
-      if (drag.kind === "none" || drag.clampedMs === edge.atMs) {
+      const e = selectedHandle.edge;
+      const target = nudgeFrameMs(e.atMs, direction, fps, l.seams.sourceDurationMs);
+      const drag = l.seams.describe(e, target, 1);
+      if (drag.kind === "none" || drag.clampedMs === e.atMs) {
         haptic("light");
         return;
       }
       haptic("select");
-      l.seams.onDragEnd(edge, drag.clampedMs, { minDragMs: 1 });
-      setSelected({ side: edge.side, atMs: drag.clampedMs });
+      l.seams.onDragEnd(e, drag.clampedMs, { minDragMs: 1 });
+      setSelected({ side: e.side, atMs: drag.clampedMs });
       l.seams.onEdgePreview?.(drag.clampedMs);
     },
     [selectedHandle, fps, setSelected],
@@ -848,29 +822,39 @@ export default function PrecisionTimeline({
     live.current.seams.onEdgePreview?.(null);
   }, [setSelected]);
 
-  // ── drag overlay (ghost strip + moving edge line) ──
-  const ghostStyle = useAnimatedStyle(() => {
-    if (!dragging.value) return { opacity: 0 };
+  // ── styles (transform / opacity only) ──
+  const waveStyle = useAnimatedStyle(() => {
+    const s0 = waveS0.value;
+    const a = s0 > 0 ? scale.value / s0 : 1;
+    const b = TL_PAD * (1 - a) + waveO0.value * a - offset.value;
+    return { opacity: s0 > 0 ? 1 : 0, transform: [{ translateX: b + 0.5 * viewWSV.value * (a - 1) }, { scaleX: a }] };
+  });
+  const ghostOutStyle = useAnimatedStyle(() => {
     const d = dragMs.value - dragAtMs.value;
-    const x0 = msToX(dragOutputMs.value, scale.value, offset.value);
-    const x1 = msToX(dragOutputMs.value + d, scale.value, offset.value);
     const outward = dragSide.value === 0 ? d > 0 : d < 0;
-    return {
-      opacity: 1,
-      transform: [{ translateX: Math.min(x0, x1) }],
-      width: Math.abs(x1 - x0),
-      backgroundColor: outward ? "rgba(31,168,77,0.38)" : "rgba(232,41,28,0.34)",
-    };
+    const x0 = TL_PAD + dragOutputMs.value * scale.value - offset.value;
+    const w = Math.max(1, Math.abs(d) * scale.value);
+    const left = d >= 0 ? x0 : x0 - w;
+    return { opacity: dragOn.value === 1 && outward ? 1 : 0, transform: [{ translateX: left + (w - BAR_BASE) / 2 }, { scaleX: w / BAR_BASE }] };
+  });
+  const ghostCutStyle = useAnimatedStyle(() => {
+    const d = dragMs.value - dragAtMs.value;
+    const outward = dragSide.value === 0 ? d > 0 : d < 0;
+    const x0 = TL_PAD + dragOutputMs.value * scale.value - offset.value;
+    const w = Math.max(1, Math.abs(d) * scale.value);
+    const left = d >= 0 ? x0 : x0 - w;
+    return { opacity: dragOn.value === 1 && !outward && d !== 0 ? 1 : 0, transform: [{ translateX: left + (w - BAR_BASE) / 2 }, { scaleX: w / BAR_BASE }] };
   });
   const edgeLineStyle = useAnimatedStyle(() => {
-    if (!dragging.value) return { opacity: 0 };
     const d = dragMs.value - dragAtMs.value;
-    return { opacity: 1, transform: [{ translateX: msToX(dragOutputMs.value + d, scale.value, offset.value) - 1 }] };
+    return { opacity: dragOn.value === 1 ? 1 : 0, transform: [{ translateX: TL_PAD + (dragOutputMs.value + d) * scale.value - offset.value - 1 }] };
   });
-
-  // ── playhead ──
+  const selStyle = useAnimatedStyle(() => ({
+    opacity: selOutputMs.value >= 0 ? 1 : 0,
+    transform: [{ translateX: TL_PAD + selOutputMs.value * scale.value - offset.value + (selSide.value === 0 ? -6 : 1) }],
+  }));
   const playheadStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: msToX(Math.min(totalSV.value, Math.max(0, playMs.value)), scale.value, offset.value) - 1 }],
+    transform: [{ translateX: TL_PAD + playMs.value * scale.value - offset.value - 1 }],
   }));
 
   const onLayout = useCallback((e: LayoutChangeEvent) => setViewW(Math.round(e.nativeEvent.layout.width)), []);
@@ -887,13 +871,13 @@ export default function PrecisionTimeline({
               {/* lane: clips, waveform, bands, the drag ghost (clipped to the lane) */}
               <View pointerEvents="none" style={styles.lane}>
                 {clips.map((c, i) => (
-                  <ClipBar
+                  <Bar
                     key={c.id}
                     startMs={clipGeoms[i]?.startMs ?? 0}
                     durMs={clipGeoms[i]?.durMs ?? 0}
-                    selected={c.id === selectedClipId}
                     scale={scale}
                     offset={offset}
+                    style={c.id === selectedClipId ? styles.clipSelected : styles.clip}
                   />
                 ))}
                 {wave ? (
@@ -904,19 +888,32 @@ export default function PrecisionTimeline({
                   </Animated.View>
                 ) : null}
                 {bands?.map((b, i) => (
-                  <Band key={`band${i}`} startMs={b.startMs} endMs={b.endMs} scale={scale} offset={offset} />
+                  <Bar key={`band${i}`} startMs={b.startMs} durMs={Math.max(0, b.endMs - b.startMs)} scale={scale} offset={offset} style={styles.band} />
                 ))}
-                <Animated.View pointerEvents="none" style={[styles.ghost, ghostStyle]} />
+                <Animated.View pointerEvents="none" style={[styles.bar, styles.ghostOut, ghostOutStyle]} />
+                <Animated.View pointerEvents="none" style={[styles.bar, styles.ghostCut, ghostCutStyle]} />
               </View>
               {/* handles, markers, playhead: drawn over the lane */}
               <View pointerEvents="none" style={styles.overlay}>
                 {geoms.map((g, i) => (
-                  <HandlePills key={`h${i}`} geom={g} index={i} scale={scale} offset={offset} selIdx={selIdx} selSide={selSide} />
+                  <Pills key={`h${i}`} outputMs={g.outputMs} hasPrev={g.hasPrev} hasNext={g.hasNext} scale={scale} offset={offset} />
                 ))}
+                <Animated.View pointerEvents="none" style={[styles.selected, selStyle]} />
                 <Animated.View pointerEvents="none" style={[styles.edgeLine, edgeLineStyle]} />
-                {markers?.map((m) => (
-                  <MarkerGlyph key={m.id} marker={m} scale={scale} offset={offset} />
-                ))}
+                {(markers ?? []).map((m, i) => {
+                  const look = MARKER_LOOK[m.kind];
+                  if (!look) return null;
+                  return (
+                    <MarkerGlyph
+                      key={m.id}
+                      outputMs={markerGeoms[i]?.outputMs ?? 0}
+                      glyph={look.glyph}
+                      y={look.bottom ? BOTTOM_MARKER_Y : TOP_MARKER_Y}
+                      scale={scale}
+                      offset={offset}
+                    />
+                  );
+                })}
                 <Animated.View pointerEvents="none" style={[styles.playhead, playheadStyle]}>
                   <View style={styles.playheadDot} />
                   <View style={styles.playheadLine} />
@@ -982,29 +979,20 @@ function box(r: { x: number; y: number; w: number; h: number }) {
   return { left: r.x, top: r.y, width: r.w, height: r.h };
 }
 
-function seamsOutputMs(handles: SeamHandleSpec[], index: number): number {
-  return handles[index]?.outputMs ?? 0;
-}
-
 const styles = StyleSheet.create({
   container: { position: "relative", alignSelf: "stretch" },
   touchArea: { position: "absolute", top: 0, left: 0, right: 0 },
   lane: { position: "absolute", left: 0, right: 0, top: LANE_TOP, height: LANE_H, overflow: "hidden", borderRadius: 6, backgroundColor: "rgba(10,10,10,0.05)" },
   overlay: { ...StyleSheet.absoluteFill },
-  clip: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    height: LANE_H,
-    backgroundColor: "#FFFFFF",
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(10,10,10,0.18)",
-  },
-  clipSelected: { backgroundColor: "#FFF3F1", borderWidth: 2, borderColor: theme.accent },
+  bar: { position: "absolute", left: 0, top: 0, width: BAR_BASE, height: LANE_H },
+  clip: { backgroundColor: "#FFFFFF" },
+  clipSelected: { backgroundColor: "#FFE3DF" },
+  band: { backgroundColor: "rgba(242,140,40,0.28)" },
+  ghostOut: { backgroundColor: "rgba(31,168,77,0.38)" },
+  ghostCut: { backgroundColor: "rgba(232,41,28,0.34)" },
   wave: { position: "absolute", top: 0, height: LANE_H },
-  band: { position: "absolute", left: 0, top: 0, height: LANE_H, backgroundColor: "rgba(242,140,40,0.28)" },
-  ghost: { position: "absolute", left: 0, top: 0, height: LANE_H },
-  pill: { position: "absolute", left: 0, top: LANE_TOP, borderRadius: 2 },
+  pill: { position: "absolute", left: 0, top: LANE_TOP + LANE_H * 0.18, width: 4, height: LANE_H * 0.64, borderRadius: 2, backgroundColor: "rgba(10,10,10,0.82)" },
+  selected: { position: "absolute", left: 0, top: LANE_TOP, width: 5, height: LANE_H, borderRadius: 2, backgroundColor: theme.accent },
   edgeLine: { position: "absolute", left: 0, top: LANE_TOP, width: 2, height: LANE_H, backgroundColor: theme.text },
   markerBox: { position: "absolute", left: 0, width: 12, height: 12, alignItems: "center", justifyContent: "center" },
   markerGlyph: { width: 12, height: 12 },

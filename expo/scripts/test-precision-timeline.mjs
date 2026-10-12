@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import {
   BOTTOM_MARKER_Y, DEFAULT_FPS, HANDLE_MIN_TOUCH, HANDLE_TOUCH, INFO_H, LANE_H, LANE_TOP, MAX_VISIBLE_MS, NUDGE_BTN, TL_PAD, TOP_MARKER_Y,
   clampOffset, clampScale, contentWidth, dbToAmp, edgeDragMs, fitScale, fitView, followOffset, formatDeltaSeconds, formatTimeCs, frameMsOf,
-  grabAt, handleGeoms, handleHalfWidth, handleZones, isFit, maxScale, msToX, nudgeFrameMs, offsetToCenter, pinchView, safeFps, tapAt,
+  easeOutCubic, flingStep, grabAt, handleGeoms, handleHalfWidth, handleZones, isFit, lerpView, maxScale, msToX, nudgeFrameMs, offsetToCenter, pinchView, safeFps, tapAt,
   timelineRects, waveformColumns, waveformPath, wavePiecesOf, xToMs, zoomAt,
 } from "../lib/autoEdit/timelineView.ts";
 import {
@@ -284,20 +284,50 @@ const TOTAL = 60_000;    // a one-minute video
 {
   const comp = read("../components/PrecisionTimeline.tsx");
   const edit = read("../app/edit.tsx");
-  ok("the timeline is built on gesture-handler and reanimated worklets (no JS-thread gestures)", /Gesture\.Pinch\(\)/.test(comp) && /Gesture\.Pan\(\)/.test(comp) && !/runOnJS\(true\)/.test(comp) && /useAnimatedStyle/.test(comp) && /"worklet"/.test(comp));
-  ok("pinch zoom uses pinchView; double tap animates back to fitView", /pinchView\(/.test(comp) && /Gesture\.Tap\(\)\s*\.numberOfTaps\(2\)/.test(comp) && /fitView\(/.test(comp));
-  ok("one-finger pan scrolls with a decay (fling)", /withDecay\(/.test(comp) && /\.maxPointers\(1\)/.test(comp));
-  ok("edge drags snap with snapStep and buzz when they catch", /snapStep\(/.test(comp) && /onSnapHaptic/.test(comp) && /useFrameCallback/.test(comp));
-  ok("the waveform comes from the analysis cache (silence detection's loudness, computed once)", /analysis\s*\.loudness\(/.test(comp) && /waveformColumns\(/.test(comp));
-  ok("every edit ends in the existing seam handler with the lowered jitter gate", /onDragEnd\(r\.edge, drag\.clampedMs, \{ minDragMs: 1 \}\)/.test(comp) && /onDragEnd\(edge, drag\.clampedMs, \{ minDragMs: 1 \}\)/.test(comp));
-  ok("the nudge uses the video's frame rate", /nudgeFrameMs\(edge\.atMs, direction, fps/.test(comp) && /safeFps\(seams\.frameRate\)/.test(comp));
-  ok("the preview seeks while dragging (throttled) and the readout is m:ss.cc", /PREVIEW_EVERY_MS/.test(comp) && /onPreview/.test(comp) && /formatTimeCs\(/.test(comp));
+  const code = comp.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  // The crash fix: nothing runs on the UI thread except transform / opacity styles (the only reanimated use that
+  // has run in this app before, in the text overlays); every other gesture of the app is runOnJS(true) too.
+  const gestures = (code.match(/Gesture\.(Pan|Tap|Pinch)\(\)/g) || []).length;
+  const jsGestures = (code.match(/Gesture\.(Pan|Tap|Pinch)\(\)\s*\.runOnJS\(true\)/g) || []).length;
+  eq("every gesture runs on the JS thread (runOnJS(true)): Pinch + Pan + two Taps", [gestures, jsGestures], [4, 4]);
+  ok("no worklets, UI-thread loops or animation drivers: no \"worklet\", runOnJS(), useFrameCallback, useAnimatedReaction, withDecay, withTiming, withSpring, cancelAnimation", !/"worklet"|(?<!\.)\brunOnJS\(|useFrameCallback|useAnimatedReaction|withDecay|withTiming|withSpring|\bcancelAnimation\(|runOnUI|scheduleOnUI/.test(code));
+  ok("reanimated is used only for shared values and animated styles", /from "react-native-reanimated"/.test(code) && /import Animated, \{ useAnimatedStyle, useSharedValue, type SharedValue \} from "react-native-reanimated"/.test(code));
+  const styleBodies = [...code.matchAll(/useAnimatedStyle\(\(\) => (?:\{([\s\S]*?)\n  \}\)|\(\{([\s\S]*?)\}\)\))/g)].map((m) => m[1] ?? m[2] ?? "");
+  ok(`all ${styleBodies.length} animated styles return only transform and opacity (no width, height, top, left, colors)`, styleBodies.length >= 9 && styleBodies.every((b) => !/\b(width|height|top|left|right|bottom|backgroundColor|borderRadius)\s*:/.test(b)));
+  ok("animated styles read only shared values and plain numbers (no objects or functions captured)", styleBodies.every((b) => !/\b(geom|marker|clip|seams|props|live|view\.current)\b/.test(b)));
+  ok("pinch zoom uses pinchView; double tap animates back to fitView", /pinchView\(/.test(comp) && /numberOfTaps\(2\)/.test(comp) && /fitView\(/.test(comp));
+  ok("one-finger pan scrolls and flings (flingStep, a JS frame loop)", /flingStep\(/.test(comp) && /requestAnimationFrame/.test(comp) && /\.maxPointers\(1\)/.test(comp));
+  ok("edge drags snap with snapStep and buzz when they catch", /snapStep\(/.test(comp) && /if \(r\.caught\) haptic\("light"\)/.test(comp));
+  ok("the waveform comes from the analysis cache (silence detection's loudness, computed once)", /analysis\.cachedLoudness\(/.test(comp) && /analysis\.loudness\(/.test(comp) && /waveformColumns\(/.test(comp));
+  ok("the waveform is a few hundred bars per drawn window (3 points per bar, three screens wide)", /const WAVE_PITCH = 3/.test(comp) && /const width = 3 \* viewW/.test(comp));
+  ok("every edit ends in the existing seam handler with the lowered jitter gate", /cfg\.onDragEnd\(d\.edge, drag\.clampedMs, \{ minDragMs: 1 \}\)/.test(comp) && /l\.seams\.onDragEnd\(e, drag\.clampedMs, \{ minDragMs: 1 \}\)/.test(comp));
+  ok("the nudge uses the video's frame rate", /nudgeFrameMs\(e\.atMs, direction, fps/.test(comp) && /safeFps\(seams\.frameRate\)/.test(comp));
+  ok("the preview is throttled while dragging (50 ms) and the readout is m:ss.cc", /const PREVIEW_EVERY_MS = 50/.test(comp) && /now - d\.lastPreviewAt >= PREVIEW_EVERY_MS/.test(comp) && /formatTimeCs\(/.test(comp));
+  ok("the pure helpers are plain functions (no worklet directive anywhere)", !/"worklet"/.test(read("../lib/autoEdit/timelineView.ts") + read("../lib/autoEdit/edgeSnap.ts")));
+  ok("haptics are called from JS only", !/"worklet"/.test(code) && /function haptic\(/.test(code));
   ok("Cuts screen: edit.tsx shows the guarded precision timeline for the automatic edit's seams and the old timeline otherwise", /<GuardedTimeline/.test(edit) && /\{isVideo && timelineSeams && \(/.test(edit) && /\{isVideo && !timelineSeams && \(/.test(edit));
   ok("edit.tsx passes the transcript words, the frame rate and the edge preview", /words: \(captions\.words \?\? \[\]\)/.test(edit) && /frameRate: sourceFps/.test(edit) && /onEdgePreview: handleEdgePreview/.test(edit));
   ok("the edit goes through reshapeCutAtEdge with the optional gate", /reshapeCutAtEdge\(st, edge, newSourceMs, model\.durationMs, opts\?\.minDragMs\)/.test(edit) && /userEdit\(/.test(edit));
   ok("the frame rate comes from the player (JS only)", /videoTrack\?\.frameRate/.test(edit));
   ok("the edge preview is its own paused player and ends when playback starts", /const edgePlayer = useVideoPlayer/.test(edit) && /if \(isPlaying && edgePreviewing\) handleEdgePreview\(null\)/.test(edit));
+  ok("the timeline sits inside the editor's GestureHandlerRootView", /<GestureHandlerRootView style=\{\{ flex: 1 \}\}>/.test(edit));
   ok("the app version is untouched", /"version": "1\.0\.4"/.test(read("../app.json")));
+}
+
+// fling and zoom animation steps (JS, one call per frame)
+{
+  const v = flingStep(100, 800, 0.016, 5000);
+  ok("a fling keeps moving and slows down", v.offset > 100 && v.velocity < 800 && v.velocity > 0 && !v.done);
+  let o = 100, vel = 800, frames = 0, done = false;
+  while (!done && frames < 1000) { const st = flingStep(o, vel, 0.016, 100000); o = st.offset; vel = st.velocity; done = st.done; frames++; }
+  ok("...and ends by itself within a few seconds", done && frames < 400);
+  eq("a fling stops at the start of the content", flingStep(3, -900, 0.016, 5000), { offset: 0, velocity: 0, done: true });
+  eq("a fling stops at the end of the content", flingStep(4990, 900, 0.05, 5000), { offset: 5000, velocity: 0, done: true });
+  eq("a long pause between frames never jumps far (the step is capped at 50 ms)", flingStep(0, 1000, 5, 100000).offset, 50);
+  const a = { scale: 1, offset: 0 }, b = { scale: 3, offset: 100 };
+  eq("the zoom animation starts at the old view and ends on the new one", [lerpView(a, b, 0), lerpView(a, b, 1)], [a, b]);
+  ok("...eased: it moves fast first", lerpView(a, b, 0.5).scale > 2);
+  eq("a bad easing input is clamped", [easeOutCubic(-1), easeOutCubic(2)], [0, 1]);
 }
 
 // ── 10. fail safe: the previous timeline takes over ──────────────────────────
@@ -346,10 +376,11 @@ const TOTAL = 60_000;    // a one-minute video
   ok("a render error shows the previous timeline (error boundary around the new one, fallback while unknown)", /getDerivedStateFromError/.test(guarded) && /componentDidCatch/.test(guarded) && /status !== "on"\) return <>\{fallback\}<\/>/.test(guarded));
   ok("the failure is recorded (client_errors) and remembered for this build", /recordClientError\(/.test(guarded) && /kind: "precisionTimeline"/.test(guarded) && /disableGuard\(/.test(guarded));
   ok("the crash marker is armed while it shows and disarmed on unmount / background", /armGuard\(/.test(guarded) && /disarmGuard\(/.test(guarded) && /AppState\.addEventListener/.test(guarded));
-  const catches = (comp.match(/catch \(err\)/g) || []).length;
-  ok(`every gesture and frame worklet catches its own errors and reports them (${catches} catch blocks)`, catches >= 11 && (comp.match(/runOnJS\(reportFatal\)/g) || []).length >= catches);
-  ok("what the UI thread calls on the JS side is guarded", ["safeGrab", "safePreview", "safeEdgeEnd", "safeScrub", "safeTap", "safeSettle"].every((n) => new RegExp(`runOnJS\\(${n}\\)`).test(comp)));
-  ok("button handlers are guarded and a waveform failure only drops the waveform", /guard\("nudge"/.test(comp) && /setWave\(null\)/.test(comp));
+  const guardedHandlers = [...comp.matchAll(/guard\("([a-zA-Z.]+)"/g)].map((m) => m[1]);
+  ok(`every gesture handler, the edge ticker and the buttons are guarded (${guardedHandlers.length} guards)`, ["pan.begin", "pan.start", "pan.update", "pan.end", "pan.finalize", "tap", "doubleTap", "pinch.begin", "pinch.start", "pinch.update", "pinch.finalize", "edgeTick", "nudge", "clear"].every((n) => guardedHandlers.includes(n)));
+  ok("a guarded error goes to onFatal (the owner switches to the previous timeline)", /live\.current\.onFatal\?\.\(e, where\)/.test(comp));
+  ok("a waveform failure only drops the waveform", /setWave\(null\)/.test(comp));
+  ok("breadcrumbs: mounted, waveform ready, first gesture, edge drag started, guard on, edge preview player", /precision timeline: mounted/.test(comp) && /precision timeline: waveform ready/.test(comp) && /precision timeline: first \$\{kind\}/.test(comp) && /precision timeline: edge drag started/.test(comp) && /precision timeline: guard on, mounting/.test(guarded) && /onBreadcrumb=\{recordBreadcrumb\}/.test(guarded) && /precision timeline: edge preview player loading/.test(edit));
   ok("the fallback is the previous timeline, with the same props it had", /fallback=\{\s*<TimelineEditor/.test(edit) && /onReorderClips=\{handleReorderClips\}/.test(edit));
   ok("the frame rate and the edge preview player cannot throw into the screen", /Only reads: a player that does not answer/.test(edit) && /The frame preview is a nicety/.test(edit));
   ok("the waveform waits for the screen to settle, uses the cache first, and swallows failures", /setTimeout\(\(\) => \{\s*\(async \(\) => \{\s*try \{\s*let d = usable\(await analysis\.cachedLoudness/.test(comp) && /if \(!d && canAnalyze\)/.test(comp) && /canAnalyze: !autoEditRunning/.test(edit));

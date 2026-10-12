@@ -4,7 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 
 import PrecisionTimeline, { type PrecisionTimelineProps } from "@/components/PrecisionTimeline";
-import { recordClientError } from "@/lib/clientErrors";
+import { recordBreadcrumb, recordClientError } from "@/lib/clientErrors";
 import { armGuard, disableGuard, disarmGuard, readGuard, type GuardStorage } from "@/lib/autoEdit/precisionGuard";
 
 const storage: GuardStorage = {
@@ -75,6 +75,7 @@ export default function GuardedTimeline({ fallback, ...props }: PrecisionTimelin
   // armed while the timeline is on screen and the app is in the foreground
   useEffect(() => {
     if (status !== "on") return;
+    recordBreadcrumb("precision timeline: guard on, mounting");
     void armGuard(storage, key, Date.now());
     const sub = AppState.addEventListener("change", (s) => {
       if (s === "active") void armGuard(storage, key, Date.now());
@@ -102,7 +103,7 @@ export default function GuardedTimeline({ fallback, ...props }: PrecisionTimelin
   if (status !== "on") return <>{fallback}</>;
   return (
     <Boundary onError={fail}>
-      <PrecisionTimeline {...props} onFatal={fail} />
+      <PrecisionTimeline {...props} onFatal={fail} onBreadcrumb={recordBreadcrumb} />
     </Boundary>
   );
 }

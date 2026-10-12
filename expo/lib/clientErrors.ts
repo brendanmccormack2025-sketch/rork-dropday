@@ -70,6 +70,24 @@ export function recordMetric(name: string, data: Record<string, unknown> = {}): 
   return recorder.reportNow(`${name} ${Object.entries(data).map(([k, v]) => `${k}=${String(v)}`).join(" ")}`.trim(), { kind: "metric", metric: name, ...data });
 }
 
+const breadcrumbsSeen = new Set<string>();
+
+/**
+ * A trail for crashes that leave no JavaScript error (a native crash kills the app before anything can be reported):
+ * the step reached is saved to storage at once (kind "breadcrumb") and uploaded at the next launch with the other
+ * reports, so the newest breadcrumb says how far the screen got. Each name is saved once per run. Never throws.
+ */
+export function recordBreadcrumb(name: string, data: Record<string, unknown> = {}): void {
+  try {
+    if (breadcrumbsSeen.has(name)) return;
+    breadcrumbsSeen.add(name);
+    if (__DEV__) console.log("[breadcrumb]", name, JSON.stringify(data));
+    void recorder.record(name, { kind: "breadcrumb", ...data });
+  } catch {
+    // a breadcrumb is never worth a failure
+  }
+}
+
 /** Upload the reports saved by earlier runs (call once the user is signed in). */
 export function flushClientErrors(userId: string | null): Promise<{ uploaded: number }> {
   return recorder.flush(userId);

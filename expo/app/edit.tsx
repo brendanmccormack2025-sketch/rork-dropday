@@ -77,7 +77,7 @@ import { resetCaptionLook, usableCaptionStyle, withCaptionLook } from "@/lib/tra
 import { supportsCaptionFont } from "@/modules/video-render";
 import { RENDER_FINAL_IDLE_MS, RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
-import { recordClientError } from "@/lib/clientErrors";
+import { recordClientError, recordBreadcrumb } from "@/lib/clientErrors";
 import { POST_FAILED_TEXT, renderWithCaptionFallback, safePost, type RenderStepResult } from "@/lib/safePost";
 import type { EditOverlay } from "@/lib/editModel";
 import { stageExportFallback, startPostExport } from "@/lib/exportEdit";
@@ -3048,6 +3048,7 @@ export default function EditScreen() {
         edgeWantedMsRef.current = ms;
         if (edgeUriRef.current !== uri) {
           edgeUriRef.current = uri;
+          recordBreadcrumb("precision timeline: edge preview player loading");
           edgePlayer.replace(uri);
         } else {
           edgePlayer.currentTime = ms / 1000;

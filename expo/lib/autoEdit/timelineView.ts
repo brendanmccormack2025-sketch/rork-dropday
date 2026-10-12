@@ -2,8 +2,7 @@
  * The math of the zoomable Cuts timeline: time <-> screen position at any zoom, pinch zoom around a point, the
  * touch zones of the edge handles, the m:ss.cc readout, one-frame nudges and the waveform columns.
  *
- * Pure; erasable TypeScript only so the Node tests can run it. The functions that run while a finger is down carry
- * the 'worklet' directive, so the gesture code can call them on the UI thread (they call nothing but each other).
+ * Pure; erasable TypeScript only so the Node tests can run it.
  *
  * Units: time in milliseconds, scale in screen points per millisecond ("pxPerMs"), offset = how far the content is
  * scrolled left, in points. The content has `pad` points before the first and after the last millisecond.
@@ -22,42 +21,35 @@ export type View = { scale: number; offset: number };
 
 /** The scale that fits the whole video between the paddings. */
 export function fitScale(totalMs: number, viewW: number, pad: number = TL_PAD): number {
-  "worklet";
   return Math.max(1e-6, (viewW - 2 * pad) / Math.max(1, totalMs));
 }
 
 /** The scale that shows about MAX_VISIBLE_MS across the screen width; never below the fit scale (short videos). */
 export function maxScale(totalMs: number, viewW: number, pad: number = TL_PAD): number {
-  "worklet";
   return Math.max(fitScale(totalMs, viewW, pad), viewW / MAX_VISIBLE_MS);
 }
 
 export function clampScale(scale: number, totalMs: number, viewW: number, pad: number = TL_PAD): number {
-  "worklet";
   return Math.min(maxScale(totalMs, viewW, pad), Math.max(fitScale(totalMs, viewW, pad), scale));
 }
 
 export function contentWidth(totalMs: number, scale: number, pad: number = TL_PAD): number {
-  "worklet";
   return 2 * pad + totalMs * scale;
 }
 
 /** The scroll offset kept inside the content: 0 at the start, never past the end. */
 export function clampOffset(offset: number, totalMs: number, scale: number, viewW: number, pad: number = TL_PAD): number {
-  "worklet";
   const max = Math.max(0, contentWidth(totalMs, scale, pad) - viewW);
   return Math.min(max, Math.max(0, offset));
 }
 
 /** Where a time is on screen. */
 export function msToX(ms: number, scale: number, offset: number, pad: number = TL_PAD): number {
-  "worklet";
   return pad + ms * scale - offset;
 }
 
 /** The time under a screen position. */
 export function xToMs(x: number, scale: number, offset: number, pad: number = TL_PAD): number {
-  "worklet";
   return (x + offset - pad) / scale;
 }
 
@@ -74,7 +66,6 @@ export function pinchView(
   viewW: number,
   pad: number = TL_PAD,
 ): View {
-  "worklet";
   const scale = clampScale(start.scale * pinchScale, totalMs, viewW, pad);
   const focalMs = xToMs(startFocalX, start.scale, start.offset, pad);
   const offset = clampOffset(pad + focalMs * scale - focalX, totalMs, scale, viewW, pad);
@@ -83,31 +74,26 @@ export function pinchView(
 
 /** Zoom by `factor` keeping the time under `focalX` where it is (buttons, programmatic zoom). */
 export function zoomAt(view: View, factor: number, focalX: number, totalMs: number, viewW: number, pad: number = TL_PAD): View {
-  "worklet";
   return pinchView(view, factor, focalX, focalX, totalMs, viewW, pad);
 }
 
 /** Whole video in view (double tap). */
 export function fitView(totalMs: number, viewW: number, pad: number = TL_PAD): View {
-  "worklet";
   return { scale: fitScale(totalMs, viewW, pad), offset: 0 };
 }
 
 /** True when the view shows the whole video (nothing to scroll). */
 export function isFit(view: View, totalMs: number, viewW: number, pad: number = TL_PAD): boolean {
-  "worklet";
   return view.scale <= fitScale(totalMs, viewW, pad) * 1.001;
 }
 
 /** The scroll offset that puts `ms` at the middle of the screen (clamped). */
 export function offsetToCenter(ms: number, scale: number, totalMs: number, viewW: number, pad: number = TL_PAD): number {
-  "worklet";
   return clampOffset(pad + ms * scale - viewW / 2, totalMs, scale, viewW, pad);
 }
 
 /** The new source time of an edge dragged `dxPx` points: the same distance in time at the current zoom. */
 export function edgeDragMs(atMs: number, dxPx: number, scale: number): number {
-  "worklet";
   return atMs + dxPx / scale;
 }
 
@@ -117,14 +103,12 @@ export function edgeDragMs(atMs: number, dxPx: number, scale: number): number {
  * so neighbours never swallow each other's touches. `gapPx` is the distance to the neighbouring handle (null: none).
  */
 export function handleHalfWidth(gapPx: number | null): number {
-  "worklet";
   if (gapPx === null) return HANDLE_TOUCH;
   return Math.min(HANDLE_TOUCH, Math.max(HANDLE_MIN_TOUCH, gapPx / 2));
 }
 
 /** m:ss.cc (centiseconds, rounded down so the display never runs ahead of the frame). */
 export function formatTimeCs(ms: number): string {
-  "worklet";
   const safe = Number.isFinite(ms) && ms > 0 ? ms : 0;
   const totalCs = Math.floor(safe / 10);
   const cs = totalCs % 100;
@@ -136,7 +120,6 @@ export function formatTimeCs(ms: number): string {
 
 /** "+0.04s" / "-0.40s": how much footage the edge adds or removes. */
 export function formatDeltaSeconds(deltaMs: number): string {
-  "worklet";
   const abs = Math.abs(deltaMs) / 1000;
   return `${deltaMs < 0 ? "-" : "+"}${abs.toFixed(2)}s`;
 }
@@ -330,7 +313,6 @@ export function handleGeoms(seams: Array<{ outputMs: number; prev?: { atMs: numb
 
 /** Touch zone widths of a seam at a zoom: left = the clip before it (its end), right = the clip after it (its start). */
 export function handleZones(g: HandleGeom, scale: number): { left: number; right: number } {
-  "worklet";
   return {
     left: g.hasPrev ? handleHalfWidth(g.prevGapMs === null ? null : g.prevGapMs * scale) : 0,
     right: g.hasNext ? handleHalfWidth(g.nextGapMs === null ? null : g.nextGapMs * scale) : 0,
@@ -339,7 +321,6 @@ export function handleZones(g: HandleGeom, scale: number): { left: number; right
 
 /** The edge under a touch inside the clip lane: seam index and side (0 = end of the clip before, 1 = start of the next). */
 export function hitEdge(x: number, y: number, handles: HandleGeom[], scale: number, offset: number, pad: number = TL_PAD): { index: number; side: 0 | 1 } | null {
-  "worklet";
   if (y < LANE_TOP - 4 || y > LANE_TOP + LANE_H + 4) return null;
   let index = -1;
   let side: 0 | 1 = 0;
@@ -370,7 +351,6 @@ export type Grab = { kind: "playhead" | "edge" | "scroll"; index: number; side: 
  * the lane to the handles; a plain spot scrolls.
  */
 export function grabAt(x: number, y: number, handles: HandleGeom[], playheadMs: number, scale: number, offset: number, pad: number = TL_PAD): Grab {
-  "worklet";
   const px = msToX(playheadMs, scale, offset, pad);
   if (y < TOP_STRIP_H && Math.abs(x - px) <= PLAYHEAD_GRAB) return { kind: "playhead", index: -1, side: 0 };
   const edge = hitEdge(x, y, handles, scale, offset, pad);
@@ -392,7 +372,6 @@ export function tapAt(
   offset: number,
   pad: number = TL_PAD,
 ): TapTarget {
-  "worklet";
   for (let i = 0; i < markers.length; i++) {
     const m = markers[i]!;
     const mx = msToX(m.outputMs, scale, offset, pad);
@@ -425,4 +404,35 @@ export function followOffset(playheadMs: number, scale: number, offset: number, 
 /** The offset that brings an edge back into view (or null if it is). */
 export function revealOffset(ms: number, scale: number, offset: number, totalMs: number, viewW: number, margin: number = 40, pad: number = TL_PAD): number | null {
   return followOffset(ms, scale, offset, totalMs, viewW, margin, pad);
+}
+
+// ── Animation steps (run in JS, one call per frame) ─────────────────────────
+
+export function easeOutCubic(t: number): number {
+  const k = Math.min(1, Math.max(0, t));
+  return 1 - Math.pow(1 - k, 3);
+}
+
+/** The view part-way (0..1) between two views, eased. */
+export function lerpView(from: View, to: View, t: number): View {
+  const e = easeOutCubic(t);
+  return { scale: from.scale + (to.scale - from.scale) * e, offset: from.offset + (to.offset - from.offset) * e };
+}
+
+/** Friction of a fling, per second: the speed falls to 1/e of itself in 1/FLING_FRICTION s. */
+export const FLING_FRICTION = 3.2;
+/** A fling slower than this (points per second) is over. */
+export const FLING_MIN_SPEED = 15;
+
+/**
+ * One frame of a fling: the scroll offset keeps moving at `velocity` (points per second) while friction slows it, and
+ * stops at the ends of the content. `maxOffset` is the furthest the content can scroll.
+ */
+export function flingStep(offset: number, velocity: number, dtSec: number, maxOffset: number): { offset: number; velocity: number; done: boolean } {
+  const dt = Math.min(0.05, Math.max(0, dtSec));
+  const next = offset + velocity * dt;
+  const clamped = Math.min(Math.max(0, maxOffset), Math.max(0, next));
+  const v = velocity * Math.exp(-FLING_FRICTION * dt);
+  const hitEnd = clamped !== next;
+  return { offset: clamped, velocity: hitEnd ? 0 : v, done: hitEnd || Math.abs(v) < FLING_MIN_SPEED };
 }

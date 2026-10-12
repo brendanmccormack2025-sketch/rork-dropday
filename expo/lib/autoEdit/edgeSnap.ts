@@ -3,8 +3,7 @@
  * boundaries of the automatic silence cuts. The snap holds while the finger stays near; pausing for a moment, or
  * dragging past the threshold, lets go.
  *
- * Pure; erasable TypeScript only so the Node tests can run it. The functions called while a finger is down carry the
- * 'worklet' directive (the gesture code runs them on the UI thread).
+ * Pure; erasable TypeScript only so the Node tests can run it.
  */
 
 export type TimedWord = { startMs: number; endMs: number };
@@ -32,14 +31,12 @@ export function buildSnapTargets(words: TimedWord[] | null | undefined, boundari
 
 /** The snap threshold in ms at a zoom (scale = points per ms). */
 export function snapThresholdMs(scale: number): number {
-  "worklet";
   const ms = SNAP_PX / Math.max(1e-6, scale);
   return Math.min(SNAP_MAX_MS, Math.max(SNAP_MIN_MS, ms));
 }
 
 /** The target nearest to `ms` within `thresholdMs`, or null; `skip` is ignored (a target just let go of). */
 export function nearestTarget(targets: ArrayLike<number>, ms: number, thresholdMs: number, skip: number | null = null): number | null {
-  "worklet";
   const n = targets.length;
   if (n === 0) return null;
   let lo = 0;
@@ -74,14 +71,12 @@ export type SnapState = {
 };
 
 export function snapStart(rawMs: number, now: number): SnapState {
-  "worklet";
   return { target: null, released: null, anchorMs: rawMs, movedAt: now };
 }
 
 export type SnapParams = { thresholdMs: number; pauseMs: number; jitterMs: number };
 
 export function snapParams(scale: number): SnapParams {
-  "worklet";
   return { thresholdMs: snapThresholdMs(scale), pauseMs: SNAP_PAUSE_MS, jitterMs: SNAP_JITTER_PX / Math.max(1e-6, scale) };
 }
 
@@ -97,7 +92,6 @@ export function snapStep(
   targets: ArrayLike<number>,
   p: SnapParams,
 ): { ms: number; state: SnapState; caught: boolean } {
-  "worklet";
   let { target, released, anchorMs, movedAt } = state;
   if (Math.abs(rawMs - anchorMs) > p.jitterMs) {
     anchorMs = rawMs;
