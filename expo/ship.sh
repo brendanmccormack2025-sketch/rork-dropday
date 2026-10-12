@@ -46,8 +46,13 @@ SQL_RUNNER="scripts/supabase-sql.mjs"
 
 MIGRATIONS=()
 while IFS= read -r f; do MIGRATIONS+=("$f"); done < <(list_entries "$MIGRATIONS_FILE")
-FUNCTIONS=()
-while IFS= read -r f; do FUNCTIONS+=("$f"); done < <(list_entries "$FUNCTIONS_FILE")
+FUNCTIONS=()        # names
+FUNCTION_FLAGS=()   # extra deploy flags for each (the rest of its line in FUNCTIONS.txt, e.g. --no-verify-jwt)
+while IFS= read -r line; do
+  name="${line%% *}"
+  flags=""; [ "$line" = "$name" ] || flags="${line#* }"
+  FUNCTIONS+=("$name"); FUNCTION_FLAGS+=("$flags")
+done < <(sed -e 's/#.*//' "$FUNCTIONS_FILE" | awk 'NF { $1=$1; print }')
 [ "${#MIGRATIONS[@]}" -gt 0 ] || fail "$MIGRATIONS_FILE lists no migrations"
 for f in "${MIGRATIONS[@]}"; do [ -f "supabase/$f" ] || fail "migration listed but not found: supabase/$f"; done
 for f in "${FUNCTIONS[@]}"; do [ -d "supabase/functions/$f" ] || fail "function listed but not found: supabase/functions/$f"; done
@@ -86,13 +91,18 @@ for f in "${MIGRATIONS[@]}"; do
 done
 
 # ── 3. Edge Functions ────────────────────────────────────────────────────────
+# --use-api bundles on Supabase's side (no Docker needed, e.g. in a Codespace). Extra flags per function come from FUNCTIONS.txt.
 DEPLOYED=()
-for f in "${FUNCTIONS[@]}"; do
+for i in "${!FUNCTIONS[@]}"; do
+  f="${FUNCTIONS[$i]}"
+  EXTRA=()
+  # shellcheck disable=SC2206
+  [ -z "${FUNCTION_FLAGS[$i]}" ] || EXTRA=(${FUNCTION_FLAGS[$i]})
   step "deploy function $f"
   if [ -n "$DRY" ]; then
-    echo "[dry run] npx --yes supabase functions deploy $f --project-ref $PROJECT_REF"
+    echo "[dry run] npx --yes supabase functions deploy $f --project-ref $PROJECT_REF --use-api ${EXTRA[*]:-}"
   else
-    npx --yes supabase functions deploy "$f" --project-ref "$PROJECT_REF"
+    npx --yes supabase functions deploy "$f" --project-ref "$PROJECT_REF" --use-api ${EXTRA[@]+"${EXTRA[@]}"}
   fi
   DEPLOYED+=("$f")
 done

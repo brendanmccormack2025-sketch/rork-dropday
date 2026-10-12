@@ -1,7 +1,8 @@
-# Edge functions that expo/ship.sh deploys on every release (one name per line = a folder in expo/supabase/functions/).
-# Blank lines and # comments are ignored. Keep this file up to date whenever a function is added.
+# Edge functions that expo/ship.sh deploys on every release (one per line = a folder in expo/supabase/functions/).
+# A line is: <name> [extra deploy flags], e.g. "my-webhook --no-verify-jwt". ship.sh always adds --use-api (server-side
+# bundling: no Docker needed). Blank lines and # comments are ignored. Keep this file up to date whenever a function is added.
 
-delete-media
+delete-media        # no extra flags: the default JWT check passes with the service role key, and the function checks the key itself
 
 # ── delete-media ─────────────────────────────────────────────────────────────────────────────────────────────────
 # What: removes the Storage files queued in trial_media_delete_queue when a post ends or stays incomplete.

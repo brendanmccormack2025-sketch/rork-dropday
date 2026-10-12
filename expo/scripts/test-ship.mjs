@@ -30,7 +30,7 @@ const ship = (e, args = ["msg"]) => spawnSync("bash", [root + "ship.sh", ...args
 
 eq("ship.sh is valid bash", spawnSync("bash", ["-n", root + "ship.sh"]).status, 0);
 eq("no psql and no SUPABASE_DB_URL any more", [/psql/.test(sh.replace(/#.*$/gm, "")), /SUPABASE_DB_URL/.test(sh)], [false, false]);
-eq("ship.sh runs migrations through the API runner, deploys with npx --yes, publishes with eas", [/node "\$SQL_RUNNER" file "supabase\/\$f"/.test(sh), /npx --yes supabase functions deploy "\$f" --project-ref "\$PROJECT_REF"/.test(sh), /PROJECT_REF="tfdjymogbtfavdzgfqas"/.test(sh), /npx --yes eas-cli update --channel production --environment production --message "\$MESSAGE" --non-interactive/.test(sh)], [true, true, true, true]);
+eq("ship.sh runs migrations through the API runner, deploys with npx --yes, publishes with eas", [/node "\$SQL_RUNNER" file "supabase\/\$f"/.test(sh), /npx --yes supabase functions deploy "\$f" --project-ref "\$PROJECT_REF" --use-api/.test(sh), /PROJECT_REF="tfdjymogbtfavdzgfqas"/.test(sh), /npx --yes eas-cli update --channel production --environment production --message "\$MESSAGE" --non-interactive/.test(sh)], [true, true, true, true]);
 eq("ship.sh never prints the token (no echo / set -x of it)", [/set -x/.test(sh), /echo[^\n]*(?<!\\)\$\{?SUPABASE_ACCESS_TOKEN/.test(sh), /printf[^\n]*(?<!\\)\$\{?SUPABASE_ACCESS_TOKEN[^)]*\n/.test(sh.split("\n").filter((l) => !l.includes("tr -d")).join("\n"))], [false, false, false]);
 
 const noToken = ship({});
@@ -40,6 +40,16 @@ eq("a token that is not sbp_ is refused (the migrations need it) and is not echo
 const dry = (token) => ship({ SHIP_DRY_RUN: "1", SUPABASE_ACCESS_TOKEN: token });
 const clean = dry("sbp_TOPSECRETTOKEN");
 eq("dry run: every migration through the API in order, then the function, then the update; no secret in the output", [clean.status, migrations.every((m) => clean.stdout.includes(`supabase/${m}`)), clean.stdout.indexOf("migration-known-connections.sql") < clean.stdout.indexOf("deploy function delete-media"), clean.stdout.includes("TOPSECRET"), clean.stderr.includes("TOPSECRET")], [0, true, true, false, false]);
+eq("the function deploy uses server-side bundling (--use-api)", /functions deploy delete-media --project-ref tfdjymogbtfavdzgfqas --use-api/.test(clean.stdout), true);
+{
+  // per-function flags from FUNCTIONS.txt are passed through
+  const fs = await import("node:fs");
+  const orig = fs.readFileSync(root + "supabase/FUNCTIONS.txt", "utf8");
+  fs.writeFileSync(root + "supabase/FUNCTIONS.txt", orig.replace(/^delete-media.*$/m, "delete-media --no-verify-jwt   # test"));
+  const flagged = dry("sbp_TOPSECRETTOKEN");
+  fs.writeFileSync(root + "supabase/FUNCTIONS.txt", orig);
+  eq("flags written after the name in FUNCTIONS.txt are included", /deploy delete-media --project-ref tfdjymogbtfavdzgfqas --use-api --no-verify-jwt/.test(flagged.stdout), true);
+}
 const messy = dry("\n  sbp_TOPSECRETTOKEN \r\n");
 eq("a pasted token with leading / trailing newlines and spaces still works", [messy.status, /skipping/.test(messy.stdout), messy.stdout.includes("TOPSECRET")], [0, false, false]);
 
