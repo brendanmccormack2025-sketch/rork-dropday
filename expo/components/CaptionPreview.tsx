@@ -6,9 +6,10 @@ import type { CaptionStyle } from "@/lib/editModel";
 import { withTextBox, type OverlayFontWeight } from "@/lib/editStyles";
 import * as Haptics from "expo-haptics";
 import HuggingText from "@/components/HuggingText";
+import { hexToRgba } from "@/lib/palette";
 import { shouldBuzz } from "@/lib/guides";
 import { TOUCH_PAD } from "@/lib/overlayGestures";
-import { supportsLineBackgrounds, supportsTextBox } from "@/modules/video-render";
+import { supportedFontNames, supportsLineBackgrounds, supportsTextBox, supportsTextOutline } from "@/modules/video-render";
 import { previewFontFamily } from "@/lib/transcription/captionPresets";
 import type { EditorCaptionLine } from "@/lib/transcription/captionLines";
 import {
@@ -64,6 +65,9 @@ function buzz(): void {
   }
 }
 
+/** What the build can burn in: the preview draws exactly that, so it matches the posted video. */
+const RENDER_CAPS = { outline: supportsTextOutline, fontNames: supportedFontNames };
+
 const sameStyle = (a: CaptionStyle, b: CaptionStyle) =>
   Math.abs(a.scale - b.scale) < 1e-4 && Math.abs(a.yCenter - b.yCenter) < 1e-4 && Math.abs(a.xCenter - b.xCenter) < 1e-4;
 
@@ -107,7 +111,7 @@ export default function CaptionPreview({
   const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
   const inputRef = useRef<TextInput>(null);
   const shown = live ?? stored;
-  const spec = useMemo(() => withTextBox(styledSpec(shown), supportsTextBox, supportsLineBackgrounds), [shown]);
+  const spec = useMemo(() => withTextBox(styledSpec(shown, RENDER_CAPS), supportsTextBox, supportsLineBackgrounds), [shown]);
   const px = frameW / 1080;
 
   const activeIndex = lines.findIndex((l) => positionMs >= l.startMs && positionMs < l.endMs);
@@ -155,6 +159,7 @@ export default function CaptionPreview({
     const gs = g.current;
     const next = settleCaptionStyle(
       {
+        ...gs.base,
         scale: gs.base.scale * gs.pinch,
         yCenter: gs.base.yCenter + gs.dy / Math.max(1, cur.frameH),
         xCenter: CAPTION_STYLE_CONFIG.horizontalNative ? gs.base.xCenter + gs.dx / Math.max(1, cur.frameW) : gs.base.xCenter,
@@ -164,7 +169,7 @@ export default function CaptionPreview({
     gs.last = next.style;
     // Position follows the fingers at the stored size; the pinch is shown as a scale of the drawn box.
     const moving = settleCaptionStyle(
-      { scale: gs.base.scale, yCenter: next.style.yCenter, xCenter: next.style.xCenter },
+      { ...gs.base, scale: gs.base.scale, yCenter: next.style.yCenter, xCenter: next.style.xCenter },
       cur.frameH / Math.max(1, cur.frameW),
     );
     setLive(moving.style);
@@ -255,10 +260,13 @@ export default function CaptionPreview({
     textAlign: "center" as const,
     letterSpacing: (spec.letterSpacing ?? 0) * px,
     lineHeight: lineHeightPx,
-    ...(spec.shadow
-      ? { textShadowColor: "rgba(0,0,0,0.6)", textShadowRadius: 4 * px, textShadowOffset: { width: 0, height: 2 * px } }
-      : {}),
+    // an outlined caption is drawn by the outline layer: its own text is transparent
+    ...(spec.outlineColor ? { color: "transparent" } : {}),
   };
+  // The renderer's shadow (black, 60%, radius 4, 2 down, in frame units) falls behind the whole caption: around the box
+  // when there is one, else around the words. Drawn the same way here.
+  const shadow = spec.shadow ? { opacity: 0.6, radius: 4 * px, offsetY: 2 * px } : null;
+  const outline = spec.outlineColor && spec.outlineWidth ? { fill: spec.color, color: spec.outlineColor, reach: spec.outlineWidth * px, shadow: false } : null;
   const padX = (spec.backgroundPaddingX ?? spec.backgroundPadding ?? 0) * px;
   const padY = (spec.backgroundPaddingY ?? spec.backgroundPadding ?? 0) * px;
   const radiusPx = (spec.cornerRadius ?? 0) * px;
@@ -274,7 +282,9 @@ export default function CaptionPreview({
       padX={padX}
       padY={padY}
       radius={radiusPx}
-      background={spec.backgroundColor ?? null}
+      background={spec.backgroundColor ? hexToRgba(spec.backgroundColor) : null}
+      shadow={shadow}
+      outline={outline}
       maxWidth={maxBox}
       mode={supportsLineBackgrounds ? "lines" : "box"}
     />

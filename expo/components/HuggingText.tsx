@@ -25,6 +25,11 @@ type Props = {
    * `reach` is how far the outline extends beyond the letters, in points; `shadow` puts a soft drop shadow behind it.
    */
   outline?: { fill: string; color: string; reach: number; shadow: boolean } | null;
+  /**
+   * A drop shadow behind everything (the box and the words together), like the renderer's own: the shadow of whatever is
+   * drawn, so with a background it falls around the box. Captions use it so the preview matches the burned-in video.
+   */
+  shadow?: { opacity: number; radius: number; offsetY: number } | null;
   onLayout?: (e: LayoutChangeEvent) => void;
   children?: React.ReactNode;
 };
@@ -35,7 +40,7 @@ type Props = {
  * (onTextLayout) and draws the background from them (lib/lineBackground.ts), never wider than the widest line
  * plus padding. The same component draws the editor's and the feed's text overlays and the captions.
  */
-export default function HuggingText({ text, textStyle, padX, padY, radius, background, maxWidth, mode, hidden, outline, onLayout, children }: Props) {
+export default function HuggingText({ text, textStyle, padX, padY, radius, background, maxWidth, mode, hidden, outline, shadow, onLayout, children }: Props) {
   const key = `${text}|${textStyle.fontSize}|${textStyle.fontFamily ?? ""}|${textStyle.fontWeight ?? ""}|${maxWidth}|${textStyle.letterSpacing ?? 0}`;
   const [measured, setMeasured] = useState<{ key: string; widths: number[]; lines: LineInfo[] } | null>(null);
   const last = useRef<number[]>([]);
@@ -70,7 +75,12 @@ export default function HuggingText({ text, textStyle, padX, padY, radius, backg
   return (
     <View
       onLayout={onLayout}
-      style={[styles.root, { paddingHorizontal: padX, paddingVertical: padY, maxWidth }, hidden && styles.hidden]}
+      style={[
+        styles.root,
+        { paddingHorizontal: padX, paddingVertical: padY, maxWidth },
+        shadow ? { shadowColor: "#000", shadowOpacity: shadow.opacity, shadowRadius: shadow.radius, shadowOffset: { width: 0, height: shadow.offsetY } } : null,
+        hidden && styles.hidden,
+      ]}
     >
       {geo && (
         <View pointerEvents="none" style={styles.bg}>

@@ -14,9 +14,9 @@
  * Pure; erasable TypeScript only so the Node tests can run it.
  */
 import type { CaptionStyle } from "../editModel.ts";
-import { applyCaptionStyle, resolveOverlayStyle, type OverlayStyleSpec } from "../editStyles.ts";
+import { applyCaptionStyle, resolveOverlayStyle, type OverlayStyleSpec, type RenderCaps } from "../editStyles.ts";
 import { estimateTextWidth } from "./captionFit.ts";
-import { defaultFontId } from "./captionPresets.ts";
+import { CAPTION_FONTS, captionFontAvailable, defaultFontId, type CaptionOutline, type EmbeddedFonts } from "./captionPresets.ts";
 
 export const CAPTION_STYLE_CONFIG = {
   minScale: 0.6,
@@ -47,9 +47,9 @@ export function effectiveCaptionStyle(style?: CaptionStyle | null): CaptionStyle
   return style ?? defaultCaptionStyle();
 }
 
-/** The preset with a style applied (what the preview and the render both draw). */
-export function styledSpec(style?: CaptionStyle | null): OverlayStyleSpec {
-  return style ? applyCaptionStyle(presetSpec(), style) : presetSpec();
+/** The preset with a style applied (what the preview and the render both draw; `caps` = what the build can burn in). */
+export function styledSpec(style?: CaptionStyle | null, caps: RenderCaps = {}): OverlayStyleSpec {
+  return style ? applyCaptionStyle(presetSpec(), style, caps) : presetSpec();
 }
 
 /** Half the height of a one-line caption box as a fraction of the frame height (aspect = frame height / width). */
@@ -75,7 +75,8 @@ export function clampCaptionStyle(
   const yCenter = lo > hi ? clamp(style.yCenter, config.safeTop, config.safeBottom) : clamp(style.yCenter, lo, hi);
   const halfW = (presetSpec().maxWidth ?? 0.86) / 2;
   const xCenter = config.horizontalNative ? clamp(style.xCenter, halfW, 1 - halfW) : 0.5;
-  return { scale, yCenter, xCenter };
+  // the look (font, colors, shadow, outline) is not touched by moving or resizing the box
+  return { ...style, scale, yCenter, xCenter };
 }
 
 /** Snap to the horizontal centre when close; `snappedX` tells the preview to draw its guide. */
@@ -167,29 +168,41 @@ export function previewCenterY(frameH: number, yCenter: number): number {
 // ── Look: font, text color, background (see captionPresets.ts) ────────────────────────────────
 
 /**
- * The style to draw and render with. A font is only usable when the build can render it (the native
- * module reports supportsCaptionFont): without it the font is dropped, so the preview never shows a font
- * the render cannot produce. The stored style keeps the font.
+ * The style to draw and render with. A font is only usable when the build can render it (the native module reports
+ * supportsCaptionFont; the Google Fonts also need the build to embed them, `embedded`): otherwise the font is dropped
+ * (the default one takes over), so the preview never shows a font the render cannot produce. The stored style keeps
+ * the font the creator picked.
  */
-export function usableCaptionStyle(style: CaptionStyle | null | undefined, supportsFont: boolean): CaptionStyle | undefined {
-  // Where fonts work, a caption with no chosen font is Classic (Montserrat). Where they do not, nothing changes.
-  if (supportsFont) return style?.fontId === undefined ? { ...effectiveCaptionStyle(style), fontId: defaultFontId(true) } : style;
+export function usableCaptionStyle(style: CaptionStyle | null | undefined, supportsFont: boolean, embedded: EmbeddedFonts = []): CaptionStyle | undefined {
+  // Where fonts work, a caption with no chosen font gets the default (TikTok Sans where embedded, else Classic).
+  if (supportsFont) {
+    if (style?.fontId === undefined) return { ...effectiveCaptionStyle(style), fontId: defaultFontId(true, embedded) };
+    const font = CAPTION_FONTS.find((f) => f.id === style.fontId);
+    if (font && !captionFontAvailable(font, embedded)) return { ...style, fontId: defaultFontId(true, embedded) };
+    return style;
+  }
   if (!style) return undefined;
   if (style.fontId === undefined) return style;
   const { fontId: _drop, ...rest } = style;
   return rest;
 }
 
-/** A look change (a font, a text color or a background chosen) applied to the stored style (or the default one). */
+/** A look change (font, colors, shadow, outline, case) applied to the stored style (or the default one). */
 export function withCaptionLook(
   style: CaptionStyle | null | undefined,
-  patch: { fontId?: string; textColor?: string; backgroundColor?: string; uppercase?: boolean },
+  patch: { fontId?: string; textColor?: string; backgroundColor?: string; uppercase?: boolean; shadow?: boolean; outline?: CaptionOutline | null; outlineColor?: string },
 ): CaptionStyle {
-  return { ...effectiveCaptionStyle(style), ...patch };
+  const { outline, ...rest } = patch;
+  const next: CaptionStyle = { ...effectiveCaptionStyle(style), ...rest };
+  if (outline !== undefined) {
+    if (outline === null) delete next.outline;
+    else next.outline = outline;
+  }
+  return next;
 }
 
 /** "Reset to Trial style": font and colors back to the defaults; size and position are kept. */
-export function resetCaptionLook(style: CaptionStyle | null | undefined, supportsFont = false): CaptionStyle {
+export function resetCaptionLook(style: CaptionStyle | null | undefined, supportsFont = false, embedded: EmbeddedFonts = []): CaptionStyle {
   const { scale, yCenter, xCenter } = effectiveCaptionStyle(style);
-  return supportsFont ? { scale, yCenter, xCenter, fontId: defaultFontId(true) } : { scale, yCenter, xCenter };
+  return supportsFont ? { scale, yCenter, xCenter, fontId: defaultFontId(true, embedded) } : { scale, yCenter, xCenter };
 }

@@ -25,7 +25,7 @@ const textSpec = (supportsFont) => JSON.parse(toRenderJson({ version: 1, clips: 
 // ── the fonts ──
 {
   eq("Classic is the first font, Montserrat ExtraBold", [CAPTION_FONTS[0].id, CAPTION_FONTS[0].fontName], ["classic", "Montserrat-ExtraBold"]);
-  eq("the other presets are kept", CAPTION_FONTS.slice(1).map((f) => f.id), ["trial", "avenir", "futura", "condensed", "serif", "typewriter"]);
+  eq("the other presets are kept (then the Google Fonts that need the build to embed them)", CAPTION_FONTS.slice(1).map((f) => f.id), ["trial", "avenir", "futura", "condensed", "serif", "typewriter", "tiktok-sans", "anton", "archivo-black", "poppins", "marker", "caveat", "dm-serif", "space-grotesk"]);
   eq("JS family names for the editor preview", [previewFontFamily("Montserrat-ExtraBold"), previewFontFamily(TEXT_FONT_NAME), previewFontFamily("Futura-Bold")], ["Montserrat_800ExtraBold", "Montserrat_700Bold", "Futura-Bold"]);
   eq("text overlay font", [TEXT_FONT_NAME, TEXT_FONT_FAMILY], ["Montserrat-Bold", "Montserrat_700Bold"]);
   const app = JSON.parse(readFileSync(new URL("../app.json", import.meta.url), "utf8")).expo;

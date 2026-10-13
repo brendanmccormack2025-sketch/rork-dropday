@@ -21,18 +21,20 @@ function eq(name, actual, expected) {
 }
 const w = (text, startMs, endMs) => ({ text, startMs, endMs });
 const KEEP = [{ startMs: 0, endMs: 3000 }];
-const spec = (style) => JSON.parse(toRenderJson({ version: 1, clips: [], overlays: captionLinesToEditOverlays(buildCaptionLines([w("hi", 100, 400)], {}, KEEP, style), style) })).overlays[0].styleSpec;
+const specWith = (style, options = {}) => JSON.parse(toRenderJson({ version: 1, clips: [], overlays: captionLinesToEditOverlays(buildCaptionLines([w("hi", 100, 400)], {}, KEEP, style), style) }, options)).overlays[0].styleSpec;
+const spec = (style) => specWith(style);
+const EMBEDDED = CAPTION_FONTS.map((f) => f.fontName).filter(Boolean);
 
 // ── the presets ──
 eq("fonts: id -> iOS PostScript name (system heavy for trial)", CAPTION_FONTS.map((f) => [f.id, f.fontName]), [
   ["classic", "Montserrat-ExtraBold"], ["trial", null], ["avenir", "AvenirNext-Heavy"], ["futura", "Futura-Bold"], ["condensed", "HelveticaNeue-CondensedBlack"], ["serif", "Georgia-Bold"], ["typewriter", "AmericanTypewriter-Bold"],
+  // the Google Fonts of the text overlays: burned in once the build embeds them (1.0.5)
+  ["tiktok-sans", "TikTokSans-Bold"], ["anton", "Anton-Regular"], ["archivo-black", "ArchivoBlack-Regular"], ["poppins", "Poppins-SemiBold"], ["marker", "PermanentMarker-Regular"], ["caveat", "Caveat-Bold"], ["dm-serif", "DMSerifDisplay-Regular"], ["space-grotesk", "SpaceGrotesk-Bold"],
 ]);
-eq("backgrounds: Black (default), White, None, Trial red, Yellow, Blue", CAPTION_BACKGROUNDS.map((b) => [b.id, b.color]), [
-  ["black", "#000000"], ["white", "#FFFFFF"], ["none", null], ["red", "#E8291C"], ["yellow", "#FFD400"], ["blue", "#1E5BFF"],
-]);
-eq("text colors: White (default), Black, Yellow, Trial red, Blue", CAPTION_TEXT_COLORS.map((b) => [b.id, b.color]), [
-  ["white", "#FFFFFF"], ["black", "#000000"], ["yellow", "#FFD400"], ["red", "#E8291C"], ["blue", "#1E5BFF"],
-]);
+const PALETTE_ROWS = [["white", "#FFFFFF"], ["black", "#000000"], ["red", "#E8291C"], ["yellow", "#FFD400"], ["orange", "#FF8A1F"], ["green", "#1FC45A"], ["teal", "#14B8A6"], ["blue", "#1E5BFF"], ["purple", "#8B5CF6"], ["pink", "#FF5FA8"], ["grey", "#8E8E93"]];
+eq("backgrounds: the shared palette, the two semi-transparent ones, then None", CAPTION_BACKGROUNDS.map((b) => [b.id, b.color]), [...PALETTE_ROWS, ["black-60", "#00000099"], ["white-60", "#FFFFFF99"], ["none", null]]);
+eq("text colors: the shared palette, same order (every id the old sheet stored is still there)", CAPTION_TEXT_COLORS.map((b) => [b.id, b.color]), PALETTE_ROWS);
+eq("the ids older styles stored still resolve to the same colors", ["white", "black", "yellow", "red", "blue"].map((id) => CAPTION_TEXT_COLORS.find((c) => c.id === id).color), ["#FFFFFF", "#000000", "#FFD400", "#E8291C", "#1E5BFF"]);
 eq("the defaults are the Trial look", DEFAULT_CAPTION_LOOK, { fontId: "trial", textColor: "white", backgroundColor: "black" });
 
 // ── the default style changes nothing ──
@@ -50,7 +52,7 @@ eq("the defaults are the Trial look", DEFAULT_CAPTION_LOOK, { fontId: "trial", t
 {
   const base = defaultCaptionStyle();
   for (const f of CAPTION_FONTS) {
-    const s = spec({ ...base, fontId: f.id });
+    const s = specWith({ ...base, fontId: f.id }, { fontNames: EMBEDDED });
     eq(`font ${f.id}: fontName ${f.fontName ?? "(none: system heavy)"}`, [s.fontName ?? null, s.fontWeight], [f.fontName, "heavy"]);
   }
   for (const c of CAPTION_BACKGROUNDS) {
@@ -58,33 +60,29 @@ eq("the defaults are the Trial look", DEFAULT_CAPTION_LOOK, { fontId: "trial", t
     eq(`background ${c.id}: ${c.color ?? "no backgroundColor key"}`, [s.backgroundColor ?? null, "backgroundColor" in s], [c.color, c.color !== null]);
   }
   for (const c of CAPTION_TEXT_COLORS) {
-    // on a background where every text color reads, so nothing is adjusted
-    const bg = c.id === "black" ? "white" : "black";
-    const hex = c.color;
-    const looksReadable = contrastRatio(hex, bg === "white" ? "#FFFFFF" : "#000000") >= MIN_CONTRAST;
-    const s = spec({ ...base, textColor: c.id, backgroundColor: bg });
-    eq(`text ${c.id} on ${bg}: ${looksReadable ? hex : "adjusted"}`, s.color, looksReadable ? hex : (bg === "black" ? "#FFFFFF" : "#000000"));
+    // exactly the color picked, on any background (nothing is ever switched for readability)
+    for (const bg of ["black", "white", "none", "yellow"]) {
+      eq(`text ${c.id} on ${bg}: exactly ${c.color}`, spec({ ...base, textColor: c.id, backgroundColor: bg }).color, c.color);
+    }
   }
   eq("the look keeps the box: size and position are untouched by a look change", [spec({ ...base, scale: 1.5, yCenter: 0.4, fontId: "futura" }).fontSize, spec({ ...base, scale: 1.5, yCenter: 0.4, fontId: "futura" }).yCenter], [57, 0.4]);
 }
 
-// ── readability ──
+// ── colors are used exactly as picked; a low contrast is only a hint ──
 {
   const look = (textColor, backgroundColor) => resolveCaptionLook({ textColor, backgroundColor });
-  eq("white on black is fine (21:1)", [Math.round(contrastRatio("#FFFFFF", "#000000")), look("white", "black").adjusted, look("white", "black").textHex], [21, false, "#FFFFFF"]);
-  eq("white on white switches the text to black", [look("white", "white").adjusted, look("white", "white").textHex], [true, "#000000"]);
-  eq("yellow on white switches to black", [look("yellow", "white").adjusted, look("yellow", "white").textHex], [true, "#000000"]);
-  eq("black on black switches to white", [look("black", "black").adjusted, look("black", "black").textHex], [true, "#FFFFFF"]);
-  eq("blue on blue switches to white (the higher contrast)", [look("blue", "blue").adjusted, look("blue", "blue").textHex], [true, "#FFFFFF"]);
-  eq("yellow on yellow switches to black", [look("yellow", "yellow").adjusted, look("yellow", "yellow").textHex], [true, "#000000"]);
-  eq("black on yellow reads (no change)", [look("black", "yellow").adjusted, look("black", "yellow").textHex], [false, "#000000"]);
-  eq("every combination ends with at least 3:1 (or no background to read against)", CAPTION_TEXT_COLORS.every((t) => CAPTION_BACKGROUNDS.every((b) => {
-    const r = look(t.id, b.id);
-    return b.color === null || contrastRatio(r.textHex, b.color) >= MIN_CONTRAST;
+  eq("white on black is fine (21:1)", [Math.round(contrastRatio("#FFFFFF", "#000000")), look("white", "black").lowContrast, look("white", "black").textHex], [21, false, "#FFFFFF"]);
+  eq("yellow background + white text renders white on yellow (not switched to black)", [spec({ ...defaultCaptionStyle(), textColor: "white", backgroundColor: "yellow" }).color, spec({ ...defaultCaptionStyle(), textColor: "white", backgroundColor: "yellow" }).backgroundColor], ["#FFFFFF", "#FFD400"]);
+  eq("white on white stays white", [look("white", "white").textHex, look("white", "white").lowContrast], ["#FFFFFF", true]);
+  eq("black on black stays black", [look("black", "black").textHex, look("black", "black").lowContrast], ["#000000", true]);
+  eq("blue on blue stays blue; yellow on yellow stays yellow", [look("blue", "blue").textHex, look("yellow", "yellow").textHex], ["#1E5BFF", "#FFD400"]);
+  eq("the hint is raised for close colors only, never for none or a semi-transparent background", [look("white", "yellow").lowContrast, look("black", "yellow").lowContrast, look("white", "none").lowContrast, look("white", "white-60").lowContrast], [true, false, false, false]);
+  eq("EVERY text x background combination renders exactly the picked colors", CAPTION_TEXT_COLORS.every((t) => CAPTION_BACKGROUNDS.every((b) => {
+    const sp = spec({ ...defaultCaptionStyle(), textColor: t.id, backgroundColor: b.id });
+    return sp.color === t.color && (b.color === null ? !("backgroundColor" in sp) : sp.backgroundColor === b.color);
   })), true);
-  eq("the adjusted color is what the render gets, the chosen one stays in the style", [spec({ ...defaultCaptionStyle(), textColor: "white", backgroundColor: "white" }).color, withCaptionLook(undefined, { textColor: "white", backgroundColor: "white" }).textColor], ["#000000", "white"]);
-  eq("changing the background re-evaluates (white text comes back on black)", spec({ ...defaultCaptionStyle(), textColor: "white", backgroundColor: "black" }).color, "#FFFFFF");
-  eq("the note is shown only when something was adjusted", [look("white", "white").adjusted, look("white", "none").adjusted], [true, false]);
+  eq("no 'adjusted' result any more", "adjusted" in resolveCaptionLook({ textColor: "white", backgroundColor: "white" }), false);
+  eq("changing the background never changes the text color", spec({ ...defaultCaptionStyle(), textColor: "white", backgroundColor: "black" }).color, "#FFFFFF");
 }
 
 // ── None: no background, soft shadow ──

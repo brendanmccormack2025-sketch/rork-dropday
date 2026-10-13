@@ -75,7 +75,11 @@ export function sameCaptionStyle(a: CaptionStyle, b: CaptionStyle): boolean {
     a.xCenter === b.xCenter &&
     a.fontId === b.fontId &&
     a.textColor === b.textColor &&
-    a.backgroundColor === b.backgroundColor
+    a.backgroundColor === b.backgroundColor &&
+    a.uppercase === b.uppercase &&
+    a.shadow === b.shadow &&
+    a.outline === b.outline &&
+    a.outlineColor === b.outlineColor
   );
 }
 

@@ -52,6 +52,12 @@ export type CaptionStyle = {
   backgroundColor?: string;
   /** ALL CAPS; absent or false = the transcript's own casing. */
   uppercase?: boolean;
+  /** Drop shadow behind the text (or the box). Absent = on when there is no background (the old rule). */
+  shadow?: boolean;
+  /** Outline thickness; absent = no outline. Burned in only by a build that reports supportsTextOutline. */
+  outline?: "thin" | "medium" | "thick";
+  /** Outline color (a lib/palette.ts id); absent = black. */
+  outlineColor?: string;
 };
 
 export type CaptionEditOverlay = OverlayBase & { kind: "caption"; text: string; style?: string; captionStyle?: CaptionStyle };

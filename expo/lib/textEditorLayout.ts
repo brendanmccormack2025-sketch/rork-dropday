@@ -11,16 +11,16 @@ export const EDITOR_TOP_ROW_HEIGHT = 56;
 /** Back to front. The dim is one layer under both the controls and the field. */
 export const EDITOR_LAYER_ORDER = ["video", "dim", "controls", "field"] as const;
 
-/** The options panel above the keyboard: a row of fonts, a row of colors (and the extra colors), a row of style options. */
+/** The options panel above the keyboard: a row of fonts, the color target tabs, the palette, the switches. */
 export const PANEL_ROW_H = 44;
 export const PANEL_GAP = 8;
 export const PANEL_PAD = 8;
 
-export type PanelOptions = { fonts: boolean; extraColors: boolean };
+export type PanelOptions = { fonts: boolean };
 
 /** Height of the options panel for the rows that are showing. */
 export function panelHeight(opts: PanelOptions): number {
-  const rows = 2 + (opts.fonts ? 1 : 0) + (opts.extraColors ? 1 : 0);   // colors + style options always
+  const rows = 3 + (opts.fonts ? 1 : 0);   // target tabs, palette and switches always
   return rows * PANEL_ROW_H + (rows - 1) * PANEL_GAP + 2 * PANEL_PAD;
 }
 

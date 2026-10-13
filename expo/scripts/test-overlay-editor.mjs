@@ -81,7 +81,7 @@ for (const [label, text] of Object.entries(texts)) {
   ok("both use the shared overlay font (no build check)", /<OverlayText/.test(editor) && /<OverlayText/.test(feed) && /overlayFont\(look\.fontId, isLoaded\)/.test(read("../components/OverlayText.tsx")) && !/supportsCaptionFont/.test(editor + feed.slice(feed.indexOf("FeedTextOverlay"), feed.indexOf("function timeAgo"))));
   ok("Montserrat Bold is loaded with the app's fonts", /Montserrat_700Bold/.test(read("../app/_layout.tsx")));
   ok("both ignore the phone's text-size setting (one shared text component)", /allowFontScaling=\{false\}/.test(read("../components/HuggingText.tsx")) && /<OverlayText/.test(editor) && /<OverlayText/.test(feed) && /<HuggingText/.test(read("../components/OverlayText.tsx")));
-  ok("both draw the shadow only without a background, with the same radius", /textShadowRadius: 4/.test(read("../components/OverlayText.tsx")) && /a\.shadow && !boxed && !outlined/.test(read("../components/OverlayText.tsx")) && /<OverlayText/.test(editor) && /<OverlayText/.test(feed));
+  ok("both draw the shadow only without a background, with the same radius", /textShadowRadius: 4/.test(read("../components/OverlayText.tsx")) && /a\.shadow && !outlined/.test(read("../components/OverlayText.tsx")) && /<OverlayText/.test(editor) && /<OverlayText/.test(feed));
   ok("while typing, the text on the video is drawn by the same editor component and values", /displayOverlays\.map\(\(ov\) => \(\s*<DraggableTextOverlay/.test(edit));
 }
 

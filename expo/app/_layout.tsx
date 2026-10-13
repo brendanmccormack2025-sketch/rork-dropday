@@ -23,7 +23,8 @@ import { PlusJakartaSans_700Bold } from "@expo-google-fonts/plus-jakarta-sans/70
 import { PlusJakartaSans_800ExtraBold } from "@expo-google-fonts/plus-jakarta-sans/800ExtraBold";
 import { Montserrat_700Bold } from "@expo-google-fonts/montserrat/700Bold";
 import { Montserrat_800ExtraBold } from "@expo-google-fonts/montserrat/800ExtraBold";
-// Text overlay fonts (lib/textLook.ts), one weight each, all SIL Open Font License.
+// Text overlay fonts (lib/fonts.ts), one weight each, all SIL Open Font License.
+import { TikTokSans_700Bold } from "@expo-google-fonts/tiktok-sans/700Bold";
 import { Anton_400Regular } from "@expo-google-fonts/anton/400Regular";
 import { ArchivoBlack_400Regular } from "@expo-google-fonts/archivo-black/400Regular";
 import { Poppins_600SemiBold } from "@expo-google-fonts/poppins/600SemiBold";
@@ -257,6 +258,7 @@ export default function RootLayout() {
     PlusJakartaSans_800ExtraBold,
     Montserrat_700Bold,
     Montserrat_800ExtraBold,
+    TikTokSans_700Bold,
     Anton_400Regular,
     ArchivoBlack_400Regular,
     Poppins_600SemiBold,

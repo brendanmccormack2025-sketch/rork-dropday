@@ -72,9 +72,9 @@ import type { WordEdits } from "@/lib/transcription/captionLines";
 import { settleCaptionsForPost } from "@/lib/postWait";
 import { aiEditorFeatures } from "@/lib/autoEdit/rollout";
 import { postRenderSource } from "@/lib/renderSignature";
-import CaptionStyleSheet from "@/components/CaptionStyleSheet";
+import CaptionStyleSheet, { type CaptionLookPatch } from "@/components/CaptionStyleSheet";
 import { resetCaptionLook, usableCaptionStyle, withCaptionLook } from "@/lib/transcription/captionStyle";
-import { supportsCaptionFont } from "@/modules/video-render";
+import { supportedFontNames, supportsCaptionFont, supportsTextOutline } from "@/modules/video-render";
 import { RENDER_FINAL_IDLE_MS, RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
 import { recordClientError, recordBreadcrumb } from "@/lib/clientErrors";
@@ -156,7 +156,7 @@ import TimelineEditor, { effectiveDurationMs } from "@/components/TimelineEditor
 import GuardedTimeline from "@/components/GuardedTimeline";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import TextOverlayEditor from "@/components/TextOverlayEditor";
-import { NEW_TEXT_FONT_SIZE, applyTextEdit, editorStateOf, nextLook, type TextAppearance } from "@/lib/textLook";
+import { NEW_TEXT_FONT_SIZE, appearancePatch, applyTextEdit, cycleLook, editorStateOf, resolveAppearance, type EditorAppearance } from "@/lib/textLook";
 import DraggableTextOverlay, {
   BG_STYLES,
 } from "@/components/DraggableTextOverlay";
@@ -562,7 +562,7 @@ export default function EditScreen() {
   const captionEditsHandlerRef = useRef<(next: WordEdits) => void>(() => {});
   const storedCaptionStyle = editModel ? editModel.state.captionStyle : localCaption.style;
   // A font the build cannot render is not used: the preview never shows what the render cannot produce.
-  const captionStyle = useMemo(() => usableCaptionStyle(storedCaptionStyle, supportsCaptionFont), [storedCaptionStyle]);
+  const captionStyle = useMemo(() => usableCaptionStyle(storedCaptionStyle, supportsCaptionFont, supportedFontNames), [storedCaptionStyle]);
   const [styleSheetOpen, setStyleSheetOpen] = useState(false);
   const captions = useCaptions(
     features.transcription,
@@ -2074,7 +2074,7 @@ export default function EditScreen() {
   // Done in the text editor: the text and its look (font, color, style, outline, shadow) are stored on the overlay, in
   // one undo step (pushSnapshot), and travel with drafts and the post like every other overlay field.
   const handleTextEditorDone = useCallback(
-    (text: string, appearance: Required<TextAppearance>) => {
+    (text: string, appearance: EditorAppearance) => {
       setTextEditorVisible(false);
       pushSnapshot(clips, textOverlays);
       const { overlays, created } = applyTextEdit(
@@ -2160,8 +2160,9 @@ export default function EditScreen() {
       setTextOverlays((prev) =>
         prev.map((ov) => {
           if (ov.id !== id) return ov;
-          // A text with the new look cycles outline -> box -> plain; an older one its old background presets.
-          if (ov.look) return { ...ov, look: nextLook(ov.look) };
+          // A text with the newer look cycles outline -> background -> shadow only; the first Text button's texts keep
+          // cycling their old background presets.
+          if (!resolveAppearance(ov).legacy) return { ...ov, ...appearancePatch(cycleLook(editorStateOf(ov))) };
           const idx = BG_STYLES.indexOf(
             ov.backgroundStyle ?? "none-white",
           );
@@ -2820,13 +2821,12 @@ export default function EditScreen() {
 
   // The Style sheet: a font, text color or background chosen (instant; one undo step each).
   const handleCaptionLook = useCallback(
-    (patch: { fontId?: string; textColor?: string; backgroundColor?: string }) =>
-      handleCaptionStyleCommit(withCaptionLook(storedCaptionStyle, patch)),
+    (patch: CaptionLookPatch) => handleCaptionStyleCommit(withCaptionLook(storedCaptionStyle, patch)),
     [handleCaptionStyleCommit, storedCaptionStyle],
   );
   // "Reset to Trial style": font and colors back to the defaults; size and position stay.
   const handleCaptionLookReset = useCallback(() => {
-    if (storedCaptionStyle) handleCaptionStyleCommit(resetCaptionLook(storedCaptionStyle, supportsCaptionFont));
+    if (storedCaptionStyle) handleCaptionStyleCommit(resetCaptionLook(storedCaptionStyle, supportsCaptionFont, supportedFontNames));
   }, [handleCaptionStyleCommit, storedCaptionStyle]);
 
   // Back to the preset's own caption size and position (undoable).
@@ -4709,6 +4709,8 @@ export default function EditScreen() {
         visible={styleSheetOpen}
         style={storedCaptionStyle}
         supportsFont={supportsCaptionFont}
+        embeddedFonts={supportedFontNames}
+        supportsOutline={supportsTextOutline}
         onChange={handleCaptionLook}
         onReset={handleCaptionLookReset}
         onClose={() => setStyleSheetOpen(false)}

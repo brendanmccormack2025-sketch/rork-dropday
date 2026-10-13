@@ -9,7 +9,8 @@
  * Pure data and functions: no React, no native modules.
  */
 import type { CaptionStyle, EditInstructions } from "./editModel.ts";
-import { TEXT_FONT_NAME, resolveCaptionLook } from "./transcription/captionPresets.ts";
+import { CAPTION_FONTS, TEXT_FONT_NAME, resolveCaptionLook } from "./transcription/captionPresets.ts";
+import { burnedFontName, resolveAppearance, STROKE_EM, type LookSource } from "./textLook.ts";
 import { TEXT_LINE_HEIGHT_EM, TEXT_PAD_X_EM, TEXT_PAD_Y_EM } from "./feedLayout.ts";
 
 export type OverlayFontWeight = "regular" | "medium" | "semibold" | "bold" | "heavy" | "black";
@@ -39,6 +40,12 @@ export type OverlayStyleSpec = {
   fontName?: string;
   letterSpacing?: number;
   shadow?: boolean;
+  /**
+   * An outline around the letters (build 1.0.5, supportsTextOutline): its color and its width in points on a 1080-wide
+   * frame (how far it reaches beyond the letters). Builds that do not know the keys ignore them.
+   */
+  outlineColor?: string;
+  outlineWidth?: number;
   /** Simple fade at the start and end of the overlay's window. */
   fadeInMs?: number;
   fadeOutMs?: number;
@@ -138,8 +145,20 @@ export function resolveOverlayStyle(kind: "text" | "caption", styleId?: string):
   return preset.spec;
 }
 
-/** A preset with the clip-wide caption box applied: size scaled, position replaced. */
-export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle): OverlayStyleSpec {
+/** What the build can burn in beyond the 1.0.4 baseline; every field is false / empty on a 1.0.4 build. */
+export type RenderCaps = {
+  /** An outline around the text (style keys outlineColor / outlineWidth). */
+  outline?: boolean;
+  /** PostScript names of the fonts the build embeds (VideoRender.supportedFontNames). */
+  fontNames?: readonly string[];
+};
+
+/**
+ * A preset with the clip-wide caption box applied: size scaled, position replaced, then the look: the colors exactly as
+ * chosen (text, background, outline), the shadow, the font. `caps` says what the build can burn in: without outline
+ * support the outline keys are left out, so the preview (which uses the same function) shows what the render draws.
+ */
+export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle, caps: RenderCaps = {}): OverlayStyleSpec {
   const s = style.scale;
   const out: OverlayStyleSpec = {
     ...spec,
@@ -160,7 +179,12 @@ export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle): 
   if (look.uppercase) out.uppercase = true;
   else delete out.uppercase;
   if (look.shadow) out.shadow = true;
+  else delete out.shadow;
   if (look.fontName) out.fontName = look.fontName;
+  if (look.outline && caps.outline) {
+    out.outlineColor = look.outline.hex;
+    out.outlineWidth = look.outline.em * out.fontSize;
+  }
   return out;
 }
 
@@ -170,17 +194,40 @@ export function applyCaptionStyle(spec: OverlayStyleSpec, style: CaptionStyle): 
  * caption fades for 1 ms, which takes the minimum-fade path.
  */
 function renderSpec(kind: "text" | "caption", styleId?: string, captionStyle?: CaptionStyle, options: RenderOptions = {}): OverlayStyleSpec {
+  const caps: RenderCaps = { outline: options.supportsOutline === true, fontNames: options.fontNames ?? [] };
   const resolved = resolveOverlayStyle(kind, styleId);
   // Text overlays are Montserrat Bold where the build can draw a bundled font; elsewhere the system font, as before.
   if (kind !== "caption") {
     const spec = options.supportsFont && !resolved.fontName ? { ...resolved, fontName: TEXT_FONT_NAME } : resolved;
     return withTextBox(spec, !!options.supportsTextBox, !!options.supportsLineBackgrounds);
   }
-  const spec = captionStyle ? applyCaptionStyle(resolved, captionStyle) : resolved;
+  const spec = guardFont(captionStyle ? applyCaptionStyle(resolved, captionStyle, caps) : resolved, options);
   return withTextBox({ ...spec, fadeInMs: Math.max(1, spec.fadeInMs ?? 0), fadeOutMs: Math.max(1, spec.fadeOutMs ?? 0) }, !!options.supportsTextBox, !!options.supportsLineBackgrounds);
 }
 
-export type RenderOptions = { supportsFont?: boolean; supportsTextBox?: boolean; supportsLineBackgrounds?: boolean };
+/**
+ * A font that needs the build to embed it is only sent to a build that says it does; anything else falls back to the
+ * default font (Montserrat ExtraBold where the build can draw a bundled font, else the system font), never to a name
+ * the renderer cannot open.
+ */
+function guardFont(spec: OverlayStyleSpec, options: RenderOptions): OverlayStyleSpec {
+  const font = CAPTION_FONTS.find((f) => f.fontName !== null && f.fontName === spec.fontName);
+  if (!font?.requiresEmbedded || (options.fontNames ?? []).includes(font.fontName as string)) return spec;
+  const out = { ...spec };
+  if (options.supportsFont) out.fontName = "Montserrat-ExtraBold";
+  else delete out.fontName;
+  return out;
+}
+
+export type RenderOptions = {
+  supportsFont?: boolean;
+  supportsTextBox?: boolean;
+  supportsLineBackgrounds?: boolean;
+  /** Build 1.0.5: the renderer draws an outline (style keys outlineColor / outlineWidth). */
+  supportsOutline?: boolean;
+  /** Build 1.0.5: PostScript names of the fonts the build embeds. */
+  fontNames?: readonly string[];
+};
 
 /**
  * The box proportions both the preview and the render use where the build supports them: 0.5 em across and
@@ -212,3 +259,38 @@ export function toRenderJson(instructions: EditInstructions, options: RenderOpti
     ),
   });
 }
+
+/**
+ * A Text-button overlay as the native renderer's style (for a 1080-wide frame): every part of the look maps to its own
+ * keys and none depends on another: `color` is the text color, `backgroundColor` the box (absent = none), `shadow` the
+ * shadow, `outlineColor` / `outlineWidth` the outline (only where the build draws one). The font is the overlay's own
+ * where the build embeds it, else Montserrat Bold. Text-button overlays are drawn live today and are not burned into the
+ * posted video; this is the mapping for the day they are, and what the tests check for every combination.
+ */
+export function overlayRenderStyle(ov: LookSource & { fontSize: number; scale?: number }, caps: RenderCaps = {}): OverlayStyleSpec {
+  const a = resolveAppearance(ov);
+  const fontSize = ov.fontSize * (ov.scale ?? 1);
+  const spec: OverlayStyleSpec = {
+    fontSize,
+    fontWeight: "bold",
+    color: a.textColor,
+    yCenter: 0.5,
+    fontName: burnedFontName(a.fontId, caps.fontNames ?? []),
+  };
+  if (a.boxColor !== null) {
+    const alpha = a.boxOpacity < 1 ? Math.round(a.boxOpacity * 255).toString(16).padStart(2, "0").toUpperCase() : "";
+    spec.backgroundColor = `${a.boxColor}${alpha}`;
+    spec.cornerRadius = fontSize * 0.2;
+    spec.lineBackground = true;
+    spec.backgroundPaddingX = fontSize * TEXT_PAD_X_EM;
+    spec.backgroundPaddingY = fontSize * TEXT_PAD_Y_EM;
+  }
+  if (a.shadow) spec.shadow = true;
+  if (a.stroke && caps.outline) {
+    spec.outlineColor = a.stroke.color;
+    spec.outlineWidth = a.stroke.em * fontSize;
+  }
+  return spec;
+}
+
+export { STROKE_EM };

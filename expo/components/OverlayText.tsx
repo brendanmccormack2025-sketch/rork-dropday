@@ -40,7 +40,7 @@ export default function OverlayText({ text, look, layout, onLayout, hidden, chil
     textShadowRadius: 0,
     textShadowColor: "transparent",
   };
-  if (a.shadow && !boxed && !outlined) {
+  if (a.shadow && !outlined) {
     shadow = a.legacy
       ? {
           textShadowOffset: { width: 0, height: 1 },

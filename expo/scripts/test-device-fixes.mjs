@@ -48,7 +48,7 @@ const w = (text, startMs, endMs) => ({ text, startMs, endMs });
   const bottomEdge = 0.72 + halfBoxHeight(1, 16 / 9);
   ok("the default caption box ends above the feed's bottom bar and below the face area", bottomEdge * 422 < z.bottom.y && 0.72 > 0.6);
   const sheet = read("../components/CaptionStyleSheet.tsx");
-  ok("the Style sheet has a case option (Aa / AA)", /onChange\(\{ uppercase: c\.value \}\)/.test(sheet) && />Case</.test(sheet));
+  ok("the Style sheet has a case option (Aa / AA)", /onChange\(\{ uppercase: c\.value \}\)/.test(sheet) && /accessibilityLabel=\{c\.value \? "All caps" : "Normal case"\}/.test(sheet));
   ok("editing a caption shows the real casing, not capitals", !/setDraft\([^)]*toUpperCase/.test(read("../components/CaptionPreview.tsx") + read("../components/CaptionsSheet.tsx")));
 }
 

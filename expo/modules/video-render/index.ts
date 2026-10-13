@@ -18,6 +18,10 @@ type VideoRenderNative = {
   supportsLineBackgrounds?: boolean;
   /** Present (true) from build 1.0.4: probeTimingAsync, and merges without seam fades / with tracks kept in step. */
   supportsTimingProbe?: boolean;
+  /** Build 1.0.5 (not in 1.0.4): text styles may carry outlineColor / outlineWidth and the renderer strokes the letters. */
+  supportsTextOutline?: boolean;
+  /** Build 1.0.5 (not in 1.0.4): the PostScript names of the bundled fonts the build embeds (UIFont(name:) finds them). */
+  supportedFontNames?: string[];
   probeTimingAsync?(uri: string): Promise<TimingProbe>;
   addListener(event: "onProgress", listener: (e: RenderProgressEvent) => void): Subscription;
 };
@@ -34,6 +38,12 @@ export const supportsTextBox: boolean = native?.supportsTextBox === true;
 
 /** True when this build draws a background per caption line (older builds draw one box as wide as the widest line). */
 export const supportsLineBackgrounds: boolean = native?.supportsLineBackgrounds === true;
+
+/** True when this build burns in a text outline (style keys outlineColor / outlineWidth). False on 1.0.4: the outline is not offered for captions. */
+export const supportsTextOutline: boolean = native?.supportsTextOutline === true;
+
+/** The PostScript names of the bundled fonts this build embeds for the renderer. Empty on 1.0.4 (only Montserrat, for "Classic"). */
+export const supportedFontNames: readonly string[] = Array.isArray(native?.supportedFontNames) ? (native!.supportedFontNames as string[]) : [];
 
 /** True when this build can measure a file's track timing (probeTimingAsync). */
 export const supportsTimingProbe: boolean = native?.supportsTimingProbe === true;
