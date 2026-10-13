@@ -7,9 +7,9 @@
  */
 import { readFileSync } from "node:fs";
 import {
-  BOTTOM_MARKER_Y, DEFAULT_FPS, HANDLE_MIN_TOUCH, HANDLE_TOUCH, INFO_H, LANE_H, LANE_TOP, MAX_VISIBLE_MS, NUDGE_BTN, TL_PAD, TOP_MARKER_Y,
+  BOTTOM_MARKER_Y, DEFAULT_FPS, DIVIDER_W, FRAME_LINE, HANDLE_PRESS_SCALE, HANDLE_RADIUS, HANDLE_TOUCH, HANDLE_W, INFO_H, LANE_H, LANE_TOP, MAX_VISIBLE_MS, NUDGE_BTN, TL_PAD, TOP_MARKER_Y,
   clampOffset, clampScale, contentWidth, dbToAmp, edgeDragMs, fitScale, fitView, followOffset, formatDeltaSeconds, formatTimeCs, frameMsOf,
-  easeOutCubic, flingStep, grabAt, handleGeoms, handleHalfWidth, handleZones, isFit, lerpView, maxScale, msToX, nudgeFrameMs, offsetToCenter, pinchView, safeFps, tapAt,
+  easeOutCubic, flingStep, frameHandleXs, frameOf, grabAt, handleGeoms, hitFrame, isFit, lerpView, maxScale, msToX, nudgeFrameMs, offsetToCenter, pinchView, safeFps, tapAt,
   timelineRects, waveformColumns, waveformPath, wavePiecesOf, xToMs, zoomAt,
 } from "../lib/autoEdit/timelineView.ts";
 import {
@@ -79,7 +79,7 @@ const TOTAL = 60_000;    // a one-minute video
   eq("a playhead in view is left alone; one out of view is brought back", [followOffset(30_000, z.scale, offsetToCenter(30_000, z.scale, TOTAL, W), TOTAL, W), followOffset(1000, z.scale, offsetToCenter(30_000, z.scale, TOTAL, W), TOTAL, W) !== null], [null, true]);
 }
 
-// ── 3. handle touch zones: 44 pt at every zoom ───────────────────────────────
+// ── 3. the selected clip's frame and handles: 44 pt targets at every zoom ────
 {
   const fit = fitScale(TOTAL, W);
   const max = maxScale(TOTAL, W);
@@ -90,31 +90,42 @@ const TOTAL = 60_000;    // a one-minute video
     { outputMs: 40_000, prev: { atMs: 44_000 } },
   ];
   const geoms = handleGeoms(seams);
-  eq("geometry: neighbours and the source time of each edge", [geoms[1].prevGapMs, geoms[1].nextGapMs, geoms[1].prevAtMs, geoms[1].nextAtMs, geoms[0].prevGapMs, geoms[3].nextGapMs], [10_000, 400, 10_000, 12_000, null, null]);
-  eq("a handle half is 44 pt wide when its neighbours are far", [handleHalfWidth(null), handleHalfWidth(500), handleHalfWidth(88)], [HANDLE_TOUCH, HANDLE_TOUCH, HANDLE_TOUCH]);
-  eq("...and shrinks between very close seams, never below the minimum", [handleHalfWidth(40), handleHalfWidth(10), handleHalfWidth(0)], [20, HANDLE_MIN_TOUCH, HANDLE_MIN_TOUCH]);
-  // the seams 400 ms apart are 2.3 pt apart at fit, ~137 pt apart at full zoom
-  const zFit = handleZones(geoms[2], fit);
-  const zMax = handleZones(geoms[2], max);
-  eq("seams 0.4 s apart: tiny zones when zoomed out, the full 44 pt when zoomed in", [zFit.left <= HANDLE_MIN_TOUCH, zFit.right, zMax.left, zMax.right], [true, HANDLE_TOUCH, HANDLE_TOUCH, HANDLE_TOUCH]);
-  const offsetAtSeam = offsetToCenter(10_400, max, TOTAL, W);
-  const xs = geoms.map((g) => msToX(g.outputMs, max, offsetAtSeam));
+  eq("geometry: the source time of the edge on each side of a seam", [geoms[1].prevAtMs, geoms[1].nextAtMs, geoms[0].hasPrev, geoms[3].hasNext], [10_000, 12_000, false, false]);
+  const clips = [{ startMs: 0, durMs: 10_000 }, { startMs: 10_000, durMs: 400 }, { startMs: 10_400, durMs: 29_600 }];
+  const mid = frameOf(clips[1], geoms);
+  eq("a clip's frame knows which seams its two handles drag", mid, { startMs: 10_000, endMs: 10_400, leftIdx: 1, rightIdx: 2 });
+  eq("the first clip's left handle is the start of the video, the last clip's right handle its end", [frameOf(clips[0], geoms).leftIdx, frameOf(clips[0], geoms).rightIdx, frameOf(clips[2], geoms).leftIdx, frameOf(clips[2], geoms).rightIdx], [0, 1, 2, 3]);
+  eq("no clip, no frame", [frameOf(null, geoms), frameOf({ startMs: 0, durMs: 0 }, geoms)], [null, null]);
+
   const laneY = LANE_TOP + LANE_H / 2;
-  const grab = (x, y = laneY) => grabAt(x, y, geoms, 5000, max, offsetAtSeam);
-  eq("zoomed in, touching just left of a seam grabs the end of the clip before it, just right the start of the next", [grab(xs[1] - 30), grab(xs[1] + 30), grab(xs[2] - 30), grab(xs[2] + 30)].map((g) => [g.kind, g.index, g.side]), [["edge", 1, 0], ["edge", 1, 1], ["edge", 2, 0], ["edge", 2, 1]]);
-  eq("43 pt away still grabs, 46 pt away scrolls", [grab(xs[2] + 43).kind, grab(xs[2] + 46).kind], ["edge", "scroll"]);
-  eq("the first seam only has a start edge and the last only an end edge", [grabAt(msToX(0, fit, 0) + 20, laneY, geoms, 30_000, fit, 0).side, grabAt(msToX(0, fit, 0) - 20, laneY, geoms, 30_000, fit, 0).kind], [1, "scroll"]);
-  // the playhead
-  const pX = msToX(5000, max, offsetAtSeam);
-  eq("the playhead dot (top strip) and its line are grabbed for scrubbing", [grabAt(pX, 4, geoms, 5000, max, offsetAtSeam).kind, grabAt(pX + 10, laneY, geoms, 5000, max, offsetAtSeam).kind], ["playhead", "playhead"]);
-  eq("above the lane the dot wins over a handle", grabAt(xs[1], 4, geoms, 10_000, max, offsetAtSeam).kind, "playhead");
-  // taps: markers first, then handles, then the clip
+  for (const [label, scale] of [["fit", fit], ["5x", fit * 5], ["max", max]]) {
+    const offset = clampOffset(offsetToCenter(10_200, scale, TOTAL, W), TOTAL, scale, W);
+    const hx = frameHandleXs(mid, scale, offset);
+    eq(`${label}: handles sit just outside the clip (centres ${HANDLE_W / 2} pt from its edges)`, [near(hx.left, msToX(10_000, scale, offset) - HANDLE_W / 2), near(hx.right, msToX(10_400, scale, offset) + HANDLE_W / 2)], [true, true]);
+    const grab = (x, y = laneY) => grabAt(x, y, mid, 55_000, scale, offset);   // playhead far away
+    eq(`${label}: a touch within 22 pt of a handle's centre grabs it (a 44 pt target)`, [grab(hx.left - 21).kind, grab(hx.left + 21).kind, grab(hx.right - 21).kind, grab(hx.right + 21).kind], ["edge", "edge", "edge", "edge"]);
+    eq(`${label}: the left handle drags the clip's start (side 1 of seam 1), the right its end (side 0 of seam 2)`, [[grab(hx.left).index, grab(hx.left).side], [grab(hx.right).index, grab(hx.right).side]], [[1, 1], [2, 0]]);
+    eq(`${label}: 23 pt from a handle's centre is not a grab (a plain spot scrolls)`, grab(hx.left - 23 - 40).kind, "scroll");
+    eq(`${label}: the target reaches 8 pt above and below the lane`, [grab(hx.left, LANE_TOP - 7).kind, grab(hx.left, LANE_TOP + LANE_H + 7).kind, grab(hx.left, LANE_TOP - 12).kind], ["edge", "edge", "scroll"]);
+  }
+  eq("only the selected clip's handles can be grabbed: without a frame an edge is never grabbed", grabAt(msToX(10_000, fit, 0), laneY, null, 5000, fit, 0).kind, "scroll");
+  eq("a handle with no seam to drag is not grabbed", hitFrame(msToX(0, fit, 0) - HANDLE_W / 2, laneY, { startMs: 0, endMs: 20_000, leftIdx: -1, rightIdx: 1 }, fit, 0), null);
+  eq("the playhead dot (top strip) wins over a handle; the handle wins over the playhead's line", [grabAt(msToX(10_000, max, 0) - 7, 4, mid, 10_000, max, 0).kind, grabAt(msToX(10_000, max, 0) - 7, laneY, mid, 10_000, max, 0).kind], ["playhead", "edge"]);
+  eq("the playhead line is grabbed away from the handles", grabAt(msToX(5000, max, 0) + 5, laneY, mid, 5000, max, 0).kind, "playhead");
+  // very short clip at the whole-video zoom: both handles overlap, the nearer one wins
+  const tiny = frameOf({ startMs: 10_000, durMs: 400 }, geoms);
+  const hxT = frameHandleXs(tiny, fit, 0);
+  eq("on a clip narrower than its handles the nearer handle is grabbed", [hitFrame(hxT.left - 6, laneY, tiny, fit, 0).side, hitFrame(hxT.right + 6, laneY, tiny, fit, 0).side], [1, 0]);
+  eq("the touch target is 44 pt and the drawn handle 14 pt wide, 6 pt radius, full lane height", [HANDLE_TOUCH, HANDLE_W, HANDLE_RADIUS, HANDLE_PRESS_SCALE], [44, 14, 6, 1.15]);
+  eq("the frame outline is 2.5 pt and the dividers 1.5 pt", [FRAME_LINE, DIVIDER_W], [2.5, 1.5]);
+
+  // taps: markers first, then the handle, then the clip
   const markers = [{ outputMs: 10_000, bottom: false }, { outputMs: 25_000, bottom: true }];
-  const clips = [{ startMs: 0, durMs: 10_000 }, { startMs: 10_000, durMs: 30_000 }];
-  const at = (x, y) => tapAt(x, y, markers, geoms, clips, fit, 0);
-  eq("a tap on a marker beats the handle under it", at(msToX(10_000, fit, 0), TOP_MARKER_Y).kind, "marker");
-  eq("a tap lower on the same seam selects the edge", at(msToX(10_000, fit, 0) - 4, LANE_TOP + LANE_H - 4).kind, "edge");
-  eq("a tap on a clip selects it; outside the lane is nothing", [at(msToX(2000, fit, 0), laneY).index, at(msToX(2000, fit, 0), 100).kind], [0, "none"]);
+  const at = (x, y, frame) => tapAt(x, y, markers, frame, clips, fit, 0);
+  eq("a tap on a marker beats a handle under it", at(msToX(10_000, fit, 0), TOP_MARKER_Y, mid).kind, "marker");
+  eq("a tap on a handle of the selected clip selects that edge", at(frameHandleXs(mid, fit, 0).left, LANE_TOP + LANE_H - 4, mid).kind, "edge");
+  eq("a tap on a clip selects it (and shows its handles); another clip's edge is just that clip", [at(msToX(2000, fit, 0), laneY, null).kind, at(msToX(2000, fit, 0), laneY, null).index, at(msToX(30_000, fit, 0), laneY, mid).index], ["clip", 0, 2]);
+  eq("outside the lane is nothing", at(msToX(2000, fit, 0), 100, null).kind, "none");
   eq("bottom markers sit in the lower part of the lane", BOTTOM_MARKER_Y > TOP_MARKER_Y && BOTTOM_MARKER_Y < LANE_TOP + LANE_H, true);
 }
 
@@ -303,6 +314,13 @@ const TOTAL = 60_000;    // a one-minute video
   ok("every edit ends in the existing seam handler with the lowered jitter gate", /cfg\.onDragEnd\(d\.edge, drag\.clampedMs, \{ minDragMs: 1 \}\)/.test(comp) && /l\.seams\.onDragEnd\(e, drag\.clampedMs, \{ minDragMs: 1 \}\)/.test(comp));
   ok("the nudge uses the video's frame rate", /nudgeFrameMs\(e\.atMs, direction, fps/.test(comp) && /safeFps\(seams\.frameRate\)/.test(comp));
   ok("the preview is throttled while dragging (50 ms) and the readout is m:ss.cc", /const PREVIEW_EVERY_MS = 50/.test(comp) && /now - d\.lastPreviewAt >= PREVIEW_EVERY_MS/.test(comp) && /formatTimeCs\(/.test(comp));
+  // the trim-style handles
+  ok("the selected clip has a thick rounded red handle on each end, each with two white grip lines", /handle: \{[^}]*width: HANDLE_W[^}]*height: LANE_H[^}]*backgroundColor: theme\.accent/.test(comp) && /borderTopLeftRadius: HANDLE_RADIUS, borderBottomLeftRadius: HANDLE_RADIUS/.test(comp) && /borderTopRightRadius: HANDLE_RADIUS, borderBottomRightRadius: HANDLE_RADIUS/.test(comp) && (comp.match(/<View style=\{styles\.grip\} \/>/g) || []).length === 4 && /grip: \{ width: 2, height: 16[^}]*backgroundColor: "#FFFFFF"/.test(comp));
+  ok("a red outline of 2.5 pt runs along the top and bottom of the selected clip", /frameBar: \{[^}]*height: FRAME_LINE[^}]*backgroundColor: theme\.accent/.test(comp) && /top: LANE_TOP \}/.test(comp) && /top: LANE_TOP \+ LANE_H - FRAME_LINE/.test(comp));
+  ok("a touched handle scales up (transform scale, 1.15) and gives a light haptic at touch-down; it goes back on release", /\{ scale: pressLeft\.value \}/.test(comp) && /\{ scale: pressRight\.value \}/.test(comp) && /press\(g\.side\);\s*haptic\("light"\);/.test(comp) && /if \(g1\.current\.mode === "edge"\) press\(null\)/.test(comp) && /HANDLE_PRESS_SCALE/.test(comp));
+  ok("unselected cut boundaries are thin grey dividers; the red diamond markers are gone", /divider: \{[^}]*width: DIVIDER_W[^}]*rgba\(10,10,10,0\.22\)/.test(comp) && /<Divider /.test(comp) && /m\.kind === "cut" \? styles\.cutDot : look\.glyph/.test(comp) && !/Pills/.test(comp));
+  ok("the frame follows the selected edge through edits (clips get new ids), else the tapped clip", /selectedHandle\?\.edge\.clipId \?\? selectedClipId/.test(comp));
+  ok("tapping empty space ends both the edge selection and the clip selection", /if \(l\.selectedClipId\) l\.onDeselectAndPreview\?\.\(\);/.test(comp));
   ok("the pure helpers are plain functions (no worklet directive anywhere)", !/"worklet"/.test(read("../lib/autoEdit/timelineView.ts") + read("../lib/autoEdit/edgeSnap.ts")));
   ok("haptics are called from JS only", !/"worklet"/.test(code) && /function haptic\(/.test(code));
   ok("Cuts screen: edit.tsx shows the guarded precision timeline for the automatic edit's seams and the old timeline otherwise", /<GuardedTimeline/.test(edit) && /\{isVideo && timelineSeams && \(/.test(edit) && /\{isVideo && !timelineSeams && \(/.test(edit));

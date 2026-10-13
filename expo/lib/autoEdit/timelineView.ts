@@ -12,10 +12,19 @@
 export const TL_PAD = 20;
 /** The most zoomed-in view shows about this much time across the screen width. */
 export const MAX_VISIBLE_MS = 1000;
-/** An edge handle's touch target on each side of its seam: the 44 pt minimum. */
+/** An edge handle's touch target: the 44 pt minimum, at every zoom. */
 export const HANDLE_TOUCH = 44;
-/** ...but never narrower than this where seams are very close (zooming in makes room). */
-export const HANDLE_MIN_TOUCH = 14;
+/** The drawn handle of the selected clip: thick, rounded, full lane height. */
+export const HANDLE_W = 14;
+export const HANDLE_RADIUS = 6;
+/** The outline along the top and bottom of the selected clip. */
+export const FRAME_LINE = 2.5;
+/** A handle grows by this while it is touched. */
+export const HANDLE_PRESS_SCALE = 1.15;
+/** The touch target reaches this far above and below the lane. */
+export const HANDLE_V_SLOP = 8;
+/** Unselected cut boundaries are drawn as a thin divider this wide. */
+export const DIVIDER_W = 1.5;
 
 export type View = { scale: number; offset: number };
 
@@ -95,16 +104,6 @@ export function offsetToCenter(ms: number, scale: number, totalMs: number, viewW
 /** The new source time of an edge dragged `dxPx` points: the same distance in time at the current zoom. */
 export function edgeDragMs(atMs: number, dxPx: number, scale: number): number {
   return atMs + dxPx / scale;
-}
-
-/**
- * Width of one half of a handle's touch zone. Handles keep the full 44 pt target at every zoom; only where two
- * seams are closer than twice that (zoomed out, many cuts) does a half shrink to half the gap, down to a minimum,
- * so neighbours never swallow each other's touches. `gapPx` is the distance to the neighbouring handle (null: none).
- */
-export function handleHalfWidth(gapPx: number | null): number {
-  if (gapPx === null) return HANDLE_TOUCH;
-  return Math.min(HANDLE_TOUCH, Math.max(HANDLE_MIN_TOUCH, gapPx / 2));
 }
 
 /** m:ss.cc (centiseconds, rounded down so the display never runs ahead of the frame). */
@@ -284,7 +283,7 @@ export const MARKER_HIT = 44;
 export const TOP_MARKER_Y = LANE_TOP + 10;
 export const BOTTOM_MARKER_Y = LANE_TOP + LANE_H - 12;
 
-/** One seam: where it is on the output timeline and how far its neighbours are (to size its touch zones). */
+/** One seam: where it is on the output timeline, and the source time of the edge on each side. */
 export type HandleGeom = {
   outputMs: number;
   hasPrev: boolean;
@@ -311,49 +310,57 @@ export function handleGeoms(seams: Array<{ outputMs: number; prev?: { atMs: numb
   }));
 }
 
-/** Touch zone widths of a seam at a zoom: left = the clip before it (its end), right = the clip after it (its start). */
-export function handleZones(g: HandleGeom, scale: number): { left: number; right: number } {
+/**
+ * The selected clip's frame: where it is on the output timeline and which seams its two handles drag. The left handle
+ * drags the start of the clip (the `next` edge of the seam at its start, side 1), the right handle its end (the `prev`
+ * edge of the seam at its end, side 0). An index of -1: no draggable edge on that side.
+ */
+export type FrameGeom = { startMs: number; endMs: number; leftIdx: number; rightIdx: number };
+
+export function frameOf(clip: ClipGeom | null | undefined, handles: HandleGeom[]): FrameGeom | null {
+  if (!clip || !(clip.durMs > 0)) return null;
+  const endMs = clip.startMs + clip.durMs;
   return {
-    left: g.hasPrev ? handleHalfWidth(g.prevGapMs === null ? null : g.prevGapMs * scale) : 0,
-    right: g.hasNext ? handleHalfWidth(g.nextGapMs === null ? null : g.nextGapMs * scale) : 0,
+    startMs: clip.startMs,
+    endMs,
+    leftIdx: handles.findIndex((g) => g.hasNext && Math.abs(g.outputMs - clip.startMs) <= 2),
+    rightIdx: handles.findIndex((g) => g.hasPrev && Math.abs(g.outputMs - endMs) <= 2),
   };
 }
 
-/** The edge under a touch inside the clip lane: seam index and side (0 = end of the clip before, 1 = start of the next). */
-export function hitEdge(x: number, y: number, handles: HandleGeom[], scale: number, offset: number, pad: number = TL_PAD): { index: number; side: 0 | 1 } | null {
-  if (y < LANE_TOP - 4 || y > LANE_TOP + LANE_H + 4) return null;
-  let index = -1;
-  let side: 0 | 1 = 0;
-  let best = Infinity;
-  for (let i = 0; i < handles.length; i++) {
-    const g = handles[i]!;
-    const hx = msToX(g.outputMs, scale, offset, pad);
-    const z = handleZones(g, scale);
-    if (g.hasPrev && x >= hx - z.left && x <= hx && hx - x < best) {
-      best = hx - x;
-      index = i;
-      side = 0;
-    }
-    if (g.hasNext && x >= hx && x <= hx + z.right && x - hx < best) {
-      best = x - hx;
-      index = i;
-      side = 1;
-    }
-  }
-  return index < 0 ? null : { index, side };
+/** Where the two handles are drawn on screen (their centres): just outside the clip, so the clip stays fully visible. */
+export function frameHandleXs(frame: FrameGeom, scale: number, offset: number, pad: number = TL_PAD): { left: number; right: number } {
+  return {
+    left: msToX(frame.startMs, scale, offset, pad) - HANDLE_W / 2,
+    right: msToX(frame.endMs, scale, offset, pad) + HANDLE_W / 2,
+  };
+}
+
+/**
+ * The handle under a touch: a 44 pt wide target centred on each drawn handle, as tall as the lane plus a little above
+ * and below, at every zoom. Only the selected clip's handles can be grabbed. Returns the seam index and side.
+ */
+export function hitFrame(x: number, y: number, frame: FrameGeom | null, scale: number, offset: number, pad: number = TL_PAD): { index: number; side: 0 | 1 } | null {
+  if (!frame) return null;
+  if (y < LANE_TOP - HANDLE_V_SLOP || y > LANE_TOP + LANE_H + HANDLE_V_SLOP) return null;
+  const xs = frameHandleXs(frame, scale, offset, pad);
+  const dl = frame.leftIdx >= 0 ? Math.abs(x - xs.left) : Infinity;
+  const dr = frame.rightIdx >= 0 ? Math.abs(x - xs.right) : Infinity;
+  if (dl > HANDLE_TOUCH / 2 && dr > HANDLE_TOUCH / 2) return null;
+  return dl <= dr ? { index: frame.leftIdx, side: 1 } : { index: frame.rightIdx, side: 0 };
 }
 
 export type Grab = { kind: "playhead" | "edge" | "scroll"; index: number; side: 0 | 1 };
 
 /**
- * What a finger that lands at (x, y) is going to drag: the playhead (its dot in the top strip, or its line), an edge
- * handle (inside the clip lane), or the timeline itself (scroll). The strip above the lane belongs to the playhead,
- * the lane to the handles; a plain spot scrolls.
+ * What a finger that lands at (x, y) is going to drag: the playhead (its dot in the top strip, or its line), a handle
+ * of the selected clip, or the timeline itself (scroll). The strip above the lane belongs to the playhead, the
+ * handles win over the playhead's line; a plain spot scrolls.
  */
-export function grabAt(x: number, y: number, handles: HandleGeom[], playheadMs: number, scale: number, offset: number, pad: number = TL_PAD): Grab {
+export function grabAt(x: number, y: number, frame: FrameGeom | null, playheadMs: number, scale: number, offset: number, pad: number = TL_PAD): Grab {
   const px = msToX(playheadMs, scale, offset, pad);
   if (y < TOP_STRIP_H && Math.abs(x - px) <= PLAYHEAD_GRAB) return { kind: "playhead", index: -1, side: 0 };
-  const edge = hitEdge(x, y, handles, scale, offset, pad);
+  const edge = hitFrame(x, y, frame, scale, offset, pad);
   if (edge) return { kind: "edge", index: edge.index, side: edge.side };
   if (Math.abs(x - px) <= PLAYHEAD_LINE_GRAB) return { kind: "playhead", index: -1, side: 0 };
   return { kind: "scroll", index: -1, side: 0 };
@@ -361,12 +368,12 @@ export function grabAt(x: number, y: number, handles: HandleGeom[], playheadMs: 
 
 export type TapTarget = { kind: "marker" | "edge" | "clip" | "none"; index: number; side: 0 | 1 };
 
-/** What a tap at (x, y) hits: a marker first (44 x 44), then an edge handle, then the clip under it. */
+/** What a tap at (x, y) hits: a marker first (44 x 44), then a handle of the selected clip, then the clip under it. */
 export function tapAt(
   x: number,
   y: number,
   markers: MarkerGeom[],
-  handles: HandleGeom[],
+  frame: FrameGeom | null,
   clips: ClipGeom[],
   scale: number,
   offset: number,
@@ -378,7 +385,7 @@ export function tapAt(
     const my = m.bottom ? BOTTOM_MARKER_Y : TOP_MARKER_Y;
     if (Math.abs(x - mx) <= MARKER_HIT / 2 && Math.abs(y - my) <= MARKER_HIT / 2) return { kind: "marker", index: i, side: 0 };
   }
-  const edge = hitEdge(x, y, handles, scale, offset, pad);
+  const edge = hitFrame(x, y, frame, scale, offset, pad);
   if (edge) return { kind: "edge", index: edge.index, side: edge.side };
   if (y >= LANE_TOP && y <= LANE_TOP + LANE_H) {
     const ms = xToMs(x, scale, offset, pad);

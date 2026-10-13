@@ -17,6 +17,11 @@ import type { SeamEdgeInfo, SeamHandleSpec } from "@/lib/autoEdit/seams";
 import { buildSnapTargets, snapParams, snapStart, snapStep, type SnapState, type TimedWord } from "@/lib/autoEdit/edgeSnap";
 import {
   BOTTOM_MARKER_Y,
+  DIVIDER_W,
+  FRAME_LINE,
+  HANDLE_PRESS_SCALE,
+  HANDLE_RADIUS,
+  HANDLE_W,
   INFO_H,
   LANE_H,
   LANE_TOP,
@@ -31,6 +36,8 @@ import {
   followOffset,
   formatDeltaSeconds,
   formatTimeCs,
+  frameOf,
+  frameHandleXs,
   grabAt,
   handleGeoms,
   lerpView,
@@ -45,6 +52,7 @@ import {
   wavePiecesOf,
   xToMs,
   type ClipGeom,
+  type FrameGeom,
   type MarkerGeom,
   type View as ViewState,
 } from "@/lib/autoEdit/timelineView";
@@ -194,13 +202,66 @@ function Bar({
   return <Animated.View pointerEvents="none" style={[styles.bar, style, anim]} />;
 }
 
-function Pills({ outputMs, hasPrev, hasNext, scale, offset }: { outputMs: number; hasPrev: boolean; hasNext: boolean; scale: SharedValue<number>; offset: SharedValue<number> }) {
-  const prev = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - 5 }] }));
-  const next = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value + 1 }] }));
+/** A thin, subtle divider on a cut boundary that is not part of the selected clip. */
+function Divider({ outputMs, scale, offset }: { outputMs: number; scale: SharedValue<number>; offset: SharedValue<number> }) {
+  const anim = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - DIVIDER_W / 2 }] }));
+  return <Animated.View pointerEvents="none" style={[styles.divider, anim]} />;
+}
+
+/**
+ * The selected clip's frame, iOS Photos / CapCut trim style: a thick rounded handle on each end (Trial red, two short
+ * white grip lines) joined by a red outline along the top and bottom. Only transform and opacity are animated: the
+ * outline is one wide bar per side scaled sideways, a touched handle scales up.
+ */
+function Frame({
+  frameStart,
+  frameEnd,
+  pressLeft,
+  pressRight,
+  scale,
+  offset,
+}: {
+  frameStart: SharedValue<number>;
+  frameEnd: SharedValue<number>;
+  pressLeft: SharedValue<number>;
+  pressRight: SharedValue<number>;
+  scale: SharedValue<number>;
+  offset: SharedValue<number>;
+}) {
+  const topBar = useAnimatedStyle(() => {
+    if (frameStart.value < 0) return { opacity: 0 };
+    const x0 = TL_PAD + frameStart.value * scale.value - offset.value - HANDLE_W / 2;
+    const x1 = TL_PAD + frameEnd.value * scale.value - offset.value + HANDLE_W / 2;
+    const w = Math.max(1, x1 - x0);
+    return { opacity: 1, transform: [{ translateX: x0 + (w - BAR_BASE) / 2 }, { scaleX: w / BAR_BASE }] };
+  });
+  const bottomBar = useAnimatedStyle(() => {
+    if (frameStart.value < 0) return { opacity: 0 };
+    const x0 = TL_PAD + frameStart.value * scale.value - offset.value - HANDLE_W / 2;
+    const x1 = TL_PAD + frameEnd.value * scale.value - offset.value + HANDLE_W / 2;
+    const w = Math.max(1, x1 - x0);
+    return { opacity: 1, transform: [{ translateX: x0 + (w - BAR_BASE) / 2 }, { scaleX: w / BAR_BASE }] };
+  });
+  const left = useAnimatedStyle(() => ({
+    opacity: frameStart.value < 0 ? 0 : 1,
+    transform: [{ translateX: TL_PAD + frameStart.value * scale.value - offset.value - HANDLE_W }, { scale: pressLeft.value }],
+  }));
+  const right = useAnimatedStyle(() => ({
+    opacity: frameStart.value < 0 ? 0 : 1,
+    transform: [{ translateX: TL_PAD + frameEnd.value * scale.value - offset.value }, { scale: pressRight.value }],
+  }));
   return (
     <>
-      {hasPrev ? <Animated.View pointerEvents="none" style={[styles.pill, prev]} /> : null}
-      {hasNext ? <Animated.View pointerEvents="none" style={[styles.pill, next]} /> : null}
+      <Animated.View pointerEvents="none" style={[styles.frameBar, { top: LANE_TOP }, topBar]} />
+      <Animated.View pointerEvents="none" style={[styles.frameBar, { top: LANE_TOP + LANE_H - FRAME_LINE }, bottomBar]} />
+      <Animated.View pointerEvents="none" style={[styles.handle, styles.handleLeft, left]}>
+        <View style={styles.grip} />
+        <View style={styles.grip} />
+      </Animated.View>
+      <Animated.View pointerEvents="none" style={[styles.handle, styles.handleRight, right]}>
+        <View style={styles.grip} />
+        <View style={styles.grip} />
+      </Animated.View>
     </>
   );
 }
@@ -249,8 +310,10 @@ export default function PrecisionTimeline({
   const viewWSV = useSharedValue(0);
   const playMs = useSharedValue(positionMs);
   const playRef = useRef(positionMs);
-  const selOutputMs = useSharedValue(-1);
-  const selSide = useSharedValue(0);
+  const frameStart = useSharedValue(-1);
+  const frameEnd = useSharedValue(-1);
+  const pressLeft = useSharedValue(1);
+  const pressRight = useSharedValue(1);
   const dragOn = useSharedValue(0);
   const dragMs = useSharedValue(0);
   const dragAtMs = useSharedValue(0);
@@ -311,8 +374,11 @@ export default function PrecisionTimeline({
   }, [clips]);
   const markerGeoms = useMemo<MarkerGeom[]>(() => (markers ?? []).map((m) => ({ outputMs: m.outputMs, bottom: MARKER_LOOK[m.kind]?.bottom ?? false })), [markers]);
   const targets = useMemo(() => buildSnapTargets(seams.words, seams.boundaries), [seams.words, seams.boundaries]);
-  const geo = useRef({ geoms, markerGeoms, clipGeoms, targets });
-  geo.current = { geoms, markerGeoms, clipGeoms, targets };
+  const geo = useRef<{ geoms: typeof geoms; markerGeoms: MarkerGeom[]; clipGeoms: ClipGeom[]; targets: number[]; frame: FrameGeom | null }>({ geoms, markerGeoms, clipGeoms, targets, frame: null });
+  geo.current.geoms = geoms;
+  geo.current.markerGeoms = markerGeoms;
+  geo.current.clipGeoms = clipGeoms;
+  geo.current.targets = targets;
 
   // ── the view ──
   const waveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -439,10 +505,18 @@ export default function PrecisionTimeline({
     });
     return best as { index: number; edge: SeamEdgeInfo } | null;
   }, [selected, seams.handles]);
+  // The framed clip: the clip the selected edge belongs to (it follows the edge through edits, which give clips new
+  // ids), else the clip that was tapped.
+  const frameClipIndex = useMemo(() => {
+    const id = selectedHandle?.edge.clipId ?? selectedClipId;
+    return id ? clips.findIndex((c) => c.id === id) : -1;
+  }, [selectedHandle, selectedClipId, clips]);
+  const frame = useMemo(() => (frameClipIndex >= 0 ? frameOf(clipGeoms[frameClipIndex], geoms) : null), [frameClipIndex, clipGeoms, geoms]);
+  geo.current.frame = frame;
   useEffect(() => {
-    selOutputMs.value = selectedHandle ? (seams.handles[selectedHandle.index]?.outputMs ?? -1) : -1;
-    selSide.value = selected?.side === "right" ? 0 : 1;
-  }, [selectedHandle, selected, seams.handles, selOutputMs, selSide]);
+    frameStart.value = frame ? frame.startMs : -1;
+    frameEnd.value = frame ? frame.endMs : -1;
+  }, [frame, frameStart, frameEnd]);
   // an edit moved the edge somewhere we can no longer find: nothing is selected any more
   useEffect(() => {
     if (selected && !selectedHandle && seams.handles !== selectedAgainst.current) {
@@ -543,6 +617,28 @@ export default function PrecisionTimeline({
     }
   }, [dragMs]);
 
+  // A touched handle grows a little and ticks (transform only); it goes back when the finger lifts.
+  const tweenId = useRef(0);
+  const press = useCallback(
+    (side: 0 | 1 | null) => {
+      const id = ++tweenId.current;
+      const fromL = pressLeft.value;
+      const fromR = pressRight.value;
+      const toL = side === 1 ? HANDLE_PRESS_SCALE : 1;
+      const toR = side === 0 ? HANDLE_PRESS_SCALE : 1;
+      const t0 = Date.now();
+      const tick = () => {
+        if (tweenId.current !== id) return;
+        const k = Math.min(1, (Date.now() - t0) / 90);
+        pressLeft.value = fromL + (toL - fromL) * k;
+        pressRight.value = fromR + (toR - fromR) * k;
+        if (k < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    },
+    [pressLeft, pressRight],
+  );
+
   const stopTicker = useCallback(() => {
     if (ticker.current) clearInterval(ticker.current);
     ticker.current = null;
@@ -598,7 +694,6 @@ export default function PrecisionTimeline({
       dragOutputMs.value = g.outputMs;
       dragSide.value = side;
       dragOn.value = 1;
-      haptic("select");
       selectEdge(e);
       setLiveEdge({ ms: e.atMs, atMs: e.atMs });
       stopTicker();
@@ -639,10 +734,7 @@ export default function PrecisionTimeline({
       }
       if (kind === "edge") {
         const e = resolveEdge(index, side);
-        if (e) {
-          haptic("select");
-          selectEdge(e);
-        }
+        if (e) selectEdge(e);
         return;
       }
       if (kind === "clip") {
@@ -657,9 +749,8 @@ export default function PrecisionTimeline({
       if (l.selected) {
         setSelected(null);
         l.seams.onEdgePreview?.(null);
-      } else if (l.selectedClipId) {
-        l.onDeselectAndPreview?.();
       }
+      if (l.selectedClipId) l.onDeselectAndPreview?.();
     },
     [resolveEdge, selectEdge, setSelected],
   );
@@ -686,8 +777,12 @@ export default function PrecisionTimeline({
         guard("pan.begin", (e: { x: number; y: number }) => {
           cancelAnim();
           touching.current += 1;
-          const g = grabAt(e.x, e.y, geo.current.geoms, playRef.current, view.current.scale, view.current.offset);
+          const g = grabAt(e.x, e.y, geo.current.frame, playRef.current, view.current.scale, view.current.offset);
           g1.current = { mode: g.kind === "edge" ? "edge" : g.kind === "playhead" ? "playhead" : "scroll", idx: g.index, side: g.side, startOffset: view.current.offset, grabDx: 0, lastSeekMs: -1 };
+          if (g.kind === "edge") {
+            press(g.side);
+            haptic("light");
+          }
         }),
       )
       .onStart(
@@ -735,6 +830,7 @@ export default function PrecisionTimeline({
       .onFinalize(
         guard("pan.finalize", (e: { translationX: number }, success: boolean) => {
           if (g1.current.mode === "edge" || edge.current) endEdge(success, e.translationX);
+          if (g1.current.mode === "edge") press(null);
           g1.current.mode = "none";
           touching.current = Math.max(0, touching.current - 1);
         }),
@@ -748,7 +844,7 @@ export default function PrecisionTimeline({
         guard("tap", (e: { x: number; y: number }, ok: boolean) => {
           if (!ok) return;
           once("tap");
-          const t = tapAt(e.x, e.y, geo.current.markerGeoms, geo.current.geoms, geo.current.clipGeoms, view.current.scale, view.current.offset);
+          const t = tapAt(e.x, e.y, geo.current.markerGeoms, geo.current.frame, geo.current.clipGeoms, view.current.scale, view.current.offset);
           handleTap(t.kind, t.index, t.side);
         }),
       );
@@ -849,10 +945,6 @@ export default function PrecisionTimeline({
     const d = dragMs.value - dragAtMs.value;
     return { opacity: dragOn.value === 1 ? 1 : 0, transform: [{ translateX: TL_PAD + (dragOutputMs.value + d) * scale.value - offset.value - 1 }] };
   });
-  const selStyle = useAnimatedStyle(() => ({
-    opacity: selOutputMs.value >= 0 ? 1 : 0,
-    transform: [{ translateX: TL_PAD + selOutputMs.value * scale.value - offset.value + (selSide.value === 0 ? -6 : 1) }],
-  }));
   const playheadStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: TL_PAD + playMs.value * scale.value - offset.value - 1 }],
   }));
@@ -895,10 +987,8 @@ export default function PrecisionTimeline({
               </View>
               {/* handles, markers, playhead: drawn over the lane */}
               <View pointerEvents="none" style={styles.overlay}>
-                {geoms.map((g, i) => (
-                  <Pills key={`h${i}`} outputMs={g.outputMs} hasPrev={g.hasPrev} hasNext={g.hasNext} scale={scale} offset={offset} />
-                ))}
-                <Animated.View pointerEvents="none" style={[styles.selected, selStyle]} />
+                {geoms.map((g, i) => (g.hasPrev && g.hasNext ? <Divider key={`d${i}`} outputMs={g.outputMs} scale={scale} offset={offset} /> : null))}
+                <Frame frameStart={frameStart} frameEnd={frameEnd} pressLeft={pressLeft} pressRight={pressRight} scale={scale} offset={offset} />
                 <Animated.View pointerEvents="none" style={[styles.edgeLine, edgeLineStyle]} />
                 {(markers ?? []).map((m, i) => {
                   const look = MARKER_LOOK[m.kind];
@@ -907,7 +997,7 @@ export default function PrecisionTimeline({
                     <MarkerGlyph
                       key={m.id}
                       outputMs={markerGeoms[i]?.outputMs ?? 0}
-                      glyph={look.glyph}
+                      glyph={m.kind === "cut" ? styles.cutDot : look.glyph}
                       y={look.bottom ? BOTTOM_MARKER_Y : TOP_MARKER_Y}
                       scale={scale}
                       offset={offset}
@@ -991,11 +1081,17 @@ const styles = StyleSheet.create({
   ghostOut: { backgroundColor: "rgba(31,168,77,0.38)" },
   ghostCut: { backgroundColor: "rgba(232,41,28,0.34)" },
   wave: { position: "absolute", top: 0, height: LANE_H },
-  pill: { position: "absolute", left: 0, top: LANE_TOP + LANE_H * 0.18, width: 4, height: LANE_H * 0.64, borderRadius: 2, backgroundColor: "rgba(10,10,10,0.82)" },
-  selected: { position: "absolute", left: 0, top: LANE_TOP, width: 5, height: LANE_H, borderRadius: 2, backgroundColor: theme.accent },
+  divider: { position: "absolute", left: 0, top: LANE_TOP + 4, width: DIVIDER_W, height: LANE_H - 8, borderRadius: DIVIDER_W / 2, backgroundColor: "rgba(10,10,10,0.22)" },
+  frameBar: { position: "absolute", left: 0, width: BAR_BASE, height: FRAME_LINE, backgroundColor: theme.accent },
+  handle: { position: "absolute", left: 0, top: LANE_TOP, width: HANDLE_W, height: LANE_H, backgroundColor: theme.accent, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 3 },
+  handleLeft: { borderTopLeftRadius: HANDLE_RADIUS, borderBottomLeftRadius: HANDLE_RADIUS },
+  handleRight: { borderTopRightRadius: HANDLE_RADIUS, borderBottomRightRadius: HANDLE_RADIUS },
+  grip: { width: 2, height: 16, borderRadius: 1, backgroundColor: "#FFFFFF" },
   edgeLine: { position: "absolute", left: 0, top: LANE_TOP, width: 2, height: LANE_H, backgroundColor: theme.text },
   markerBox: { position: "absolute", left: 0, width: 12, height: 12, alignItems: "center", justifyContent: "center" },
   markerGlyph: { width: 12, height: 12 },
+  // the cut marker is no longer a red diamond: a small grey dot (still tappable, to see what was cut)
+  cutDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(10,10,10,0.35)" },
   playhead: { position: "absolute", left: 0, top: 0, width: 2, height: LANE_TOP + LANE_H, alignItems: "center" },
   playheadDot: { position: "absolute", top: 1, width: 14, height: 14, borderRadius: 7, backgroundColor: theme.accent, borderWidth: 2, borderColor: "#fff" },
   playheadLine: { position: "absolute", top: 14, bottom: 0, width: 2, backgroundColor: theme.accent },
