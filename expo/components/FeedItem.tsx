@@ -54,13 +54,12 @@ import {
   TAB_BAR_HEIGHT,
   VIDEO_ASPECT,
   computeCoverCrop,
-  overlayFont,
   textLayout,
   textSlot,
   videoDisplayWidth,
 } from "@/lib/feedLayout";
 import { uploadLabel } from "@/lib/postingFeed";
-import HuggingText from "@/components/HuggingText";
+import OverlayText from "@/components/OverlayText";
 import { savePostToRoll } from "@/lib/exportEdit";
 import { effectiveFontSize } from "@/lib/textOverlayStyle";
 
@@ -187,27 +186,6 @@ function ActionButton({
   );
 }
 
-/** Resolve background style preset to colors for feed rendering. */
-function resolveFeedBg(
-  style: TextBackgroundStyle,
-  accentColor: string,
-): { backgroundColor: string; color: string } {
-  switch (style) {
-    case "none-white":
-      return { backgroundColor: "transparent", color: "#FFFFFF" };
-    case "none-black":
-      return { backgroundColor: "transparent", color: "#000000" };
-    case "white-box":
-      return { backgroundColor: "#FFFFFF", color: "#000000" };
-    case "black-box":
-      return { backgroundColor: "#000000", color: "#FFFFFF" };
-    case "accent-box":
-      return { backgroundColor: accentColor, color: "#FFFFFF" };
-    case "translucent-box":
-      return { backgroundColor: "rgba(0,0,0,0.55)", color: "#FFFFFF" };
-  }
-}
-
 /** Non-interactive text overlay rendered on top of feed media.
  *  Translates editor-space fractions (relative to the full CONTAIN video
  *  frame) into feed-space pixels, accounting for COVER's centered crop. */
@@ -222,11 +200,6 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
   containerH: number;
   videoAspect?: number;
 }) {
-  const { backgroundColor, color } = resolveFeedBg(
-    overlay.backgroundStyle,
-    overlay.color,
-  );
-
   // Compute how much of the original video is visible after COVER cropping
   const { visibleW, visibleH, cropLeft, cropTop } = computeCoverCrop(
     containerW,
@@ -254,8 +227,6 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
   const videoW = videoDisplayWidth(containerW, { visibleW, visibleH, cropLeft, cropTop });
   const slot = textSlot(left, videoW);
   const [boxH, setBoxH] = useState(0);
-  const hasBackground = backgroundColor !== "transparent";
-  const shadowTint = color === "#000000" ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)";
 
   return (
     <View
@@ -273,26 +244,13 @@ export const FeedTextOverlay = memo(function FeedTextOverlay({
         },
       ]}
     >
-      <HuggingText
+      <OverlayText
         text={overlay.text}
+        look={overlay}
+        layout={layout}
         onLayout={(e) => {
           const { height } = e.nativeEvent.layout;
           if (height > 0) setBoxH((prev) => (prev === height ? prev : height));
-        }}
-        maxWidth={layout.maxWidth}
-        padX={layout.padX}
-        padY={layout.padY}
-        radius={layout.cornerRadius}
-        mode="lines"
-        background={hasBackground ? backgroundColor : null}
-        textStyle={{
-          ...overlayFont(overlay.fontId),
-          color,
-          fontSize: layout.fontSize,
-          lineHeight: layout.lineHeight,
-          textShadowOffset: { width: 0, height: 1 },
-          textShadowRadius: 4,
-          textShadowColor: hasBackground ? "transparent" : shadowTint,
         }}
       />
     </View>

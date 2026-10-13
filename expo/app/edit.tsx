@@ -151,12 +151,12 @@ import {
   type DraftClip,
   type DraftProject,
   type TextOverlay,
-  type TextBackgroundStyle,
 } from "@/providers/PostsProvider";
 import TimelineEditor, { effectiveDurationMs } from "@/components/TimelineEditor";
 import GuardedTimeline from "@/components/GuardedTimeline";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import TextOverlayEditor from "@/components/TextOverlayEditor";
+import { NEW_TEXT_FONT_SIZE, applyTextEdit, editorStateOf, nextLook, type TextAppearance } from "@/lib/textLook";
 import DraggableTextOverlay, {
   BG_STYLES,
 } from "@/components/DraggableTextOverlay";
@@ -2071,35 +2071,31 @@ export default function EditScreen() {
     setTextEditorVisible(true);
   }, [selectedOverlayId]);
 
+  // Done in the text editor: the text and its look (font, color, style, outline, shadow) are stored on the overlay, in
+  // one undo step (pushSnapshot), and travel with drafts and the post like every other overlay field.
   const handleTextEditorDone = useCallback(
-    (text: string, backgroundStyle: TextBackgroundStyle) => {
+    (text: string, appearance: Required<TextAppearance>) => {
       setTextEditorVisible(false);
       pushSnapshot(clips, textOverlays);
-
-      if (editingOverlayId) {
-        setTextOverlays((prev) =>
-          prev.map((ov) =>
-            ov.id === editingOverlayId
-              ? { ...ov, text, backgroundStyle }
-              : ov,
-          ),
-        );
-        setEditingOverlayId(null);
-      } else {
-        const newOv: TextOverlay = {
+      const { overlays, created } = applyTextEdit(
+        textOverlays,
+        editingOverlayId,
+        text,
+        appearance,
+        (): TextOverlay => ({
           id: newOverlayId(),
           text,
           x: DEFAULT_TEXT_OVERLAY_POS.x,
           y: DEFAULT_TEXT_OVERLAY_POS.y,
-          fontSize: 26,
+          fontSize: NEW_TEXT_FONT_SIZE,
           rotation: 0,
           color: "#FFFFFF",
-          backgroundStyle,
-        };
-        setTextOverlays((prev) => [...prev, newOv]);
-        setSelectedOverlayId(newOv.id);
-        setEditingOverlayId(null);
-      }
+          backgroundStyle: "none-white",
+        }),
+      );
+      setTextOverlays(overlays);
+      if (created) setSelectedOverlayId(created.id);
+      setEditingOverlayId(null);
       triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
     },
     [editingOverlayId, clips, textOverlays, pushSnapshot],
@@ -2164,6 +2160,8 @@ export default function EditScreen() {
       setTextOverlays((prev) =>
         prev.map((ov) => {
           if (ov.id !== id) return ov;
+          // A text with the new look cycles outline -> box -> plain; an older one its old background presets.
+          if (ov.look) return { ...ov, look: nextLook(ov.look) };
           const idx = BG_STYLES.indexOf(
             ov.backgroundStyle ?? "none-white",
           );
@@ -4818,11 +4816,7 @@ export default function EditScreen() {
             ? editingOverlay.text
             : ""
         }
-        initialBackgroundStyle={
-          editingOverlay
-            ? (editingOverlay.backgroundStyle ?? "none-white")
-            : "none-white"
-        }
+        initialAppearance={editorStateOf(editingOverlay)}
         onDone={handleTextEditorDone}
         onCancel={handleTextEditorCancel}
         onRemove={handleTextEditorRemove}

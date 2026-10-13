@@ -69,13 +69,13 @@ eq("lines that differ more keep their width (they meet through a concave corner)
   ok("a narrow line over a wide one has an inward-curving (concave) corner and a convex outer corner", /A12 12 0 0 0/.test(g2.path) && /A12 12 0 0 1/.test(g2.path));
   ok("the outline stays inside the shape", pathPoints(g2.path).every((p) => p.x >= -1e-6 && p.x <= g2.width + 1e-6));
 }
-ok("editor, feed and captions draw the same shape (one component)", ["../components/DraggableTextOverlay.tsx", "../components/CaptionPreview.tsx", "../components/FeedItem.tsx"].every((f) => /HuggingText/.test(read(f))));
+ok("editor, feed and captions draw the same shape (one component: text overlays through OverlayText, which wraps HuggingText)", ["../components/DraggableTextOverlay.tsx", "../components/FeedItem.tsx"].every((f) => /<OverlayText/.test(read(f))) && /<HuggingText/.test(read("../components/OverlayText.tsx")) && /HuggingText/.test(read("../components/CaptionPreview.tsx")));
 
 // ── text editing: one copy, in place ──
 const te = read("../components/TextOverlayEditor.tsx");
 ok("the field is the finished text's own look (HuggingText mirror + TextInput), not a separate boxed input", /<HuggingText[\s\S]*<TextInput/.test(te) && !/fieldBox/.test(te));
 ok("the overlay being edited is hidden on the video (no dimmed duplicate)", /textEditorVisible && editingOverlayId \? textOverlays\.filter/.test(edit) && !/liveText/.test(edit));
-ok("the editor's own row is Cancel, Aa and the check", /Cancel/.test(te) && /Change text style/.test(te) && /accessibilityLabel="Done"/.test(te));
+ok("the editor's own row is Cancel, Aa and the check", /Cancel/.test(te) && /accessibilityLabel="Fonts"/.test(te) && /accessibilityLabel="Done"/.test(te));
 ok("while typing: top bar, tools, labels and play button are driven by one visibility object", /\{vis\.topBar && \(/.test(edit) && /\{vis\.toolColumn && \(/.test(edit) && /vis\.selectionBar \?/.test(edit) && /vis\.next \?/.test(edit));
 
 // ── Captions panel ──

@@ -9,13 +9,12 @@ import Animated, {
 } from "react-native-reanimated";
 import type { TextOverlay, TextBackgroundStyle } from "@/providers/PostsProvider";
 import * as Haptics from "expo-haptics";
-import HuggingText from "@/components/HuggingText";
+import OverlayText from "@/components/OverlayText";
 import { shouldBuzz, snapToCenter } from "@/lib/guides";
 import { TOUCH_PAD, createGestureTracker } from "@/lib/overlayGestures";
 import { clampScale, effectiveFontSize, resolveBgMeta as resolveBgMetaShared } from "@/lib/textOverlayStyle";
 import {
   TEXT_MAX_WIDTH,
-  overlayFont,
   textLayout,
   fracToFrame,
   frameToFrac,
@@ -303,16 +302,6 @@ export default function DraggableTextOverlay({
     [hasMeasured, textWidth, textHeight, opacity],
   );
 
-  // ── Resolve background style ────────────────────────────────────────────
-  const bgMeta = useMemo(
-    () => resolveBgMeta(overlay.backgroundStyle ?? "none-white", overlay.color),
-    [overlay.backgroundStyle, overlay.color],
-  );
-
-  const hasBackground = bgMeta.bgColor !== "transparent" && bgMeta.bgOpacity > 0;
-  const effectiveTextColor = bgMeta.textColor;
-  const background = hasBackground ? withOpacity(bgMeta.bgColor, bgMeta.bgOpacity) : null;
-
   // ── Render ──────────────────────────────────────────────────────────────
   return (
     <Animated.View
@@ -322,29 +311,7 @@ export default function DraggableTextOverlay({
       <GestureDetector gesture={gesture}>
         <View collapsable={false} style={styles.touch}>
           <View style={styles.box}>
-            <HuggingText
-              text={overlay.text}
-              onLayout={handleLayout}
-              maxWidth={layout.maxWidth}
-              padX={layout.padX}
-              padY={layout.padY}
-              radius={layout.cornerRadius}
-              mode="lines"
-              background={background}
-              textStyle={{
-                ...overlayFont(overlay.fontId),
-                fontSize: layout.fontSize,
-                lineHeight: layout.lineHeight,
-                color: effectiveTextColor,
-                textShadowOffset: { width: 0, height: 1 },
-                textShadowRadius: 4,
-                textShadowColor: hasBackground
-                  ? "transparent"
-                  : effectiveTextColor === "#000000"
-                    ? "rgba(255,255,255,0.6)"
-                    : "rgba(0,0,0,0.6)",
-              }}
-            />
+            <OverlayText text={overlay.text} look={overlay} layout={layout} onLayout={handleLayout} />
 
             {/* Selection outline: the same dashed white outline the caption uses */}
             {isSelected && (
@@ -356,13 +323,6 @@ export default function DraggableTextOverlay({
       </GestureDetector>
     </Animated.View>
   );
-}
-
-/** "#RRGGBB" and an opacity -> "rgba(r,g,b,a)". */
-function withOpacity(hex: string, opacity: number): string {
-  const h = hex.replace("#", "");
-  const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h.slice(0, 6), 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${opacity})`;
 }
 
 // ── Styles ──────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@
 
 import { BG_PAD_X_EM, BG_PAD_Y_EM, BG_RADIUS_EM } from "./lineBackground.ts";
 import { CAPTION_FONTS, TEXT_FONT_FAMILY, previewFontFamily } from "./transcription/captionPresets.ts";
+import { textFont, textFontFamily } from "./textLook.ts";
 
 export const TAB_BAR_HEIGHT = 88;
 /** Assumed aspect ratio (w/h) of posted video. */
@@ -164,16 +165,18 @@ export function textSlot(centerPx: number, videoW: number): { left: number; widt
  * shows Montserrat Bold (loaded with expo-font in app/_layout.tsx). An overlay with a font chosen in
  * Style (fontId, one of the caption font presets) keeps that font; the system font (Trial) is undefined.
  */
-export function overlayFontFamily(fontId?: string): string | undefined {
+export function overlayFontFamily(fontId?: string, isLoaded?: (family: string) => boolean): string | undefined {
   if (!fontId) return TEXT_FONT_FAMILY;
+  // The text fonts (Anton, Archivo Black, ...): their family when it is loaded, else Montserrat Bold.
+  if (textFont(fontId)) return textFontFamily(fontId, isLoaded);
   const font = CAPTION_FONTS.find((f) => f.id === fontId);
   if (!font) return TEXT_FONT_FAMILY;
   return font.fontName ? previewFontFamily(font.fontName) : undefined;
 }
 
 /** The font style keys of a Text-button overlay (nothing for the system font, so the app font default stays out of it). */
-export function overlayFont(fontId?: string): { fontFamily?: string; fontWeight: "400" } | { fontWeight: "900" } {
-  const family = overlayFontFamily(fontId);
+export function overlayFont(fontId?: string, isLoaded?: (family: string) => boolean): { fontFamily?: string; fontWeight: "400" } | { fontWeight: "900" } {
+  const family = overlayFontFamily(fontId, isLoaded);
   return family ? { fontFamily: family, fontWeight: "400" } : { fontWeight: "900" };
 }
 

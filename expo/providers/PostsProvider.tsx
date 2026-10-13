@@ -309,8 +309,20 @@ export type TextOverlay = {
   backgroundStyle: TextBackgroundStyle;
   /** Pinch scale on top of fontSize (1 = as typed). Absent = 1. */
   scale?: number;
-  /** A font chosen in Style (a caption font id); absent = Montserrat Bold. */
+  /**
+   * The font: one of lib/textLook.ts TEXT_FONTS (anton, archivo-black, montserrat, poppins, marker, caveat, dm-serif,
+   * space-grotesk), or a caption font id from an older Style choice; absent = Montserrat Bold.
+   */
   fontId?: string;
+  /**
+   * How the text is drawn (lib/textLook.ts). Absent on a text made before these existed: it is then drawn from
+   * `backgroundStyle` exactly as before. `color` is the fill (or the box color in the "box" look).
+   */
+  look?: "outline" | "box" | "plain";
+  /** Outline thickness (look "outline"). */
+  stroke?: "thin" | "medium" | "thick";
+  /** Soft drop shadow (looks "outline" and "plain"). Absent = on. */
+  shadow?: boolean;
   /** Absent = 'text'. Stored in the existing text_overlays JSON; no new columns. */
   kind?: "text" | "caption";
   /** When it shows, in ms on the OUTPUT timeline (after cuts). Missing startMs/endMs = whole video. */

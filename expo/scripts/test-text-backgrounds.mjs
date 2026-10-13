@@ -80,7 +80,7 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
   const drag = read("../components/DraggableTextOverlay.tsx");
   const feed = read("../components/FeedItem.tsx");
   const cap = read("../components/CaptionPreview.tsx");
-  ok("editor and feed text overlays use HuggingText in per-line mode", /<HuggingText[\s\S]{0,400}mode="lines"/.test(drag) && /<HuggingText[\s\S]{0,500}mode="lines"/.test(feed));
+  ok("editor and feed text overlays use HuggingText in per-line mode", /<OverlayText/.test(drag) && /<OverlayText/.test(feed) && /<HuggingText[\s\S]{0,500}mode="lines"/.test(read("../components/OverlayText.tsx")));
   ok("captions use it too: per line where the build can, else one hugging box", /mode=\{supportsLineBackgrounds \? "lines" : "box"\}/.test(cap));
 }
 

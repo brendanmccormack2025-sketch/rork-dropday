@@ -14,16 +14,23 @@ import React, { useEffect } from "react";
 import { Appearance, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import {
-  useFonts,
-  PlusJakartaSans_300Light,
-  PlusJakartaSans_400Regular,
-  PlusJakartaSans_500Medium,
-  PlusJakartaSans_700Bold,
-  PlusJakartaSans_800ExtraBold,
-} from "@expo-google-fonts/plus-jakarta-sans";
-
-import { Montserrat_700Bold, Montserrat_800ExtraBold } from "@expo-google-fonts/montserrat";
+import { useFonts } from "expo-font";
+// One import per weight: the package index would pull in every weight of a family (Montserrat alone is 6 MB).
+import { PlusJakartaSans_300Light } from "@expo-google-fonts/plus-jakarta-sans/300Light";
+import { PlusJakartaSans_400Regular } from "@expo-google-fonts/plus-jakarta-sans/400Regular";
+import { PlusJakartaSans_500Medium } from "@expo-google-fonts/plus-jakarta-sans/500Medium";
+import { PlusJakartaSans_700Bold } from "@expo-google-fonts/plus-jakarta-sans/700Bold";
+import { PlusJakartaSans_800ExtraBold } from "@expo-google-fonts/plus-jakarta-sans/800ExtraBold";
+import { Montserrat_700Bold } from "@expo-google-fonts/montserrat/700Bold";
+import { Montserrat_800ExtraBold } from "@expo-google-fonts/montserrat/800ExtraBold";
+// Text overlay fonts (lib/textLook.ts), one weight each, all SIL Open Font License.
+import { Anton_400Regular } from "@expo-google-fonts/anton/400Regular";
+import { ArchivoBlack_400Regular } from "@expo-google-fonts/archivo-black/400Regular";
+import { Poppins_600SemiBold } from "@expo-google-fonts/poppins/600SemiBold";
+import { PermanentMarker_400Regular } from "@expo-google-fonts/permanent-marker/400Regular";
+import { Caveat_700Bold } from "@expo-google-fonts/caveat/700Bold";
+import { DMSerifDisplay_400Regular } from "@expo-google-fonts/dm-serif-display/400Regular";
+import { SpaceGrotesk_700Bold } from "@expo-google-fonts/space-grotesk/700Bold";
 
 import SaveToRollToast from "@/components/SaveToRollToast";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
@@ -242,7 +249,7 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     PlusJakartaSans_300Light,
     PlusJakartaSans_400Regular,
     PlusJakartaSans_500Medium,
@@ -250,15 +257,25 @@ export default function RootLayout() {
     PlusJakartaSans_800ExtraBold,
     Montserrat_700Bold,
     Montserrat_800ExtraBold,
+    Anton_400Regular,
+    ArchivoBlack_400Regular,
+    Poppins_600SemiBold,
+    PermanentMarker_400Regular,
+    Caveat_700Bold,
+    DMSerifDisplay_400Regular,
+    SpaceGrotesk_700Bold,
   });
+  // A font that fails to load must not keep the app on the splash screen: text falls back to Montserrat / the system
+  // font (lib/textLook.ts textFontFamily checks what is loaded).
+  const fontsReady = fontsLoaded || !!fontError;
 
   useEffect(() => {
-    if (fontsLoaded) {
+    if (fontsReady) {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [fontsLoaded]);
+  }, [fontsReady]);
 
-  if (!fontsLoaded) {
+  if (!fontsReady) {
     return null;
   }
 
