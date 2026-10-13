@@ -179,7 +179,7 @@ const segs = buildSegments(clips);
   ok("unchanged pieces keep their clip, so selection and keys survive an edit", /reuse\(c\) \?\? \{ \.\.\.base/.test(edit));
   ok("the playback loop watches the player every frame and skips removed ranges (playbackTick)", /requestAnimationFrame\(tick\)/.test(edit) && /playbackTick\(\{ segs: virtualSegsRef\.current/.test(edit));
   ok("the playhead is read from the player (getPositionMs) and the timeline knows when it plays", /getPositionMs=\{samplePlayheadMs\}/.test(edit) && /isPlaying=\{isPlaying\}/.test(edit));
-  ok("selecting a clip on the timeline does not move the playhead or limit playback to it", /const handleSelectPiece[\s\S]{0,300}isIsolatedRef\.current = false/.test(edit) && /onSelectClip=\{handleSelectPiece\}/.test(edit));
+  ok("selecting a clip on the timeline plays that clip only (the playhead stays if it is inside the clip), and tapping off returns to the whole video", /const handleSelectPiece[\s\S]{0,1200}isIsolatedRef\.current = true/.test(edit) && /onSelectClip=\{handleSelectPiece\}/.test(edit) && /const handleClearSelection/.test(edit));
   ok("Split and Delete go through the reversible edit", /const handleSplitAtPlayhead[\s\S]{0,700}userEdit\(\(\) => next\)/.test(edit) && /const handleDeleteSelected[\s\S]{0,900}userEdit\(\(\) => plan\.next\)/.test(edit));
   ok("the old Trim / Split / Delete rows are hidden while the precision timeline owns them", /!\(timelineSeams && precisionOn\)/.test(edit));
   ok("the playhead is fixed at the centre of the timeline", /styles\.playhead, \{ left: viewW \/ 2 - 1 \}/.test(tl) && !/playMs/.test(tl));

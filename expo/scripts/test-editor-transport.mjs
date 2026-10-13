@@ -69,7 +69,7 @@ const idle = { step: "edit", textEditing: false, panelOpen: false, keyboardUp: f
   const edit = read("../app/edit.tsx");
   const tr = read("../components/EditorTransport.tsx");
   ok("one play control: the red bottom play button is gone; the soft round icon shows while paused", !/<PlaybackControls\s+floating/.test(edit) && /<PlayIndicator visible=\{vis\.playButton\}/.test(edit));
-  ok("tapping the video toggles play/pause, below the overlays and controls", /accessibilityLabel=\{isPlaying \? "Pause" : "Play"\}[\s\S]{0,300}togglePlay\(\)/.test(edit));
+  ok("tapping the video toggles play/pause, below the overlays and controls", /accessibilityLabel=\{isPlaying \? "Pause" : "Play"\}[\s\S]{0,700}togglePlay\(\)/.test(edit));
   ok("the progress bar scrubs (seek) and plays on after a scrub that interrupted playback; replay restarts from 0", /onSeek=\{handleSeekAny\}/.test(edit) && /onResume=\{\(\) => setTimeout\(\(\) => setIsPlaying\(true\), 60\)\}/.test(edit) && /onReplay=\{handleReplay\}/.test(edit));
   ok("the top bar and the tool column fade (FadeView) from chromeFade", /<FadeView style=\{\[styles\.eTopBar/.test(edit) && /<FadeView style=\{\[styles\.eTools/.test(edit) && /const fade = chromeFade\(/.test(edit) && /guideGesture\.active/.test(edit));
   ok("new texts are placed and sized left of the tool column", /newTextPlacement\(\{/.test(edit) && /spot\.scale < 1/.test(edit));

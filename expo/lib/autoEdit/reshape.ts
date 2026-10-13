@@ -90,7 +90,32 @@ export function describeEdgeDrag(
   if (Math.abs(moved) < minDragMs) return { kind: "none", edgeMs, clampedMs: edgeMs };
   const outward = edge.side === "left" ? moved < 0 : moved > 0;
   const range = { startMs: Math.min(edgeMs, limited), endMs: Math.max(edgeMs, limited) };
-  return { kind: outward ? "reveal" : "cut", edgeMs, clampedMs: limited, range };
+  if (!outward) return { kind: "cut", edgeMs, clampedMs: limited, range };
+  // Bringing footage back can leave a sliver of the cut behind, which is restored with it (see revealRange). The edit
+  // then lands a little beyond the finger; say so now, so what is shown during the drag is what is committed.
+  const landed = revealLanding(state, range);
+  const landing = edge.side === "right" ? landed.endMs : landed.startMs;
+  return { kind: "reveal", edgeMs, clampedMs: landing, range: landed };
+}
+
+/** The hole that revealRange will really open: the asked one, widened over any sliver of a cut it would leave behind. */
+function revealLanding(state: EditState, hole: Range): Range {
+  const prot = protectedRangesOf(state);
+  const out = { ...hole };
+  for (const d of state.decisions) {
+    if (!isActiveCut(state, d)) continue;
+    const pieces = effectivePieces({ startMs: d.sourceStartMs, endMs: d.sourceEndMs }, d.origin === "user" ? [] : prot);
+    for (const p of pieces) {
+      if (!overlaps(p, hole)) continue;
+      for (const rest of subtract(p, hole)) {
+        if (rest.endMs - rest.startMs < MIN_KEEP_MS) {
+          out.startMs = Math.min(out.startMs, rest.startMs);
+          out.endMs = Math.max(out.endMs, rest.endMs);
+        }
+      }
+    }
+  }
+  return out;
 }
 
 /** What is left of `r` once `hole` is taken out (zero, one or two ranges). */

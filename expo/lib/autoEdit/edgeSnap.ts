@@ -9,7 +9,7 @@
 export type TimedWord = { startMs: number; endMs: number };
 
 /** How close (points) the edge must come to a target before it is pulled onto it. */
-export const SNAP_PX = 10;
+export const SNAP_PX = 8;
 /** The threshold in time is this many points at the current zoom, but never below / above these. */
 export const SNAP_MIN_MS = 6;
 export const SNAP_MAX_MS = 150;
@@ -17,6 +17,14 @@ export const SNAP_MAX_MS = 150;
 export const SNAP_PAUSE_MS = 350;
 /** Movement smaller than this (points) counts as holding still. */
 export const SNAP_JITTER_PX = 1.5;
+
+/** True when a whole word lies between two moments: a snap must never pull an edge across one. */
+export function crossesWord(words: TimedWord[] | null | undefined, aMs: number, bMs: number): boolean {
+  const lo = Math.min(aMs, bMs);
+  const hi = Math.max(aMs, bMs);
+  for (const w of words ?? []) if (w.startMs >= lo && w.endMs <= hi && w.endMs > w.startMs) return true;
+  return false;
+}
 
 /** Word starts, word ends and cut boundaries (source ms), sorted and without duplicates. */
 export function buildSnapTargets(words: TimedWord[] | null | undefined, boundaries: number[] | null | undefined): number[] {
@@ -36,7 +44,7 @@ export function snapThresholdMs(scale: number): number {
 }
 
 /** The target nearest to `ms` within `thresholdMs`, or null; `skip` is ignored (a target just let go of). */
-export function nearestTarget(targets: ArrayLike<number>, ms: number, thresholdMs: number, skip: number | null = null): number | null {
+export function nearestTarget(targets: ArrayLike<number>, ms: number, thresholdMs: number, skip: number | null = null, accept?: (target: number) => boolean): number | null {
   const n = targets.length;
   if (n === 0) return null;
   let lo = 0;
@@ -51,6 +59,7 @@ export function nearestTarget(targets: ArrayLike<number>, ms: number, thresholdM
   for (let i = Math.max(0, lo - 2); i <= Math.min(n - 1, lo + 1); i++) {
     const t = targets[i]!;
     if (skip !== null && t === skip) continue;
+    if (accept && !accept(t)) continue;
     const d = Math.abs(t - ms);
     if (d <= thresholdMs && d < bestD) {
       best = t;
@@ -74,10 +83,10 @@ export function snapStart(rawMs: number, now: number): SnapState {
   return { target: null, released: null, anchorMs: rawMs, movedAt: now };
 }
 
-export type SnapParams = { thresholdMs: number; pauseMs: number; jitterMs: number };
+export type SnapParams = { thresholdMs: number; pauseMs: number; jitterMs: number; words?: TimedWord[] };
 
-export function snapParams(scale: number): SnapParams {
-  return { thresholdMs: snapThresholdMs(scale), pauseMs: SNAP_PAUSE_MS, jitterMs: SNAP_JITTER_PX / Math.max(1e-6, scale) };
+export function snapParams(scale: number, words?: TimedWord[]): SnapParams {
+  return { thresholdMs: snapThresholdMs(scale), pauseMs: SNAP_PAUSE_MS, jitterMs: SNAP_JITTER_PX / Math.max(1e-6, scale), ...(words ? { words } : {}) };
 }
 
 /**
@@ -108,7 +117,8 @@ export function snapStep(
   }
   let caught = false;
   if (target === null) {
-    const found = nearestTarget(targets, rawMs, p.thresholdMs, released);
+    // never pulled across a whole word
+    const found = nearestTarget(targets, rawMs, p.thresholdMs, released, p.words ? (t) => !crossesWord(p.words, rawMs, t) : undefined);
     if (found !== null) {
       target = found;
       caught = true;

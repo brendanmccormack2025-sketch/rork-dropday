@@ -409,6 +409,44 @@ export function addManualCut(state: EditState, sourceStartMs: number, sourceEndM
 }
 
 /**
+ * A new AI plan never moves an edge the creator set. The visible edges of the cuts that are in force (the start and the
+ * end of each stretch of cut footage) that belong to a cut of the creator's own are fixed: a planned cut is trimmed so
+ * that it does not reach into the kept footage beside such an edge. A planned cut that would only do that becomes an
+ * empty, reverted decision (it stays in the plan's list so positions keep matching).
+ */
+export function protectCreatorEdges(state: EditState, planned: Decision): Decision {
+  const ranges = effectiveCutRanges(state)
+    .map((r) => ({ startMs: r.startMs, endMs: r.endMs }))
+    .sort((a, b) => a.startMs - b.startMs);
+  const union: Range[] = [];
+  for (const r of ranges) {
+    const last = union[union.length - 1];
+    if (last && r.startMs <= last.endMs + 1) last.endMs = Math.max(last.endMs, r.endMs);
+    else union.push({ ...r });
+  }
+  const mine = state.decisions.filter((d) => d.origin === "user" && d.state === "applied" && isCutType(d.type));
+  let start = planned.sourceStartMs;
+  let end = planned.sourceEndMs;
+  for (const u of union) {
+    const startIsCreators = mine.some((d) => Math.abs(d.sourceStartMs - u.startMs) <= 1);
+    const endIsCreators = mine.some((d) => Math.abs(d.sourceEndMs - u.endMs) <= 1);
+    // kept footage on the left of u: nothing planned may reach into it
+    if (startIsCreators && start < u.startMs - 1 && end > u.startMs - 1) {
+      if (end <= u.startMs + 1) end = start;   // entirely in the footage beside the edge
+      else start = u.startMs;
+    }
+    // kept footage on the right of u
+    if (endIsCreators && end > u.endMs + 1 && start < u.endMs + 1) {
+      if (start >= u.endMs - 1) end = start;
+      else end = u.endMs;
+    }
+  }
+  if (start === planned.sourceStartMs && end === planned.sourceEndMs) return planned;
+  if (end - start < 1) return { ...planned, sourceEndMs: planned.sourceStartMs + 1, state: "reverted" as const };
+  return { ...makeDecision(planned.type, start, end, { origin: planned.origin, payload: planned.payload, state: planned.state }) };
+}
+
+/**
  * Fold a new AI plan for `types` into the state. User wins: the old AI decisions of
  * those types are replaced, but user decisions stay, and any reverted decision is
  * kept as a tombstone. A planned decision that overlaps a tombstone by at least
@@ -429,7 +467,9 @@ export function mergePlan(
   const kept = state.decisions.filter(
     (d) => d.origin === "user" || d.state === "reverted" || !types.includes(d.type),
   );
-  const resolved = planned.map((p) => {
+  const resolved = planned.map((p0) => {
+    // the creator's own edges are not moved by a new plan
+    const p = isCutType(p0.type) && p0.origin !== "user" ? protectCreatorEdges(state, p0) : p0;
     const same = kept.find((k) => k.id === p.id);
     if (same) return same;
     // The creator's own decisions are never blocked by an earlier reversal.

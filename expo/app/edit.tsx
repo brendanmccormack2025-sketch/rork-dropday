@@ -108,6 +108,7 @@ import { MANUAL_EDIT_CONFIRM_MESSAGE, guardManualEdits, timelineMatchesState } f
 import { addManualCut, addSplit, protectedRangesOf } from "@/lib/autoEdit/decisions";
 import { planRangeCut } from "@/lib/autoEdit/rangeCut";
 import { buildSegments, editedToSource, playbackTick, segmentAtEdited } from "@/lib/autoEdit/virtualTimeline";
+import { clipLoopOf, loopOfSegment, loopTick, playheadOnSelect, selectionSuccessor } from "@/lib/autoEdit/clipLoop";
 import { GAPLESS_DEFAULTS, gaplessTick, learnLatency, playPressed, previewSourceFor, type StandbyState } from "@/lib/autoEdit/gaplessPlan";
 import PlaybackControls from "@/components/PlaybackControls";
 import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/lib/autoEdit/deletePart";
@@ -464,6 +465,14 @@ export default function EditScreen() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const selectedClipIdRef = useRef<string | null>(null);
+  selectedClipIdRef.current = selectedClipId;
+  // The precision timeline (and its own Split / Delete toolbar) is the one on screen.
+  const [precisionOn, setPrecisionOn] = useState(false);
+  // A clip is selected on the Cuts screen: it plays (and loops) on its own until the creator taps off.
+  const clipMode = step === "cuts" && precisionOn && selectedClipId !== null;
+  const clipModeRef = useRef(false);
+  clipModeRef.current = clipMode;
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [isMature, setIsMature] = useState<boolean>(false);
@@ -649,6 +658,7 @@ export default function EditScreen() {
   const renderedWasPlayingRef = useRef(false);
   if (!isPlaying) renderedWasPlayingRef.current = aheadMatches;
   const previewMode =
+    !clipMode &&
     previewModeFor({ aheadMatches, selectedClipId }) &&
     previewSourceFor({ aheadMatches, isPlaying, renderedWasPlaying: renderedWasPlayingRef.current }) === "rendered";
   const previewModeRef = useRef(false);
@@ -1189,7 +1199,7 @@ export default function EditScreen() {
     const posMillis = status.positionMillis ?? 0;
 
     // Two-player playback (gapless) owns the seams: this handler only reports where the playhead is.
-    if (geOnRef.current) {
+    if (geOnRef.current || clipModeRef.current) {
       const t = Date.now();
       if (t - lastPositionUpdate.current >= 100) {
         lastPositionUpdate.current = t;
@@ -1669,16 +1679,6 @@ export default function EditScreen() {
       cumulative += dur;
     }
 
-    // A selected clip stays selected while the playhead moves over others, unless playback is limited to it.
-    if (selectedClipId !== null && isIsolatedRef.current) {
-      const selIdx = currentClips.findIndex((c) => c.id === selectedClipId);
-      if (selIdx !== targetIdx) {
-        selectedClipIdxRef.current = -1;
-        isIsolatedRef.current = false;
-        setSelectedClipId(null);
-      }
-    }
-
     const posInEffectiveClip = targetMs - clipStart;
     const trimStart = currentClips[targetIdx]?.trimStartMs ?? 0;
     const sourcePos = posInEffectiveClip + trimStart;
@@ -1760,7 +1760,9 @@ export default function EditScreen() {
       setIsPlaying(true);
       return;
     }
-    handleSeek(0);
+    // a selected clip is replayed from its own start, the whole video from 0
+    const own = clipModeRef.current ? virtualSegsRef.current.find((sg) => sg.id === selectedClipIdRef.current) : undefined;
+    handleSeek(own ? own.outStartMs : 0);
     setTimeout(() => setIsPlaying(true), 60);
   }, [handleSeek, playerR]);
 
@@ -1783,12 +1785,12 @@ export default function EditScreen() {
     }
     if (!activeClip) return;
     if (!isPlaying) {
-      if (isIsolatedRef.current && selectedClipId !== null && selectedClipId === activeClip.id && isTrimmed) {
+      if (!clipModeRef.current && isIsolatedRef.current && selectedClipId !== null && selectedClipId === activeClip.id && isTrimmed) {
         handleSeek(segmentOffsetRef.current);
         setTimeout(() => setIsPlaying(true), 60);
         return;
       }
-      if (displayPosition >= totalDurationMs - 120) {
+      if (!clipModeRef.current && displayPosition >= totalDurationMs - 120) {
         handleSeek(0);
         setTimeout(() => setIsPlaying(true), 60);
         return;
@@ -1802,9 +1804,9 @@ export default function EditScreen() {
   // the next one: a seek past the removed part, decided from the precomputed segment table. Nothing is rendered.
   const geSameSource = clips.length > 1 && clips.every((c) => c.type === "video" && c.uri === clips[0]!.uri);
   const [geFailed, setGeFailed] = useState(false);
-  const geEligible = isVideo && geSameSource && !previewMode && (step === "cuts" || step === "edit") && !geFailed;
+  const geEligible = isVideo && geSameSource && !previewMode && !clipMode && (step === "cuts" || step === "edit") && !geFailed;
   const gaplessOn = geEligible && videoReady;
-  const virtualActive = step === "cuts" && isPlaying && videoReady && !previewMode && clips.length > 1 && !gaplessOn;
+  const virtualActive = step === "cuts" && isPlaying && videoReady && !previewMode && clips.length > 1 && !gaplessOn && !clipMode;
 
   // ── Gapless playback: two players on the same source ──────────────────────
   // A plays piece N while B is parked at piece N+1's start; at the boundary they swap (opacity and mute only) and A is
@@ -2910,10 +2912,17 @@ export default function EditScreen() {
     const seg = segs[segmentAtEdited(segs, positionMs)];
     if (!seg) return false;
     const clip = next[seg.index]!;
+    // A selected clip stays selected through the edit: it becomes the new clip that overlaps it most (trimming its edge
+    // changes its range, a split leaves the half under the playhead). Without one, the selection ends.
+    const before = clipsRef.current.find((c) => c.id === selectedClipIdRef.current);
+    const range = (c: DraftClip) => ({ srcStartMs: c.trimStartMs ?? 0, srcEndMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0) });
+    const wantedSource = seg.srcStartMs + Math.min(seg.outEndMs - seg.outStartMs, Math.max(0, positionMs - seg.outStartMs));
+    const successor = before && clipModeRef.current ? selectionSuccessor(range(before), next.map(range), wantedSource) : -1;
     clipsRef.current = next;
     activeIndexRef.current = seg.index;
-    selectedClipIdxRef.current = -1;
-    isIsolatedRef.current = false;
+    selectedClipIdxRef.current = successor >= 0 ? successor : -1;
+    isIsolatedRef.current = successor >= 0;
+    selectedClipIdRef.current = successor >= 0 ? next[successor]!.id : null;
     trimStartRef.current = clip.trimStartMs ?? 0;
     trimEndRef.current = clip.trimEndMs ?? (clip.durationMs ?? 0);
     prevTrimStartRef.current = trimStartRef.current;
@@ -2932,7 +2941,7 @@ export default function EditScreen() {
     setClips(next);
     setActiveIndex(seg.index);
     setPositionMs(positionMs);
-    setSelectedClipId((id) => (id && next.some((c) => c.id === id) ? id : null));
+    setSelectedClipId(successor >= 0 ? next[successor]!.id : null);
     return true;
   }, []);
 
@@ -3283,21 +3292,83 @@ export default function EditScreen() {
     }
   }, [selectedClipId, clips, textOverlays, userEdit, pushSnapshot, replaceClips]);
 
-  // Selecting a clip on the precision timeline: only a selection. The playhead does not move and playback is not
-  // limited to the clip.
-  const handleSelectPiece = useCallback((clipId: string) => {
-    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
-    selectedClipIdxRef.current = -1;
-    isIsolatedRef.current = false;
-    setSelectedClipId((id) => (id === clipId ? null : clipId));
-    setSelectedOverlayId(null);
-  }, []);
+  // Selecting a clip on the precision timeline: playback switches to THAT clip only (the same players, seeking inside the
+  // source: nothing is loaded or rendered). The playhead stays if it is already inside the clip, else it goes to the clip's
+  // start; playing or paused stays as it was. The clip loops until the creator taps off or selects another one.
   const handleClearSelection = useCallback(() => {
+    // Tapping off: full-video playback goes on from the same moment, playing or paused as it was.
     selectedClipIdxRef.current = -1;
     isIsolatedRef.current = false;
+    selectedClipIdRef.current = null;
     setSelectedClipId(null);
   }, []);
-  const [precisionOn, setPrecisionOn] = useState(false);
+  const handleSelectPiece = useCallback(
+    (clipId: string) => {
+      triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+      setSelectedOverlayId(null);
+      if (selectedClipIdRef.current === clipId) {
+        handleClearSelection();
+        return;
+      }
+      const loop = clipLoopOf(clipsRef.current, clipId);
+      if (!loop) return;
+      selectedClipIdRef.current = clipId;
+      selectedClipIdxRef.current = loop.index;
+      isIsolatedRef.current = true;
+      setSelectedClipId(clipId);
+      const wasPlaying = isPlayingRef.current;
+      const here = wasPlaying ? (samplePlayheadMs() ?? positionMsRef.current) : positionMsRef.current;
+      const at = playheadOnSelect(loop, here);
+      if (Math.abs(at - here) > 1 || activeIndexRef.current !== loop.index) {
+        handleSeek(at);
+        if (wasPlaying) setTimeout(() => setIsPlaying(true), 60);
+      }
+    },
+    [handleClearSelection, handleSeek, samplePlayheadMs],
+  );
+
+  // While a clip is selected it loops: a moment BEFORE its end the player jumps back to its start, so no frame of the footage
+  // after it is shown at the loop point; a player outside the clip (the playhead was moved elsewhere) is put at its start.
+  useEffect(() => {
+    if (!clipMode || !isPlaying || !videoReady) return;
+    let raf = 0;
+    let alive = true;
+    const tick = () => {
+      if (!alive) return;
+      try {
+        const player = videoRef.current;
+        const seg = virtualSegsRef.current.find((sg) => sg.id === selectedClipIdRef.current);
+        if (player && seg && !commitInFlightRef.current) {
+          const loop = loopOfSegment(seg);
+          const r = loopTick(loop, player.currentTime * 1000);
+          if (r.kind !== "play") {
+            // the bookkeeping of the playback follows the clip that plays
+            const clip = clipsRef.current[seg.index];
+            if (clip && activeIndexRef.current !== seg.index) {
+              activeIndexRef.current = seg.index;
+              trimStartRef.current = clip.trimStartMs ?? 0;
+              trimEndRef.current = clip.trimEndMs ?? (clip.durationMs ?? 0);
+              prevTrimStartRef.current = trimStartRef.current;
+              prevTrimEndRef.current = trimEndRef.current;
+              setActiveIndex(seg.index);
+            }
+            segmentOffsetRef.current = seg.outStartMs;
+            player.currentTime = r.seekToSourceMs / 1000;
+            lastPositionUpdate.current = 0;
+            setPositionMs(seg.outStartMs);
+          }
+        }
+      } catch {
+        // the status events keep the position
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+    };
+  }, [clipMode, isPlaying, videoReady]);
 
   // A range cut on the Cuts timeline (a range held and dragged inside a clip, or a missed-silence hint): the creator's
   // own cut, one undo step. Captions, text and the cut count follow because the edit is the decision state.
@@ -3323,6 +3394,12 @@ export default function EditScreen() {
   const edgePlayer = useVideoPlayer(null, (p) => {
     p.loop = false;
     p.muted = true;
+    // exact seeks: the frame shown is the frame at the edge, not the nearest keyframe
+    try {
+      p.seekTolerance = { toleranceBefore: 0, toleranceAfter: 0 };
+    } catch {
+      // an older player: the default is exact too
+    }
   });
   const [edgePreviewing, setEdgePreviewing] = useState(false);
   const edgeUriRef = useRef<string | null>(null);
@@ -3357,7 +3434,14 @@ export default function EditScreen() {
         if (ms === null) {
           edgeWantedMsRef.current = null;
           setEdgePreviewing(false);
-          if (edgeUriRef.current) edgePlayer.pause();
+          if (edgeUriRef.current) {
+            edgePlayer.pause();
+            try {
+              edgePlayer.scrubbingModeOptions = { scrubbingModeEnabled: false };
+            } catch {
+              // optional
+            }
+          }
           return;
         }
         const uri = editStateRef.current?.state.sourceUri;
@@ -3368,6 +3452,13 @@ export default function EditScreen() {
           recordBreadcrumb("precision timeline: edge preview player loading");
           edgePlayer.replace(uri);
         } else {
+          // seeks that arrive faster than they finish chase the latest position instead of piling up, so the frame
+          // on screen is never one from earlier in the drag
+          try {
+            if (!edgePlayer.scrubbingModeOptions?.scrubbingModeEnabled) edgePlayer.scrubbingModeOptions = { scrubbingModeEnabled: true };
+          } catch {
+            // optional
+          }
           edgePlayer.currentTime = ms / 1000;
         }
         edgePlayer.pause();
@@ -3380,6 +3471,21 @@ export default function EditScreen() {
     },
     [edgePlayer],
   );
+  // The preview player is loaded as soon as a clip is selected (its handles can be dragged), so the first drag already
+  // shows exact frames instead of waiting for the file to load.
+  useEffect(() => {
+    if (step !== "cuts" || !selectedClipId) return;
+    try {
+      const uri = editStateRef.current?.state.sourceUri;
+      if (uri && edgeUriRef.current !== uri) {
+        edgeUriRef.current = uri;
+        edgePlayer.replace(uri);
+        edgePlayer.pause();
+      }
+    } catch {
+      // the preview is optional
+    }
+  }, [step, selectedClipId, edgePlayer]);
   // Playing the video ends the edge preview (the edge stays selected on the timeline).
   useEffect(() => {
     if (isPlaying && edgePreviewing) handleEdgePreview(null);
@@ -4433,7 +4539,9 @@ export default function EditScreen() {
           }}
           onPress={() => {
             if (selectedClipId) {
-              handleDeselectAndPreview();
+              // tapping off a selected clip: back to the whole video, playing or paused as it was
+              if (precisionOn) handleClearSelection();
+              else handleDeselectAndPreview();
             }
           }}
         >
@@ -4570,7 +4678,9 @@ export default function EditScreen() {
                 style={StyleSheet.absoluteFill}
                 accessibilityLabel={isPlaying ? "Pause" : "Play"}
                 onPress={() => {
-                  if (videoTapAction({ step, hasSelection }) === "drop-selection") {
+                  if (clipMode) {
+                    handleClearSelection();
+                  } else if (videoTapAction({ step, hasSelection }) === "drop-selection") {
                     setSelectedOverlayId(null);
                     setCaptionSelected(false);
                   } else {

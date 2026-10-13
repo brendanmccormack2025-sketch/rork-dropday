@@ -18,7 +18,8 @@ import { buildSegments, canSplitAt, followPlayhead, interpolatePosition } from "
 import { detectSilences } from "@/lib/silenceDetection";
 import type { EdgeDrag } from "@/lib/autoEdit/reshape";
 import type { SeamEdgeInfo, SeamHandleSpec } from "@/lib/autoEdit/seams";
-import { buildSnapTargets, snapParams, snapStart, snapStep, type SnapState, type TimedWord } from "@/lib/autoEdit/edgeSnap";
+import { buildSnapTargets, snapParams, type TimedWord } from "@/lib/autoEdit/edgeSnap";
+import { moveEdge, startEdgeSession, type EdgeSession } from "@/lib/autoEdit/edgeDrag";
 import {
   BOTTOM_MARKER_Y,
   CLIP_GAP,
@@ -154,20 +155,17 @@ type MarkerItem =
 
 type SelectedEdge = { side: "left" | "right"; atMs: number };
 
-type GestureState = { mode: "none" | "edge" | "scroll"; idx: number; side: 0 | 1; startOffset: number };
+type GestureState = { mode: "none" | "edge" | "scroll"; idx: number; side: 0 | 1; startOffset: number; touchX: number };
 
 type EdgeDragState = {
   idx: number;
   side: 0 | 1;
   edge: SeamEdgeInfo;
-  atMs: number;
-  min: number;
-  max: number;
-  dx: number;
+  /** The distance, snapping, frame rounding and clamping of the drag: `session.ms` is the one position shown and committed. */
+  session: EdgeSession;
+  /** The latest finger position (points). */
+  x: number;
   fingerX: number;
-  offsetStart: number;
-  snap: SnapState;
-  ms: number;
   lastPreviewAt: number;
   lastPreviewMs: number;
 };
@@ -693,6 +691,7 @@ export default function PrecisionTimeline({
     return touching.current > 0;
   }, []);
   const edge = useRef<EdgeDragState | null>(null);
+  const fpsRef = useRef(30);
   useEffect(() => {
     propPos.current = { ms: Number.isFinite(positionMs) ? positionMs : 0, at: Date.now() };
     if (touchingNow() || viewW <= 0 || edge.current || playingRef.current) return;
@@ -829,26 +828,33 @@ export default function PrecisionTimeline({
     [setSelected],
   );
 
+  /**
+   * One step of an edge drag: the position follows the finger RELATIVE to where it went down, is snapped only within a few
+   * points (never across a word), rounded to the nearest frame and passed through what the edit will really give (the
+   * same function the commit uses): `session.ms` is what the readout, the preview frame and the commit all use.
+   */
   const stepEdge = useCallback(() => {
     const d = edge.current;
     if (!d) return;
     const v = view.current;
-    const rawUnclamped = edgeDragMs(d.atMs, d.dx + (v.offset - d.offsetStart), v.scale);
-    const raw = Math.min(d.max, Math.max(d.min, rawUnclamped));
+    const cfg = live.current.seams;
     const now = Date.now();
-    const r = snapStep(d.snap, raw, now, geo.current.targets, snapParams(v.scale));
-    d.snap = r.state;
-    const ms = Math.min(d.max, Math.max(d.min, r.ms));
+    const r = moveEdge(d.session, {
+      x: d.x,
+      offset: v.offset,
+      scale: v.scale,
+      now,
+      targets: geo.current.targets,
+      params: snapParams(v.scale, cfg.words),
+      land: (ms) => cfg.describe(d.edge, ms, 1).clampedMs,
+    });
     if (r.caught) haptic("light");
-    if (ms !== d.ms) {
-      d.ms = ms;
-      dragMs.value = ms;
-    }
-    if (ms !== d.lastPreviewMs && now - d.lastPreviewAt >= PREVIEW_EVERY_MS) {
+    dragMs.value = r.ms;
+    if (r.ms !== d.lastPreviewMs && now - d.lastPreviewAt >= PREVIEW_EVERY_MS) {
       d.lastPreviewAt = now;
-      d.lastPreviewMs = ms;
-      setLiveEdge({ ms, atMs: d.atMs });
-      live.current.seams.onEdgePreview?.(ms);
+      d.lastPreviewMs = r.ms;
+      setLiveEdge({ ms: r.ms, atMs: d.session.atMs });
+      cfg.onEdgePreview?.(r.ms);
     }
   }, [dragMs]);
 
@@ -900,7 +906,7 @@ export default function PrecisionTimeline({
   );
 
   const beginEdge = useCallback(
-    (idx: number, side: 0 | 1, fingerX: number) => {
+    (idx: number, side: 0 | 1, fingerX: number, touchX: number) => {
       const e = resolveEdge(idx, side);
       const g = geo.current.geoms[idx];
       if (!e || !g) return false;
@@ -913,14 +919,9 @@ export default function PrecisionTimeline({
         idx,
         side,
         edge: e,
-        atMs: e.atMs,
-        min: Math.min(lo, hi, e.atMs),
-        max: Math.max(lo, hi, e.atMs),
-        dx: 0,
+        session: startEdgeSession({ atMs: e.atMs, startX: touchX, offsetStart: view.current.offset, min: lo, max: hi, fps: fpsRef.current, now }),
+        x: touchX,
         fingerX,
-        offsetStart: view.current.offset,
-        snap: snapStart(e.atMs, now),
-        ms: e.atMs,
         lastPreviewAt: 0,
         lastPreviewMs: -1,
       };
@@ -940,23 +941,37 @@ export default function PrecisionTimeline({
   );
 
   const endEdge = useCallback(
-    (success: boolean, translationX: number) => {
+    (success: boolean, finalX: number | null) => {
       const d = edge.current;
+      if (!d) {
+        stopTicker();
+        dragOn.value = 0;
+        setLiveEdge(null);
+        return;
+      }
+      // the last finger position counts: one more step with it, so the committed position is the one at release
+      if (success && finalX !== null && Number.isFinite(finalX)) d.x = finalX;
+      stepEdge();
       edge.current = null;
       stopTicker();
       dragOn.value = 0;
       setLiveEdge(null);
-      if (!d) return;
-      const moved = success && (Math.abs(translationX) >= TAP_SLOP || Math.abs(d.ms - d.atMs) >= 1);
-      if (!moved) return;
+      const ms = d.session.ms;
+      const moved = success && Math.abs(ms - d.session.atMs) >= 0.5;
+      if (!moved) {
+        live.current.seams.onEdgePreview?.(d.session.atMs);
+        return;
+      }
       const cfg = live.current.seams;
-      const drag = cfg.describe(d.edge, d.ms, 1);
+      const drag = cfg.describe(d.edge, ms, 1);
       if (drag.kind === "none") return;
+      // the exact frame shown at release (a final exact seek), then the edit with exactly that position
+      cfg.onEdgePreview?.(drag.clampedMs);
       cfg.onDragEnd(d.edge, drag.clampedMs, { minDragMs: 1 });
       setSelected({ side: d.edge.side, atMs: drag.clampedMs });
-      cfg.onEdgePreview?.(drag.clampedMs);
+      crumb("precision timeline: edge committed", { shown: Math.round(ms), committed: Math.round(drag.clampedMs) });
     },
-    [stopTicker, dragOn, setSelected],
+    [stopTicker, dragOn, setSelected, stepEdge, crumb],
   );
 
   /** Nothing of the inline bar is selected any more (a tap elsewhere, an edit, a new selection). */
@@ -1023,7 +1038,7 @@ export default function PrecisionTimeline({
   );
 
   // ── gestures: plain JS, like every other gesture in the app ──
-  const g1 = useRef<GestureState>({ mode: "none", idx: -1, side: 0, startOffset: 0 });
+  const g1 = useRef<GestureState>({ mode: "none", idx: -1, side: 0, startOffset: 0, touchX: 0 });
   const pinchStart = useRef({ scale: 1, centerMs: 0 });
   const firstGesture = useRef(new Set<string>());
   const once = useCallback(
@@ -1048,7 +1063,7 @@ export default function PrecisionTimeline({
           touching.current += 1;
           lastTouchAt.current = Date.now();
           const hit = hitFrame(e.x, e.y, geo.current.frame, view.current.scale, view.current.offset);
-          g1.current = { mode: hit ? "edge" : "scroll", idx: hit ? hit.index : -1, side: hit ? hit.side : 0, startOffset: view.current.offset };
+          g1.current = { mode: hit ? "edge" : "scroll", idx: hit ? hit.index : -1, side: hit ? hit.side : 0, startOffset: view.current.offset, touchX: e.x };
           if (hit) {
             press(hit.side);
             haptic("light");
@@ -1060,7 +1075,7 @@ export default function PrecisionTimeline({
           const g = g1.current;
           if (g.mode === "edge") {
             once("edge drag");
-            if (!beginEdge(g.idx, g.side, e.x)) g.mode = "none";
+            if (!beginEdge(g.idx, g.side, e.x, g.touchX)) g.mode = "none";
           } else if (g.mode === "scroll") {
             once("scrub");
           }
@@ -1071,7 +1086,7 @@ export default function PrecisionTimeline({
           lastTouchAt.current = Date.now();
           const g = g1.current;
           if (g.mode === "edge" && edge.current) {
-            edge.current.dx = e.translationX;
+            edge.current.x = e.x;
             edge.current.fingerX = e.x;
             stepEdge();
           } else if (g.mode === "scroll") {
@@ -1089,8 +1104,8 @@ export default function PrecisionTimeline({
         }),
       )
       .onFinalize(
-        guard("pan.finalize", (e: { translationX: number }, success: boolean) => {
-          if (g1.current.mode === "edge" || edge.current) endEdge(success, e.translationX);
+        guard("pan.finalize", (e: { x: number }, success: boolean) => {
+          if (g1.current.mode === "edge" || edge.current) endEdge(success, e.x);
           if (g1.current.mode === "edge") press(null);
           g1.current.mode = "none";
           touching.current = Math.max(0, touching.current - 1);
@@ -1185,6 +1200,7 @@ export default function PrecisionTimeline({
 
   // ── the nudge buttons ──
   const fps = safeFps(seams.frameRate);
+  fpsRef.current = fps;
   const nudge = useCallback(
     (direction: 1 | -1) => {
       const l = live.current;

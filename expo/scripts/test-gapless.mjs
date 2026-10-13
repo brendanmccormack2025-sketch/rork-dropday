@@ -152,9 +152,9 @@ const kept = (table, ms, slack = 40) => table.some((s) => ms >= s.srcStartMs - s
   ok("two expo-video players on the same source: the second is loaded as the preload slot, parked and swapped by the scheduler", /setPreloadSource\(\(prev\) => \(prev\?\.uri === geUri/.test(edit) && /gaplessTick\(\{/.test(edit) && /case "swap"/.test(edit));
   ok("the swap changes opacity (shared values) and mute only", /slotB\.value = 1;\s*slotA\.value = 0/.test(edit) && /B\.muted = false;\s*A\.muted = true;\s*A\.pause\(\)/.test(edit) && /useAnimatedStyle\(\(\) => \(\{ opacity: slotA\.value \}\)\)/.test(edit));
   ok("the swap is scheduled from the players' own playback times, every frame", /A\.currentTime \* 1000/.test(edit) && /B\.currentTime \* 1000/.test(edit) && /requestAnimationFrame\(tick\)/.test(edit));
-  ok("if the scheduler throws, the single-player path takes over", /setGeFailed\(true\)/.test(edit) && /!gaplessOn;/.test(edit));
+  ok("if the scheduler throws, the single-player path takes over", /setGeFailed\(true\)/.test(edit) && /!gaplessOn/.test(edit));
   ok("playing to the end stops (no loop) and shows replay; the status handler of the playing piece never seeks back", /const stopAtEnd = useCallback/.test(edit) && /setPlayEnded\(true\)/.test(edit) && !/Hot swap for the wrap-around/.test(edit) && /playerR\.loop = false/.test(edit));
-  ok("Replay restarts from 0 and plays", /const handleReplay[\s\S]{0,400}handleSeek\(0\);\s*setTimeout\(\(\) => setIsPlaying\(true\), 60\)/.test(edit));
+  ok("Replay restarts from 0 and plays", /const handleReplay[\s\S]{0,700}handleSeek\(own \? own\.outStartMs : 0\);\s*setTimeout\(\(\) => setIsPlaying\(true\), 60\)/.test(edit));
   ok("tapping the video still toggles play/pause (and replays at the end)", /togglePlay\(\)/.test(edit) && /=== "replay"/.test(edit));
   ok("controls under the video on the Cuts screen; the full-screen editor has the slim progress bar with replay and time instead of a second play button", /<PlaybackControls\s+isPlaying=\{isPlaying\}/.test(edit) && /<EditorTransport/.test(edit) && !/<PlaybackControls\s+floating/.test(edit));
   ok("the controls are rounded: play/pause 56 pt circle, replay circle, time pill", /big: \{[^}]*borderRadius: 28/.test(bar) && /small: \{[^}]*borderRadius: 22/.test(bar) && /time: \{[^}]*borderRadius: 18/.test(bar));

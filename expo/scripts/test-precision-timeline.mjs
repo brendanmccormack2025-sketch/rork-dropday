@@ -134,7 +134,7 @@ const TOTAL = 60_000;    // a one-minute video
   const words = [{ startMs: 1000, endMs: 1400 }, { startMs: 1450, endMs: 2000 }];
   const targets = buildSnapTargets(words, [1400, 5000, 1000]);
   eq("targets are word starts and ends plus the cut boundaries, sorted, no duplicates", targets, [1000, 1400, 1450, 2000, 5000]);
-  eq("the snap threshold is about 10 pt of time, bounded", [snapThresholdMs(1e-6) === SNAP_MAX_MS, snapThresholdMs(10) === SNAP_MIN_MS, near(snapThresholdMs(0.343), 10 / 0.343)], [true, true, true]);
+  eq("the snap threshold is about 8 pt of time, bounded", [snapThresholdMs(1e-6) === SNAP_MAX_MS, snapThresholdMs(10) === SNAP_MIN_MS, near(snapThresholdMs(0.343), 8 / 0.343)], [true, true, true]);
   eq("the nearest target within the threshold, else none", [nearestTarget(targets, 1010, 30), nearestTarget(targets, 1200, 30), nearestTarget(targets, 1425, 30), nearestTarget([], 5, 30)], [1000, null, 1400, null]);
   eq("a skipped target is not returned", nearestTarget(targets, 1425, 30, 1400), 1450);
 
@@ -308,7 +308,7 @@ const TOTAL = 60_000;    // a one-minute video
   ok("animated styles read only shared values and plain numbers (no objects or functions captured)", styleBodies.every((b) => !/\b(geom|marker|clip|seams|props|live|view\.current)\b/.test(b)));
   ok("pinch zoom keeps the moment under the centre line; double tap animates back to the whole video", /offsetForCenter\(p\.centerMs, sc/.test(comp) && /numberOfTaps\(2\)/.test(comp) && /fitScale\(totalRef/.test(comp));
   ok("one-finger pan scrolls and flings (flingStep, a JS frame loop)", /flingStep\(/.test(comp) && /requestAnimationFrame/.test(comp) && /\.maxPointers\(1\)/.test(comp));
-  ok("edge drags snap with snapStep and buzz when they catch", /snapStep\(/.test(comp) && /if \(r\.caught\) haptic\("light"\)/.test(comp));
+  ok("edge drags snap with snapStep and buzz when they catch", /moveEdge\(/.test(comp) && /snapParams\(/.test(comp) && /if \(r\.caught\) haptic\("light"\)/.test(comp));
   ok("the waveform comes from the analysis cache (silence detection's loudness, computed once)", /analysis\.cachedLoudness\(/.test(comp) && /analysis\.loudness\(/.test(comp) && /waveformColumns\(/.test(comp));
   ok("the waveform is a few hundred bars per drawn window (3 points per bar, three screens wide)", /const WAVE_PITCH = 3/.test(comp) && /const width = 3 \* viewW/.test(comp));
   ok("every edit ends in the existing seam handler with the lowered jitter gate", /cfg\.onDragEnd\(d\.edge, drag\.clampedMs, \{ minDragMs: 1 \}\)/.test(comp) && /l\.seams\.onDragEnd\(e, drag\.clampedMs, \{ minDragMs: 1 \}\)/.test(comp));
