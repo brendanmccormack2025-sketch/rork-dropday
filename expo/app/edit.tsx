@@ -102,8 +102,9 @@ import CutsSheet from "@/components/CutsSheet";
 import CaptionsSheet from "@/components/CaptionsSheet";
 import MarkerSheet from "@/components/MarkerSheet";
 import { MANUAL_EDIT_CONFIRM_MESSAGE, guardManualEdits, timelineMatchesState } from "@/lib/autoEdit/confirm";
-import { addManualCut, protectedRangesOf } from "@/lib/autoEdit/decisions";
+import { addManualCut, addSplit, protectedRangesOf } from "@/lib/autoEdit/decisions";
 import { planRangeCut } from "@/lib/autoEdit/rangeCut";
+import { buildSegments, editedToSource, playbackTick, segmentAtEdited } from "@/lib/autoEdit/virtualTimeline";
 import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/lib/autoEdit/deletePart";
 import { analysisSource, loadLoudnessChecked } from "@/lib/mergeTiming";
 import { AUTO_EDIT_STALL_MS, transcriptionGate } from "@/lib/captionsGate";
@@ -623,19 +624,22 @@ export default function EditScreen() {
       clips,
       isRoot: !reactingTo && !rootDropId,
       userId: user?.id,
-      hold: captionsBusy || mergeUi.kind !== "idle",
+      // Nothing is rendered while the cuts are edited: the preview plays the source through the edit list. The
+      // renders (for Post) start in the background when the Cuts screen is left.
+      hold: captionsBusy || mergeUi.kind !== "idle" || step === "cuts",
     };
     // The preview render is skipped when there is nothing cut (isRoot false = "not eligible", so it goes idle and
     // drops any render in flight); the final render for Post below is unaffected (captions are still burned in).
     aheadRef.current?.update({ ...args, isRoot: args.isRoot && !noCuts });
     finalRef.current?.update({ ...args, captions: captions.overlays });
-  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captionsBusy, mergeUi.kind, noCuts]);
+  }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captionsBusy, mergeUi.kind, noCuts, step]);
   const aheadReady = aheadState.kind === "ready" ? aheadState : null;
   const aheadSignature = aheadRef.current?.signatureOf(clips) ?? null;
   const aheadMatches = !!aheadReady && aheadReady.signature === aheadSignature;
   // The rendered file plays while it matches the timeline. Selecting a clip is not an edit and does not
   // leave it (see lib/previewSelection.ts); a trim or cut changes the clips, so the render stops matching.
-  const previewMode = previewModeFor({ aheadMatches, selectedClipId });
+  // The Cuts screen always plays the source through the edit list (a rendered file is never the preview there).
+  const previewMode = step !== "cuts" && previewModeFor({ aheadMatches, selectedClipId });
   const previewModeRef = useRef(false);
   previewModeRef.current = previewMode;
   const isPlayingRef = useRef(false);
@@ -645,7 +649,7 @@ export default function EditScreen() {
   const [pendingPlay, setPendingPlay] = useState(false);
   const [roughPlay, setRoughPlay] = useState(false);
   const aheadBusy = aheadState.kind === "waiting" || aheadState.kind === "rendering";
-  const waitForPreview = aheadBusy && !aheadMatches && selectedClipId === null && !roughPlay && !noCuts;
+  const waitForPreview = step !== "cuts" && aheadBusy && !aheadMatches && selectedClipId === null && !roughPlay && !noCuts;
   const waitForPreviewRef = useRef(false);
   waitForPreviewRef.current = waitForPreview;
   const renderStartedAtRef = useRef(0);
@@ -1717,7 +1721,8 @@ export default function EditScreen() {
       cumulative += dur;
     }
 
-    if (selectedClipId !== null) {
+    // A selected clip stays selected while the playhead moves over others, unless playback is limited to it.
+    if (selectedClipId !== null && isIsolatedRef.current) {
       const selIdx = currentClips.findIndex((c) => c.id === selectedClipId);
       if (selIdx !== targetIdx) {
         selectedClipIdxRef.current = -1;
@@ -1736,15 +1741,22 @@ export default function EditScreen() {
     trimEndHandledRef.current = false;
 
     if (targetIdx !== activeIndexRef.current) {
+      // The same source file (every clip of the cuts): the player is already on it, so it seeks at once instead of
+      // waiting for its next progress event.
+      const sameSource = currentPlayingClipUriRef.current === currentClips[targetIdx]!.uri && !!videoRef.current;
       currentPlayingClipUriRef.current = currentClips[targetIdx]!.uri;
-      pendingSeekRef.current = sourcePos;
+      pendingSeekRef.current = sameSource ? null : sourcePos;
+      if (sameSource) {
+        durationSetRef.current = true;
+        videoRef.current!.currentTime = sourcePos / 1000;
+      }
       activeIndexRef.current = targetIdx;
       trimStartRef.current = trimStart;
       trimEndRef.current = currentClips[targetIdx]?.trimEndMs ?? (currentClips[targetIdx]?.durationMs ?? 0);
       prevTrimStartRef.current = trimStart;
       prevTrimEndRef.current = trimEndRef.current;
       trimEndHandledRef.current = false;
-      trimSeekDoneRef.current = false;
+      trimSeekDoneRef.current = sameSource;
       trimGenerationRef.current += 1;
       setActiveIndex(targetIdx);
       setIsPlaying(false);
@@ -1806,7 +1818,7 @@ export default function EditScreen() {
     }
     if (!activeClip) return;
     if (!isPlaying) {
-      if (selectedClipId !== null && selectedClipId === activeClip.id && isTrimmed) {
+      if (isIsolatedRef.current && selectedClipId !== null && selectedClipId === activeClip.id && isTrimmed) {
         handleSeek(segmentOffsetRef.current);
         setTimeout(() => setIsPlaying(true), 60);
         return;
@@ -1819,6 +1831,47 @@ export default function EditScreen() {
     }
     setIsPlaying((p) => !p);
   }, [activeClip, isPlaying, pendingPlay, selectedClipId, isTrimmed, displayPosition, totalDurationMs, handleSeek]);
+
+  // The Cuts screen's playback: the player plays the SOURCE and the edit list says what to skip. This loop watches the
+  // player every frame (the progress events come every 50 ms) and, a moment before a kept range ends, hands over to
+  // the next one: a seek past the removed part, decided from the precomputed segment table. Nothing is rendered.
+  const virtualActive = step === "cuts" && isPlaying && videoReady && !previewMode && clips.length > 1;
+  // Pausing stops the playhead exactly where the player stopped, not at its last (up to 200 ms old) progress event.
+  useEffect(() => {
+    if (isPlaying || stepRef.current !== "cuts" || previewModeRef.current || commitInFlightRef.current) return;
+    const ms = samplePlayheadMs();
+    if (ms !== null && Math.abs(ms - positionMsRef.current) > 5) setPositionMs(ms);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
+  const virtualSegs = useMemo(() => buildSegments(clips), [clips]);
+  const virtualSegsRef = useRef(virtualSegs);
+  virtualSegsRef.current = virtualSegs;
+  useEffect(() => {
+    if (!virtualActive) return;
+    let raf = 0;
+    let alive = true;
+    const tick = () => {
+      if (!alive) return;
+      try {
+        const p = videoRef.current;
+        if (p && !isAdvancingRef.current && !trimEndHandledRef.current && !safeSeekActiveRef.current && !isIsolatedRef.current && !commitInFlightRef.current) {
+          const r = playbackTick({ segs: virtualSegsRef.current, activeIndex: activeIndexRef.current, sourceMs: p.currentTime * 1000 });
+          if (r.kind === "advance" || r.kind === "end") {
+            trimEndHandledRef.current = true;
+            advanceToNextClip();
+          }
+        }
+      } catch {
+        // the status events still handle the seams
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+    };
+  }, [virtualActive, advanceToNextClip]);
 
   // ── Clip operations ───────────────────────────────────────────────────────
   const handleClipUpdate = useCallback(
@@ -2700,6 +2753,51 @@ export default function EditScreen() {
     return "No cuts";
   }, [editModel, autoEditSession]);
 
+  // Where the playhead is right now (edited time), read from the player itself: exact between progress events.
+  const samplePlayheadMs = useCallback((): number | null => {
+    const p = videoRef.current;
+    const list = clipsRef.current;
+    if (!p || list.length === 0 || previewModeRef.current) return null;
+    const c = list[activeIndexRef.current];
+    if (!c) return null;
+    const src = p.currentTime * 1000;
+    if (!Number.isFinite(src)) return null;
+    return segmentOffsetRef.current + Math.min(effectiveDurationMs(c), Math.max(0, src - trimStartRef.current));
+  }, []);
+
+  // An edit on the Cuts screen without stopping anything: the clips become the new edit list, the bookkeeping of the
+  // playback follows, and the one player (which plays the source file) is moved only if its moment was cut out.
+  const softReplaceClips = useCallback((next: DraftClip[], positionMs: number) => {
+    const segs = buildSegments(next);
+    const seg = segs[segmentAtEdited(segs, positionMs)];
+    if (!seg) return false;
+    const clip = next[seg.index]!;
+    clipsRef.current = next;
+    activeIndexRef.current = seg.index;
+    selectedClipIdxRef.current = -1;
+    isIsolatedRef.current = false;
+    trimStartRef.current = clip.trimStartMs ?? 0;
+    trimEndRef.current = clip.trimEndMs ?? (clip.durationMs ?? 0);
+    prevTrimStartRef.current = trimStartRef.current;
+    prevTrimEndRef.current = trimEndRef.current;
+    segmentOffsetRef.current = seg.outStartMs;
+    trimEndHandledRef.current = false;
+    trimSeekDoneRef.current = true;
+    pendingSeekRef.current = null;
+    durationSetRef.current = true;
+    lastPositionUpdate.current = 0;
+    trimGenerationRef.current += 1;
+    currentPlayingClipUriRef.current = clip.uri;
+    const wantedMs = seg.srcStartMs + Math.min(seg.outEndMs - seg.outStartMs, Math.max(0, positionMs - seg.outStartMs));
+    const player = videoRef.current;
+    if (player && Math.abs(player.currentTime * 1000 - wantedMs) > 40) player.currentTime = wantedMs / 1000;
+    setClips(next);
+    setActiveIndex(seg.index);
+    setPositionMs(positionMs);
+    setSelectedClipId((id) => (id && next.some((c) => c.id === id) ? id : null));
+    return true;
+  }, []);
+
   // Show a new decision state: render again from the model and keep the playhead on
   // the same footage (output time -> source time -> new output time), never back at 0.
   const commitDecisions = useCallback(
@@ -2716,7 +2814,8 @@ export default function EditScreen() {
         trimStartMs: c.trimStartMs ?? 0,
         trimEndMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? model.durationMs),
       }));
-      const newPosition = mapOutputPosition(before, derived, positionMsRef.current, next.sourceUri);
+      const playheadNow = isPlayingRef.current ? (samplePlayheadMs() ?? positionMsRef.current) : positionMsRef.current;
+      const newPosition = mapOutputPosition(before, derived, playheadNow, next.sourceUri);
       // Text that was placed on some footage stays on it when the cuts change the output times.
       setTextOverlays((prev) => {
         const moved = remapOverlayTimes(prev, before, derived, next.sourceUri);
@@ -2724,6 +2823,14 @@ export default function EditScreen() {
       });
       const wasPlaying = isPlayingRef.current;
       const base = current[0]!;
+      // Pieces that did not change keep their clip (and id); only new ranges get new clips.
+      const reuse = (c: { trimStartMs: number; trimEndMs: number }) =>
+        current.find((o) => Math.abs((o.trimStartMs ?? 0) - c.trimStartMs) <= 1 && Math.abs((o.trimEndMs ?? o.durationMs ?? 0) - c.trimEndMs) <= 1);
+      const soft = stepRef.current === "cuts" && current.every((c) => c.uri === base.uri && c.type === "video") && !previewModeRef.current;
+      if (soft) {
+        const nextClips = derived.map((c) => reuse(c) ?? { ...base, id: newClipId(), trimStartMs: c.trimStartMs, trimEndMs: c.trimEndMs });
+        if (softReplaceClips(nextClips, newPosition)) return;
+      }
       commitInFlightRef.current = true;
       const produced = derived.map((c) => ({ ...base, id: newClipId(), trimStartMs: c.trimStartMs, trimEndMs: c.trimEndMs }));
       replaceClips(produced);
@@ -2768,7 +2875,7 @@ export default function EditScreen() {
         }
       }, 50);
     },
-    [setEditModel, replaceClips, handleSeek, setTextOverlays, playerA, playerB],
+    [setEditModel, replaceClips, handleSeek, setTextOverlays, playerA, playerB, samplePlayheadMs, softReplaceClips],
   );
 
   // With manual edits the model does not contain, an AI-edit action asks first.
@@ -2999,6 +3106,60 @@ export default function EditScreen() {
     },
     [userEdit],
   );
+
+  // Split: the video is cut into two clips at the playhead (nothing is removed). Instant: only the edit list changes.
+  const handleSplitAtPlayhead = useCallback(() => {
+    const model = editStateRef.current;
+    if (!model) return;
+    const at = isPlayingRef.current ? (samplePlayheadMs() ?? positionMsRef.current) : positionMsRef.current;
+    const src = editedToSource(buildSegments(clipsRef.current), at);
+    if (!src) return;
+    const next = addSplit(model.state, src.sourceMs, model.durationMs);
+    if (next === model.state) {
+      triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+      return;
+    }
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    userEdit(() => next);
+  }, [userEdit, samplePlayheadMs]);
+
+  // Delete: the selected clip / piece is removed at once (a cut of the creator's own: Restore, undo and Reset work).
+  const handleDeleteSelected = useCallback(() => {
+    if (!selectedClipId) return;
+    const model = editStateRef.current;
+    const plan = planDeletePart({
+      clips,
+      clipId: selectedClipId,
+      model,
+      matches: !!model && timelineMatchesState(clipsForUndoRef.current, model.state, model.durationMs),
+    });
+    if (plan.kind === "blocked") {
+      showAlert("Can't delete", LAST_PART_MESSAGE);
+      return;
+    }
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (plan.kind === "user-cut") userEdit(() => plan.next);
+    else {
+      pushSnapshot(clips, textOverlays);
+      replaceClips(clips.filter((c) => c.id !== plan.clipId));
+    }
+  }, [selectedClipId, clips, textOverlays, userEdit, pushSnapshot, replaceClips]);
+
+  // Selecting a clip on the precision timeline: only a selection. The playhead does not move and playback is not
+  // limited to the clip.
+  const handleSelectPiece = useCallback((clipId: string) => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+    selectedClipIdxRef.current = -1;
+    isIsolatedRef.current = false;
+    setSelectedClipId((id) => (id === clipId ? null : clipId));
+    setSelectedOverlayId(null);
+  }, []);
+  const handleClearSelection = useCallback(() => {
+    selectedClipIdxRef.current = -1;
+    isIsolatedRef.current = false;
+    setSelectedClipId(null);
+  }, []);
+  const [precisionOn, setPrecisionOn] = useState(false);
 
   // A range cut on the Cuts timeline (a range held and dragged inside a clip, or a missed-silence hint): the creator's
   // own cut, one undo step. Captions, text and the cut count follow because the edit is the decision state.
@@ -4375,8 +4536,13 @@ export default function EditScreen() {
             positionMs={displayPosition}
             selectedClipId={selectedClipId}
             onSeek={handleSeekAny}
-            onSelectClip={handleSelectClip}
-            onDeselectAndPreview={() => handleDeselectAndPreview()}
+            onSelectClip={handleSelectPiece}
+            onDeselectAndPreview={handleClearSelection}
+            isPlaying={isPlaying}
+            getPositionMs={samplePlayheadMs}
+            onSplit={handleSplitAtPlayhead}
+            onDeleteSelected={handleDeleteSelected}
+            onActive={setPrecisionOn}
             markers={timelineMarkers}
             onMarkerPress={handleMarkerPress}
             onRestoreCut={handleRestoreCut}
@@ -4424,7 +4590,7 @@ export default function EditScreen() {
           />
         )}
 
-        {selectedClipId && clips.length > 0 && (
+        {selectedClipId && clips.length > 0 && !(timelineSeams && precisionOn) && (
           <View style={styles.cutActionRow}>
             <Pressable onPress={handleDeletePart} style={styles.deletePartBtn} accessibilityRole="button" accessibilityLabel="Delete this part">
               <Trash2 size={18} color="#fff" strokeWidth={2.2} />
@@ -4432,6 +4598,7 @@ export default function EditScreen() {
             </Pressable>
           </View>
         )}
+        {!(timelineSeams && precisionOn) && (
         <View style={styles.toolbar}>
           {/* Trim — video only */}
           {isVideo && (
@@ -4480,6 +4647,7 @@ export default function EditScreen() {
           </Pressable>
 
         </View>
+        )}
         <View style={[styles.bottomSection, { paddingBottom: insets.bottom + 8 }]}>
           <View style={styles.actionRow}>
             {isVideo && aiEditsEnabled && (autoEditSession || editModel) && (

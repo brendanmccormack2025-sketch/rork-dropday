@@ -145,9 +145,9 @@ const base = () => newEditState("file:///a.mov", [makeDecision("silenceCut", 800
   ok("the cut chips replace the grey dots", /function CutChip/.test(src) && !/cutDot/.test(src) && !/grey dot/i.test(src.replace(/\/\/.*$/gm, "")));
   ok("the kept clips are rounded with a gap (ClipBar, CLIP_GAP)", /function ClipBar/.test(src) && /insetL=\{i > 0 \? CLIP_GAP : 0\}/.test(src));
   ok("every gesture runs on the JS thread", (src.match(/Gesture\.(Pan|Tap|Pinch)\(\)/g) ?? []).length === (src.match(/Gesture\.(Pan|Tap|Pinch)\(\)\s*\.runOnJS\(true\)/g) ?? []).length);
-  ok("the range gesture is a hold, then a drag", /activateAfterLongPress\(RANGE_HOLD_MS\)/.test(src) && /Race\(rangePan, pan,/.test(src));
+  ok("the long-press range selection is gone (Split + Delete replace it)", !/activateAfterLongPress|rangePan/.test(src));
   ok("the inline bar's buttons are pills (rounded), the nudge buttons circles", /pill: \{[^}]*borderRadius: 16/.test(src) && /nudge: \{[^}]*borderRadius: 22/.test(src) && /inlineBar: \{[^}]*borderRadius: 20/.test(src));
-  ok("the inline bar offers Restore, Cut this part and Cut this silence", /"Restore"/.test(src) && /Cut this part/.test(src) && /Cut this silence \(/.test(src));
+  ok("the toolbar offers Split, Delete and Restore; the inline bar Cut this silence", /label="Split"/.test(src) && /label="Delete"/.test(src) && /"Restore"/.test(src) && /Cut this silence \(/.test(src));
   ok("no worklet functions or UI-thread callbacks were added", !/['"]worklet['"]|useAnimatedReaction|useFrameCallback|runOnUI|useDerivedValue/.test(src));
   const edit = read("../app/edit.tsx");
   ok("the screen cuts through the reversible edit (userEdit) and shows no sheet for a chip", /handleCutRange[\s\S]{0,700}userEdit\(\(\) => plan\.next\)/.test(edit) && /onRestoreCut=\{handleRestoreCut\}/.test(edit));

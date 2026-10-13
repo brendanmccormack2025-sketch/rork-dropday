@@ -52,7 +52,7 @@ class Boundary extends React.Component<{ onError: (error: unknown, where: string
  * with it showing last time, the previous timeline (`fallback`) is shown instead. Until the stored marker has been read
  * the fallback is shown too, so a build that crashes on this screen never gets as far as mounting the new timeline.
  */
-export default function GuardedTimeline({ fallback, ...props }: PrecisionTimelineProps & { fallback: React.ReactNode }) {
+export default function GuardedTimeline({ fallback, onActive, ...props }: PrecisionTimelineProps & { fallback: React.ReactNode; /** Whether the precision timeline (and its own Split / Delete toolbar) is the one on screen. */ onActive?: (active: boolean) => void }) {
   const [status, setStatus] = useState<"checking" | "on" | "off">(decided ?? "checking");
   const key = useRef(buildKey()).current;
   const failedOnce = useRef(false);
@@ -71,6 +71,11 @@ export default function GuardedTimeline({ fallback, ...props }: PrecisionTimelin
       cancelled = true;
     };
   }, [key]);
+
+  useEffect(() => {
+    onActive?.(status === "on");
+    return () => onActive?.(false);
+  }, [status, onActive]);
 
   // armed while the timeline is on screen and the app is in the foreground
   useEffect(() => {

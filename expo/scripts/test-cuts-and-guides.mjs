@@ -97,7 +97,7 @@ const model = (st) => ({ state: st, durationMs: DURATION });
   let h = pushEdit(emptyHistory(), st);
   eq("it is one undo step", undoEdit(h, restored).state, st);
   ok("a selected part still shows Delete this part and a marker opens its sheet", /setMarkerSheet\(marker\);/.test(edit));
-  ok("a selected part shows Delete this part", /selectedClipId && clips\.length > 0 && \(/.test(edit) && /accessibilityLabel="Delete this part"/.test(edit));
+  ok("a selected part shows Delete this part", /selectedClipId && clips\.length > 0 && !\(timelineSeams && precisionOn\) && \(/.test(edit) && /accessibilityLabel="Delete this part"/.test(edit));
 }
 
 // ── Keep original ──

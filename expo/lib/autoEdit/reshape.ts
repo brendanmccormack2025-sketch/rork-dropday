@@ -24,6 +24,7 @@ import {
   isCutType,
   keepRangesOf,
   makeDecision,
+  pieceRangesOf,
   protectedRangesOf,
   sortDecisions,
   type Decision,
@@ -51,9 +52,9 @@ export type EdgeDrag =
   | { kind: "reveal"; edgeMs: number; clampedMs: number; range: Range }
   | { kind: "cut"; edgeMs: number; clampedMs: number; range: Range };
 
-/** The kept clip that owns an edge, or null when no kept clip ends there. */
+/** The clip (a kept range, or a piece of one after a split) that owns an edge, or null when no clip ends there. */
 function clipOfEdge(state: EditState, edge: SeamEdge, durationMs: number): Range | null {
-  const keep = keepRangesOf(state, durationMs);
+  const keep = pieceRangesOf(state, durationMs);
   const near = (k: Range) => Math.abs((edge.side === "left" ? k.startMs : k.endMs) - edge.atMs) <= EDGE_TOLERANCE_MS;
   const found = keep.filter(near);
   if (found.length === 0) return null;
@@ -82,11 +83,14 @@ export function describeEdgeDrag(
     edge.side === "left"
       ? Math.min(Math.max(0, newSourceMs), Math.max(edgeMs, clip.endMs - MIN_KEEP_MS))
       : Math.max(Math.min(durationMs, newSourceMs), Math.min(edgeMs, clip.startMs + MIN_KEEP_MS));
-  const moved = clampedMs - edgeMs;
+  // An edge at a split has footage kept right behind it: nothing to bring back there, it only trims inward.
+  const atSplit = pieceRangesOf(state, durationMs).some((p) => (edge.side === "left" ? Math.abs(p.endMs - edgeMs) <= 1 : Math.abs(p.startMs - edgeMs) <= 1));
+  const limited = atSplit ? (edge.side === "left" ? Math.max(clampedMs, edgeMs) : Math.min(clampedMs, edgeMs)) : clampedMs;
+  const moved = limited - edgeMs;
   if (Math.abs(moved) < minDragMs) return { kind: "none", edgeMs, clampedMs: edgeMs };
   const outward = edge.side === "left" ? moved < 0 : moved > 0;
-  const range = { startMs: Math.min(edgeMs, clampedMs), endMs: Math.max(edgeMs, clampedMs) };
-  return { kind: outward ? "reveal" : "cut", edgeMs, clampedMs, range };
+  const range = { startMs: Math.min(edgeMs, limited), endMs: Math.max(edgeMs, limited) };
+  return { kind: outward ? "reveal" : "cut", edgeMs, clampedMs: limited, range };
 }
 
 /** What is left of `r` once `hole` is taken out (zero, one or two ranges). */

@@ -259,6 +259,38 @@ export const LANE_H = 56;
 export const LANE_TOP = 12;
 export const INFO_H = 48;
 export const NUDGE_BTN = 44;
+/** The bottom toolbar (Split / Delete / Restore): big, rounded buttons under the info row. */
+export const TOOLBAR_H = 64;
+export const TOOLBAR_BTN_H = 48;
+
+/** The buttons of the toolbar, left to right, `count` of them sharing the width (12 pt margins, 10 pt between). */
+export function toolbarRects(width: number, count: number, top: number): Rect[] {
+  const n = Math.max(1, count);
+  const margin = 12;
+  const gap = 10;
+  const w = Math.max(0, (width - 2 * margin - (n - 1) * gap) / n);
+  const y = top + (TOOLBAR_H - TOOLBAR_BTN_H) / 2;
+  return Array.from({ length: n }, (_, i) => ({ x: margin + i * (w + gap), y, w, h: TOOLBAR_BTN_H }));
+}
+
+// ── The playhead is fixed at the horizontal centre; the timeline scrolls under it (CapCut style) ──
+
+/** The scroll offset that puts `ms` under the centre line. */
+export function offsetForCenter(ms: number, scale: number, viewW: number, pad: number = TL_PAD): number {
+  return pad + ms * scale - viewW / 2;
+}
+
+/** The time under the centre line. */
+export function msAtCenter(offset: number, scale: number, viewW: number, pad: number = TL_PAD): number {
+  return scale > 0 ? (offset + viewW / 2 - pad) / scale : 0;
+}
+
+/** The offset kept so that the centre line stays between the start and the end of the video. */
+export function clampCenterOffset(offset: number, totalMs: number, scale: number, viewW: number, pad: number = TL_PAD): number {
+  const lo = offsetForCenter(0, scale, viewW, pad);
+  const hi = offsetForCenter(Math.max(0, totalMs), scale, viewW, pad);
+  return Math.min(hi, Math.max(lo, offset));
+}
 
 /** The fixed parts of the timeline at `width` points: the lane, and the info row with the nudge buttons and readout. */
 export function timelineRects(width: number): { lane: Rect; info: Rect; nudgeBack: Rect; nudgeFwd: Rect; readout: Rect; clearBtn: Rect } {

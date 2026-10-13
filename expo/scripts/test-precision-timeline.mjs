@@ -300,13 +300,13 @@ const TOTAL = 60_000;    // a one-minute video
   // has run in this app before, in the text overlays); every other gesture of the app is runOnJS(true) too.
   const gestures = (code.match(/Gesture\.(Pan|Tap|Pinch)\(\)/g) || []).length;
   const jsGestures = (code.match(/Gesture\.(Pan|Tap|Pinch)\(\)\s*\.runOnJS\(true\)/g) || []).length;
-  eq("every gesture runs on the JS thread (runOnJS(true)): Pinch + Pan + the hold-and-drag range Pan + two Taps", [gestures, jsGestures], [5, 5]);
+  eq("every gesture runs on the JS thread (runOnJS(true)): Pinch + Pan + two Taps", [gestures, jsGestures], [4, 4]);
   ok("no worklets, UI-thread loops or animation drivers: no \"worklet\", runOnJS(), useFrameCallback, useAnimatedReaction, withDecay, withTiming, withSpring, cancelAnimation", !/"worklet"|(?<!\.)\brunOnJS\(|useFrameCallback|useAnimatedReaction|withDecay|withTiming|withSpring|\bcancelAnimation\(|runOnUI|scheduleOnUI/.test(code));
   ok("reanimated is used only for shared values and animated styles", /from "react-native-reanimated"/.test(code) && /import Animated, \{ useAnimatedStyle, useSharedValue, type SharedValue \} from "react-native-reanimated"/.test(code));
   const styleBodies = [...code.matchAll(/useAnimatedStyle\(\(\) => (?:\{([\s\S]*?)\n  \}\)|\(\{([\s\S]*?)\}\)\))/g)].map((m) => m[1] ?? m[2] ?? "");
   ok(`all ${styleBodies.length} animated styles return only transform and opacity (no width, height, top, left, colors)`, styleBodies.length >= 9 && styleBodies.every((b) => !/\b(width|height|top|left|right|bottom|backgroundColor|borderRadius)\s*:/.test(b)));
   ok("animated styles read only shared values and plain numbers (no objects or functions captured)", styleBodies.every((b) => !/\b(geom|marker|clip|seams|props|live|view\.current)\b/.test(b)));
-  ok("pinch zoom uses pinchView; double tap animates back to fitView", /pinchView\(/.test(comp) && /numberOfTaps\(2\)/.test(comp) && /fitView\(/.test(comp));
+  ok("pinch zoom keeps the moment under the centre line; double tap animates back to the whole video", /offsetForCenter\(p\.centerMs, sc/.test(comp) && /numberOfTaps\(2\)/.test(comp) && /fitScale\(totalRef/.test(comp));
   ok("one-finger pan scrolls and flings (flingStep, a JS frame loop)", /flingStep\(/.test(comp) && /requestAnimationFrame/.test(comp) && /\.maxPointers\(1\)/.test(comp));
   ok("edge drags snap with snapStep and buzz when they catch", /snapStep\(/.test(comp) && /if \(r\.caught\) haptic\("light"\)/.test(comp));
   ok("the waveform comes from the analysis cache (silence detection's loudness, computed once)", /analysis\.cachedLoudness\(/.test(comp) && /analysis\.loudness\(/.test(comp) && /waveformColumns\(/.test(comp));
@@ -317,7 +317,7 @@ const TOTAL = 60_000;    // a one-minute video
   // the trim-style handles
   ok("the selected clip has a thick rounded red handle on each end, each with two white grip lines", /handle: \{[^}]*width: HANDLE_W[^}]*height: LANE_H[^}]*backgroundColor: theme\.accent/.test(comp) && /borderTopLeftRadius: HANDLE_RADIUS, borderBottomLeftRadius: HANDLE_RADIUS/.test(comp) && /borderTopRightRadius: HANDLE_RADIUS, borderBottomRightRadius: HANDLE_RADIUS/.test(comp) && (comp.match(/<View style=\{styles\.grip\} \/>/g) || []).length === 4 && /grip: \{ width: 2, height: 16[^}]*backgroundColor: "#FFFFFF"/.test(comp));
   ok("a red outline of 2.5 pt runs along the top and bottom of the selected clip", /frameBar: \{[^}]*height: FRAME_LINE[^}]*backgroundColor: theme\.accent/.test(comp) && /top: LANE_TOP \}/.test(comp) && /top: LANE_TOP \+ LANE_H - FRAME_LINE/.test(comp));
-  ok("a touched handle scales up (transform scale, 1.15) and gives a light haptic at touch-down; it goes back on release", /\{ scale: pressLeft\.value \}/.test(comp) && /\{ scale: pressRight\.value \}/.test(comp) && /press\(g\.side\);\s*haptic\("light"\);/.test(comp) && /if \(g1\.current\.mode === "edge"\) press\(null\)/.test(comp) && /HANDLE_PRESS_SCALE/.test(comp));
+  ok("a touched handle scales up (transform scale, 1.15) and gives a light haptic at touch-down; it goes back on release", /\{ scale: pressLeft\.value \}/.test(comp) && /\{ scale: pressRight\.value \}/.test(comp) && /press\(hit\.side\);\s*haptic\("light"\);/.test(comp) && /if \(g1\.current\.mode === "edge"\) press\(null\)/.test(comp) && /HANDLE_PRESS_SCALE/.test(comp));
   ok("cuts are slim striped chips in the gap between rounded clips; the grey dividers and dots are gone", /function CutChip/.test(comp) && /function ClipBar/.test(comp) && !/<Divider /.test(comp) && !/cutDot/.test(comp) && !/Pills/.test(comp));
   ok("the frame follows the selected edge through edits (clips get new ids), else the tapped clip", /selectedHandle\?\.edge\.clipId \?\? selectedClipId/.test(comp));
   ok("tapping empty space ends both the edge selection and the clip selection", /if \(l\.selectedClipId\) l\.onDeselectAndPreview\?\.\(\);/.test(comp));

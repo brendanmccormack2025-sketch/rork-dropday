@@ -53,7 +53,46 @@ export type EditState = {
    * change): a new text, or "" for a deleted word (Delete line deletes every word of the line). Undo/redo cover it.
    */
   captionEdits?: Record<number, string>;
+  /**
+   * Where the creator split the video (source ms). A split cuts nothing: the kept footage is the same, but the two
+   * sides are separate clips on the timeline (select, trim and delete one). Undo/redo cover it like any state.
+   */
+  splits?: number[];
 };
+
+/** A split must leave at least this much on each side (and be this far from another split). */
+export const MIN_SPLIT_PIECE_MS = 80;
+
+/** The state with a split at a source moment; the same object when it cannot be split there (so it is no undo step). */
+export function addSplit(state: EditState, sourceMs: number, sourceDurationMs: number): EditState {
+  if (!Number.isFinite(sourceMs)) return state;
+  const at = Math.round(sourceMs);
+  const keep = keepRangesOf(state, sourceDurationMs);
+  const range = keep.find((k) => at - k.startMs >= MIN_SPLIT_PIECE_MS && k.endMs - at >= MIN_SPLIT_PIECE_MS);
+  if (!range) return state;
+  const old = state.splits ?? [];
+  if (old.some((x) => Math.abs(x - at) < MIN_SPLIT_PIECE_MS && x > range.startMs && x < range.endMs)) return state;
+  return { ...state, splits: [...old, at].sort((a, b) => a - b) };
+}
+
+/** The kept footage as clips: each kept range cut into pieces at the splits that fall inside it. */
+export function pieceRangesOf(state: EditState, sourceDurationMs: number): KeepRange[] {
+  const keep = keepRangesOf(state, sourceDurationMs);
+  const splits = state.splits ?? [];
+  if (splits.length === 0) return keep;
+  const out: KeepRange[] = [];
+  for (const k of keep) {
+    let cursor = k.startMs;
+    for (const x of splits) {
+      if (x > cursor + 1 && x < k.endMs - 1) {
+        out.push({ startMs: cursor, endMs: x });
+        cursor = x;
+      }
+    }
+    out.push({ startMs: cursor, endMs: k.endMs });
+  }
+  return out;
+}
 
 /** The state with new caption edits; the same object when nothing changes (so it is not an undo step). */
 export function setCaptionEdits(state: EditState, edits: Record<number, string>): EditState {
@@ -285,7 +324,7 @@ export function appliedCutRanges(state: EditState): Array<{ startMs: number; end
 
 /** The clips to render for this state: what the render path consumes today. */
 export function renderClipsOf(state: EditState, sourceDurationMs: number): EditClip[] {
-  return keepRangesToClips(state.sourceUri, keepRangesOf(state, sourceDurationMs));
+  return keepRangesToClips(state.sourceUri, pieceRangesOf(state, sourceDurationMs));
 }
 
 export type MappedDecision = {
