@@ -21,8 +21,10 @@ import type { SeamEdgeInfo, SeamHandleSpec } from "@/lib/autoEdit/seams";
 import { buildSnapTargets, snapParams, snapStart, snapStep, type SnapState, type TimedWord } from "@/lib/autoEdit/edgeSnap";
 import {
   BOTTOM_MARKER_Y,
-  CHIP_W,
   CLIP_GAP,
+  CUT_DOT,
+  CUT_DOT_Y,
+  CUT_LINE_W,
   FRAME_LINE,
   HANDLE_PRESS_SCALE,
   HANDLE_RADIUS,
@@ -89,12 +91,7 @@ const CLIP_R = 8;
 const SCRUB_EVERY_MS = 70;
 /** A touch that never ended (a lost gesture) is forgotten after this long, so the playhead can follow playback again. */
 const TOUCH_STALE_MS = 4000;
-const STRIPES = (() => {
-  const h = LANE_H - 14;
-  let d = "";
-  for (let k = -h; k < CHIP_W + h; k += 6) d += `M${k} ${h} L${k + h} 0 `;
-  return d;
-})();
+
 
 export type PrecisionSeams = {
   handles: SeamHandleSpec[];
@@ -274,15 +271,20 @@ function ClipBar({
   );
 }
 
-/** A removed part: a slim striped chip in the gap at the seam where the cut was. Transform only. */
-function CutChip({ outputMs, selected, scale, offset }: { outputMs: number; selected: boolean; scale: SharedValue<number>; offset: SharedValue<number> }) {
-  const anim = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - CHIP_W / 2 }] }));
+/**
+ * A removed part: a thin red line at the seam where the cut was, and a small round scissors dot above the lane (tap the
+ * dot: "Silence 1.2s · Restore"). Transform only.
+ */
+function CutMark({ outputMs, selected, scale, offset }: { outputMs: number; selected: boolean; scale: SharedValue<number>; offset: SharedValue<number> }) {
+  const line = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - CUT_LINE_W / 2 }] }));
+  const dot = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - CUT_DOT / 2 }] }));
   return (
-    <Animated.View pointerEvents="none" style={[styles.chip, selected && styles.chipSelected, anim]}>
-      <Svg width={CHIP_W} height={LANE_H - 14}>
-        <Path d={STRIPES} stroke={selected ? "#FFFFFF" : theme.accent} strokeOpacity={selected ? 0.9 : 0.55} strokeWidth={2} />
-      </Svg>
-    </Animated.View>
+    <>
+      <Animated.View pointerEvents="none" style={[styles.cutLine, selected && styles.cutLineSelected, line]} />
+      <Animated.View pointerEvents="none" style={[styles.cutDotBox, selected && styles.cutDotSelected, dot]}>
+        <Scissors size={12} color="#FFFFFF" strokeWidth={2.6} />
+      </Animated.View>
+    </>
   );
 }
 
@@ -1241,7 +1243,7 @@ export default function PrecisionTimeline({
               </View>
               {/* handles, markers, playhead: drawn over the lane */}
               <View pointerEvents="none" style={styles.overlay}>
-                {(markers ?? []).map((m, i) => (m.kind === "cut" ? <CutChip key={m.id} outputMs={markerGeoms[i]?.outputMs ?? 0} selected={m.id === chipId} scale={scale} offset={offset} /> : null))}
+                {(markers ?? []).map((m, i) => (m.kind === "cut" ? <CutMark key={m.id} outputMs={markerGeoms[i]?.outputMs ?? 0} selected={m.id === chipId} scale={scale} offset={offset} /> : null))}
                 <Frame frameStart={frameStart} frameEnd={frameEnd} pressLeft={pressLeft} pressRight={pressRight} scale={scale} offset={offset} />
                 <Animated.View pointerEvents="none" style={[styles.edgeLine, edgeLineStyle]} />
                 {(markers ?? []).map((m, i) => {
@@ -1379,8 +1381,10 @@ const styles = StyleSheet.create({
   clipSelected: { backgroundColor: "#FFE3DF" },
   hintTint: { backgroundColor: "rgba(20,184,166,0.20)" },
   hintTintOn: { backgroundColor: "rgba(20,184,166,0.42)" },
-  chip: { position: "absolute", left: 0, top: LANE_TOP + 7, width: CHIP_W, height: LANE_H - 14, borderRadius: CHIP_W / 2, overflow: "hidden", backgroundColor: "rgba(232,41,28,0.16)", alignItems: "center", justifyContent: "center" },
-  chipSelected: { backgroundColor: theme.accent },
+  cutLine: { position: "absolute", left: 0, top: CUT_DOT_Y, width: CUT_LINE_W, height: LANE_TOP + LANE_H - CUT_DOT_Y, backgroundColor: theme.accent, opacity: 0.85 },
+  cutLineSelected: { opacity: 1 },
+  cutDotBox: { position: "absolute", left: 0, top: CUT_DOT_Y - CUT_DOT / 2, width: CUT_DOT, height: CUT_DOT, borderRadius: CUT_DOT / 2, backgroundColor: theme.accent, alignItems: "center", justifyContent: "center" },
+  cutDotSelected: { backgroundColor: theme.text },
   band: { backgroundColor: "rgba(242,140,40,0.28)" },
   ghostOut: { backgroundColor: "rgba(31,168,77,0.38)" },
   ghostCut: { backgroundColor: "rgba(232,41,28,0.34)" },

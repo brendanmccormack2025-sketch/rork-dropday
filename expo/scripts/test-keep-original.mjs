@@ -75,8 +75,8 @@ const whole = [{ id: "a", uri: "v.mov", trimStartMs: 0, trimEndMs: DUR, duration
 // ── wiring ──
 {
   const edit = read("../app/edit.tsx");
-  ok("the preview render is skipped when no cut is active, and the editor never waits for it", /const noCuts = isPlayingWholeSource\(clips, editModel\?\.state/.test(edit) && /isRoot: args\.isRoot && !noCuts/.test(edit) && /!roughPlay && !noCuts/.test(edit));
-  ok("the render for Post is not affected (captions are still burned in, the original is posted when nothing is cut)", /finalRef\.current\?\.update\(\{ \.\.\.args, captions: captions\.overlays \}\)/.test(edit));
+  ok("the preview render is skipped when no cut is active, and the editor never waits for it", /const noCuts = isPlayingWholeSource\(clips, editModel\?\.state/.test(edit) && /isRoot: args\.isRoot && !noCuts/.test(edit) && /const waitForPreview = false/.test(edit));
+  ok("the render for Post is not affected (captions are still burned in, the original is posted when nothing is cut)", /finalRef\.current\?\.update\(\{ \.\.\.args, hold: args\.hold \|\| step === "cuts", captions: captions\.overlays \}\)/.test(edit));
   const rap = read("../lib/renderAtPost.ts");
   ok("Post: a single untrimmed clip with no captions posts the original; with captions it is rendered", /return "no cuts";\s*\n\s*if \(!isVideoRenderAvailable/.test(rap) && /clips\.length > 1 \|\| clips\.some\(isTrimmed\) \|\| args\.hasOverlays/.test(rap));
   ok("the edit seeks once: replaceClips' pending seek and start-trim seek are dropped, handleSeek clears any left", /pendingSeekRef\.current = null;\s*\n\s*trimSeekDoneRef\.current = true;/.test(edit) && /pendingSeekRef\.current = null;\s*\n\s*if \(videoRef\.current\) videoRef\.current\.currentTime = sourcePos/.test(edit));

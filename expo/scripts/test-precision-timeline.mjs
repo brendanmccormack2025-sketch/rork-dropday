@@ -221,7 +221,7 @@ const TOTAL = 60_000;    // a one-minute video
   ok("the buttons are at least 44 x 44", [r.nudgeBack, r.nudgeFwd, r.clearBtn].every((b) => b.w >= 44 && b.h >= 44));
   ok("the readout has room for m:ss.cc and the delta (at least 150 pt)", r.readout.w >= 150);
   ok("the info row is under the lane", r.info.y === r.lane.y + r.lane.h && !overlap(r.lane, r.info));
-  eq("the timeline is a fixed height", LANE_TOP + LANE_H + INFO_H, 116);
+  eq("the timeline is a fixed height (a strip for the cut dots, the lane, the info row)", LANE_TOP + LANE_H + INFO_H, 138);
   ok("(NUDGE_BTN is the 44 pt minimum)", NUDGE_BTN >= 44);
 }
 
@@ -318,7 +318,7 @@ const TOTAL = 60_000;    // a one-minute video
   ok("the selected clip has a thick rounded red handle on each end, each with two white grip lines", /handle: \{[^}]*width: HANDLE_W[^}]*height: LANE_H[^}]*backgroundColor: theme\.accent/.test(comp) && /borderTopLeftRadius: HANDLE_RADIUS, borderBottomLeftRadius: HANDLE_RADIUS/.test(comp) && /borderTopRightRadius: HANDLE_RADIUS, borderBottomRightRadius: HANDLE_RADIUS/.test(comp) && (comp.match(/<View style=\{styles\.grip\} \/>/g) || []).length === 4 && /grip: \{ width: 2, height: 16[^}]*backgroundColor: "#FFFFFF"/.test(comp));
   ok("a red outline of 2.5 pt runs along the top and bottom of the selected clip", /frameBar: \{[^}]*height: FRAME_LINE[^}]*backgroundColor: theme\.accent/.test(comp) && /top: LANE_TOP \}/.test(comp) && /top: LANE_TOP \+ LANE_H - FRAME_LINE/.test(comp));
   ok("a touched handle scales up (transform scale, 1.15) and gives a light haptic at touch-down; it goes back on release", /\{ scale: pressLeft\.value \}/.test(comp) && /\{ scale: pressRight\.value \}/.test(comp) && /press\(hit\.side\);\s*haptic\("light"\);/.test(comp) && /if \(g1\.current\.mode === "edge"\) press\(null\)/.test(comp) && /HANDLE_PRESS_SCALE/.test(comp));
-  ok("cuts are slim striped chips in the gap between rounded clips; the grey dividers and dots are gone", /function CutChip/.test(comp) && /function ClipBar/.test(comp) && !/<Divider /.test(comp) && !/cutDot/.test(comp) && !/Pills/.test(comp));
+  ok("a cut is a thin red line with a round scissors dot above the lane, between rounded clips; no striped chips (they looked like pause icons), dividers or grey dots", /function CutMark/.test(comp) && /function ClipBar/.test(comp) && !/<Divider /.test(comp) && !/STRIPES|CutChip|<Svg width=\{CHIP_W\}/.test(comp) && !/Pills/.test(comp));
   ok("the frame follows the selected edge through edits (clips get new ids), else the tapped clip", /selectedHandle\?\.edge\.clipId \?\? selectedClipId/.test(comp));
   ok("tapping empty space ends both the edge selection and the clip selection", /if \(l\.selectedClipId\) l\.onDeselectAndPreview\?\.\(\);/.test(comp));
   ok("the pure helpers are plain functions (no worklet directive anywhere)", !/"worklet"/.test(read("../lib/autoEdit/timelineView.ts") + read("../lib/autoEdit/edgeSnap.ts")));

@@ -173,8 +173,8 @@ const segs = buildSegments(clips);
 {
   const edit = read("../app/edit.tsx");
   const tl = read("../components/PrecisionTimeline.tsx");
-  ok("nothing is rendered while the cuts are edited: the renders hold on the Cuts screen and start when it is left", /hold: captionsBusy \|\| mergeUi\.kind !== "idle" \|\| step === "cuts"/.test(edit));
-  ok("the Cuts screen never plays a rendered preview and never waits for one", /const previewMode = step !== "cuts" && previewModeFor/.test(edit) && /const waitForPreview = step !== "cuts" && aheadBusy/.test(edit));
+  ok("the preview render starts after ~2 s with no edit, the final (captions) render waits until the Cuts screen is left", /hold: args\.hold \|\| step === "cuts"/.test(edit) && /RENDER_AHEAD_IDLE_MS = 2000/.test(read("../lib/renderAhead.ts")));
+  ok("playback never waits for a render and never shows a loading state for it", /const waitForPreview = false/.test(edit));
   ok("a cut changes the edit list without resetting the player (soft commit): no pause, no re-seek unless its moment was cut out", /softReplaceClips\(nextClips, newPosition\)/.test(edit) && /Math\.abs\(player\.currentTime \* 1000 - wantedMs\) > 40/.test(edit));
   ok("unchanged pieces keep their clip, so selection and keys survive an edit", /reuse\(c\) \?\? \{ \.\.\.base/.test(edit));
   ok("the playback loop watches the player every frame and skips removed ranges (playbackTick)", /requestAnimationFrame\(tick\)/.test(edit) && /playbackTick\(\{ segs: virtualSegsRef\.current/.test(edit));

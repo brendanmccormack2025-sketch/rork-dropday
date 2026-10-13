@@ -26,6 +26,7 @@ import UiText from "@/components/UiText";
 import { PlayIndicator, PreviewStatusChip } from "@/components/EditorChromeBits";
 import { CAPTIONS_EDIT_BAR_HEIGHT, E_BAR, E_NEXT, E_READY, E_TOOLS, E_TOP_BAR, captionLift, chromeVisibility } from "@/lib/editorChrome";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import ReAnimated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
@@ -105,6 +106,8 @@ import { MANUAL_EDIT_CONFIRM_MESSAGE, guardManualEdits, timelineMatchesState } f
 import { addManualCut, addSplit, protectedRangesOf } from "@/lib/autoEdit/decisions";
 import { planRangeCut } from "@/lib/autoEdit/rangeCut";
 import { buildSegments, editedToSource, playbackTick, segmentAtEdited } from "@/lib/autoEdit/virtualTimeline";
+import { GAPLESS_DEFAULTS, gaplessTick, learnLatency, playPressed, previewSourceFor, type StandbyState } from "@/lib/autoEdit/gaplessPlan";
+import PlaybackControls from "@/components/PlaybackControls";
 import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/lib/autoEdit/deletePart";
 import { analysisSource, loadLoudnessChecked } from "@/lib/mergeTiming";
 import { AUTO_EDIT_STALL_MS, transcriptionGate } from "@/lib/captionsGate";
@@ -624,32 +627,42 @@ export default function EditScreen() {
       clips,
       isRoot: !reactingTo && !rootDropId,
       userId: user?.id,
-      // Nothing is rendered while the cuts are edited: the preview plays the source through the edit list. The
-      // renders (for Post) start in the background when the Cuts screen is left.
-      hold: captionsBusy || mergeUi.kind !== "idle" || step === "cuts",
+      hold: captionsBusy || mergeUi.kind !== "idle",
     };
     // The preview render is skipped when there is nothing cut (isRoot false = "not eligible", so it goes idle and
     // drops any render in flight); the final render for Post below is unaffected (captions are still burned in).
     aheadRef.current?.update({ ...args, isRoot: args.isRoot && !noCuts });
-    finalRef.current?.update({ ...args, captions: captions.overlays });
+    // The preview render (cuts only) starts after ~2 s with no edit and any edit cancels it. The final render (captions
+    // burned in, for Post) waits until the Cuts screen is left, so only one render competes with playback.
+    finalRef.current?.update({ ...args, hold: args.hold || step === "cuts", captions: captions.overlays });
   }, [clips, reactingTo, rootDropId, user?.id, captions.overlays, captionsBusy, mergeUi.kind, noCuts, step]);
   const aheadReady = aheadState.kind === "ready" ? aheadState : null;
   const aheadSignature = aheadRef.current?.signatureOf(clips) ?? null;
   const aheadMatches = !!aheadReady && aheadReady.signature === aheadSignature;
   // The rendered file plays while it matches the timeline. Selecting a clip is not an edit and does not
   // leave it (see lib/previewSelection.ts); a trim or cut changes the clips, so the render stops matching.
-  // The Cuts screen always plays the source through the edit list (a rendered file is never the preview there).
-  const previewMode = step !== "cuts" && previewModeFor({ aheadMatches, selectedClipId });
+  // The two players always work and are what plays while editing. A finished render-ahead file for exactly this
+  // timeline plays instead when playback starts on it (never swapped in mid-playback); any edit makes it stale and the
+  // players are back at once. Nothing ever waits for it.
+  const renderedWasPlayingRef = useRef(false);
+  if (!isPlaying) renderedWasPlayingRef.current = aheadMatches;
+  const previewMode =
+    previewModeFor({ aheadMatches, selectedClipId }) &&
+    previewSourceFor({ aheadMatches, isPlaying, renderedWasPlaying: renderedWasPlayingRef.current }) === "rendered";
   const previewModeRef = useRef(false);
   previewModeRef.current = previewMode;
   const isPlayingRef = useRef(false);
   isPlayingRef.current = isPlaying;
+  useEffect(() => {
+    if (isPlaying) setPlayEnded(false);
+  }, [isPlaying]);
   // Play while the render-ahead is waiting or rendering: do not start the glitchy
   // live playback; wait for the rendered file (or "Play rough preview").
   const [pendingPlay, setPendingPlay] = useState(false);
   const [roughPlay, setRoughPlay] = useState(false);
   const aheadBusy = aheadState.kind === "waiting" || aheadState.kind === "rendering";
-  const waitForPreview = step !== "cuts" && aheadBusy && !aheadMatches && selectedClipId === null && !roughPlay && !noCuts;
+  // Playback never waits for a render: the two players play at once.
+  const waitForPreview = false;
   const waitForPreviewRef = useRef(false);
   waitForPreviewRef.current = waitForPreview;
   const renderStartedAtRef = useRef(0);
@@ -672,10 +685,14 @@ export default function EditScreen() {
     if (!isPlaying) setRoughPlay(false);
   }, [isPlaying]);
   const playerR = useVideoPlayer(null, (p) => {
-    p.loop = true;
+    p.loop = false;
     p.timeUpdateEventInterval = 0.05;
   });
   const [positionMs, setPositionMs] = useState<number>(0);
+  // The edit played to its end: playback stopped there and the replay button shows.
+  const [playEnded, setPlayEnded] = useState(false);
+  const playEndedRef = useRef(false);
+  playEndedRef.current = playEnded;
   const pendingSeekRef = useRef<number | null>(null);
   const segmentOffsetRef = useRef<number>(0);
   const activeIndexRef = useRef<number>(0);
@@ -981,6 +998,8 @@ export default function EditScreen() {
   // swap at segment end is instant instead of a cold load.
   const [preloadSource, setPreloadSource] = useState<{ uri: string } | undefined>(undefined);
   const preloadArmedRef = useRef<boolean>(false);
+  // Two players on the same source, parked and swapped by the scheduler (lib/autoEdit/gaplessPlan.ts).
+  const geOnRef = useRef(false);
   const preloadReadyRef = useRef<boolean>(false);
   const preloadExpectedUriRef = useRef<string | null>(null);
 
@@ -1045,7 +1064,7 @@ export default function EditScreen() {
   const previewUri = previewMode ? aheadReady!.uri : null;
   useEffect(() => {
     if (previewUri) {
-      playerR.loop = true;
+      playerR.loop = false;
       if (previewUriRef.current !== previewUri) {
         previewUriRef.current = previewUri;
         // A fresh item, ready, then ONE seek to the playhead (a seek before the file is ready is ignored), then play
@@ -1075,6 +1094,10 @@ export default function EditScreen() {
   useVideoStatusFeed(playerR, {
     onStatus: (s) => {
       if (!previewModeRef.current || !s.isLoaded) return;
+      if (s.didJustFinish) {
+        stopAtEnd();
+        return;
+      }
       const now = Date.now();
       if (now - lastPreviewPosRef.current < 100) return;
       lastPreviewPosRef.current = now;
@@ -1131,6 +1154,22 @@ export default function EditScreen() {
     setIsPlaying(false);
   }, []);
 
+  // Playing to the end stops there (nothing loops) and shows replay.
+  const stopAtEnd = useCallback(() => {
+    const total = clipsRef.current.reduce((sum, c) => sum + effectiveDurationMs(c), 0);
+    try {
+      videoRef.current?.pause();
+      (activeSlotRef.current === 0 ? videoRefB : videoRefA).current?.pause();
+      playerR.pause();
+    } catch {
+      // a player that is gone cannot be paused
+    }
+    trimEndHandledRef.current = true;
+    setIsPlaying(false);
+    setPlayEnded(true);
+    setPositionMs(total);
+  }, []);
+
   // ── Playback status handler ───────────────────────────────────────────────
   const onVideoStatus = useCallback((status: VideoPlaybackStatus) => {
     // Error variant has isLoaded=false and an optional error field.
@@ -1146,6 +1185,18 @@ export default function EditScreen() {
     const sourceDur =
       typeof status.durationMillis === "number" ? status.durationMillis : 0;
     const posMillis = status.positionMillis ?? 0;
+
+    // Two-player playback (gapless) owns the seams: this handler only reports where the playhead is.
+    if (geOnRef.current) {
+      const t = Date.now();
+      if (t - lastPositionUpdate.current >= 100) {
+        lastPositionUpdate.current = t;
+        const c = clipsRef.current[activeIndexRef.current];
+        const within = Math.max(0, posMillis - trimStartRef.current);
+        setPositionMs(segmentOffsetRef.current + (c ? Math.min(effectiveDurationMs(c), within) : within));
+      }
+      return;
+    }
 
     // Preload arming: when playback nears the clip's end, source the next clip
     // into the inactive slot so it's ready to swap in without a cold-load stall.
@@ -1279,12 +1330,7 @@ export default function EditScreen() {
         }
         trimEndHandledRef.current = false;
       } else if (clipsRef.current.length === 1) {
-        if (videoRef.current) {
-          videoRef.current.muted = true;
-          videoRef.current.currentTime = trimStartRef.current / 1000;
-          videoRef.current.muted = false;
-        }
-        trimEndHandledRef.current = false;
+        stopAtEnd();
       } else {
         advanceToNextClip();
       }
@@ -1316,12 +1362,17 @@ export default function EditScreen() {
       }
       return;
     }
-  }, [handleVideoLoadError]);
+  }, [handleVideoLoadError, stopAtEnd]);
 
   // ── Preload slot handlers ──────────────────────────────────────────────────
   // The inactive slot tracks readiness AND positions itself at the upcoming
   // clip's trimStart so the hot-swap lands at the correct playback position.
   const onPreloadLoad = useCallback((slot: 0 | 1, loaded: boolean, hadError: boolean) => {
+    // The second player of the two-player playback is parked by its own scheduler, not at the first clip's start.
+    if (geOnRef.current && loaded) {
+      preloadReadyRef.current = true;
+      return;
+    }
     if (loaded) {
       const expectedUri = preloadExpectedUriRef.current;
       if (!expectedUri) {
@@ -1586,122 +1637,17 @@ export default function EditScreen() {
       setPositionMs(segmentOffsetRef.current);
       setIsPlaying(true);
     } else {
-      const firstClip = currentClips[0];
-      const sameUri =
-        currentPlayingClipUriRef.current === (firstClip?.uri ?? null);
-
-      // Hot swap for the wrap-around (last clip → first clip).
-      if (
-        !sameUri &&
-        firstClip?.type === "video" &&
-        preloadReadyRef.current &&
-        preloadExpectedUriRef.current === firstClip?.uri
-      ) {
-        const newSlot: 0 | 1 = activeSlotRef.current === 0 ? 1 : 0;
-        trimStartRef.current = firstClip?.trimStartMs ?? 0;
-        trimEndRef.current = firstClip?.trimEndMs ?? (firstClip?.durationMs ?? 0);
-        prevTrimStartRef.current = trimStartRef.current;
-        prevTrimEndRef.current = trimEndRef.current;
-        segmentOffsetRef.current = 0;
-        trimEndHandledRef.current = true; // keep true to block stale didJustFinish
-        // Same conditional as the forward hot-swap: trust the preload's position
-        // only when preloadReadyRef confirms the seek completed.
-        trimSeekDoneRef.current = preloadReadyRef.current;
-        trimGenerationRef.current += 1;
-        pendingSeekRef.current = null;
-        durationSetRef.current = true;
-        lastPositionUpdate.current = 0;
-
-        const incomingVideo = newSlot === 0 ? videoRefA.current : videoRefB.current;
-        videoRef.current = incomingVideo;
-        activeSlotRef.current = newSlot;
-        currentPlayingClipUriRef.current = firstClip?.uri ?? null;
-
-        const afterClip = currentClips.length > 1 ? currentClips[1] : undefined;
-        if (
-          currentClips.length > 1 &&
-          afterClip &&
-          afterClip.type === "video" &&
-          afterClip.uri !== (firstClip?.uri ?? null)
-        ) {
-          preloadArmedRef.current = true;
-          preloadReadyRef.current = false;
-          preloadExpectedUriRef.current = afterClip.uri;
-          setPreloadSource({ uri: afterClip.uri });
-        } else {
-          preloadArmedRef.current = false;
-          preloadReadyRef.current = false;
-          preloadExpectedUriRef.current = null;
-          setPreloadSource(undefined);
-        }
-
-        hotSwapRef.current = true;
-        activeIndexRef.current = 0;
-        setActiveSlot(newSlot);
-        setActiveIndex(0);
-        setPositionMs(0);
-        setVideoReady(true);
-        setIsPlaying(true);
-
-        if (incomingVideo) incomingVideo.muted = false;
-        // ALWAYS seek to trimStart (or 0) before playing — same reason as
-        // forward hot-swap: preload slot may have a stale position.
-        const wrapSeekTarget = trimStartRef.current;
-        if (incomingVideo) {
-          incomingVideo.currentTime = wrapSeekTarget / 1000;
-          incomingVideo.play();
-        }
-        trimEndHandledRef.current = false;
-        return;
-      }
-
-      const seekTarget = firstClip?.trimStartMs ?? 0;
-
-      trimStartRef.current = firstClip?.trimStartMs ?? 0;
-      trimEndRef.current = firstClip?.trimEndMs ?? (firstClip?.durationMs ?? 0);
-      prevTrimStartRef.current = trimStartRef.current;
-      prevTrimEndRef.current = trimEndRef.current;
-      segmentOffsetRef.current = 0;
-      trimEndHandledRef.current = true; // keep true to block stale didJustFinish
-      trimGenerationRef.current += 1;
-      // Same as cold-load forward: prevent the [activeClipUri] effect from
-      // resetting isPlaying=false on the wrap-around auto-advance.
-      hotSwapRef.current = true;
-
-      if (sameUri) {
-        currentPlayingClipUriRef.current = firstClip?.uri ?? null;
-        pendingSeekRef.current = null;
-        lastPositionUpdate.current = 0;
-        trimSeekDoneRef.current = true;
-        if (videoRef.current) {
-          videoRef.current.currentTime = seekTarget / 1000;
-          videoRef.current.play();
-        }
-      } else {
-        // Different URI: set a pending seek so onVideoStatus seeks to
-        // trimStart (or 0) once the new source loads.
-        currentPlayingClipUriRef.current = firstClip?.uri ?? null;
-        pendingSeekRef.current = seekTarget;
-        lastPositionUpdate.current = 0;
-        trimSeekDoneRef.current = false;
-        durationSetRef.current = false;
-      }
-
-      // Reset trimEndHandledRef after a short delay so the end-of-segment
-      // check can fire for the new clip.
-      setTimeout(() => {
-        trimEndHandledRef.current = false;
-      }, seamGuardMs(300));
-
-      activeIndexRef.current = 0;
-      setActiveIndex(0);
-      setPositionMs(0);
-      setIsPlaying(true);
+      // The last clip has played: stop at the end of the edit; the replay button starts it again from 0.
+      stopAtEnd();
     }
   }, []);
 
   // ── Seek ──────────────────────────────────────────────────────────────────
   const handleSeek = useCallback((targetMs: number) => {
+    setPlayEnded(false);
+    // the parked second player is for the old position: it is parked again for the new one
+    geStandbyRef.current = null;
+    geHeldSince.current = null;
     const currentClips = clipsRef.current;
     let cumulative = 0;
     let targetIdx = 0;
@@ -1803,7 +1749,24 @@ export default function EditScreen() {
     wasPreviewRef.current = previewMode;
   }, [previewMode, handleSeek]);
 
+  // Replay: the whole edit from 0, playing.
+  const handleReplay = useCallback(() => {
+    setPlayEnded(false);
+    if (previewModeRef.current) {
+      playerR.currentTime = 0;
+      setPositionMs(0);
+      setIsPlaying(true);
+      return;
+    }
+    handleSeek(0);
+    setTimeout(() => setIsPlaying(true), 60);
+  }, [handleSeek, playerR]);
+
   const togglePlay = useCallback(() => {
+    if (playPressed({ isPlaying: isPlayingRef.current, ended: playEndedRef.current }) === "replay") {
+      handleReplay();
+      return;
+    }
     if (pendingPlay) {
       setPendingPlay(false);
       return;
@@ -1830,12 +1793,178 @@ export default function EditScreen() {
       }
     }
     setIsPlaying((p) => !p);
-  }, [activeClip, isPlaying, pendingPlay, selectedClipId, isTrimmed, displayPosition, totalDurationMs, handleSeek]);
+  }, [activeClip, isPlaying, pendingPlay, selectedClipId, isTrimmed, displayPosition, totalDurationMs, handleSeek, handleReplay]);
 
   // The Cuts screen's playback: the player plays the SOURCE and the edit list says what to skip. This loop watches the
   // player every frame (the progress events come every 50 ms) and, a moment before a kept range ends, hands over to
   // the next one: a seek past the removed part, decided from the precomputed segment table. Nothing is rendered.
-  const virtualActive = step === "cuts" && isPlaying && videoReady && !previewMode && clips.length > 1;
+  const geSameSource = clips.length > 1 && clips.every((c) => c.type === "video" && c.uri === clips[0]!.uri);
+  const [geFailed, setGeFailed] = useState(false);
+  const geEligible = isVideo && geSameSource && !previewMode && (step === "cuts" || step === "edit") && !geFailed;
+  const gaplessOn = geEligible && videoReady;
+  const virtualActive = step === "cuts" && isPlaying && videoReady && !previewMode && clips.length > 1 && !gaplessOn;
+
+  // ── Gapless playback: two players on the same source ──────────────────────
+  // A plays piece N while B is parked at piece N+1's start; at the boundary they swap (opacity and mute only) and A is
+  // parked for N+2. The scheduler (gaplessPlan.ts) decides from the players' own times, every frame.
+  const slotA = useSharedValue(1);
+  const slotB = useSharedValue(0);
+  const slotAStyle = useAnimatedStyle(() => ({ opacity: slotA.value }));
+  const slotBStyle = useAnimatedStyle(() => ({ opacity: slotB.value }));
+  useEffect(() => {
+    slotA.value = activeSlot === 0 ? 1 : 0;
+    slotB.value = activeSlot === 1 ? 1 : 0;
+  }, [activeSlot, slotA, slotB]);
+  const geUri = geEligible ? clips[0]!.uri : null;
+  const gePreloadSet = useRef(false);
+  useEffect(() => {
+    if (geUri) {
+      gePreloadSet.current = true;
+      setPreloadSource((prev) => (prev?.uri === geUri ? prev : { uri: geUri }));
+    } else if (gePreloadSet.current) {
+      gePreloadSet.current = false;
+      preloadArmedRef.current = false;
+      preloadReadyRef.current = false;
+      preloadExpectedUriRef.current = null;
+      setPreloadSource(undefined);
+    }
+  }, [geUri]);
+  const geStandbyRef = useRef<StandbyState | null>(null);
+  const geHeldSince = useRef<number | null>(null);
+  const geLatency = useRef<number>(GAPLESS_DEFAULTS.latencyMs);
+  useEffect(() => {
+    geOnRef.current = gaplessOn;
+    if (!gaplessOn) {
+      geStandbyRef.current = null;
+      geHeldSince.current = null;
+      return;
+    }
+    let raf = 0;
+    let alive = true;
+    // The bookkeeping of the playback follows the piece that is playing now.
+    const applyActive = (index: number) => {
+      const seg = virtualSegsRef.current[index];
+      const clip = seg ? clipsRef.current[seg.index] : undefined;
+      if (!seg || !clip) return;
+      activeIndexRef.current = seg.index;
+      trimStartRef.current = clip.trimStartMs ?? 0;
+      trimEndRef.current = clip.trimEndMs ?? (clip.durationMs ?? 0);
+      prevTrimStartRef.current = trimStartRef.current;
+      prevTrimEndRef.current = trimEndRef.current;
+      segmentOffsetRef.current = seg.outStartMs;
+      setActiveIndex(seg.index);
+    };
+    const frame = () => {
+      const segs = virtualSegsRef.current;
+      if (segs.length < 2 || isIsolatedRef.current || commitInFlightRef.current) return;
+      const aSlot = activeSlotRef.current;
+      const A = aSlot === 0 ? playerA : playerB;
+      const B = aSlot === 0 ? playerB : playerA;
+      const playing = isPlayingRef.current;
+      const now = Date.now();
+      const a = A.currentTime * 1000;
+      const b = B.currentTime * 1000;
+      const sb = geStandbyRef.current;
+      const bLoaded = B.status === "readyToPlay";
+      // a standby that was started and is paused again with the editor resumes with it
+      if (playing && sb?.playing && !B.playing) B.play();
+      const ready = !!sb && bLoaded && (sb.playing || (now - sb.preparedAt >= GAPLESS_DEFAULTS.readyAfterMs && Math.abs(b - sb.prepMs) < 150));
+      const action = gaplessTick({
+        segs,
+        activeIndex: activeIndexRef.current,
+        aMs: a,
+        bMs: b,
+        standby: sb ? { ...sb, ready } : null,
+        nowMs: now,
+        playing,
+        heldMs: geHeldSince.current === null ? 0 : now - geHeldSince.current,
+        params: { latencyMs: geLatency.current },
+      });
+      switch (action.kind) {
+        case "advanceWithin":
+          applyActive(action.toIndex);
+          break;
+        case "prepare":
+          if (!bLoaded) break;
+          B.pause();
+          B.muted = true;
+          B.currentTime = action.seekMs / 1000;
+          geStandbyRef.current = { index: action.toIndex, prepMs: action.seekMs, preparedAt: now, playing: false };
+          break;
+        case "startStandby":
+          if (sb) {
+            B.muted = true;
+            B.play();
+            sb.playing = true;
+          }
+          break;
+        case "swap": {
+          const newSlot: 0 | 1 = aSlot === 0 ? 1 : 0;
+          const start = segs[action.toIndex]!.srcStartMs;
+          // late = the active player had to wait for it; early = it was already past the start
+          geLatency.current = learnLatency(geLatency.current, b - start - (geHeldSince.current === null ? 0 : now - geHeldSince.current));
+          // the picture first (opacity), then the sound: the new player is already playing, muted
+          if (newSlot === 1) {
+            slotB.value = 1;
+            slotA.value = 0;
+          } else {
+            slotA.value = 1;
+            slotB.value = 0;
+          }
+          B.muted = false;
+          A.muted = true;
+          A.pause();
+          activeSlotRef.current = newSlot;
+          videoRef.current = B;
+          applyActive(action.toIndex);
+          geStandbyRef.current = null;
+          geHeldSince.current = null;
+          setActiveSlot(newSlot);
+          break;
+        }
+        case "hold":
+          if (geHeldSince.current === null) geHeldSince.current = now;
+          A.pause();
+          break;
+        case "hop":
+          if (sb?.playing) B.pause();
+          A.currentTime = action.seekToSourceMs / 1000;
+          if (!A.playing) A.play();
+          applyActive(action.toIndex);
+          geStandbyRef.current = null;
+          geHeldSince.current = null;
+          break;
+        case "end":
+          geHeldSince.current = null;
+          stopAtEnd();
+          break;
+        default:
+          break;
+      }
+    };
+    const tick = () => {
+      if (!alive) return;
+      try {
+        frame();
+      } catch (e) {
+        // two-player playback is switched off for this session; the single-player path takes over
+        geOnRef.current = false;
+        setGeFailed(true);
+        void recordClientError(e instanceof Error ? e : new Error(String(e)), { kind: "gaplessPlayback" });
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+      geOnRef.current = false;
+      geStandbyRef.current = null;
+      geHeldSince.current = null;
+    };
+  }, [gaplessOn, playerA, playerB, slotA, slotB, stopAtEnd]);
+
   // Pausing stops the playhead exactly where the player stopped, not at its last (up to 200 ms old) progress event.
   useEffect(() => {
     if (isPlaying || stepRef.current !== "cuts" || previewModeRef.current || commitInFlightRef.current) return;
@@ -4298,39 +4427,29 @@ export default function EditScreen() {
               <>
                 {/* Slot A — active when activeSlot === 0, else preloading next clip */}
                 {(activeSlot === 0 || preloadSource !== undefined) && (
-                  <VideoView
-                    player={playerA}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      opacity: activeSlot === 0 ? 1 : 0,
-                    }}
-                    contentFit="cover"
-                    nativeControls={false}
-                    onFirstFrameRender={onReadySlot0}
-                    pointerEvents="none"
-                  />
+                  <ReAnimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, slotAStyle]}>
+                    <VideoView
+                      player={playerA}
+                      style={{ width: "100%", height: "100%" }}
+                      contentFit="cover"
+                      nativeControls={false}
+                      onFirstFrameRender={onReadySlot0}
+                      pointerEvents="none"
+                    />
+                  </ReAnimated.View>
                 )}
                 {/* Slot B — active when activeSlot === 1, else preloading next clip */}
                 {(activeSlot === 1 || preloadSource !== undefined) && (
-                  <VideoView
-                    player={playerB}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      opacity: activeSlot === 1 ? 1 : 0,
-                    }}
-                    contentFit="cover"
-                    nativeControls={false}
-                    onFirstFrameRender={onReadySlot1}
-                    pointerEvents="none"
-                  />
+                  <ReAnimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, slotBStyle]}>
+                    <VideoView
+                      player={playerB}
+                      style={{ width: "100%", height: "100%" }}
+                      contentFit="cover"
+                      nativeControls={false}
+                      onFirstFrameRender={onReadySlot1}
+                      pointerEvents="none"
+                    />
+                  </ReAnimated.View>
                 )}
                 {edgePreviewing && (
                   <VideoView
@@ -4508,6 +4627,16 @@ export default function EditScreen() {
         {/* ── Cuts screen: the timeline and the Cuts panel ───────────── */}
         {step === "cuts" && (
           <>
+        {isVideo && clips.length > 0 && (
+          <PlaybackControls
+            isPlaying={isPlaying}
+            ended={playEnded}
+            positionMs={displayPosition}
+            totalMs={totalDurationMs}
+            onToggle={togglePlay}
+            onReplay={handleReplay}
+          />
+        )}
         {autoEditRunning && (
           <View style={styles.autoEditRow}>
             <ActivityIndicator size="small" color={theme.textMuted} />
@@ -4819,6 +4948,20 @@ export default function EditScreen() {
             </View>
             )}
 
+            {isVideo && vis.topBar && !vis.selectionBar && (
+              <View style={[styles.eControls, { bottom: insets.bottom + E_NEXT.bottomOffset + E_NEXT.height + 12 }]} pointerEvents="box-none">
+                <PlaybackControls
+                  floating
+                  isPlaying={isPlaying}
+                  ended={playEnded}
+                  positionMs={displayPosition}
+                  totalMs={totalDurationMs}
+                  onToggle={togglePlay}
+                  onReplay={handleReplay}
+                />
+              </View>
+            )}
+
             {vis.selectionBar ? (
               <View
                 style={[styles.eSelectionBar, barSide === "top" ? { top: insets.top + E_BAR.topOffset } : { bottom: insets.bottom + E_BAR.bottomOffset }]}
@@ -5079,6 +5222,7 @@ const styles = StyleSheet.create({
   },
 
   // ── Three steps: full-screen editor and Post screen ──
+  eControls: { position: "absolute", left: 0, right: 0, alignItems: "center" },
   previewAreaFull: {
     ...StyleSheet.absoluteFill,
     alignItems: "center",

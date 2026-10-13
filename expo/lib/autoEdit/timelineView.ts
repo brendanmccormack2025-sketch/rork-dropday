@@ -256,7 +256,13 @@ export function wavePiecesOf(clips: Array<{ trimStartMs?: number; trimEndMs?: nu
 export type Rect = { x: number; y: number; w: number; h: number };
 
 export const LANE_H = 56;
-export const LANE_TOP = 12;
+/** The strip above the lane holds the round scissors dots of the cuts (and the playhead's knob). */
+export const LANE_TOP = 34;
+export const CUT_DOT = 22;
+/** Centre of the cut dots (above the lane). */
+export const CUT_DOT_Y = 14;
+export const CUT_DOT_HIT = 36;
+export const CUT_LINE_W = 2;
 export const INFO_H = 48;
 export const NUDGE_BTN = 44;
 /** The bottom toolbar (Split / Delete / Restore): big, rounded buttons under the info row. */
@@ -430,9 +436,15 @@ export function tapAt(
     const my = m.bottom ? BOTTOM_MARKER_Y : TOP_MARKER_Y;
     if (Math.abs(x - mx) <= MARKER_HIT / 2 && Math.abs(y - my) <= MARKER_HIT / 2) return { kind: "marker", index: i, side: 0 };
   }
+  // the round scissors dot above the lane (a 36 pt target; the strip above the lane is clear of the trim handles)
+  for (let i = 0; i < markers.length; i++) {
+    const m = markers[i]!;
+    if (m.chip && y < LANE_TOP - HANDLE_V_SLOP && Math.abs(x - msToX(m.outputMs, scale, offset, pad)) <= CUT_DOT_HIT / 2 && Math.abs(y - CUT_DOT_Y) <= CUT_DOT_HIT / 2) return { kind: "marker", index: i, side: 0 };
+  }
   const edge = hitFrame(x, y, frame, scale, offset, pad);
   if (edge) return { kind: "edge", index: edge.index, side: edge.side };
   if (y >= LANE_TOP && y <= LANE_TOP + LANE_H) {
+    // the thin red line of a cut (a handle of the selected clip beside it wins, above)
     for (let i = 0; i < markers.length; i++) {
       const m = markers[i]!;
       if (m.chip && Math.abs(x - msToX(m.outputMs, scale, offset, pad)) <= CHIP_HIT / 2) return { kind: "marker", index: i, side: 0 };

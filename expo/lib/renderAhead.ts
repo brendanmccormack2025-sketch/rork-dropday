@@ -26,7 +26,7 @@ import { captionsKeyOf, rawKeyOf, renderSignature } from "@/lib/renderSignature"
 import type { DraftClip } from "@/providers/PostsProvider";
 
 /** The timeline must be unchanged this long before a background render starts. */
-export const RENDER_AHEAD_IDLE_MS = 1200;
+export const RENDER_AHEAD_IDLE_MS = 2000;
 /** Same for a change that only touches the captions. */
 export const RENDER_AHEAD_CAPTION_IDLE_MS = 800;
 /**

@@ -142,7 +142,7 @@ const base = () => newEditState("file:///a.mov", [makeDecision("silenceCut", 800
 {
   const src = read("../components/PrecisionTimeline.tsx");
   ok("no modal on this screen: the timeline never imports a Modal or the marker sheet", !/\bModal\b|MarkerSheet/.test(src));
-  ok("the cut chips replace the grey dots", /function CutChip/.test(src) && !/cutDot/.test(src) && !/grey dot/i.test(src.replace(/\/\/.*$/gm, "")));
+  ok("the cuts are a thin red line and a round scissors dot", /function CutMark/.test(src) && /cutDotBox/.test(src) && !/CutChip|STRIPES/.test(src));
   ok("the kept clips are rounded with a gap (ClipBar, CLIP_GAP)", /function ClipBar/.test(src) && /insetL=\{i > 0 \? CLIP_GAP : 0\}/.test(src));
   ok("every gesture runs on the JS thread", (src.match(/Gesture\.(Pan|Tap|Pinch)\(\)/g) ?? []).length === (src.match(/Gesture\.(Pan|Tap|Pinch)\(\)\s*\.runOnJS\(true\)/g) ?? []).length);
   ok("the long-press range selection is gone (Split + Delete replace it)", !/activateAfterLongPress|rangePan/.test(src));
