@@ -31,8 +31,21 @@ export const PAD_AFTER_SPEECH_MS = 30;
 export const PAD_BEFORE_SPEECH_MS = 50;
 /** A cut result may never leave less video than this. */
 export const MIN_RESULT_MS = 3000;
-/** At most this many cuts; the longest silences win. */
+/**
+ * How many interior cuts a clip may get; the longest silences win. This used to be a flat 14, which left real pauses
+ * (0.7 s and longer) in any clip with more than 14 of them. The cap now grows with the length of the clip:
+ * `MAX_CUTS_PER_SECOND` cuts per second of video, never fewer than `MAX_CUTS` and never more than `MAX_CUTS_CEILING`.
+ * Pieces shorter than MIN_KEEP_MS are still never made, so the cap only guards against absurd chopping.
+ */
 export const MAX_CUTS = 14;
+export const MAX_CUTS_PER_SECOND = 0.5;
+export const MAX_CUTS_CEILING = 60;
+
+/** The interior cut cap for a clip of this length (ms). */
+export function maxCutsFor(durationMs: number): number {
+  const scaled = Math.ceil((Math.max(0, durationMs) / 1000) * MAX_CUTS_PER_SECOND);
+  return Math.min(MAX_CUTS_CEILING, Math.max(MAX_CUTS, scaled));
+}
 /** No kept piece may be shorter than this; the cut that created it is dropped. */
 export const MIN_KEEP_MS = 350;
 /** A leading or trailing silence qualifies from this length (no seam, so lower than MIN_SILENCE_MS). */
@@ -181,7 +194,7 @@ export function detectSilences(
   const padAfterSpeechMs = options.padAfterSpeechMs ?? PAD_AFTER_SPEECH_MS;
   const padBeforeSpeechMs = options.padBeforeSpeechMs ?? PAD_BEFORE_SPEECH_MS;
   const minResultMs = options.minResultMs ?? MIN_RESULT_MS;
-  const maxCuts = options.maxCuts ?? MAX_CUTS;
+  const maxCutsOption = options.maxCuts;
   const minKeepMs = options.minKeepMs ?? MIN_KEEP_MS;
   const edgeMinSilenceMs = options.edgeMinSilenceMs ?? EDGE_MIN_SILENCE_MS;
   const maxVideoMs = options.maxVideoMs ?? MAX_VIDEO_MS;
@@ -196,6 +209,7 @@ export function detectSilences(
 
   const durationMs = options.durationMs ?? windows.length * windowMs;
 
+  const maxCuts = maxCutsOption ?? maxCutsFor(options.durationMs ?? windows.length * windowMs);
   const sorted = [...values].sort((a, b) => a - b);
   const noiseFloorDb = percentile(sorted, noiseFloorPercentile);
   const thresholdDb = Math.min(absoluteCeilingDb, noiseFloorDb + thresholdMarginDb);

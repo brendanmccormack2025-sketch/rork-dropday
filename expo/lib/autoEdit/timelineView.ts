@@ -507,3 +507,41 @@ export function flingStep(offset: number, velocity: number, dtSec: number, maxOf
   const hitEnd = clamped !== next;
   return { offset: clamped, velocity: hitEnd ? 0 : v, done: hitEnd || Math.abs(v) < FLING_MIN_SPEED };
 }
+
+// ── Cut markers that would overlap are one marker with a count ──
+
+/** Markers closer than this on screen (pt) are grouped. A dot is 22 pt wide. */
+export const MARKER_MIN_GAP_PX = 26;
+
+export type MarkerCluster = {
+  /** Where the group sits on the output timeline (the mean of its members). */
+  outputMs: number;
+  /** The members, as indices into the list that was grouped, in time order. */
+  indices: number[];
+  count: number;
+};
+
+/**
+ * Group markers (output times, any order) whose dots would touch at this zoom: a marker joins the group when it is
+ * closer than `minGapPx` to the previous member. Zooming in separates them, so they expand by themselves.
+ */
+export function clusterByPixels(outputMs: number[], scale: number, minGapPx: number = MARKER_MIN_GAP_PX): MarkerCluster[] {
+  const order = outputMs.map((ms, i) => ({ ms, i })).sort((a, b) => a.ms - b.ms || a.i - b.i);
+  const groups: Array<Array<{ ms: number; i: number }>> = [];
+  for (const m of order) {
+    const g = groups[groups.length - 1];
+    if (g && (m.ms - g[g.length - 1]!.ms) * scale < minGapPx) g.push(m);
+    else groups.push([m]);
+  }
+  return groups.map((g) => ({ outputMs: Math.round(g.reduce((sum, m) => sum + m.ms, 0) / g.length), indices: g.map((m) => m.i), count: g.length }));
+}
+
+/** The zoom at which every member of a cluster is `minGapPx` from the next (clamped to what the timeline allows). */
+export function scaleToSeparate(cluster: { indices: number[] }, outputMs: number[], totalMs: number, viewW: number, minGapPx: number = MARKER_MIN_GAP_PX): number {
+  const times = cluster.indices.map((i) => outputMs[i]!).sort((a, b) => a - b);
+  let smallest = Infinity;
+  for (let i = 1; i < times.length; i++) smallest = Math.min(smallest, times[i]! - times[i - 1]!);
+  if (!Number.isFinite(smallest) || smallest <= 0) return maxScale(totalMs, viewW);
+  return clampScale((minGapPx * 1.15) / smallest, totalMs, viewW);
+}
+

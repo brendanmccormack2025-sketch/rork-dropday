@@ -1929,6 +1929,8 @@ export default function EditScreen() {
           A.pause();
           break;
         case "hop":
+          // the cut costs a seek: say why, so a recording of a stall can be explained
+          recordBreadcrumb(`gapless: hop over a cut (${action.reason})`, { reason: action.reason, piece: action.toIndex, heldMs: geHeldSince.current === null ? 0 : Math.round(now - geHeldSince.current), latencyMs: geLatency.current });
           if (sb?.playing) B.pause();
           A.currentTime = action.seekToSourceMs / 1000;
           if (!A.playing) A.play();

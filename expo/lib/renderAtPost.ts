@@ -12,6 +12,7 @@ import { isInternalTester } from "@/constants/debug";
 import type { EditOverlay } from "@/lib/editModel";
 import { toRenderJson } from "@/lib/editStyles";
 import { supportedFontNames, supportsCaptionFont, supportsLineBackgrounds, supportsTextBox, supportsTextOutline } from "@/modules/video-render";
+import { renderEditOf, type EditProblem } from "@/lib/renderEdit";
 import type { DraftClip } from "@/providers/PostsProvider";
 
 export const RENDER_AT_POST_ENABLED = true;
@@ -116,14 +117,10 @@ export async function computeRenderSize(first: DraftClip): Promise<{ width: numb
 export function buildRenderEdit(clips: DraftClip[]): {
   edit: Array<{ uri: string; trimStartMs: number; trimEndMs: number }>;
   editMs: number;
+  /** Why this edit cannot be rendered (checked before any native work), or null. */
+  problem: EditProblem | null;
 } {
-  const edit = clips.map((c) => ({
-    uri: c.uri,
-    trimStartMs: c.trimStartMs ?? 0,
-    trimEndMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0),
-  }));
-  const editMs = edit.reduce((sum, c) => sum + Math.max(0, c.trimEndMs - c.trimStartMs), 0);
-  return { edit, editMs };
+  return renderEditOf(clips);
 }
 
 /** The exact instructions JSON and options used for every render (post time and ahead of time). */
@@ -166,8 +163,10 @@ export async function renderForPost(
   let timeoutSeconds = 0;
   try {
     const { addRenderProgressListener, cancelRender, renderAsync } = await import("@/modules/video-render");
-    const { edit, editMs } = buildRenderEdit(clips);
+    const { edit, editMs, problem } = buildRenderEdit(clips);
     if (editMs <= 0) return { ok: false, reason: "no cuts" };
+    // checked before any native work: a bad range never reaches the exporter (the post goes out the old way)
+    if (problem) return { ok: false, reason: `invalid edit: ${problem}` };
 
     const { width, height } = await computeRenderSize(clips[0]!);
     subscription = addRenderProgressListener((e) => onProgress(e.progress));

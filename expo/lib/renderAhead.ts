@@ -268,7 +268,9 @@ export class RenderAhead {
     if (this.requireCaptions && (overlays?.length ?? 0) === 0) return "no captions";
     const reason = renderSkipReason({ isRoot: args.isRoot, userId: args.userId, clips: args.clips, hasOverlays: (overlays?.length ?? 0) > 0 });
     if (reason) return reason;
-    if (buildRenderEdit(args.clips).editMs > RENDER_AHEAD_MAX_EDIT_MS) return "too long";
+    const built = buildRenderEdit(args.clips);
+    if (built.problem) return `invalid edit: ${built.problem}`;
+    if (built.editMs > RENDER_AHEAD_MAX_EDIT_MS) return "too long";
     return null;
   }
 

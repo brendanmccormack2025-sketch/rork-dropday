@@ -9,6 +9,7 @@
  * Pure; erasable TypeScript only so the Node tests can run it.
  */
 import type { EditOverlay } from "./editModel.ts";
+import { coalesceEdit, rangeOf } from "./renderEdit.ts";
 
 type ClipKey = { uri: string; trimStartMs?: number; trimEndMs?: number; durationMs?: number };
 
@@ -16,10 +17,12 @@ export function captionsKeyOf(captions: EditOverlay[] | undefined): string {
   return JSON.stringify(captions ?? []);
 }
 
+/**
+ * What the clips render to. Pieces that continue where the last one ended (a split) are one range, so splitting a clip
+ * does not make a finished render stale and never starts another one.
+ */
 export function rawKeyOf(clips: ClipKey[]): string {
-  return JSON.stringify(
-    clips.map((c) => [c.uri, c.trimStartMs ?? 0, c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0)]),
-  );
+  return JSON.stringify(coalesceEdit(clips.map(rangeOf)).map((r) => [r.uri, r.trimStartMs, r.trimEndMs]));
 }
 
 /** The signature of a render of these clips (and, for the final render, these captions) at this size. */

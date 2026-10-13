@@ -7,7 +7,7 @@
  *
  * (From expo/. Node 22.6+; the flag is a no-op on newer Node.)
  */
-import { detectSilences, mergeKeepRanges } from "../lib/silenceDetection.ts";
+import { detectSilences, mergeKeepRanges, maxCutsFor, MAX_CUTS, MAX_CUTS_CEILING } from "../lib/silenceDetection.ts";
 
 const WINDOW_MS = 20;
 
@@ -94,11 +94,11 @@ const cases = [
     expect: (r) => r.cuts.length === 1 && Math.abs(r.cuts[0].lengthMs - 520) <= 60,
   },
   {
-    name: "sixteen pauses: at most 14 cuts (90 s)",
+    name: "sixteen pauses in 87 s: every one is cut (the cap grows with the length: 44 cuts allowed)",
     windows: build(
       Array.from({ length: 16 }, (_, i) => [[4000, -22], [800 + i * 50, -70]]).flat().concat([[4000, -22]]),
     ),
-    expect: (r) => r.cuts.length === 14 && r.silences.length === 16 && r.silences.filter((s) => s.cut).length === 14,
+    expect: (r) => r.cuts.length === 16 && r.silences.length === 16 && r.silences.filter((s) => s.cut).length === 16,
   },
   {
     name: "350 ms rule: a 200 ms burst between two pauses would be a 280 ms piece, so one cut is dropped",

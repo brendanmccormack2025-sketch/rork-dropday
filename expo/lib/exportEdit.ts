@@ -41,8 +41,9 @@ async function ensureAddPermission(): Promise<boolean> {
 
 /** Render `clips` with the overlays burned in. Throws on any problem (the caller reports it). */
 async function renderExport(clips: DraftClip[], overlays: EditOverlay[]): Promise<{ uri: string }> {
-  const { edit, editMs } = buildRenderEdit(clips);
+  const { edit, editMs, problem } = buildRenderEdit(clips);
   if (editMs <= 0) throw new Error("export: nothing to render");
+  if (problem) throw new Error(`export: invalid edit (${problem})`);
   const { width, height } = await computeRenderSize(clips[0]!);
   const release = await acquireNative();
   let timer: ReturnType<typeof setTimeout> | null = null;

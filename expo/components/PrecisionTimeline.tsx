@@ -22,6 +22,8 @@ import { buildSnapTargets, snapParams, snapStart, snapStep, type SnapState, type
 import {
   BOTTOM_MARKER_Y,
   CLIP_GAP,
+  clusterByPixels,
+  scaleToSeparate,
   CUT_DOT,
   CUT_DOT_Y,
   CUT_LINE_W,
@@ -145,6 +147,10 @@ export type PrecisionTimelineProps = {
   /** A step reached (saved at once, uploaded later): the trail a native crash leaves. */
   onBreadcrumb?: (name: string, data?: Record<string, unknown>) => void;
 };
+
+type MarkerItem =
+  | { type: "marker"; marker: TimelineMarker; outputMs: number; bottom: boolean; chip: boolean }
+  | { type: "cluster"; members: TimelineMarker[]; outputMs: number; bottom: boolean; chip: true };
 
 type SelectedEdge = { side: "left" | "right"; atMs: number };
 
@@ -275,14 +281,14 @@ function ClipBar({
  * A removed part: a thin red line at the seam where the cut was, and a small round scissors dot above the lane (tap the
  * dot: "Silence 1.2s · Restore"). Transform only.
  */
-function CutMark({ outputMs, selected, scale, offset }: { outputMs: number; selected: boolean; scale: SharedValue<number>; offset: SharedValue<number> }) {
+function CutMark({ outputMs, count, selected, scale, offset }: { outputMs: number; count: number; selected: boolean; scale: SharedValue<number>; offset: SharedValue<number> }) {
   const line = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - CUT_LINE_W / 2 }] }));
   const dot = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - CUT_DOT / 2 }] }));
   return (
     <>
       <Animated.View pointerEvents="none" style={[styles.cutLine, selected && styles.cutLineSelected, line]} />
       <Animated.View pointerEvents="none" style={[styles.cutDotBox, selected && styles.cutDotSelected, dot]}>
-        <Scissors size={12} color="#FFFFFF" strokeWidth={2.6} />
+        {count > 1 ? <UiText style={styles.cutCount}>{count}</UiText> : <Scissors size={12} color="#FFFFFF" strokeWidth={2.6} />}
       </Animated.View>
     </>
   );
@@ -500,7 +506,22 @@ export default function PrecisionTimeline({
     }
     return out;
   }, [clips]);
-  const markerGeoms = useMemo<MarkerGeom[]>(() => (markers ?? []).map((m) => ({ outputMs: m.outputMs, bottom: MARKER_LOOK[m.kind]?.bottom ?? false, chip: m.kind === "cut" })), [markers]);
+  // Cut markers that would touch at the current zoom are one marker with a count (zoom in and they separate).
+  const [clusterScale, setClusterScale] = useState(0.05);
+  const markerItems = useMemo<MarkerItem[]>(() => {
+    const all = markers ?? [];
+    const items: MarkerItem[] = [];
+    all.forEach((m) => {
+      if (m.kind !== "cut") items.push({ type: "marker", marker: m, outputMs: m.outputMs, bottom: MARKER_LOOK[m.kind]?.bottom ?? false, chip: false });
+    });
+    const cuts = all.filter((m) => m.kind === "cut");
+    for (const c of clusterByPixels(cuts.map((m) => m.outputMs), clusterScale)) {
+      if (c.count === 1) items.push({ type: "marker", marker: cuts[c.indices[0]!]!, outputMs: cuts[c.indices[0]!]!.outputMs, bottom: false, chip: true });
+      else items.push({ type: "cluster", members: c.indices.map((i) => cuts[i]!), outputMs: c.outputMs, bottom: false, chip: true });
+    }
+    return items;
+  }, [markers, clusterScale]);
+  const markerGeoms = useMemo<MarkerGeom[]>(() => markerItems.map((m) => ({ outputMs: m.outputMs, bottom: m.bottom, chip: m.chip })), [markerItems]);
   // clips as the range cut sees them: where each starts on the output timeline and in the source
   const rangeClips = useMemo<RangeClip[]>(
     () => clips.map((c, i) => ({ outStartMs: clipGeoms[i]?.startMs ?? 0, durMs: clipGeoms[i]?.durMs ?? 0, srcStartMs: c.trimStartMs ?? 0 })),
@@ -531,11 +552,12 @@ export default function PrecisionTimeline({
   const hintOuts = useMemo(() => hints.map((h) => h.out), [hints]);
   hintsRef.current = hints;
   const targets = useMemo(() => buildSnapTargets(seams.words, seams.boundaries), [seams.words, seams.boundaries]);
-  const geo = useRef<{ geoms: typeof geoms; markerGeoms: MarkerGeom[]; clipGeoms: ClipGeom[]; targets: number[]; frame: FrameGeom | null; hintOuts: Array<{ startMs: number; endMs: number }>; rangeClips: RangeClip[] }>({ geoms, markerGeoms, clipGeoms, targets, frame: null, hintOuts: [], rangeClips: [] });
+  const geo = useRef<{ markerItems: MarkerItem[]; geoms: typeof geoms; markerGeoms: MarkerGeom[]; clipGeoms: ClipGeom[]; targets: number[]; frame: FrameGeom | null; hintOuts: Array<{ startMs: number; endMs: number }>; rangeClips: RangeClip[] }>({ markerItems: [], geoms, markerGeoms, clipGeoms, targets, frame: null, hintOuts: [], rangeClips: [] });
   geo.current.hintOuts = hintOuts;
   geo.current.rangeClips = rangeClips;
   geo.current.geoms = geoms;
   geo.current.markerGeoms = markerGeoms;
+  geo.current.markerItems = markerItems;
   geo.current.clipGeoms = clipGeoms;
   geo.current.targets = targets;
 
@@ -555,6 +577,7 @@ export default function PrecisionTimeline({
     }, 110);
   }, []);
 
+  const clusterTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setView = useCallback(
     (v: ViewState) => {
       const w = viewWRef.current;
@@ -566,6 +589,13 @@ export default function PrecisionTimeline({
       scale.value = s;
       offset.value = o;
       scheduleWave();
+      if (!clusterTimer.current) {
+        clusterTimer.current = setTimeout(() => {
+          clusterTimer.current = null;
+          const now = view.current.scale;
+          setClusterScale((prev) => (Math.abs(now / prev - 1) > 0.03 ? now : prev));
+        }, 120);
+      }
     },
     [scale, offset, scheduleWave],
   );
@@ -939,8 +969,18 @@ export default function PrecisionTimeline({
     (kind: string, index: number, side: number, hint?: number) => {
       const l = live.current;
       if (kind === "marker") {
-        const m = l.markers?.[index];
-        if (!m) return;
+        const item = geo.current.markerItems[index];
+        if (!item) return;
+        if (item.type === "cluster") {
+          // a group of cuts: zoom in on it until its cuts are apart (and put the playhead there)
+          const ms = item.members.map((x) => x.outputMs);
+          const target = scaleToSeparate({ indices: ms.map((_, i) => i) }, ms, totalRef.current, viewWRef.current);
+          haptic("select");
+          animateTo({ scale: target, offset: offsetForCenter(item.outputMs, target, viewWRef.current) }, 260);
+          live.current.onSeek(item.outputMs);
+          return;
+        }
+        const m = item.marker;
         if (m.kind === "cut" || m.kind === "restored") {
           // an inline bar, not a sheet: the video and the timeline stay usable
           clearInline();
@@ -979,7 +1019,7 @@ export default function PrecisionTimeline({
       }
       if (l.selectedClipId) l.onDeselectAndPreview?.();
     },
-    [resolveEdge, selectEdge, setSelected, clearInline],
+    [resolveEdge, selectEdge, setSelected, clearInline, animateTo],
   );
 
   // ── gestures: plain JS, like every other gesture in the app ──
@@ -1243,16 +1283,29 @@ export default function PrecisionTimeline({
               </View>
               {/* handles, markers, playhead: drawn over the lane */}
               <View pointerEvents="none" style={styles.overlay}>
-                {(markers ?? []).map((m, i) => (m.kind === "cut" ? <CutMark key={m.id} outputMs={markerGeoms[i]?.outputMs ?? 0} selected={m.id === chipId} scale={scale} offset={offset} /> : null))}
+                {markerItems.map((it) =>
+                  it.chip ? (
+                    <CutMark
+                      key={it.type === "cluster" ? `cluster:${it.members[0]!.id}:${it.members.length}` : it.marker.id}
+                      outputMs={it.outputMs}
+                      count={it.type === "cluster" ? it.members.length : 1}
+                      selected={it.type === "marker" && it.marker.id === chipId}
+                      scale={scale}
+                      offset={offset}
+                    />
+                  ) : null,
+                )}
                 <Frame frameStart={frameStart} frameEnd={frameEnd} pressLeft={pressLeft} pressRight={pressRight} scale={scale} offset={offset} />
                 <Animated.View pointerEvents="none" style={[styles.edgeLine, edgeLineStyle]} />
-                {(markers ?? []).map((m, i) => {
+                {markerItems.map((it) => {
+                  if (it.type !== "marker" || it.chip) return null;
+                  const m = it.marker;
                   const look = MARKER_LOOK[m.kind];
-                  if (!look || m.kind === "cut") return null;
+                  if (!look) return null;
                   return (
                     <MarkerGlyph
                       key={m.id}
-                      outputMs={markerGeoms[i]?.outputMs ?? 0}
+                      outputMs={it.outputMs}
                       glyph={look.glyph}
                       y={look.bottom ? BOTTOM_MARKER_Y : TOP_MARKER_Y}
                       scale={scale}
@@ -1384,6 +1437,7 @@ const styles = StyleSheet.create({
   cutLine: { position: "absolute", left: 0, top: CUT_DOT_Y, width: CUT_LINE_W, height: LANE_TOP + LANE_H - CUT_DOT_Y, backgroundColor: theme.accent, opacity: 0.85 },
   cutLineSelected: { opacity: 1 },
   cutDotBox: { position: "absolute", left: 0, top: CUT_DOT_Y - CUT_DOT / 2, width: CUT_DOT, height: CUT_DOT, borderRadius: CUT_DOT / 2, backgroundColor: theme.accent, alignItems: "center", justifyContent: "center" },
+  cutCount: { color: "#FFFFFF", fontSize: 11, fontWeight: "900", includeFontPadding: false },
   cutDotSelected: { backgroundColor: theme.text },
   band: { backgroundColor: "rgba(242,140,40,0.28)" },
   ghostOut: { backgroundColor: "rgba(31,168,77,0.38)" },

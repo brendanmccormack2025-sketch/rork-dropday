@@ -26,7 +26,11 @@ export type GaplessParams = {
   arriveTolMs?: number;
   /** A standby needs this long after its seek before it can be started. */
   readyAfterMs?: number;
-  /** The active player waits this long at the end of its piece for a late standby before hopping. */
+  /**
+   * The active player waits at the end of its piece for a late standby only when the standby is predicted to arrive
+   * within this long (it plays at normal speed), and never longer than this: a seek over the cut can be as slow as
+   * the wait, so a longer wait is never worth it.
+   */
   holdMaxMs?: number;
 };
 
@@ -36,7 +40,7 @@ export const GAPLESS_DEFAULTS = {
   swapLeadMs: 16,
   arriveTolMs: 24,
   readyAfterMs: 140,
-  holdMaxMs: 350,
+  holdMaxMs: 150,
 } as const;
 
 export type StandbyState = {
@@ -48,6 +52,9 @@ export type StandbyState = {
   preparedAt: number;
   playing: boolean;
 };
+
+/** Why the playing player had to seek over a cut itself (for the diagnostics). */
+export type HopReason = "no-standby" | "standby-not-started" | "standby-too-late" | "hold-limit";
 
 export type GaplessAction =
   | { kind: "none" }
@@ -62,7 +69,7 @@ export type GaplessAction =
   /** The active piece is over but the standby has not arrived: pause the active player and wait. */
   | { kind: "hold" }
   /** No usable standby: the active player seeks over the cut itself. */
-  | { kind: "hop"; toIndex: number; seekToSourceMs: number; editedMs: number }
+  | { kind: "hop"; toIndex: number; seekToSourceMs: number; editedMs: number; reason: HopReason }
   /** The last piece is over. */
   | { kind: "end"; editedMs: number };
 
@@ -132,7 +139,7 @@ export function gaplessTick(args: {
   const due = playing && remaining <= p.swapLeadMs;
 
   if (!parked) {
-    if (due) return { kind: "hop", toIndex: target.index, seekToSourceMs: target.startMs, editedMs: segs[target.index]!.outStartMs };
+    if (due) return { kind: "hop", toIndex: target.index, seekToSourceMs: target.startMs, editedMs: segs[target.index]!.outStartMs, reason: "no-standby" };
     return { kind: "prepare", toIndex: target.index, seekMs: target.prepMs };
   }
   if (!playing) return { kind: "none" };
@@ -140,8 +147,12 @@ export function gaplessTick(args: {
   if (due) {
     const arrived = parked.playing && bMs >= target.startMs - p.arriveTolMs;
     if (arrived) return { kind: "swap", toIndex: target.index, editedMs: segs[target.index]!.outStartMs };
-    if (parked.playing && args.heldMs < p.holdMaxMs) return { kind: "hold" };
-    return { kind: "hop", toIndex: target.index, seekToSourceMs: target.startMs, editedMs: segs[target.index]!.outStartMs };
+    const hopTo = { kind: "hop" as const, toIndex: target.index, seekToSourceMs: target.startMs, editedMs: segs[target.index]!.outStartMs };
+    if (!parked.playing) return { ...hopTo, reason: "standby-not-started" };
+    // waiting is only worth it when the standby is about to arrive
+    if (target.startMs - bMs > p.holdMaxMs) return { ...hopTo, reason: "standby-too-late" };
+    if (args.heldMs >= p.holdMaxMs) return { ...hopTo, reason: "hold-limit" };
+    return { kind: "hold" };
   }
   if (!parked.playing && parked.ready && aMs >= standbyStartAt(runEnd, p)) return { kind: "startStandby" };
   return { kind: "none" };
