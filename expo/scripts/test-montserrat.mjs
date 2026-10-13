@@ -30,7 +30,7 @@ const textSpec = (supportsFont) => JSON.parse(toRenderJson({ version: 1, clips: 
   eq("text overlay font", [TEXT_FONT_NAME, TEXT_FONT_FAMILY], ["Montserrat-Bold", "Montserrat_700Bold"]);
   const app = JSON.parse(readFileSync(new URL("../app.json", import.meta.url), "utf8")).expo;
   const plugin = app.plugins.find((p) => Array.isArray(p) && p[0] === "expo-font");
-  eq("app.json embeds both Montserrat files via expo-font", plugin?.[1].fonts.map((f) => f.split("/").pop()), ["Montserrat_800ExtraBold.ttf", "Montserrat_700Bold.ttf"]);
+  eq("app.json embeds both Montserrat files via expo-font (first two entries; the other text fonts follow for the 1.0.5 burn-in)", plugin?.[1].fonts.slice(0, 2).map((f) => f.split("/").pop()), ["Montserrat_800ExtraBold.ttf", "Montserrat_700Bold.ttf"]);
   eq("app.json version is 1.0.4 (bumped by the owner)", app.version, "1.0.4");
   const ttf = (f) => readFileSync(new URL(`../node_modules/@expo-google-fonts/montserrat/${f}/Montserrat_${f}.ttf`, import.meta.url));
   const psNames = (buf) => {

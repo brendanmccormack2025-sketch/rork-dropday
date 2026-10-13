@@ -62,7 +62,7 @@ import CaptionPreview from "@/components/CaptionPreview";
 import FeedSafeZones from "@/components/FeedSafeZones";
 import { defaultCaptionStyle } from "@/lib/transcription/captionStyle";
 import { guidesVisible } from "@/lib/guides";
-import { cancelTextEdit } from "@/lib/textOverlayStyle";
+import { cancelTextEdit, textOverlaysForSave } from "@/lib/textOverlayStyle";
 import { MERGE_FAILED_TEXT, MERGE_PREPARING_TEXT, mergeVideoClips, shouldMerge } from "@/lib/mergeClips";
 import { renderMerge } from "@/lib/mergeNative";
 import { backStep, initialStep, nextStep, selectionBarSide, stepLayout, videoTapAction, type EditorStep } from "@/lib/editorFlow";
@@ -77,7 +77,7 @@ import { aiEditorFeatures } from "@/lib/autoEdit/rollout";
 import { postRenderSource } from "@/lib/renderSignature";
 import CaptionStyleSheet, { type CaptionLookPatch } from "@/components/CaptionStyleSheet";
 import { resetCaptionLook, usableCaptionStyle, withCaptionLook } from "@/lib/transcription/captionStyle";
-import { supportedFontNames, supportsCaptionFont, supportsTextOutline } from "@/modules/video-render";
+import { supportedFontNames, supportsCaptionFont, supportsTextOutline, supportsTextOverlays } from "@/modules/video-render";
 import { RENDER_FINAL_IDLE_MS, RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
 import { recordClientError, recordBreadcrumb } from "@/lib/clientErrors";
@@ -150,7 +150,7 @@ import { planHookTrim } from "@/lib/autoEdit/hookTrim";
 import { silenceCutsFromDetection } from "@/lib/autoEdit/silenceCuts";
 import { keepRangesToClips } from "@/lib/editModel";
 import { SENSITIVITY_PRESETS, detectSilences, type Sensitivity } from "@/lib/silenceDetection";
-import { getAutoEditEnabled, getAutoEditSensitivity, getSaveEditedToRoll, setAutoEditSensitivity, setSaveEditedToRoll } from "@/lib/autoEditSettings";
+import { getAutoEditEnabled, getAutoEditSensitivity, getIncludeTextInSave, getSaveEditedToRoll, setAutoEditSensitivity, setIncludeTextInSave, setSaveEditedToRoll } from "@/lib/autoEditSettings";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -454,6 +454,19 @@ export default function EditScreen() {
     let alive = true;
     void getSaveEditedToRoll(user?.id).then((v) => {
       if (alive) setSaveToRoll(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
+  // "Include text in saved video": on by default, remembered per user; only offered by builds that can draw it.
+  const [includeText, setIncludeText] = useState(true);
+  const includeTextRef = useRef(true);
+  includeTextRef.current = includeText;
+  useEffect(() => {
+    let alive = true;
+    void getIncludeTextInSave(user?.id).then((v) => {
+      if (alive) setIncludeText(v);
     });
     return () => {
       alive = false;
@@ -4141,15 +4154,24 @@ export default function EditScreen() {
         reactingTo || null,
       );
 
-      // Save to camera roll: the posted video (cuts and captions; text overlays are not part of it) is saved
-      // alongside the upload and never touches the post. The posted file is copied first (the upload deletes it
-      // when done). Any problem shows "Couldn't save to camera roll"; it is also recorded.
+      // Save to camera roll, alongside the upload; it never touches the post. Without text it is the posted video
+      // (cuts and captions), copied first because the upload deletes it. With text (a build that can draw it and the
+      // "Include text in saved video" switch on) it is a separate render of the same edit with the text burned in;
+      // the posted video stays as it is and the feed draws the text live. Any problem shows "Couldn't save to camera
+      // roll"; it is also recorded.
       try {
-        const postedUri = saveToRollRef.current && rendered ? await stageExportFallback(rendered.uri) : null;
+        const savedText = textOverlaysForSave({
+          supportsTextOverlays,
+          includeText: includeTextRef.current,
+          overlays: textOverlays,
+          fontNames: supportedFontNames,
+        });
+        const postedUri = saveToRollRef.current && rendered && savedText.length === 0 ? await stageExportFallback(rendered.uri) : null;
         void startPostExport({
           enabled: saveToRollRef.current && Platform.OS !== "web",
           clips,
           captionOverlays: captionOverlaysForPost,
+          textOverlays: savedText,
           userId: user?.id,
           postedUri,
         }).catch((e) => void recordClientError(e, { kind: "saveToRoll", stage: "start" }));
@@ -5006,6 +5028,22 @@ export default function EditScreen() {
                 thumbColor="#fff"
                 ios_backgroundColor={theme.border}
                 accessibilityLabel="Save to camera roll"
+              />
+            </View>
+          )}
+          {isVideo && Platform.OS !== "web" && saveToRoll && supportsTextOverlays && (
+            <View style={styles.saveRollRow}>
+              <UiText style={styles.saveRollText}>Include text in saved video</UiText>
+              <Switch
+                value={includeText}
+                onValueChange={(v) => {
+                  setIncludeText(v);
+                  setIncludeTextInSave(v, user?.id);
+                }}
+                trackColor={{ false: theme.border, true: theme.accent }}
+                thumbColor="#fff"
+                ios_backgroundColor={theme.border}
+                accessibilityLabel="Include text in saved video"
               />
             </View>
           )}

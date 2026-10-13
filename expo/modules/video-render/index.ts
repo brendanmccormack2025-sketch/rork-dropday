@@ -20,6 +20,11 @@ type VideoRenderNative = {
   supportsTimingProbe?: boolean;
   /** Build 1.0.5 (not in 1.0.4): text styles may carry outlineColor / outlineWidth and the renderer strokes the letters. */
   supportsTextOutline?: boolean;
+  /**
+   * Build 1.0.5 (not in 1.0.4): Text-button overlays can be burned in: a "text" overlay with a complete styleSpec places
+   * itself by xCenter / yCenter, rotates, and draws font, outline, text shadow and per-line background.
+   */
+  supportsTextOverlays?: boolean;
   /** Build 1.0.5 (not in 1.0.4): the PostScript names of the bundled fonts the build embeds (UIFont(name:) finds them). */
   supportedFontNames?: string[];
   probeTimingAsync?(uri: string): Promise<TimingProbe>;
@@ -41,6 +46,9 @@ export const supportsLineBackgrounds: boolean = native?.supportsLineBackgrounds 
 
 /** True when this build burns in a text outline (style keys outlineColor / outlineWidth). False on 1.0.4: the outline is not offered for captions. */
 export const supportsTextOutline: boolean = native?.supportsTextOutline === true;
+
+/** True when this build burns Text-button overlays into a render (position, rotation, outline, shadow, background). False on 1.0.4: saves go out without text. */
+export const supportsTextOverlays: boolean = native?.supportsTextOverlays === true;
 
 /** The PostScript names of the bundled fonts this build embeds for the renderer. Empty on 1.0.4 (only Montserrat, for "Classic"). */
 export const supportedFontNames: readonly string[] = Array.isArray(native?.supportedFontNames) ? (native!.supportedFontNames as string[]) : [];

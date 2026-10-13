@@ -59,7 +59,15 @@
         {
           "fonts": [
             "./node_modules/@expo-google-fonts/montserrat/800ExtraBold/Montserrat_800ExtraBold.ttf",
-            "./node_modules/@expo-google-fonts/montserrat/700Bold/Montserrat_700Bold.ttf"
+            "./node_modules/@expo-google-fonts/montserrat/700Bold/Montserrat_700Bold.ttf",
+            "./node_modules/@expo-google-fonts/tiktok-sans/700Bold/TikTokSans_700Bold.ttf",
+            "./node_modules/@expo-google-fonts/anton/400Regular/Anton_400Regular.ttf",
+            "./node_modules/@expo-google-fonts/archivo-black/400Regular/ArchivoBlack_400Regular.ttf",
+            "./node_modules/@expo-google-fonts/poppins/600SemiBold/Poppins_600SemiBold.ttf",
+            "./node_modules/@expo-google-fonts/permanent-marker/400Regular/PermanentMarker_400Regular.ttf",
+            "./node_modules/@expo-google-fonts/caveat/700Bold/Caveat_700Bold.ttf",
+            "./node_modules/@expo-google-fonts/dm-serif-display/400Regular/DMSerifDisplay_400Regular.ttf",
+            "./node_modules/@expo-google-fonts/space-grotesk/700Bold/SpaceGrotesk_700Bold.ttf"
           ]
         }
       ],

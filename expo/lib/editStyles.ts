@@ -33,6 +33,8 @@ export type OverlayStyleSpec = {
   yCenter: number;
   /** Horizontal centre as a fraction of the frame width (default 0.5). Read by the renderer only once it supports it. */
   xCenter?: number;
+  /** Degrees, clockwise (build 1.0.5, supportsTextOverlays). Absent: upright. */
+  rotation?: number;
   /** Widest the text may get, as a fraction of the frame width. Default 0.86. */
   maxWidth?: number;
   uppercase?: boolean;
@@ -46,6 +48,11 @@ export type OverlayStyleSpec = {
    */
   outlineColor?: string;
   outlineWidth?: number;
+  /**
+   * A shadow behind the letters only (build 1.0.5, supportsTextOverlays), never behind the box: `radius` is the blur
+   * radius of the shadow layer and `offsetY` its drop (down), both in points on a 1080-wide frame.
+   */
+  textShadow?: { color: string; opacity: number; radius: number; offsetY: number };
   /** Simple fade at the start and end of the overlay's window. */
   fadeInMs?: number;
   fadeOutMs?: number;
@@ -254,7 +261,7 @@ export function toRenderJson(instructions: EditInstructions, options: RenderOpti
     ...instructions,
     overlays: instructions.overlays.map((o) =>
       o.kind === "text" || o.kind === "caption"
-        ? { ...o, styleSpec: renderSpec(o.kind, o.style, o.kind === "caption" ? o.captionStyle : undefined, options) }
+        ? { ...o, styleSpec: o.kind === "text" && o.spec ? o.spec : renderSpec(o.kind, o.style, o.kind === "caption" ? o.captionStyle : undefined, options) }
         : o,
     ),
   });

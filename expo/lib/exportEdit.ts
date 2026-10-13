@@ -1,8 +1,9 @@
 /**
  * The camera-roll export: the video that was posted (cuts and captions burned in), saved to Photos with an
- * add-only permission. Text-button overlays are NOT part of it: creators add their own text in TikTok or
- * Instagram. When the post went out as source clips (nothing was rendered) the cuts and captions are
- * rendered for the save.
+ * add-only permission. When the build can draw Text-button overlays (supportsTextOverlays) and "Include text in
+ * saved video" is on, the save is instead a separate render of the same edit with the text burned in (the POSTED
+ * video is untouched: the feed draws text live). When the post went out as source clips (nothing was rendered)
+ * the cuts and captions are rendered for the save.
  *
  * It runs alongside the upload and never touches it. One native render at a time: it waits its turn behind
  * any other render (acquireNative).
@@ -108,13 +109,22 @@ export function startPostExport(args: {
   enabled: boolean;
   clips: DraftClip[];
   captionOverlays: EditOverlay[];
+  /**
+   * The Text-button overlays to burn in (textOverlaysForSave: empty on a build that cannot draw them or when the
+   * user turned the setting off). With any, the save is rendered from `clips` and `postedUri` is not used.
+   */
+  textOverlays?: EditOverlay[];
   /** The signed-in user (the owner account sees the real error reason). */
   userId?: string | null;
   /** The file that was posted (cuts and captions), staged by stageExportFallback. */
   postedUri?: string | null;
 }): Promise<SaveToRollResult> {
   if (!args.enabled || args.clips.some((c) => c.type !== "video")) return Promise.resolve({ status: "off" });
-  const run = () => saveToCameraRoll(deps(true, () => renderExport(args.clips, args.captionOverlays), args.postedUri));
+  const text = args.textOverlays ?? [];
+  const run = () =>
+    saveToCameraRoll(
+      deps(true, () => renderExport(args.clips, [...args.captionOverlays, ...text]), text.length > 0 ? null : args.postedUri),
+    );
   return runSaveWithStatus(saveStatus, run, isDebugOwner(args.userId));
 }
 

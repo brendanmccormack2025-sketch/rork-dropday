@@ -22,8 +22,23 @@ Only Montserrat is embedded.
    string in `makeTextOverlay`. Until then outline keys are not sent and the caption sheet hides the outline control.
 4. **Shadow placement (optional)**: the shadow sits on the container layer, so with a background it falls around the box
    (the preview matches). A shadow on the letters inside a box would need a second layer.
-5. **Text-button overlays** are drawn live (editor, Preview, feed) and are not part of the burned-in video; if that ever
-   changes, `overlayRenderStyle` in `lib/editStyles.ts` is the mapping, covered by `scripts/test-text-styles.mjs`.
+5. **Text-button overlays** are drawn live (editor, Preview, feed) in the POSTED video. The camera-roll save can burn them
+   in (below); `overlayRenderStyle` in `lib/editStyles.ts` is the older mapping for captions-style text, covered by
+   `scripts/test-text-styles.mjs`.
+
+## Done in VideoRenderModule.swift for 1.0.5 (capabilities in `Constants`)
+- `supportsTextOverlays`: a `"text"` overlay with a complete `styleSpec` (lib/textOverlayStyle.ts `textOverlayExportSpec`)
+  is placed by its own `xCenter` / `yCenter` (fractions of the frame), turned by `rotation` (degrees clockwise), wrapped at
+  `maxWidth` x frame width with fixed `lineHeight`, and drawn with font (`fontName`), colour, a hugging per-line
+  background (`backgroundColor`, `lineBackground`; absent = none), `outlineColor` / `outlineWidth` and `textShadow`.
+- `supportsTextOutline`: the outline is drawn as an image (UIKit stroke under the fill, round joins), reaching
+  `outlineWidth` beyond the letters.
+- `supportedFontNames`: the bundled fonts `UIFont(name:)` opens. The files are in the `expo-font` list in `app.json`
+  (UIAppFonts) and the module also registers every bundled `.ttf` / `.otf` with `CTFontManagerRegisterFontsForURL`.
+- `textShadow {color, opacity, radius, offsetY}` sits on the letters (or the outline image), never on the box; sizes are for
+  a 1080-wide frame. The older `shadow: true` (container, captions) is unchanged. Captions are drawn exactly as before.
+- JS gates all of it behind `supportsTextOverlays` (`modules/video-render`) and the per-user setting "Include text in saved
+  video" (`lib/autoEditSettings.ts`, on by default). On 1.0.4 the save has no text and no error.
 
 Test matrix: `scripts/test-text-styles.mjs` checks every font x text color x background (none, 11 solids, 2 translucent)
 x outline (off, 3 sizes) x shadow for overlays and captions, with and without the 1.0.5 capabilities.

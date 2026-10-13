@@ -5,9 +5,9 @@
  * (lib/palette.ts). Stored on the overlay itself (the existing text_overlays JSON, no new columns), so drafts, undo
  * and the feed all carry it. Pure; erasable TypeScript only so the Node tests can run it.
  *
- * Text-button overlays are drawn live (editor, Preview, feed) from this data; they are never burned into the posted
- * video. Only captions are burned in, with their own look (lib/transcription/captionPresets.ts). The mapping to the
- * native renderer's style numbers is overlayRenderStyle in lib/editStyles.ts, ready for the day they are burned in.
+ * Text-button overlays are drawn live (editor, Preview, feed) from this data; the POSTED video does not carry them. The
+ * saved (camera-roll) video can: textOverlayExportSpec in lib/textOverlayStyle.ts maps this data to the native renderer's
+ * numbers (build 1.0.5). Captions are burned in everywhere, with their own look (lib/transcription/captionPresets.ts).
  *
  * Three generations of stored overlays are understood:
  *   1. no look fields: the first Text button; its `backgroundStyle` preset gives the colors (drawn as it always was);
@@ -183,6 +183,47 @@ export function resolveAppearance(ov: LookSource): ResolvedAppearance {
     stroke: a.outline ? { color: a.outlineColor, em: STROKE_EM[a.stroke] } : null,
     shadow: a.shadow,
   };
+}
+
+// ── The shadow, one definition for the editor and the saved video ──
+
+/** The shadow under an outlined text (HuggingText's outline layer): opacity, and blur / drop as fractions of the font size. */
+export const OUTLINE_SHADOW = { opacity: 0.55, radiusEm: 0.1, offsetYEm: 0.04 } as const;
+/** The shadow of an older (first Text button) overlay is a fixed 4 / 1 in screen points; the frame it is judged on is this wide. */
+export const LEGACY_SHADOW_REF_WIDTH = 360;
+
+export type ShadowKind = "text" | "layer";
+export type ShadowSpec = {
+  /** "text": a React Native textShadow (its radius is a blur radius); "layer": a View / layer shadow (its radius is a layer radius, about half the blur). */
+  kind: ShadowKind;
+  color: string;
+  opacity: number;
+  radius: number;
+  /** Downward, in the same units as `fontSize` was given in. */
+  offsetY: number;
+};
+
+/**
+ * The shadow of an overlay drawn at `fontSize`, in the units `fontSize` is in (screen points in the editor, 1080-wide frame
+ * points in the export): null when there is none. Both the editor and the export read this, so the shadow cannot drift.
+ * `unit` = how many of those units one screen point is (1 in the editor, 1080 / frame width in the export).
+ */
+export function shadowOf(a: ResolvedAppearance, fontSize: number, unit = 1): ShadowSpec | null {
+  if (!a.shadow) return null;
+  if (a.stroke) {
+    return { kind: "layer", color: "#000000", opacity: OUTLINE_SHADOW.opacity, radius: fontSize * OUTLINE_SHADOW.radiusEm, offsetY: fontSize * OUTLINE_SHADOW.offsetYEm };
+  }
+  if (a.legacy) {
+    return { kind: "text", color: a.textColor === "#000000" ? "#FFFFFF" : "#000000", opacity: 0.6, radius: 4 * unit, offsetY: 1 * unit };
+  }
+  return { kind: "text", color: "#000000", opacity: 0.6, radius: fontSize * 0.14, offsetY: fontSize * 0.05 };
+}
+
+/** "#RRGGBB" and an opacity -> "rgba(r,g,b,a)". */
+export function rgbaOf(hex: string, opacity: number): string {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.slice(0, 6), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${opacity})`;
 }
 
 /** The editor's starting state for an overlay: a new text, or the look an existing one has now. */

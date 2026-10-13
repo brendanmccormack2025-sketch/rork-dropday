@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreText
 import QuartzCore
 import ExpoModulesCore
 import UIKit
@@ -76,6 +77,39 @@ private final class RenderState {
   }
 }
 
+// MARK: - Bundled fonts
+
+// The PostScript names of the fonts the app bundles for text (the editor's fonts). UIFont(name:) finds them once their
+// files are registered; the expo-font plugin lists them in the app (UIAppFonts), and this registers any that are in the
+// bundle but not yet known, so a render never depends on the order things start in.
+private let bundledFontNames: [String] = [
+  "TikTokSans-Bold", "Anton-Regular", "ArchivoBlack-Regular", "Montserrat-Bold", "Montserrat-ExtraBold",
+  "Poppins-SemiBold", "PermanentMarker-Regular", "Caveat-Bold", "DMSerifDisplay-Regular", "SpaceGrotesk-Bold",
+]
+
+private let registerBundledFontsOnce: Void = {
+  let bundle = Bundle.main
+  var urls: [URL] = []
+  for ext in ["ttf", "otf"] {
+    urls.append(contentsOf: bundle.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? [])
+  }
+  for url in urls {
+    var error: Unmanaged<CFError>?
+    // A font that is already registered answers with an error; that is fine.
+    _ = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
+  }
+}()
+
+private func ensureBundledFonts() {
+  _ = registerBundledFontsOnce
+}
+
+/// The bundled fonts this build can really draw (registered and openable by name).
+private func availableBundledFontNames() -> [String] {
+  ensureBundledFonts()
+  return bundledFontNames.filter { UIFont(name: $0, size: 12) != nil }
+}
+
 public class VideoRenderModule: Module {
   public func definition() -> ModuleDefinition {
     Name("VideoRender")
@@ -84,8 +118,16 @@ public class VideoRenderModule: Module {
     // supportsTextBox: the caption box (separate padding across/down and a fixed line height: style
     // "backgroundPaddingX/Y", "lineHeight").
     // supportsLineBackgrounds: a caption with several lines gets a background per line (style "lineBackground").
+    // Build 1.0.5:
+    // supportsTextOverlays: Text-button overlays are burned in (type "text" with a complete styleSpec: the overlay's own
+    // centre "xCenter"/"yCenter", "rotation", font, outline, text shadow and per-line background).
+    // supportsTextOutline: styleSpec "outlineColor" / "outlineWidth" draw a real outline under the letters.
+    // supportedFontNames: the PostScript names of the bundled fonts this build can draw.
     Constants {
-      ["supportsCaptionFont": true, "supportsTextBox": true, "supportsLineBackgrounds": true, "supportsTimingProbe": true]
+      [
+        "supportsCaptionFont": true, "supportsTextBox": true, "supportsLineBackgrounds": true, "supportsTimingProbe": true,
+        "supportsTextOverlays": true, "supportsTextOutline": true, "supportedFontNames": availableBundledFontNames(),
+      ]
     }
 
     Events("onProgress")
@@ -411,6 +453,7 @@ private func addTimed(
 // Core Animation in AVVideoCompositionCoreAnimationTool has its origin at the
 // bottom left; yFromTop (0 top ... 1 bottom) is converted here.
 private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
+  ensureBundledFonts()
   let scale = size.width / 1080
   let style = overlay.style
   let fontSize = CGFloat(number(style["fontSize"]) ?? 56) * scale
@@ -464,7 +507,13 @@ private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
 
   let container = CALayer()
   container.bounds = CGRect(x: 0, y: 0, width: textWidth + 2 * padX, height: textHeight + 2 * padY)
-  container.position = CGPoint(x: size.width / 2, y: size.height * (1 - yFromTop))
+  // Build 1.0.5: the overlay's own horizontal centre (a fraction of the width, default the middle) and a rotation in
+  // degrees, clockwise as on screen. Without these keys the overlay is centred and upright, as older builds drew it.
+  let xFrac = CGFloat(number(style["xCenter"]) ?? 0.5)
+  container.position = CGPoint(x: size.width * xFrac, y: size.height * (1 - yFromTop))
+  if let degrees = number(style["rotation"]), degrees != 0 {
+    container.transform = CATransform3DMakeRotation(-CGFloat(degrees) * .pi / 180, 0, 0, 1)
+  }
   let cornerRadius = CGFloat(number(style["cornerRadius"]) ?? 0) * scale
   if let bg = style["backgroundColor"] as? String {
     if (style["lineBackground"] as? Bool) == true {
@@ -491,11 +540,43 @@ private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
     }
   }
   if (style["lineBackground"] as? Bool) != true { container.cornerRadius = cornerRadius }
+  // The caption shadow: one soft shadow behind everything (the box and the words), as in builds before 1.0.5.
   if (style["shadow"] as? Bool) == true {
     container.shadowColor = UIColor.black.cgColor
     container.shadowOpacity = 0.6
     container.shadowRadius = 4 * scale
     container.shadowOffset = CGSize(width: 0, height: -2 * scale)
+  }
+
+  // Build 1.0.5, a Text-button overlay: the shadow the editor draws, on the words (or on the outline when there is one),
+  // never on the box. radius and offsetY are for a 1080-wide frame; offsetY is downward.
+  let textShadow = style["textShadow"] as? [String: Any]
+  func applyTextShadow(to layer: CALayer) {
+    guard let sh = textShadow else { return }
+    layer.shadowColor = color(sh["color"] as? String, fallback: .black).cgColor
+    layer.shadowOpacity = Float(number(sh["opacity"]) ?? 0.6)
+    layer.shadowRadius = CGFloat(number(sh["radius"]) ?? 4) * scale
+    layer.shadowOffset = CGSize(width: 0, height: -CGFloat(number(sh["offsetY"]) ?? 0) * scale)
+  }
+
+  let outlineReach = CGFloat(number(style["outlineWidth"]) ?? 0) * scale
+  if outlineReach > 0 {
+    // A real outline: the words are drawn as an image (UIKit draws the stroke), the stroke under the fill, so the
+    // letters keep their full shape and the outline reaches `outlineReach` beyond them, as in the editor.
+    let outlineColor = color(style["outlineColor"] as? String, fallback: .black)
+    let margin = ceil(outlineReach) + 3
+    let canvas = CGSize(width: textWidth + 2 * margin, height: textHeight + 2 * margin)
+    let image = outlinedTextImage(
+      attributed: attributed, textSize: CGSize(width: textWidth, height: textHeight), margin: margin,
+      reach: outlineReach, fontSize: fontSize, outlineColor: outlineColor
+    )
+    let imageLayer = CALayer()
+    imageLayer.contents = image.cgImage
+    imageLayer.contentsScale = image.scale
+    imageLayer.frame = CGRect(x: padX - margin, y: padY - margin, width: canvas.width, height: canvas.height)
+    applyTextShadow(to: imageLayer)
+    container.addSublayer(imageLayer)
+    return container
   }
 
   let textLayer = CATextLayer()
@@ -504,6 +585,7 @@ private func makeTextOverlay(_ overlay: OverlaySpec, size: CGSize) -> CALayer {
   textLayer.alignmentMode = .center
   textLayer.contentsScale = 2
   textLayer.frame = CGRect(x: padX, y: padY, width: textWidth, height: textHeight)
+  applyTextShadow(to: textLayer)
   container.addSublayer(textLayer)
   return container
 }
@@ -521,6 +603,39 @@ private func lineWidths(of attributed: NSAttributedString, width: CGFloat) -> [C
     widths.append(ceil(usedRect.width))
   }
   return widths
+}
+
+/// The words with a real outline, as an image: an outline layer (the stroke only, `reach` points beyond the letters) under
+/// a fill layer, drawn by UIKit with the same paragraph style the text was measured with, so the lines break where the
+/// editor's break. The image is `margin` larger than the text on every side to hold the outline.
+private func outlinedTextImage(
+  attributed: NSAttributedString,
+  textSize: CGSize,
+  margin: CGFloat,
+  reach: CGFloat,
+  fontSize: CGFloat,
+  outlineColor: UIColor
+) -> UIImage {
+  let canvas = CGSize(width: textSize.width + 2 * margin, height: textSize.height + 2 * margin)
+  let format = UIGraphicsImageRendererFormat()
+  format.scale = 2
+  format.opaque = false
+  let renderer = UIGraphicsImageRenderer(size: canvas, format: format)
+  let drawRect = CGRect(x: margin, y: margin, width: textSize.width, height: textSize.height)
+  let options: NSStringDrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
+  return renderer.image { context in
+    let cg = context.cgContext
+    cg.setLineJoin(.round)
+    cg.setLineCap(.round)
+    // The stroke is centred on the letter's edge, so the outline layer is twice the reach wide; as a percentage of the
+    // font size (a positive value strokes without filling).
+    let strokeLayer = NSMutableAttributedString(attributedString: attributed)
+    let whole = NSRange(location: 0, length: strokeLayer.length)
+    strokeLayer.addAttribute(.strokeColor, value: outlineColor, range: whole)
+    strokeLayer.addAttribute(.strokeWidth, value: (2 * reach / max(1, fontSize)) * 100, range: whole)
+    strokeLayer.draw(with: drawRect, options: options, context: nil)
+    attributed.draw(with: drawRect, options: options, context: nil)
+  }
 }
 
 /// One outline for lines stacked touching and centred: every line is its own width plus padding, with rounded

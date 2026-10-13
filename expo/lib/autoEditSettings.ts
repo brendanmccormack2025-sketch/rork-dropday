@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DEFAULT_SENSITIVITY, type Sensitivity } from "@/lib/silenceDetection";
 
 const SAVE_EDITED_KEY = "dropday:saveEditedToRoll";
+const INCLUDE_TEXT_KEY = "dropday:saveIncludeText";
 const ENABLED_KEY = "dropday:autoEditEnabled";
 const SENSITIVITY_KEY = "dropday:autoEditSensitivity";
 
@@ -48,4 +49,17 @@ export async function getSaveEditedToRoll(userId?: string | null): Promise<boole
 
 export function setSaveEditedToRoll(value: boolean, userId?: string | null): void {
   AsyncStorage.setItem(userId ? `${SAVE_EDITED_KEY}:${userId}` : SAVE_EDITED_KEY, value ? "1" : "0").catch(() => {});
+}
+
+/** "Include text in saved video" switch, remembered per user; on unless the user turned it off. */
+export async function getIncludeTextInSave(userId?: string | null): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(userId ? `${INCLUDE_TEXT_KEY}:${userId}` : INCLUDE_TEXT_KEY)) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setIncludeTextInSave(value: boolean, userId?: string | null): void {
+  AsyncStorage.setItem(userId ? `${INCLUDE_TEXT_KEY}:${userId}` : INCLUDE_TEXT_KEY, value ? "1" : "0").catch(() => {});
 }

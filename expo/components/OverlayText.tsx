@@ -4,7 +4,7 @@ import { isLoaded } from "expo-font";
 
 import HuggingText from "@/components/HuggingText";
 import { overlayFont, type TextLayout } from "@/lib/feedLayout";
-import { resolveAppearance, type LookSource } from "@/lib/textLook";
+import { resolveAppearance, rgbaOf, shadowOf, type LookSource } from "@/lib/textLook";
 
 /** "#RRGGBB" and an opacity -> "rgba(r,g,b,a)". */
 function withOpacity(hex: string, opacity: number): string {
@@ -40,18 +40,9 @@ export default function OverlayText({ text, look, layout, onLayout, hidden, chil
     textShadowRadius: 0,
     textShadowColor: "transparent",
   };
-  if (a.shadow && !outlined) {
-    shadow = a.legacy
-      ? {
-          textShadowOffset: { width: 0, height: 1 },
-          textShadowRadius: 4,
-          textShadowColor: a.textColor === "#000000" ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)",
-        }
-      : {
-          textShadowOffset: { width: 0, height: layout.fontSize * 0.05 },
-          textShadowRadius: layout.fontSize * 0.14,
-          textShadowColor: "rgba(0,0,0,0.6)",
-        };
+  const sh = shadowOf(a, layout.fontSize);
+  if (sh && sh.kind === "text") {
+    shadow = { textShadowOffset: { width: 0, height: sh.offsetY }, textShadowRadius: sh.radius, textShadowColor: rgbaOf(sh.color, sh.opacity) };
   }
 
   return (

@@ -26,17 +26,17 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const ov = (patch = {}) => ({ id: "t1", text: "Bruhh \u{1F633}", x: 0.3, y: 0.25, fontSize: 26, rotation: 0, color: "#FFFFFF", backgroundStyle: "black-box", ...patch });
 const captions = captionLinesToEditOverlays(buildCaptionLines([{ text: "hi", startMs: 100, endMs: 400 }, { text: "there", startMs: 450, endMs: 900 }], {}, [{ startMs: 0, endMs: 1000 }]));
 
-// ── 1: the export has cuts + captions, no Text-button overlays ──
+// ── 1: the export has cuts + captions; text only when the build and the setting allow it (test-text-export.mjs) ──
 {
   const json = JSON.parse(toRenderJson({ version: 1, clips: [], overlays: captions }, { supportsFont: true, supportsTextBox: true }));
   ok("the export render JSON carries the captions", json.overlays.length === captions.length && json.overlays.every((o) => o.kind === "caption"));
-  ok("and no text overlay of any kind", !json.overlays.some((o) => o.kind === "text"));
+  ok("a captions-only export has no text overlay", !json.overlays.some((o) => o.kind === "text"));
   const exp = read("../lib/exportEdit.ts");
-  ok("the export code takes no Text-button overlays at all", !/textOverlays|TextOverlay|textOverlaysToEditOverlays/.test(exp.replace(/Text-button overlays are NOT[\s\S]{0,40}/, "")));
+  ok("the export code takes text only as the ready overlays chosen by textOverlaysForSave (flag and setting), never raw", /textOverlays\?: EditOverlay\[\]/.test(exp) && !/textOverlaysToEditOverlays|TextOverlay\b/.test(exp));
   const edit = read("../app/edit.tsx");
-  ok("Post passes captions and the posted file to the export, not text overlays", /startPostExport\(\{[\s\S]{0,260}captionOverlays: captionOverlaysForPost[\s\S]{0,120}postedUri/.test(edit) && !/startPostExport\(\{[^}]*textOverlays/.test(edit));
+  ok("Post passes captions, the saved text (flag and setting) and the posted file to the export", /startPostExport\(\{[\s\S]{0,260}captionOverlays: captionOverlaysForPost[\s\S]{0,120}textOverlays: savedText[\s\S]{0,120}postedUri/.test(edit) && /textOverlaysForSave\(\{/.test(edit));
   const swift = read("../modules/video-render/ios/VideoRenderModule.swift");
-  ok("no Swift remains whose only purpose is drawing text overlays into the export (no per-overlay xCenter / rotation)", !/style\["xCenter"\]/.test(swift) && !/style\["rotation"\]/.test(swift) && !/CATransform3DMakeRotation/.test(swift));
+  ok("the Swift draws a text overlay at its own centre and rotation (build 1.0.5, supportsTextOverlays), upright and centred without the keys", /style\["xCenter"\]\) \?\? 0\.5/.test(swift) && /style\["rotation"\]/.test(swift) && /CATransform3DMakeRotation/.test(swift));
   ok("the Swift for captions stays: font name, caption box, line height", /style\["fontName"\]/.test(swift) && /backgroundPaddingX/.test(swift) && /style\["lineHeight"\]/.test(swift));
   ok("the text overlays are still drawn live in the feed and the editor", /FeedTextOverlay/.test(read("../components/FeedItem.tsx")) && /DraggableTextOverlay/.test(read("../app/edit.tsx")));
 }

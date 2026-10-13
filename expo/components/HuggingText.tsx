@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, type NativeSyntheticEvent, type TextLayoutEvent
 import Svg, { Path, Text as SvgText } from "react-native-svg";
 
 import { backgroundGeometry } from "@/lib/lineBackground";
+import { OUTLINE_SHADOW } from "@/lib/textLook";
 
 type Props = {
   text: string;
@@ -124,7 +125,7 @@ function OutlineLayer({
   const width = Math.ceil(textWidth + 2 * padX);
   const height = Math.ceil(measured.length * textStyle.lineHeight + 2 * padY);
   const shadow = outline.shadow
-    ? { shadowColor: "#000", shadowOpacity: 0.55, shadowRadius: fontSize * 0.1, shadowOffset: { width: 0, height: fontSize * 0.04 } }
+    ? { shadowColor: "#000", shadowOpacity: OUTLINE_SHADOW.opacity, shadowRadius: fontSize * OUTLINE_SHADOW.radiusEm, shadowOffset: { width: 0, height: fontSize * OUTLINE_SHADOW.offsetYEm } }
     : null;
   return (
     <View pointerEvents="none" style={[styles.outlineLayer, { width, height }, shadow]}>
