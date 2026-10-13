@@ -12,12 +12,15 @@ import { theme } from "@/constants/theme";
 import { analysis } from "@/lib/autoEdit/analysis";
 import type { LoudnessData } from "@/lib/autoEdit/analysisCache";
 import type { TimelineMarker } from "@/lib/autoEdit/markers";
+import { findMissedSilences } from "@/lib/autoEdit/missedSilence";
+import { RANGE_MIN_MS, chipLabel, outputRangeToSource, selectRange, sourceRangeToOutput, type RangeClip } from "@/lib/autoEdit/rangeCut";
 import type { EdgeDrag } from "@/lib/autoEdit/reshape";
 import type { SeamEdgeInfo, SeamHandleSpec } from "@/lib/autoEdit/seams";
 import { buildSnapTargets, snapParams, snapStart, snapStep, type SnapState, type TimedWord } from "@/lib/autoEdit/edgeSnap";
 import {
   BOTTOM_MARKER_Y,
-  DIVIDER_W,
+  CHIP_W,
+  CLIP_GAP,
   FRAME_LINE,
   HANDLE_PRESS_SCALE,
   HANDLE_RADIUS,
@@ -79,6 +82,18 @@ const PREVIEW_EVERY_MS = 50;
 const EDGE_MATCH_MS = 150;
 /** Bars (clips, bands, the drag ghost) are one fixed-width view scaled sideways: no layout props are animated. */
 const BAR_BASE = 1000;
+/** Corner radius of a kept clip; its two rounded ends are fixed-size caps (a scaled rounded view would stretch its corners). */
+const CLIP_R = 8;
+/** Hold this long, then drag, to highlight a range inside a clip. */
+const RANGE_HOLD_MS = 350;
+/** The readout of a range being dragged is updated at most this often. */
+const RANGE_READOUT_MS = 60;
+const STRIPES = (() => {
+  const h = LANE_H - 14;
+  let d = "";
+  for (let k = -h; k < CHIP_W + h; k += 6) d += `M${k} ${h} L${k + h} 0 `;
+  return d;
+})();
 
 export type PrecisionSeams = {
   handles: SeamHandleSpec[];
@@ -98,6 +113,10 @@ export type PrecisionSeams = {
   canAnalyze?: boolean;
   /** Show the video frame at a source time (an edge being moved); null: back to the normal preview. */
   onEdgePreview?: (sourceMs: number | null) => void;
+  /** Cut a source range inside a kept clip (the creator's own cut: one undo step). */
+  onCutRange?: (startMs: number, endMs: number) => void;
+  /** Protected laughs (source ms): a missed-silence hint never covers one. */
+  protectedRanges?: Array<{ startMs: number; endMs: number }>;
 };
 
 export type PrecisionTimelineProps = {
@@ -110,6 +129,9 @@ export type PrecisionTimelineProps = {
   onDeselectAndPreview?: () => void;
   markers?: TimelineMarker[];
   onMarkerPress?: (marker: TimelineMarker) => void;
+  /** The inline bar of a cut chip: bring the footage back / cut it again. */
+  onRestoreCut?: (marker: TimelineMarker) => void;
+  onReapplyCut?: (marker: TimelineMarker) => void;
   /** Output-timeline ranges drawn as a subtle band (protected laughs). */
   bands?: Array<{ startMs: number; endMs: number }>;
   seams: PrecisionSeams;
@@ -202,10 +224,75 @@ function Bar({
   return <Animated.View pointerEvents="none" style={[styles.bar, style, anim]} />;
 }
 
-/** A thin, subtle divider on a cut boundary that is not part of the selected clip. */
-function Divider({ outputMs, scale, offset }: { outputMs: number; scale: SharedValue<number>; offset: SharedValue<number> }) {
-  const anim = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - DIVIDER_W / 2 }] }));
-  return <Animated.View pointerEvents="none" style={[styles.divider, anim]} />;
+/**
+ * A kept clip: a rounded rectangle drawn a little short of a seam (so a gap shows between clips). The body is one bar
+ * scaled sideways; the two rounded ends are fixed-size caps that move with it. Transform only.
+ */
+function ClipBar({
+  startMs,
+  durMs,
+  insetL,
+  insetR,
+  scale,
+  offset,
+  style,
+}: {
+  startMs: number;
+  durMs: number;
+  insetL: number;
+  insetR: number;
+  scale: SharedValue<number>;
+  offset: SharedValue<number>;
+  style: object;
+}) {
+  const body = useAnimatedStyle(() => {
+    const x0 = TL_PAD + startMs * scale.value - offset.value + insetL;
+    const x1 = TL_PAD + (startMs + durMs) * scale.value - offset.value - insetR;
+    const w = Math.max(1, x1 - x0 - 2 * CLIP_R);
+    return { transform: [{ translateX: x0 + CLIP_R + (w - BAR_BASE) / 2 }, { scaleX: w / BAR_BASE }] };
+  });
+  const left = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + startMs * scale.value - offset.value + insetL }] }));
+  const right = useAnimatedStyle(() => {
+    const x0 = TL_PAD + startMs * scale.value - offset.value + insetL;
+    const x1 = TL_PAD + (startMs + durMs) * scale.value - offset.value - insetR;
+    return { transform: [{ translateX: Math.max(x0, x1 - 2 * CLIP_R) }] };
+  });
+  return (
+    <>
+      <Animated.View pointerEvents="none" style={[styles.bar, style, body]} />
+      <Animated.View pointerEvents="none" style={[styles.clipCap, style, left]} />
+      <Animated.View pointerEvents="none" style={[styles.clipCap, style, right]} />
+    </>
+  );
+}
+
+/** A removed part: a slim striped chip in the gap at the seam where the cut was. Transform only. */
+function CutChip({ outputMs, selected, scale, offset }: { outputMs: number; selected: boolean; scale: SharedValue<number>; offset: SharedValue<number> }) {
+  const anim = useAnimatedStyle(() => ({ transform: [{ translateX: TL_PAD + outputMs * scale.value - offset.value - CHIP_W / 2 }] }));
+  return (
+    <Animated.View pointerEvents="none" style={[styles.chip, selected && styles.chipSelected, anim]}>
+      <Svg width={CHIP_W} height={LANE_H - 14}>
+        <Path d={STRIPES} stroke={selected ? "#FFFFFF" : theme.accent} strokeOpacity={selected ? 0.9 : 0.55} strokeWidth={2} />
+      </Svg>
+    </Animated.View>
+  );
+}
+
+/** A small rounded button of the inline bar. */
+function Pill({ label, onPress, primary, accessibilityLabel }: { label: string; onPress: () => void; primary?: boolean; accessibilityLabel?: string }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+      style={({ pressed }) => [styles.pill, primary ? styles.pillPrimary : styles.pillQuiet, pressed && styles.pillPressed]}
+    >
+      <UiText style={[styles.pillText, primary && styles.pillTextPrimary]} numberOfLines={1}>
+        {label}
+      </UiText>
+    </Pressable>
+  );
 }
 
 /**
@@ -294,6 +381,8 @@ export default function PrecisionTimeline({
   onDeselectAndPreview,
   markers,
   onMarkerPress,
+  onRestoreCut,
+  onReapplyCut,
   bands,
   seams,
   onFatal,
@@ -321,16 +410,24 @@ export default function PrecisionTimeline({
   const dragSide = useSharedValue(0);
   const waveS0 = useSharedValue(0);
   const waveO0 = useSharedValue(0);
+  const rangeOn = useSharedValue(0);
+  const rangeA = useSharedValue(0);
+  const rangeB = useSharedValue(0);
 
   const [selected, setSelectedState] = useState<SelectedEdge | null>(null);
   const selectedAgainst = useRef<SeamHandleSpec[] | null>(null);
   const [liveEdge, setLiveEdge] = useState<{ ms: number; atMs: number } | null>(null);
   const [wave, setWave] = useState<{ path: string; width: number } | null>(null);
   const loudness = useLoudness(seams.sourceUri, seams.canAnalyze === true);
+  // what the inline bar is about (one at a time): a cut chip, a missed-silence hint, or a range being cut
+  const [chipId, setChipId] = useState<string | null>(null);
+  const [hintKey, setHintKey] = useState<number | null>(null);
+  const [range, setRange] = useState<{ aOut: number; bOut: number; clipIdx: number; dragging: boolean } | null>(null);
 
   // The latest props for the callbacks the gestures call (their identity never changes).
   const live = useRef({ clips, markers, seams, selected, selectedClipId, onSeek, onSelectClip, onDeselectAndPreview, onMarkerPress, onFatal, onBreadcrumb });
   live.current = { clips, markers, seams, selected, selectedClipId, onSeek, onSelectClip, onDeselectAndPreview, onMarkerPress, onFatal, onBreadcrumb };
+  const rangeRef = useRef<{ active: boolean; clipIdx: number; anchorOut: number; lastReadoutAt: number; lastSeekAt: number }>({ active: false, clipIdx: -1, anchorOut: 0, lastReadoutAt: 0, lastSeekAt: 0 });
   const setSelected = useCallback((next: SelectedEdge | null) => {
     selectedAgainst.current = live.current.seams.handles;
     setSelectedState(next);
@@ -357,6 +454,8 @@ export default function PrecisionTimeline({
     [],
   );
 
+  const hintsRef = useRef<Array<{ src: { startMs: number; endMs: number }; out: { startMs: number; endMs: number } }>>([]);
+
   // ── geometry ──
   const geoms = useMemo(() => handleGeoms(seams.handles), [seams.handles]);
   const clipGeoms = useMemo(() => {
@@ -372,9 +471,30 @@ export default function PrecisionTimeline({
     }
     return out;
   }, [clips]);
-  const markerGeoms = useMemo<MarkerGeom[]>(() => (markers ?? []).map((m) => ({ outputMs: m.outputMs, bottom: MARKER_LOOK[m.kind]?.bottom ?? false })), [markers]);
+  const markerGeoms = useMemo<MarkerGeom[]>(() => (markers ?? []).map((m) => ({ outputMs: m.outputMs, bottom: MARKER_LOOK[m.kind]?.bottom ?? false, chip: m.kind === "cut" })), [markers]);
+  // clips as the range cut sees them: where each starts on the output timeline and in the source
+  const rangeClips = useMemo<RangeClip[]>(
+    () => clips.map((c, i) => ({ outStartMs: clipGeoms[i]?.startMs ?? 0, durMs: clipGeoms[i]?.durMs ?? 0, srcStartMs: c.trimStartMs ?? 0 })),
+    [clips, clipGeoms],
+  );
+  // Missed-silence hints: quiet stretches still kept, from the loudness analysis the edit already made.
+  const hints = useMemo(() => {
+    if (!loudness || !seams.onCutRange) return [];
+    try {
+      const keep = rangeClips.map((c) => ({ startMs: c.srcStartMs, endMs: c.srcStartMs + c.durMs }));
+      return findMissedSilences({ windows: loudness.windows, durationMs: loudness.durationMs, keep, protectedRanges: seams.protectedRanges })
+        .map((src) => ({ src, out: sourceRangeToOutput(src, rangeClips)[0] }))
+        .filter((h): h is { src: { startMs: number; endMs: number }; out: { startMs: number; endMs: number } } => !!h.out);
+    } catch {
+      return [];
+    }
+  }, [loudness, rangeClips, seams.onCutRange, seams.protectedRanges]);
+  const hintOuts = useMemo(() => hints.map((h) => h.out), [hints]);
+  hintsRef.current = hints;
   const targets = useMemo(() => buildSnapTargets(seams.words, seams.boundaries), [seams.words, seams.boundaries]);
-  const geo = useRef<{ geoms: typeof geoms; markerGeoms: MarkerGeom[]; clipGeoms: ClipGeom[]; targets: number[]; frame: FrameGeom | null }>({ geoms, markerGeoms, clipGeoms, targets, frame: null });
+  const geo = useRef<{ geoms: typeof geoms; markerGeoms: MarkerGeom[]; clipGeoms: ClipGeom[]; targets: number[]; frame: FrameGeom | null; hintOuts: Array<{ startMs: number; endMs: number }>; rangeClips: RangeClip[] }>({ geoms, markerGeoms, clipGeoms, targets, frame: null, hintOuts: [], rangeClips: [] });
+  geo.current.hintOuts = hintOuts;
+  geo.current.rangeClips = rangeClips;
   geo.current.geoms = geoms;
   geo.current.markerGeoms = markerGeoms;
   geo.current.clipGeoms = clipGeoms;
@@ -724,12 +844,30 @@ export default function PrecisionTimeline({
     [stopTicker, dragOn, setSelected],
   );
 
+  /** Nothing of the inline bar is selected any more (a tap elsewhere, an edit, a new selection). */
+  const clearInline = useCallback(() => {
+    rangeRef.current.active = false;
+    rangeOn.value = 0;
+    setChipId(null);
+    setHintKey(null);
+    setRange(null);
+  }, [rangeOn]);
+
   const handleTap = useCallback(
-    (kind: string, index: number, side: number) => {
+    (kind: string, index: number, side: number, hint?: number) => {
       const l = live.current;
       if (kind === "marker") {
         const m = l.markers?.[index];
-        if (m) l.onMarkerPress?.(m);
+        if (!m) return;
+        if (m.kind === "cut" || m.kind === "restored") {
+          // an inline bar, not a sheet: the video and the timeline stay usable
+          clearInline();
+          setSelected(null);
+          l.seams.onEdgePreview?.(null);
+          if (l.selectedClipId) l.onDeselectAndPreview?.();
+          setChipId(m.id);
+          haptic("select");
+        } else l.onMarkerPress?.(m);
         return;
       }
       if (kind === "edge") {
@@ -737,12 +875,19 @@ export default function PrecisionTimeline({
         if (e) selectEdge(e);
         return;
       }
+      clearInline();
       if (kind === "clip") {
         const c = l.clips[index];
         if (c) {
           setSelected(null);
           l.seams.onEdgePreview?.(null);
           l.onSelectClip(c.id);
+          const h = hint !== undefined ? geo.current.hintOuts[hint] : undefined;
+          const src = h ? hintsRef.current.find((x) => x.out.startMs === h.startMs) : undefined;
+          if (src) {
+            setHintKey(src.src.startMs);
+            haptic("select");
+          }
         }
         return;
       }
@@ -752,7 +897,7 @@ export default function PrecisionTimeline({
       }
       if (l.selectedClipId) l.onDeselectAndPreview?.();
     },
-    [resolveEdge, selectEdge, setSelected],
+    [resolveEdge, selectEdge, setSelected, clearInline],
   );
 
   // ── gestures: plain JS, like every other gesture in the app ──
@@ -836,6 +981,80 @@ export default function PrecisionTimeline({
         }),
       );
 
+    // Hold, then drag across a clip to highlight a range to cut. Plain JS like the rest; the range is kept inside the
+    // clip the finger went down on.
+    const rangePan = Gesture.Pan()
+      .runOnJS(true)
+      .activateAfterLongPress(RANGE_HOLD_MS)
+      .maxPointers(1)
+      .onStart(
+        guard("range.start", (e: { x: number; y: number }) => {
+          const r = rangeRef.current;
+          r.active = false;
+          // a hold on a handle or on the playhead is not a range
+          if (g1.current.mode === "edge" || g1.current.mode === "playhead") return;
+          if (e.y < LANE_TOP || e.y > LANE_TOP + LANE_H) return;
+          const ms = xToMs(e.x, view.current.scale, view.current.offset);
+          const idx = geo.current.rangeClips.findIndex((c) => ms >= c.outStartMs && ms < c.outStartMs + c.durMs);
+          if (idx < 0) return;
+          once("range");
+          cancelAnim();
+          clearInline();
+          r.active = true;
+          r.clipIdx = idx;
+          r.anchorOut = ms;
+          r.lastReadoutAt = 0;
+          r.lastSeekAt = 0;
+          touching.current += 1;
+          setSelected(null);
+          live.current.seams.onEdgePreview?.(null);
+          rangeA.value = ms;
+          rangeB.value = ms;
+          rangeOn.value = 1;
+          setRange({ aOut: ms, bOut: ms, clipIdx: idx, dragging: true });
+          haptic("select");
+        }),
+      )
+      .onUpdate(
+        guard("range.update", (e: { x: number }) => {
+          const r = rangeRef.current;
+          if (!r.active) return;
+          const clip = geo.current.rangeClips[r.clipIdx];
+          if (!clip) return;
+          const ms = xToMs(e.x, view.current.scale, view.current.offset);
+          const sel = selectRange(r.anchorOut, ms, clip);
+          rangeA.value = sel.startMs;
+          rangeB.value = sel.endMs;
+          const now = Date.now();
+          if (now - r.lastReadoutAt >= RANGE_READOUT_MS) {
+            r.lastReadoutAt = now;
+            setRange({ aOut: sel.startMs, bOut: sel.endMs, clipIdx: r.clipIdx, dragging: true });
+          }
+          // the video follows the finger, so the range can be placed by what is said there
+          const seekTo = Math.min(clip.outStartMs + clip.durMs, Math.max(clip.outStartMs, ms));
+          if (now - r.lastSeekAt >= 80) {
+            r.lastSeekAt = now;
+            live.current.onSeek(seekTo);
+          }
+        }),
+      )
+      .onFinalize(
+        guard("range.finalize", () => {
+          const r = rangeRef.current;
+          if (!r.active) return;
+          r.active = false;
+          touching.current = Math.max(0, touching.current - 1);
+          const a = rangeA.value;
+          const b = rangeB.value;
+          if (b - a < RANGE_MIN_MS) {
+            rangeOn.value = 0;
+            setRange(null);
+            return;
+          }
+          setRange({ aOut: a, bOut: b, clipIdx: r.clipIdx, dragging: false });
+        }),
+      );
+
     const singleTap = Gesture.Tap()
       .runOnJS(true)
       .maxDuration(300)
@@ -844,8 +1063,8 @@ export default function PrecisionTimeline({
         guard("tap", (e: { x: number; y: number }, ok: boolean) => {
           if (!ok) return;
           once("tap");
-          const t = tapAt(e.x, e.y, geo.current.markerGeoms, geo.current.frame, geo.current.clipGeoms, view.current.scale, view.current.offset);
-          handleTap(t.kind, t.index, t.side);
+          const t = tapAt(e.x, e.y, geo.current.markerGeoms, geo.current.frame, geo.current.clipGeoms, view.current.scale, view.current.offset, TL_PAD, geo.current.hintOuts);
+          handleTap(t.kind, t.index, t.side, t.hint);
         }),
       );
     const doubleTap = Gesture.Tap()
@@ -888,10 +1107,48 @@ export default function PrecisionTimeline({
         }),
       );
 
-    return Gesture.Simultaneous(pinch, Gesture.Race(pan, Gesture.Simultaneous(singleTap, doubleTap)));
+    return Gesture.Simultaneous(pinch, Gesture.Race(rangePan, pan, Gesture.Simultaneous(singleTap, doubleTap)));
     // everything the handlers use is a ref, a shared value or a stable callback
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // an edit happened (a cut, a restore, an undo): whatever the inline bar was about is stale
+  useEffect(() => {
+    clearInline();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clips]);
+
+  // ── the inline bar ──
+  const chipMarker = useMemo(() => (chipId ? (markers ?? []).find((m) => m.id === chipId) ?? null : null), [chipId, markers]);
+  const hint = useMemo(() => (hintKey === null ? null : hints.find((h) => h.src.startMs === hintKey) ?? null), [hintKey, hints]);
+  const rangeSrc = useMemo(() => {
+    if (!range) return null;
+    const clip = rangeClips[range.clipIdx];
+    return clip ? outputRangeToSource({ startMs: range.aOut, endMs: range.bOut }, clip) : null;
+  }, [range, rangeClips]);
+  const rangeLen = range ? range.bOut - range.aOut : 0;
+  const cutRange = useCallback(() => {
+    const src = rangeSrc;
+    if (!src || src.endMs - src.startMs < RANGE_MIN_MS) return;
+    haptic("select");
+    crumb("precision timeline: cut range", { ms: Math.round(src.endMs - src.startMs) });
+    live.current.seams.onCutRange?.(src.startMs, src.endMs);
+    clearInline();
+  }, [rangeSrc, clearInline, crumb]);
+  const cutHint = useCallback(() => {
+    if (!hint) return;
+    haptic("select");
+    crumb("precision timeline: cut missed silence", { ms: Math.round(hint.src.endMs - hint.src.startMs) });
+    live.current.seams.onCutRange?.(hint.src.startMs, hint.src.endMs);
+    clearInline();
+  }, [hint, clearInline, crumb]);
+  const restoreChip = useCallback(() => {
+    if (!chipMarker) return;
+    haptic("select");
+    if (chipMarker.kind === "restored") onReapplyCut?.(chipMarker);
+    else onRestoreCut?.(chipMarker);
+    clearInline();
+  }, [chipMarker, onRestoreCut, onReapplyCut, clearInline]);
 
   // ── the nudge buttons ──
   const fps = safeFps(seams.frameRate);
@@ -945,6 +1202,13 @@ export default function PrecisionTimeline({
     const d = dragMs.value - dragAtMs.value;
     return { opacity: dragOn.value === 1 ? 1 : 0, transform: [{ translateX: TL_PAD + (dragOutputMs.value + d) * scale.value - offset.value - 1 }] };
   });
+  const rangeStyle = useAnimatedStyle(() => {
+    const x0 = TL_PAD + rangeA.value * scale.value - offset.value;
+    const w = Math.max(1, (rangeB.value - rangeA.value) * scale.value);
+    return { opacity: rangeOn.value, transform: [{ translateX: x0 + (w - BAR_BASE) / 2 }, { scaleX: w / BAR_BASE }] };
+  });
+  const rangeStartStyle = useAnimatedStyle(() => ({ opacity: rangeOn.value, transform: [{ translateX: TL_PAD + rangeA.value * scale.value - offset.value - 1 }] }));
+  const rangeEndStyle = useAnimatedStyle(() => ({ opacity: rangeOn.value, transform: [{ translateX: TL_PAD + rangeB.value * scale.value - offset.value - 1 }] }));
   const playheadStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: TL_PAD + playMs.value * scale.value - offset.value - 1 }],
   }));
@@ -963,10 +1227,12 @@ export default function PrecisionTimeline({
               {/* lane: clips, waveform, bands, the drag ghost (clipped to the lane) */}
               <View pointerEvents="none" style={styles.lane}>
                 {clips.map((c, i) => (
-                  <Bar
+                  <ClipBar
                     key={c.id}
                     startMs={clipGeoms[i]?.startMs ?? 0}
                     durMs={clipGeoms[i]?.durMs ?? 0}
+                    insetL={i > 0 ? CLIP_GAP : 0}
+                    insetR={i < clips.length - 1 ? CLIP_GAP : 0}
                     scale={scale}
                     offset={offset}
                     style={c.id === selectedClipId ? styles.clipSelected : styles.clip}
@@ -979,25 +1245,31 @@ export default function PrecisionTimeline({
                     </Svg>
                   </Animated.View>
                 ) : null}
+                {hints.map((h) => (
+                  <Bar key={`hint${h.src.startMs}`} startMs={h.out.startMs} durMs={h.out.endMs - h.out.startMs} scale={scale} offset={offset} style={hint && hint.src.startMs === h.src.startMs ? styles.hintTintOn : styles.hintTint} />
+                ))}
                 {bands?.map((b, i) => (
                   <Bar key={`band${i}`} startMs={b.startMs} durMs={Math.max(0, b.endMs - b.startMs)} scale={scale} offset={offset} style={styles.band} />
                 ))}
                 <Animated.View pointerEvents="none" style={[styles.bar, styles.ghostOut, ghostOutStyle]} />
                 <Animated.View pointerEvents="none" style={[styles.bar, styles.ghostCut, ghostCutStyle]} />
+                <Animated.View pointerEvents="none" style={[styles.bar, styles.rangeFill, rangeStyle]} />
+                <Animated.View pointerEvents="none" style={[styles.rangeLine, rangeStartStyle]} />
+                <Animated.View pointerEvents="none" style={[styles.rangeLine, rangeEndStyle]} />
               </View>
               {/* handles, markers, playhead: drawn over the lane */}
               <View pointerEvents="none" style={styles.overlay}>
-                {geoms.map((g, i) => (g.hasPrev && g.hasNext ? <Divider key={`d${i}`} outputMs={g.outputMs} scale={scale} offset={offset} /> : null))}
+                {(markers ?? []).map((m, i) => (m.kind === "cut" ? <CutChip key={m.id} outputMs={markerGeoms[i]?.outputMs ?? 0} selected={m.id === chipId} scale={scale} offset={offset} /> : null))}
                 <Frame frameStart={frameStart} frameEnd={frameEnd} pressLeft={pressLeft} pressRight={pressRight} scale={scale} offset={offset} />
                 <Animated.View pointerEvents="none" style={[styles.edgeLine, edgeLineStyle]} />
                 {(markers ?? []).map((m, i) => {
                   const look = MARKER_LOOK[m.kind];
-                  if (!look) return null;
+                  if (!look || m.kind === "cut") return null;
                   return (
                     <MarkerGlyph
                       key={m.id}
                       outputMs={markerGeoms[i]?.outputMs ?? 0}
-                      glyph={m.kind === "cut" ? styles.cutDot : look.glyph}
+                      glyph={look.glyph}
                       y={look.bottom ? BOTTOM_MARKER_Y : TOP_MARKER_Y}
                       scale={scale}
                       offset={offset}
@@ -1012,8 +1284,36 @@ export default function PrecisionTimeline({
             </Animated.View>
           </GestureDetector>
 
-          {/* info row: the selected edge's time, one-frame nudges, or a hint */}
-          {selected && selectedHandle ? (
+          {/* info row: the inline bar (a range, a cut chip, a missed silence), the selected edge's nudges, or a hint */}
+          {range && rangeSrc ? (
+            <View style={[styles.inlineBar, { top: rects.info.y + 4 }]}>
+              <UiText style={styles.inlineText} numberOfLines={1}>
+                {`${(rangeLen / 1000).toFixed(2)}s selected`}
+              </UiText>
+              {range.dragging ? null : (
+                <>
+                  <Pill label="Cancel" onPress={guard("range.cancel", clearInline)} />
+                  <Pill label="Cut this part" primary onPress={guard("range.cut", cutRange)} accessibilityLabel="Cut this part" />
+                </>
+              )}
+            </View>
+          ) : chipMarker ? (
+            <View style={[styles.inlineBar, { top: rects.info.y + 4 }]}>
+              <UiText style={styles.inlineText} numberOfLines={1}>
+                {chipMarker.kind === "restored" ? "Restored footage" : chipLabel(chipMarker)}
+              </UiText>
+              <Pill label="Close" onPress={guard("chip.close", clearInline)} />
+              <Pill label={chipMarker.kind === "restored" ? "Cut again" : "Restore"} primary onPress={guard("chip.restore", restoreChip)} />
+            </View>
+          ) : hint ? (
+            <View style={[styles.inlineBar, { top: rects.info.y + 4 }]}>
+              <UiText style={styles.inlineText} numberOfLines={1}>
+                Quiet part
+              </UiText>
+              <Pill label="Close" onPress={guard("hint.close", clearInline)} />
+              <Pill label={`Cut this silence (${((hint.src.endMs - hint.src.startMs) / 1000).toFixed(1)}s)`} primary onPress={guard("hint.cut", cutHint)} />
+            </View>
+          ) : selected && selectedHandle ? (
             <>
               <Pressable
                 onPress={guard("nudge", () => nudge(-1))}
@@ -1054,7 +1354,7 @@ export default function PrecisionTimeline({
           ) : (
             <View pointerEvents="none" style={[styles.hintBox, { top: rects.info.y, height: rects.info.h }]}>
               <UiText style={styles.hint} numberOfLines={1}>
-                Pinch to zoom · drag a handle to fine-tune a cut
+                Pinch to zoom · hold and drag to cut a part
               </UiText>
             </View>
           )}
@@ -1072,16 +1372,22 @@ function box(r: { x: number; y: number; w: number; h: number }) {
 const styles = StyleSheet.create({
   container: { position: "relative", alignSelf: "stretch" },
   touchArea: { position: "absolute", top: 0, left: 0, right: 0 },
-  lane: { position: "absolute", left: 0, right: 0, top: LANE_TOP, height: LANE_H, overflow: "hidden", borderRadius: 6, backgroundColor: "rgba(10,10,10,0.05)" },
+  lane: { position: "absolute", left: 0, right: 0, top: LANE_TOP, height: LANE_H, overflow: "hidden", borderRadius: 12, backgroundColor: "rgba(10,10,10,0.07)" },
   overlay: { ...StyleSheet.absoluteFill },
   bar: { position: "absolute", left: 0, top: 0, width: BAR_BASE, height: LANE_H },
+  clipCap: { position: "absolute", left: 0, top: 0, width: CLIP_R * 2, height: LANE_H, borderRadius: CLIP_R },
   clip: { backgroundColor: "#FFFFFF" },
   clipSelected: { backgroundColor: "#FFE3DF" },
+  hintTint: { backgroundColor: "rgba(20,184,166,0.20)" },
+  hintTintOn: { backgroundColor: "rgba(20,184,166,0.42)" },
+  rangeFill: { backgroundColor: "rgba(232,41,28,0.30)" },
+  rangeLine: { position: "absolute", left: 0, top: 0, width: 2, height: LANE_H, backgroundColor: theme.accent },
+  chip: { position: "absolute", left: 0, top: LANE_TOP + 7, width: CHIP_W, height: LANE_H - 14, borderRadius: CHIP_W / 2, overflow: "hidden", backgroundColor: "rgba(232,41,28,0.16)", alignItems: "center", justifyContent: "center" },
+  chipSelected: { backgroundColor: theme.accent },
   band: { backgroundColor: "rgba(242,140,40,0.28)" },
   ghostOut: { backgroundColor: "rgba(31,168,77,0.38)" },
   ghostCut: { backgroundColor: "rgba(232,41,28,0.34)" },
   wave: { position: "absolute", top: 0, height: LANE_H },
-  divider: { position: "absolute", left: 0, top: LANE_TOP + 4, width: DIVIDER_W, height: LANE_H - 8, borderRadius: DIVIDER_W / 2, backgroundColor: "rgba(10,10,10,0.22)" },
   frameBar: { position: "absolute", left: 0, width: BAR_BASE, height: FRAME_LINE, backgroundColor: theme.accent },
   handle: { position: "absolute", left: 0, top: LANE_TOP, width: HANDLE_W, height: LANE_H, backgroundColor: theme.accent, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 3 },
   handleLeft: { borderTopLeftRadius: HANDLE_RADIUS, borderBottomLeftRadius: HANDLE_RADIUS },
@@ -1090,8 +1396,6 @@ const styles = StyleSheet.create({
   edgeLine: { position: "absolute", left: 0, top: LANE_TOP, width: 2, height: LANE_H, backgroundColor: theme.text },
   markerBox: { position: "absolute", left: 0, width: 12, height: 12, alignItems: "center", justifyContent: "center" },
   markerGlyph: { width: 12, height: 12 },
-  // the cut marker is no longer a red diamond: a small grey dot (still tappable, to see what was cut)
-  cutDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(10,10,10,0.35)" },
   playhead: { position: "absolute", left: 0, top: 0, width: 2, height: LANE_TOP + LANE_H, alignItems: "center" },
   playheadDot: { position: "absolute", top: 1, width: 14, height: 14, borderRadius: 7, backgroundColor: theme.accent, borderWidth: 2, borderColor: "#fff" },
   playheadLine: { position: "absolute", top: 14, bottom: 0, width: 2, backgroundColor: theme.accent },
@@ -1099,7 +1403,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 10,
+    borderRadius: 22,
     backgroundColor: "rgba(10,10,10,0.07)",
   },
   pressed: { backgroundColor: "rgba(10,10,10,0.16)" },
@@ -1108,6 +1412,14 @@ const styles = StyleSheet.create({
   readoutTime: { color: theme.text, fontSize: 17, fontWeight: "800", textAlign: "center", fontVariant: ["tabular-nums"] },
   readoutDelta: { color: theme.textMuted, fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] },
   readoutCaption: { color: theme.textMuted, fontSize: 11, marginTop: -1 },
+  inlineBar: { position: "absolute", left: 12, right: 12, height: 40, borderRadius: 20, paddingLeft: 16, paddingRight: 4, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(10,10,10,0.07)" },
+  inlineText: { flex: 1, color: theme.text, fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  pill: { height: 32, paddingHorizontal: 14, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  pillPrimary: { backgroundColor: theme.accent },
+  pillQuiet: { backgroundColor: "rgba(10,10,10,0.08)" },
+  pillPressed: { opacity: 0.7 },
+  pillText: { color: theme.text, fontSize: 13, fontWeight: "700" },
+  pillTextPrimary: { color: "#FFFFFF" },
   hintBox: { position: "absolute", left: 0, right: 0, alignItems: "center", justifyContent: "center" },
   hint: { color: theme.textMuted, fontSize: 12 },
 });

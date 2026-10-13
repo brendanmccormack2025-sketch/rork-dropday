@@ -300,7 +300,7 @@ const TOTAL = 60_000;    // a one-minute video
   // has run in this app before, in the text overlays); every other gesture of the app is runOnJS(true) too.
   const gestures = (code.match(/Gesture\.(Pan|Tap|Pinch)\(\)/g) || []).length;
   const jsGestures = (code.match(/Gesture\.(Pan|Tap|Pinch)\(\)\s*\.runOnJS\(true\)/g) || []).length;
-  eq("every gesture runs on the JS thread (runOnJS(true)): Pinch + Pan + two Taps", [gestures, jsGestures], [4, 4]);
+  eq("every gesture runs on the JS thread (runOnJS(true)): Pinch + Pan + the hold-and-drag range Pan + two Taps", [gestures, jsGestures], [5, 5]);
   ok("no worklets, UI-thread loops or animation drivers: no \"worklet\", runOnJS(), useFrameCallback, useAnimatedReaction, withDecay, withTiming, withSpring, cancelAnimation", !/"worklet"|(?<!\.)\brunOnJS\(|useFrameCallback|useAnimatedReaction|withDecay|withTiming|withSpring|\bcancelAnimation\(|runOnUI|scheduleOnUI/.test(code));
   ok("reanimated is used only for shared values and animated styles", /from "react-native-reanimated"/.test(code) && /import Animated, \{ useAnimatedStyle, useSharedValue, type SharedValue \} from "react-native-reanimated"/.test(code));
   const styleBodies = [...code.matchAll(/useAnimatedStyle\(\(\) => (?:\{([\s\S]*?)\n  \}\)|\(\{([\s\S]*?)\}\)\))/g)].map((m) => m[1] ?? m[2] ?? "");
@@ -318,7 +318,7 @@ const TOTAL = 60_000;    // a one-minute video
   ok("the selected clip has a thick rounded red handle on each end, each with two white grip lines", /handle: \{[^}]*width: HANDLE_W[^}]*height: LANE_H[^}]*backgroundColor: theme\.accent/.test(comp) && /borderTopLeftRadius: HANDLE_RADIUS, borderBottomLeftRadius: HANDLE_RADIUS/.test(comp) && /borderTopRightRadius: HANDLE_RADIUS, borderBottomRightRadius: HANDLE_RADIUS/.test(comp) && (comp.match(/<View style=\{styles\.grip\} \/>/g) || []).length === 4 && /grip: \{ width: 2, height: 16[^}]*backgroundColor: "#FFFFFF"/.test(comp));
   ok("a red outline of 2.5 pt runs along the top and bottom of the selected clip", /frameBar: \{[^}]*height: FRAME_LINE[^}]*backgroundColor: theme\.accent/.test(comp) && /top: LANE_TOP \}/.test(comp) && /top: LANE_TOP \+ LANE_H - FRAME_LINE/.test(comp));
   ok("a touched handle scales up (transform scale, 1.15) and gives a light haptic at touch-down; it goes back on release", /\{ scale: pressLeft\.value \}/.test(comp) && /\{ scale: pressRight\.value \}/.test(comp) && /press\(g\.side\);\s*haptic\("light"\);/.test(comp) && /if \(g1\.current\.mode === "edge"\) press\(null\)/.test(comp) && /HANDLE_PRESS_SCALE/.test(comp));
-  ok("unselected cut boundaries are thin grey dividers; the red diamond markers are gone", /divider: \{[^}]*width: DIVIDER_W[^}]*rgba\(10,10,10,0\.22\)/.test(comp) && /<Divider /.test(comp) && /m\.kind === "cut" \? styles\.cutDot : look\.glyph/.test(comp) && !/Pills/.test(comp));
+  ok("cuts are slim striped chips in the gap between rounded clips; the grey dividers and dots are gone", /function CutChip/.test(comp) && /function ClipBar/.test(comp) && !/<Divider /.test(comp) && !/cutDot/.test(comp) && !/Pills/.test(comp));
   ok("the frame follows the selected edge through edits (clips get new ids), else the tapped clip", /selectedHandle\?\.edge\.clipId \?\? selectedClipId/.test(comp));
   ok("tapping empty space ends both the edge selection and the clip selection", /if \(l\.selectedClipId\) l\.onDeselectAndPreview\?\.\(\);/.test(comp));
   ok("the pure helpers are plain functions (no worklet directive anywhere)", !/"worklet"/.test(read("../lib/autoEdit/timelineView.ts") + read("../lib/autoEdit/edgeSnap.ts")));

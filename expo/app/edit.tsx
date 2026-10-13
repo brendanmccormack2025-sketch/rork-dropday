@@ -102,7 +102,8 @@ import CutsSheet from "@/components/CutsSheet";
 import CaptionsSheet from "@/components/CaptionsSheet";
 import MarkerSheet from "@/components/MarkerSheet";
 import { MANUAL_EDIT_CONFIRM_MESSAGE, guardManualEdits, timelineMatchesState } from "@/lib/autoEdit/confirm";
-import { addManualCut } from "@/lib/autoEdit/decisions";
+import { addManualCut, protectedRangesOf } from "@/lib/autoEdit/decisions";
+import { planRangeCut } from "@/lib/autoEdit/rangeCut";
 import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/lib/autoEdit/deletePart";
 import { analysisSource, loadLoudnessChecked } from "@/lib/mergeTiming";
 import { AUTO_EDIT_STALL_MS, transcriptionGate } from "@/lib/captionsGate";
@@ -2999,6 +3000,25 @@ export default function EditScreen() {
     [userEdit],
   );
 
+  // A range cut on the Cuts timeline (a range held and dragged inside a clip, or a missed-silence hint): the creator's
+  // own cut, one undo step. Captions, text and the cut count follow because the edit is the decision state.
+  const handleCutRange = useCallback(
+    (startMs: number, endMs: number) => {
+      const model = editStateRef.current;
+      if (!model) return;
+      const plan = planRangeCut(model.state, startMs, endMs, model.durationMs);
+      if (plan.kind === "none") {
+        if (plan.reason === "everything") showAlert("Can't cut", LAST_PART_MESSAGE);
+        return;
+      }
+      triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+      userEdit(() => plan.next);
+    },
+    [userEdit],
+  );
+  const handleRestoreCut = useCallback((marker: TimelineMarker) => userEdit((s) => undoThisCut(s, marker)), [userEdit]);
+  const handleReapplyCut = useCallback((marker: TimelineMarker) => userEdit((s) => reapplyMarker(s, marker)), [userEdit]);
+
   // While an edge is dragged or selected, the preview shows that frame of the source from its own paused player.
   // It never touches the playback players, the clips or the play state.
   const edgePlayer = useVideoPlayer(null, (p) => {
@@ -3119,8 +3139,10 @@ export default function EditScreen() {
       sourceDurationMs: editModel.durationMs,
       canAnalyze: !autoEditRunning,
       onEdgePreview: handleEdgePreview,
+      onCutRange: handleCutRange,
+      protectedRanges: protectedRangesOf(editModel.state),
     };
-  }, [aiEditsEnabled, editModel, modelInSync, clips, handleSeamDragEnd, captions.words, sourceFps, handleEdgePreview, autoEditRunning]);
+  }, [aiEditsEnabled, editModel, modelInSync, clips, handleSeamDragEnd, captions.words, sourceFps, handleEdgePreview, autoEditRunning, handleCutRange]);
 
   // "Keep original": the automatic cuts off, nothing else (captions, text and the creator's own deletes stay).
   const handleKeepOriginal = useCallback(() => {
@@ -4357,6 +4379,8 @@ export default function EditScreen() {
             onDeselectAndPreview={() => handleDeselectAndPreview()}
             markers={timelineMarkers}
             onMarkerPress={handleMarkerPress}
+            onRestoreCut={handleRestoreCut}
+            onReapplyCut={handleReapplyCut}
             bands={protectionBands}
             seams={timelineSeams}
             fallback={

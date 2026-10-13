@@ -294,7 +294,8 @@ export type HandleGeom = {
   prevAtMs: number;
   nextAtMs: number;
 };
-export type MarkerGeom = { outputMs: number; bottom: boolean };
+/** `chip`: a cut chip (a slim striped chip in the gap at the seam) instead of a glyph: tapped in the lane, 28 pt wide. */
+export type MarkerGeom = { outputMs: number; bottom: boolean; chip?: boolean };
 export type ClipGeom = { startMs: number; durMs: number };
 
 /** The handle geometry for seams in output order. */
@@ -366,9 +367,19 @@ export function grabAt(x: number, y: number, frame: FrameGeom | null, playheadMs
   return { kind: "scroll", index: -1, side: 0 };
 }
 
-export type TapTarget = { kind: "marker" | "edge" | "clip" | "none"; index: number; side: 0 | 1 };
+export type TapTarget = { kind: "marker" | "edge" | "clip" | "none"; index: number; side: 0 | 1; /** The missed-silence hint under a "clip" tap. */ hint?: number };
 
-/** What a tap at (x, y) hits: a marker first (44 x 44), then a handle of the selected clip, then the clip under it. */
+/** Cut chips: drawn 10 pt wide in the gap at a seam; the touch target is a little wider, never wide enough to cover a neighbour clip. */
+export const CHIP_W = 10;
+export const CHIP_HIT = 28;
+/** The gap left between two kept clips (each clip is drawn this much shorter at a seam). */
+export const CLIP_GAP = 3;
+
+/**
+ * What a tap at (x, y) hits: a marker first (44 x 44), then a handle of the selected clip, then a cut chip, then the
+ * clip under it (and the missed-silence hint, if the tap is inside one). Chip markers are not hit in the marker pass:
+ * a handle of the selected clip beside a chip wins over it.
+ */
 export function tapAt(
   x: number,
   y: number,
@@ -378,9 +389,11 @@ export function tapAt(
   scale: number,
   offset: number,
   pad: number = TL_PAD,
+  hints: Array<{ startMs: number; endMs: number }> = [],
 ): TapTarget {
   for (let i = 0; i < markers.length; i++) {
     const m = markers[i]!;
+    if (m.chip) continue;
     const mx = msToX(m.outputMs, scale, offset, pad);
     const my = m.bottom ? BOTTOM_MARKER_Y : TOP_MARKER_Y;
     if (Math.abs(x - mx) <= MARKER_HIT / 2 && Math.abs(y - my) <= MARKER_HIT / 2) return { kind: "marker", index: i, side: 0 };
@@ -388,10 +401,17 @@ export function tapAt(
   const edge = hitFrame(x, y, frame, scale, offset, pad);
   if (edge) return { kind: "edge", index: edge.index, side: edge.side };
   if (y >= LANE_TOP && y <= LANE_TOP + LANE_H) {
+    for (let i = 0; i < markers.length; i++) {
+      const m = markers[i]!;
+      if (m.chip && Math.abs(x - msToX(m.outputMs, scale, offset, pad)) <= CHIP_HIT / 2) return { kind: "marker", index: i, side: 0 };
+    }
     const ms = xToMs(x, scale, offset, pad);
     for (let i = 0; i < clips.length; i++) {
       const c = clips[i]!;
-      if (ms >= c.startMs && ms < c.startMs + c.durMs) return { kind: "clip", index: i, side: 0 };
+      if (ms >= c.startMs && ms < c.startMs + c.durMs) {
+        const h = hints.findIndex((r) => ms >= r.startMs && ms < r.endMs);
+        return h >= 0 ? { kind: "clip", index: i, side: 0, hint: h } : { kind: "clip", index: i, side: 0 };
+      }
     }
   }
   return { kind: "none", index: -1, side: 0 };

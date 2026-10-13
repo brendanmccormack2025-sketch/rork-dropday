@@ -67,13 +67,15 @@ export function describeDecision(d: Decision): MarkerItem {
     edge?: string;
     reason?: string;
     method?: number;
+    manual?: boolean;
     cls?: SoundClass;
     features?: SoundFeatures;
   };
   let label: string;
   switch (d.type) {
     case "silenceCut":
-      label = `Silence ${seconds(lengthMs)}`;
+      // a part the creator cut by hand (a range, a deleted part) is not "silence"
+      label = d.origin === "user" && payload.manual === true ? `Cut ${seconds(lengthMs)}` : `Silence ${seconds(lengthMs)}`;
       break;
     case "fillerCut":
       label = `Filler '${payload.text ?? "filler"}'`;
