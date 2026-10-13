@@ -24,7 +24,8 @@ import {
   type EditorAppearance,
   type StrokeSize,
 } from "@/lib/textLook";
-import { hexToRgba, paletteByHex, paletteFor, type PaletteRole } from "@/lib/palette";
+import { NONE_ID, STYLE_TABS, TAB_LABEL, overlayPick, overlaySelected, overlayStroke, overlayToggleShadow, swatchesFor, type StyleSwatch, type StyleTab } from "@/lib/styleTabs";
+import { hexToRgba } from "@/lib/palette";
 import { theme } from "@/constants/theme";
 import HuggingText from "@/components/HuggingText";
 import { BG_PAD_X_EM, BG_PAD_Y_EM, BG_RADIUS_EM } from "@/lib/lineBackground";
@@ -36,8 +37,8 @@ const FIELD_LINE_HEIGHT = 38;
 
 type Appearance = EditorAppearance;
 
-/** What the palette row below the tabs is picking. */
-type Target = PaletteRole;
+/** What the color row below the tabs is picking. */
+type Target = StyleTab;
 
 interface TextOverlayEditorProps {
   visible: boolean;
@@ -122,10 +123,11 @@ export default function TextOverlayEditor({
   const look = resolveAppearance(ap);
   const boxed = look.boxColor !== null;
   // the tab shown: a part that is switched off has no color to pick
-  const activeTarget: Target = target === "outline" && !ap.outline ? "text" : target === "background" && !ap.background ? "text" : target;
-  const colors = paletteFor(activeTarget);
-  const currentHex = activeTarget === "text" ? ap.color : activeTarget === "outline" ? ap.outlineColor : ap.bgColor;
-  const pick = (hex: string) => set(activeTarget === "text" ? { color: hex } : activeTarget === "outline" ? { outlineColor: hex } : { bgColor: hex });
+  // one control set, never disabled: a tab is always tappable; "none" switches Outline / Background off, a color on
+  const activeTarget: Target = target;
+  const swatches = swatchesFor(activeTarget);
+  const selectedId = overlaySelected(ap, activeTarget);
+  const pick = (sw: StyleSwatch) => set(overlayPick(activeTarget, sw));
   const family = textFontFamily(ap.fontId, isLoaded);
   const padX = BG_PAD_X_EM * FIELD_FONT_SIZE;
   const padY = BG_PAD_Y_EM * FIELD_FONT_SIZE;
@@ -245,11 +247,10 @@ export default function TextOverlayEditor({
             </ScrollView>
           )}
 
-          {/* what the colors below are for: the text, its outline, its background box */}
+          {/* the tabs (what the colors below are for) and the shadow button: always tappable */}
           <View style={[styles.row, styles.tabsRow]}>
             <View style={styles.tabs}>
-              {(["text", "outline", "background"] as Target[]).map((t) => {
-                const enabled = t === "text" || (t === "outline" ? ap.outline : ap.background);
+              {STYLE_TABS.map((t) => {
                 const on = activeTarget === t;
                 return (
                   <Pressable
@@ -258,10 +259,9 @@ export default function TextOverlayEditor({
                       tick();
                       setTarget(t);
                     }}
-                    disabled={!enabled}
-                    style={[styles.tab, on && styles.tabOn, !enabled && styles.dimmed]}
+                    style={[styles.tab, on && styles.tabOn]}
                     accessibilityRole="button"
-                    accessibilityState={{ selected: on, disabled: !enabled }}
+                    accessibilityState={{ selected: on }}
                     accessibilityLabel={`${TAB_LABEL[t]} color`}
                   >
                     <UiText style={[styles.tabText, on && styles.tabTextOn]}>{TAB_LABEL[t]}</UiText>
@@ -269,69 +269,64 @@ export default function TextOverlayEditor({
                 );
               })}
             </View>
-            {activeTarget === "outline" && (
-              <View style={styles.segment}>
-                {STROKE_SIZES.map((sz) => (
-                  <Pressable
-                    key={sz}
-                    onPress={() => set({ stroke: sz })}
-                    style={[styles.segBtn, ap.stroke === sz && styles.segBtnOn]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: ap.stroke === sz }}
-                    accessibilityLabel={`Outline ${sz}`}
-                  >
-                    <View style={[styles.strokeBar, { height: STROKE_BAR[sz] }, ap.stroke === sz && styles.strokeBarOn]} />
-                  </Pressable>
-                ))}
+            <Pressable
+              onPress={() => set(overlayToggleShadow(ap))}
+              style={[styles.shadowBtn, ap.shadow && styles.shadowBtnOn]}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: ap.shadow }}
+              accessibilityLabel="Shadow"
+            >
+              <View>
+                <UiText style={[styles.shadowGlyph, styles.shadowGlyphBack, ap.shadow && styles.shadowGlyphBackOn]}>A</UiText>
+                <UiText style={[styles.shadowGlyph, styles.shadowGlyphFront, ap.shadow && styles.shadowGlyphFrontOn]}>A</UiText>
               </View>
-            )}
+            </Pressable>
           </View>
 
-          {/* the one shared palette (also used by the caption style sheet) */}
+          {/* the one shared palette (also used by the caption style sheet); Outline and Background start with "none" */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" style={styles.row} contentContainerStyle={styles.rowContent}>
-            {colors.map((c) => (
-              <Swatch key={c.id} hex={c.hex} label={c.label} on={paletteByHex(currentHex)?.id === c.id} onPress={() => pick(c.hex)} />
+            {activeTarget === "outline" &&
+              STROKE_SIZES.map((sz) => (
+                <Pressable
+                  key={sz}
+                  onPress={() => set(overlayStroke(sz))}
+                  style={[styles.segBtn, ap.outline && ap.stroke === sz && styles.segBtnOn]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: ap.outline && ap.stroke === sz }}
+                  accessibilityLabel={`Outline ${sz}`}
+                >
+                  <View style={[styles.strokeBar, { height: STROKE_BAR[sz] }, ap.outline && ap.stroke === sz && styles.strokeBarOn]} />
+                </Pressable>
+              ))}
+            {swatches.map((c) => (
+              <Swatch key={c.id} hex={c.hex} label={c.label} on={selectedId === c.id} onPress={() => pick(c)} />
             ))}
           </ScrollView>
-
-          {/* independent switches: any combination */}
-          <View style={[styles.row, styles.optionsRow]}>
-            <Switch label="Outline" on={ap.outline} onPress={() => {
-              set({ outline: !ap.outline });
-              setTarget(!ap.outline ? "outline" : "text");
-            }} />
-            <Switch label="Shadow" on={ap.shadow} onPress={() => set({ shadow: !ap.shadow })} />
-            <Switch label="Background" on={ap.background} onPress={() => {
-              set({ background: !ap.background });
-              setTarget(!ap.background ? "background" : "text");
-            }} />
-          </View>
         </View>
       </View>
     </Modal>
   );
 }
 
-const TAB_LABEL: Record<Target, string> = { text: "Text", outline: "Outline", background: "Background" };
 const STROKE_BAR: Record<StrokeSize, number> = { thin: 2, medium: 4, thick: 7 };
 
-function Swatch({ hex, label, on, onPress }: { hex: string; label: string; on: boolean; onPress: () => void }) {
+function Swatch({ hex, label, on, onPress }: { hex: string | null; label: string; on: boolean; onPress: () => void }) {
+  if (hex === null) {
+    // "none" (⊘)
+    return (
+      <Pressable onPress={onPress} style={styles.swatchHit} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={`${label} (off)`}>
+        <View style={[styles.swatch, styles.swatchNone, on && styles.swatchOn]}>
+          <View style={styles.noneSlash} />
+        </View>
+      </Pressable>
+    );
+  }
   const translucent = hex.length === 9;
   return (
     <Pressable onPress={onPress} style={styles.swatchHit} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={label}>
       <View style={[styles.swatch, translucent && styles.swatchChecker, on && styles.swatchOn]}>
         <View style={[StyleSheet.absoluteFill, { backgroundColor: hexToRgba(hex), borderRadius: 15 }]} />
       </View>
-    </Pressable>
-  );
-}
-
-/** A rounded on / off pill. */
-function Switch({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.optBtn, on && styles.optBtnOn]} accessibilityRole="switch" accessibilityState={{ checked: on }} accessibilityLabel={label}>
-      <View style={[styles.dot, on && styles.dotOn]} />
-      <UiText style={[styles.optLabel, on && styles.optLabelOn]}>{label}</UiText>
     </Pressable>
   );
 }
@@ -412,27 +407,18 @@ const styles = StyleSheet.create({
   tabOn: { backgroundColor: "#FFFFFF" },
   tabText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" as const },
   tabTextOn: { color: "#000000" },
-  optionsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12 },
-  optBtn: {
-    minWidth: 100,
-    height: 40,
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    backgroundColor: "rgba(255,255,255,0.16)",
-  },
-  optBtnOn: { backgroundColor: "#FFFFFF" },
-  optLabel: { color: "rgba(255,255,255,0.8)", fontSize: 13, fontWeight: "700" as const },
-  optLabelOn: { color: "#000" },
-  dot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.7)" },
-  dotOn: { backgroundColor: theme.accent, borderColor: theme.accent },
+  shadowBtn: { width: 44, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.16)" },
+  shadowBtnOn: { backgroundColor: "#FFFFFF" },
+  shadowGlyph: { fontSize: 17, fontWeight: "900" as const, includeFontPadding: false },
+  shadowGlyphBack: { position: "absolute", left: 2, top: 2, color: "rgba(255,255,255,0.35)" },
+  shadowGlyphBackOn: { color: "rgba(0,0,0,0.35)" },
+  shadowGlyphFront: { color: "#FFFFFF" },
+  shadowGlyphFrontOn: { color: "#000000" },
+  swatchNone: { backgroundColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  noneSlash: { width: 34, height: 2, backgroundColor: "#FF6B5E", transform: [{ rotate: "-45deg" }] },
   segment: { flexDirection: "row", gap: 6 },
-  segBtn: { width: 44, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.16)" },
+  segBtn: { width: 40, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.16)" },
   segBtnOn: { backgroundColor: "#FFFFFF" },
   strokeBar: { width: 22, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.85)" },
   strokeBarOn: { backgroundColor: "#000" },
-  dimmed: { opacity: 0.35 },
 });

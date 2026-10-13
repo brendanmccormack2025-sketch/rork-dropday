@@ -154,7 +154,7 @@ const kept = (table, ms, slack = 40) => table.some((s) => ms >= s.srcStartMs - s
   ok("playing to the end stops (no loop) and shows replay; the status handler of the playing piece never seeks back", /const stopAtEnd = useCallback/.test(edit) && /setPlayEnded\(true\)/.test(edit) && !/Hot swap for the wrap-around/.test(edit) && /playerR\.loop = false/.test(edit));
   ok("Replay restarts from 0 and plays", /const handleReplay[\s\S]{0,400}handleSeek\(0\);\s*setTimeout\(\(\) => setIsPlaying\(true\), 60\)/.test(edit));
   ok("tapping the video still toggles play/pause (and replays at the end)", /togglePlay\(\)/.test(edit) && /=== "replay"/.test(edit));
-  ok("controls under the video on the Cuts screen and bottom-centre in the full-screen editor", /<PlaybackControls\s+isPlaying=\{isPlaying\}/.test(edit) && /<PlaybackControls\s+floating/.test(edit));
+  ok("controls under the video on the Cuts screen; the full-screen editor has the slim progress bar with replay and time instead of a second play button", /<PlaybackControls\s+isPlaying=\{isPlaying\}/.test(edit) && /<EditorTransport/.test(edit) && !/<PlaybackControls\s+floating/.test(edit));
   ok("the controls are rounded: play/pause 56 pt circle, replay circle, time pill", /big: \{[^}]*borderRadius: 28/.test(bar) && /small: \{[^}]*borderRadius: 22/.test(bar) && /time: \{[^}]*borderRadius: 18/.test(bar));
   ok("crash-safe: the only reanimated use added is opacity", !/runOnUI|useAnimatedReaction|useFrameCallback|['"]worklet['"]/.test(edit));
 }

@@ -69,3 +69,16 @@ const styles = StyleSheet.create({
   chip: { position: "absolute", left: 16, zIndex: 5, backgroundColor: theme.text, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 11 },
   chipText: { color: "#fff", fontSize: 11, fontWeight: "700" as const },
 });
+
+/** A view that fades to `opacity` (native driver). At 0 it ignores touches; otherwise its children keep theirs. */
+export function FadeView({ opacity, style, children }: { opacity: number; style?: StyleProp<ViewStyle>; children?: React.ReactNode }) {
+  const value = useRef(new Animated.Value(opacity)).current;
+  useEffect(() => {
+    Animated.timing(value, { toValue: opacity, duration: 180, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
+  }, [opacity, value]);
+  return (
+    <Animated.View pointerEvents={opacity === 0 ? "none" : "box-none"} style={[style, { opacity: value }]}>
+      {children}
+    </Animated.View>
+  );
+}

@@ -23,8 +23,10 @@ import {
   Keyboard,
 } from "react-native";
 import UiText from "@/components/UiText";
-import { PlayIndicator, PreviewStatusChip } from "@/components/EditorChromeBits";
-import { CAPTIONS_EDIT_BAR_HEIGHT, E_BAR, E_NEXT, E_READY, E_TOOLS, E_TOP_BAR, captionLift, chromeVisibility } from "@/lib/editorChrome";
+import { FadeView, PlayIndicator, PreviewStatusChip } from "@/components/EditorChromeBits";
+import EditorTransport from "@/components/EditorTransport";
+import { chromeFade, newTextPlacement, overlayScreenRect, toolColumnLeft } from "@/lib/editorFade";
+import { CAPTIONS_EDIT_BAR_HEIGHT, E_BAR, E_NEXT, E_READY, E_TOOLS, E_TOP_BAR, captionLift, chromeVisibility, editorRects } from "@/lib/editorChrome";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import ReAnimated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -64,7 +66,7 @@ import { cancelTextEdit } from "@/lib/textOverlayStyle";
 import { MERGE_FAILED_TEXT, MERGE_PREPARING_TEXT, mergeVideoClips, shouldMerge } from "@/lib/mergeClips";
 import { renderMerge } from "@/lib/mergeNative";
 import { backStep, initialStep, nextStep, selectionBarSide, stepLayout, videoTapAction, type EditorStep } from "@/lib/editorFlow";
-import { DEFAULT_TEXT_OVERLAY_POS, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame } from "@/lib/feedLayout";
+import { DEFAULT_TEXT_OVERLAY_POS, TEXT_MAX_WIDTH, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame, frameToFrac } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { formatRenderStats, recordRenderStats, reportRender } from "@/lib/renderReport";
@@ -2265,23 +2267,28 @@ export default function EditScreen() {
         editingOverlayId,
         text,
         appearance,
-        (): TextOverlay => ({
-          id: newOverlayId(),
-          text,
-          x: DEFAULT_TEXT_OVERLAY_POS.x,
-          y: DEFAULT_TEXT_OVERLAY_POS.y,
-          fontSize: NEW_TEXT_FONT_SIZE,
-          rotation: 0,
-          color: "#FFFFFF",
-          backgroundStyle: "none-white",
-        }),
+        (): TextOverlay => {
+          // placed and sized inside the area left of the tool column
+          const spot = newTextPlacement({ text, fontSize: NEW_TEXT_FONT_SIZE, frameW: frameDims.w, maxWidth: (frameDims.w / feedCrop.visibleW) * TEXT_MAX_WIDTH });
+          return {
+            id: newOverlayId(),
+            text,
+            x: frameToFrac(spot.centerPx, 0, frameDims.w, frameDims.h, feedCrop).x,
+            y: DEFAULT_TEXT_OVERLAY_POS.y,
+            fontSize: NEW_TEXT_FONT_SIZE,
+            ...(spot.scale < 1 ? { scale: spot.scale } : {}),
+            rotation: 0,
+            color: "#FFFFFF",
+            backgroundStyle: "none-white",
+          };
+        },
       );
       setTextOverlays(overlays);
       if (created) setSelectedOverlayId(created.id);
       setEditingOverlayId(null);
       triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
     },
-    [editingOverlayId, clips, textOverlays, pushSnapshot],
+    [editingOverlayId, clips, textOverlays, pushSnapshot, frameDims, feedCrop],
   );
 
   const handleTextEditorCancel = useCallback(() => {
@@ -4325,6 +4332,20 @@ export default function EditScreen() {
     pendingPlay,
     readyLabelActive: aheadChipShown,
   });
+  // TikTok style: the top bar and the tool column step back while the video plays, fade out while an overlay or the
+  // caption is dragged or pinched, and the column fades when the selected text is under it.
+  const columnRect = editorRects({ w: SCREEN_W, h: SCREEN_H, insetTop: insets.top, insetBottom: insets.bottom }, { ...vis, toolColumn: true }, { toolCount: 3 }).find((r) => r.name === "tools") ?? null;
+  const selectedTextRect = selectedOverlay
+    ? overlayScreenRect({
+        text: selectedOverlay.text,
+        fontSize: selectedOverlay.fontSize,
+        scale: selectedOverlay.scale ?? 1,
+        centerX: ((selectedOverlay.x - feedCrop.cropLeft) / feedCrop.visibleW) * frameDims.w,
+        centerY: ((selectedOverlay.y - feedCrop.cropTop) / feedCrop.visibleH) * frameDims.h,
+        maxWidth: (frameDims.w / feedCrop.visibleW) * TEXT_MAX_WIDTH,
+      })
+    : null;
+  const fade = chromeFade({ isPlaying, gesturing: guideGesture.active || !!dragOverlayInfo?.isDragging, selectedRect: selectedTextRect, columnRect });
   // With the Captions panel open the video slides up so the caption stays visible above the panel (or the keyboard).
   const screenH = Dimensions.get("window").height;
   const previewLift = captionsPanelOpen && isVideo && captions.captionsOn
@@ -4915,7 +4936,7 @@ export default function EditScreen() {
         {step === "edit" && (
           <>
             {vis.topBar && (
-            <View style={[styles.eTopBar, { top: insets.top + E_TOP_BAR.top }]} pointerEvents="box-none">
+            <FadeView style={[styles.eTopBar, { top: insets.top + E_TOP_BAR.top }]} opacity={fade.topBar}>
               <EditorRoundButton label="Back" onPress={handleBackPress}>
                 <ArrowLeft size={20} color="#fff" strokeWidth={2.5} />
               </EditorRoundButton>
@@ -4927,11 +4948,11 @@ export default function EditScreen() {
                   <Redo2 size={18} color="#fff" strokeWidth={2} />
                 </EditorRoundButton>
               </View>
-            </View>
+            </FadeView>
             )}
 
             {vis.toolColumn && (
-            <View style={[styles.eTools, { top: insets.top + E_TOOLS.top }]} pointerEvents="box-none">
+            <FadeView style={[styles.eTools, { top: insets.top + E_TOOLS.top }]} opacity={fade.toolColumn}>
               <EditorToolButton label="Text" onPress={() => { setSelectedOverlayId(null); setCaptionSelected(false); setEditingOverlayId(null); setTextEditorVisible(true); }}>
                 <Type size={22} color="#fff" strokeWidth={2} />
               </EditorToolButton>
@@ -4945,21 +4966,22 @@ export default function EditScreen() {
                   <Scissors size={22} color="#fff" strokeWidth={2} />
                 </EditorToolButton>
               )}
-            </View>
+            </FadeView>
             )}
 
-            {isVideo && vis.topBar && !vis.selectionBar && (
-              <View style={[styles.eControls, { bottom: insets.bottom + E_NEXT.bottomOffset + E_NEXT.height + 12 }]} pointerEvents="box-none">
-                <PlaybackControls
-                  floating
-                  isPlaying={isPlaying}
-                  ended={playEnded}
-                  positionMs={displayPosition}
-                  totalMs={totalDurationMs}
-                  onToggle={togglePlay}
-                  onReplay={handleReplay}
-                />
-              </View>
+            {isVideo && vis.transport && (
+              <EditorTransport
+                screenW={SCREEN_W}
+                screenH={SCREEN_H}
+                insetBottom={insets.bottom}
+                positionMs={displayPosition}
+                totalMs={totalDurationMs}
+                isPlaying={isPlaying}
+                getPositionMs={samplePlayheadMs}
+                onSeek={handleSeekAny}
+                onResume={() => setTimeout(() => setIsPlaying(true), 60)}
+                onReplay={handleReplay}
+              />
             )}
 
             {vis.selectionBar ? (
@@ -5222,7 +5244,6 @@ const styles = StyleSheet.create({
   },
 
   // ── Three steps: full-screen editor and Post screen ──
-  eControls: { position: "absolute", left: 0, right: 0, alignItems: "center" },
   previewAreaFull: {
     ...StyleSheet.absoluteFill,
     alignItems: "center",

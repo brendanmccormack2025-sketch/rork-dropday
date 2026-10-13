@@ -17,6 +17,7 @@ import { CAPTION_BACKGROUNDS, CAPTION_FONTS, CAPTION_TEXT_COLORS, TEXT_FONT_FAMI
 import { buildCaptionLines, captionLinesToEditOverlays } from "../lib/transcription/captionLines.ts";
 import { defaultCaptionStyle } from "../lib/transcription/captionStyle.ts";
 import { PANEL_ROW_H, editorLayout, panelHeight } from "../lib/textEditorLayout.ts";
+import { NONE_ID, STYLE_TABS, captionPick, captionSelected, hasNone, overlayPick, overlaySelected, overlayStroke, overlayToggleShadow, swatchesFor } from "../lib/styleTabs.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -52,7 +53,7 @@ const require = createRequire(import.meta.url);
   eq("captions use the very same colors, same order", CAPTION_TEXT_COLORS.map((c) => c.color), PALETTE.map((c) => c.hex));
   eq("caption backgrounds: the same, the translucent ones, then None", CAPTION_BACKGROUNDS.map((c) => c.color), [...PALETTE.map((c) => c.hex), ...TRANSLUCENT.map((c) => c.hex), null]);
   const sheet = read("../components/CaptionStyleSheet.tsx"), editor = read("../components/TextOverlayEditor.tsx");
-  ok("both editors take the colors from the shared palette", /paletteFor|PALETTE|CAPTION_TEXT_COLORS/.test(sheet) && /paletteFor/.test(editor));
+  ok("both editors take the colors from the one shared palette (swatchesFor)", /swatchesFor\(/.test(sheet) && /swatchesFor\(/.test(editor));
 }
 
 // ── 3. defaults and stored fields ──
@@ -147,6 +148,48 @@ const BACKGROUNDS = [{ on: false, hex: "#000000" }, ...[...PALETTE, ...TRANSLUCE
     if ("outlineColor" in old || old.color !== t.color) fail("1.0.4: outline keys or color");
   }
   eq(`caption matrix: ${n} combinations (${CAPTION_FONTS.length} fonts x ${CAPTION_TEXT_COLORS.length} colors x ${CAPTION_BACKGROUNDS.length} backgrounds x 4 outlines x 2 shadows)`, bad.slice(0, 5), []);
+}
+
+
+// ── 8. one control set: tabs Text · Outline · Background (+ shadow), "none" first, nothing disabled ──
+{
+  const sw = (tab, id) => swatchesFor(tab).find((x) => x.id === id);
+  eq("tabs: Text, Outline, Background", STYLE_TABS, ["text", "outline", "background"]);
+  eq("Text has no 'none'; Outline and Background start with it", [hasNone("text"), swatchesFor("text")[0].id, swatchesFor("outline")[0], swatchesFor("background")[0]], [false, "white", { id: NONE_ID, label: "None", hex: null }, { id: NONE_ID, label: "None", hex: null }]);
+  eq("...followed by the one shared palette in the same order; backgrounds add the two semi-transparent colors", [swatchesFor("outline").slice(1).map((x) => x.hex), swatchesFor("background").slice(1).map((x) => x.hex)], [PALETTE.map((c) => c.hex), [...PALETTE.map((c) => c.hex), ...TRANSLUCENT.map((c) => c.hex)]]);
+  const base = { ...NEW_TEXT_APPEARANCE, background: false, outline: false };
+  eq("Background off shows 'none' selected", overlaySelected(base, "background"), "none");
+  const picked = { ...base, ...overlayPick("background", sw("background", "yellow")) };
+  eq("tapping a Background color enables the background with it (live)", [picked.background, picked.bgColor, overlaySelected(picked, "background")], [true, "#FFD400", "yellow"]);
+  eq("a semi-transparent one too", { ...base, ...overlayPick("background", sw("background", "black-60")) }.bgColor, "#00000099");
+  const off = { ...picked, ...overlayPick("background", sw("background", "none")) };
+  eq("'none' disables the background and keeps its color for next time", [off.background, off.bgColor, overlaySelected(off, "background")], [false, "#FFD400", "none"]);
+  eq("Outline works the same way", [{ ...base, ...overlayPick("outline", sw("outline", "red")) }.outline, { ...base, ...overlayPick("outline", sw("outline", "red")) }.outlineColor, { ...NEW_TEXT_APPEARANCE, ...overlayPick("outline", sw("outline", "none")) }.outline], [true, "#E8291C", false]);
+  eq("choosing an outline size switches the outline on with it", { ...base, ...overlayStroke("thick") }, { ...base, outline: true, stroke: "thick" });
+  eq("Text colors change only the text, and the text color and background stay independent", { ...picked, ...overlayPick("text", sw("text", "black")) }, { ...picked, color: "#000000" });
+  eq("the shadow is a toggle of its own", [overlayToggleShadow({ ...base, shadow: true }), overlayToggleShadow({ ...base, shadow: false })], [{ shadow: false }, { shadow: true }]);
+  eq("the new text starts with the Outline swatch shown selected and Background on 'none'", [overlaySelected(NEW_TEXT_APPEARANCE, "outline"), overlaySelected(NEW_TEXT_APPEARANCE, "background"), overlaySelected(NEW_TEXT_APPEARANCE, "text")], ["black", "none", "white"]);
+  // existing overlays and drafts map to the new model
+  eq("older styles: 'no background' is 'none', a box is its color", [overlaySelected(editorStateOf({ backgroundStyle: "none-white" }), "background"), overlaySelected(editorStateOf({ backgroundStyle: "black-box" }), "background"), overlaySelected(editorStateOf({ backgroundStyle: "white-box" }), "background"), overlaySelected(editorStateOf({ backgroundStyle: "translucent-box" }), "background")], ["none", "black", "white", "custom"]);
+  eq("a text made with the first Text button (no look fields) has no outline and no background", [overlaySelected(editorStateOf({}), "outline"), overlaySelected(editorStateOf({}), "background")], ["none", "none"]);
+  eq("generation 2: the box look is a background in its color, the plain look has none", [overlaySelected(editorStateOf({ look: "box", color: "#FFD400" }), "background"), overlaySelected(editorStateOf({ look: "plain" }), "background"), overlaySelected(editorStateOf({ look: "outline" }), "outline")], ["yellow", "none", "black"]);
+  eq("generation 3 with the background off keeps its color but selects 'none'", overlaySelected(editorStateOf({ outline: false, background: false, bgColor: "#1E5BFF" }), "background"), "none");
+  eq("two panel rows without fonts (tabs, colors) and three with", [panelHeight({ fonts: false }) === 2 * PANEL_ROW_H + 8 + 16, panelHeight({ fonts: true }) === 3 * PANEL_ROW_H + 16 + 16], [true, true]);
+
+  // the caption style sheet uses the same model
+  const look = { textColorId: "white", backgroundColorId: "none", outline: null };
+  eq("captions: Background 'none' is selected when there is no background", captionSelected(look, "background"), "none");
+  eq("...picking a color sets it (instantly), 'none' removes it", [captionPick("background", sw("background", "yellow"), look), captionPick("background", sw("background", "none"), look)], [{ backgroundColor: "yellow" }, { backgroundColor: "none" }]);
+  eq("captions: an outline color turns the outline on (thin unless one was chosen), 'none' removes it", [captionPick("outline", sw("outline", "red"), look), captionPick("outline", sw("outline", "red"), { ...look, outline: { size: "thick", colorId: "black" } }), captionPick("outline", sw("outline", "none"), look)], [{ outline: "thin", outlineColor: "red" }, { outline: "thick", outlineColor: "red" }, { outline: null }]);
+  eq("captions: Text has no 'none'", captionPick("text", { id: "none", label: "None", hex: null }, look), {});
+
+  // the screens
+  const ed = read("../components/TextOverlayEditor.tsx");
+  const cs = read("../components/CaptionStyleSheet.tsx");
+  ok("overlay editor: one row of tabs, none ever disabled or dimmed", /STYLE_TABS\.map/.test(ed) && !/disabled=\{!enabled\}/.test(ed) && !/dimmed/.test(ed) && !/accessibilityState=\{\{ selected: on, disabled/.test(ed));
+  ok("overlay editor: the bottom row of Outline / Shadow / Background toggles is gone, the shadow is a button at the end of the tab row", !/function Switch/.test(ed) && !/optionsRow/.test(ed) && /accessibilityLabel="Shadow"/.test(ed) && /overlayToggleShadow/.test(ed));
+  ok("caption sheet: the same: no toggles, no disabled tabs, a shadow button, 'none' first", !/function Switch/.test(cs) && !/disabled=\{!enabled\}/.test(cs) && /accessibilityLabel="Shadow"/.test(cs) && /swatchesFor\(active\)/.test(cs));
+  ok("the Background tab shows its colors with 'none' selected when the background is off, and a pick enables it", /const selectedId = overlaySelected\(ap, activeTarget\)/.test(ed) && /set\(overlayPick\(activeTarget, sw\)\)/.test(ed));
 }
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");

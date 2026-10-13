@@ -20,10 +20,10 @@ const ok = (name, c) => eq(name, !!c, true);
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 
 const base = { step: "edit", textEditing: false, panelOpen: false, keyboardUp: false, hasSelection: false, isPlaying: false, pendingPlay: false, readyLabelActive: true };
-const none = { topBar: false, toolColumn: false, next: false, selectionBar: false, playButton: false, readyLabel: false };
+const none = { topBar: false, toolColumn: false, next: false, selectionBar: false, transport: false, playButton: false, readyLabel: false };
 
 // ── visibility ──
-eq("idle editor: top bar, tools, Next, play button and the ready label", chromeVisibility(base), { topBar: true, toolColumn: true, next: true, selectionBar: false, playButton: true, readyLabel: true });
+eq("idle editor: top bar, tools, Next, play button and the ready label", chromeVisibility(base), { topBar: true, toolColumn: true, next: true, selectionBar: false, transport: true, playButton: true, readyLabel: true });
 eq("typing text: no top bar, no tool column, no ready label, no play button (only the text editor's own Cancel / Aa / check)", chromeVisibility({ ...base, textEditing: true, keyboardUp: true }), none);
 eq("any open panel hides everything else", chromeVisibility({ ...base, panelOpen: true }), none);
 eq("the keyboard alone hides everything else", chromeVisibility({ ...base, keyboardUp: true }), none);

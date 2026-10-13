@@ -20,7 +20,7 @@ export type PanelOptions = { fonts: boolean };
 
 /** Height of the options panel for the rows that are showing. */
 export function panelHeight(opts: PanelOptions): number {
-  const rows = 3 + (opts.fonts ? 1 : 0);   // target tabs, palette and switches always
+  const rows = 2 + (opts.fonts ? 1 : 0);   // the tabs (with the shadow button) and the color row always
   return rows * PANEL_ROW_H + (rows - 1) * PANEL_GAP + 2 * PANEL_PAD;
 }
 

@@ -30,6 +30,8 @@ export type ChromeVisibility = {
   /** Next (the editor's primary button). */
   next: boolean;
   selectionBar: boolean;
+  /** The slim progress bar with the replay icon and the time (full-screen editor). */
+  transport: boolean;
   playButton: boolean;
   readyLabel: boolean;
 };
@@ -40,13 +42,14 @@ export function chromeVisibility(s: ChromeState): ChromeVisibility {
   const free = !focused && !s.hasSelection;
   const playable = !s.isPlaying && !s.pendingPlay;
   if (s.step !== "edit") {
-    return { topBar: false, toolColumn: false, next: false, selectionBar: false, playButton: !focused && playable, readyLabel: !focused && s.readyLabelActive };
+    return { topBar: false, toolColumn: false, next: false, selectionBar: false, transport: false, playButton: !focused && playable, readyLabel: !focused && s.readyLabelActive };
   }
   return {
     topBar: !focused,
     toolColumn: free,
     next: free,
     selectionBar: !focused && s.hasSelection,
+    transport: free,
     playButton: free && playable,
     readyLabel: free && s.readyLabelActive,
   };
@@ -63,6 +66,23 @@ export const E_BAR = { height: 44, side: 16, topOffset: 64, bottomOffset: 14 };
 export const E_NEXT = { height: 48, width: 112, right: 16, bottomOffset: 16 };
 export const E_READY = { topOffset: 62, left: 16, height: 22, width: 150 };
 export const E_PLAY = { size: 64 };
+/**
+ * The bottom of the full-screen editor, from the bottom up: Next (bottom right, its own row), the slim progress bar across
+ * the width (a 28 pt touch target around a 4 pt track), and above it, on the left, the replay icon and the time.
+ */
+export const E_PROGRESS = { height: 28, track: 4, side: 16, gapAboveNext: 10 };
+export const E_TRANSPORT = { rowHeight: 32, replay: 32, gap: 6, timeWidth: 104, gapAboveBar: 2 };
+
+export type TransportRects = { progress: Rect; replay: Rect; time: Rect };
+
+export function transportRects(screen: { w: number; h: number; insetBottom: number }): TransportRects {
+  const nextTop = screen.h - screen.insetBottom - E_NEXT.bottomOffset - E_NEXT.height;
+  const progress: Rect = { name: "progress", x: E_PROGRESS.side, y: nextTop - E_PROGRESS.gapAboveNext - E_PROGRESS.height, w: screen.w - 2 * E_PROGRESS.side, h: E_PROGRESS.height };
+  const rowY = progress.y - E_TRANSPORT.gapAboveBar - E_TRANSPORT.rowHeight;
+  const replay: Rect = { name: "replay", x: E_PROGRESS.side, y: rowY, w: E_TRANSPORT.replay, h: E_TRANSPORT.rowHeight };
+  const time: Rect = { name: "time", x: replay.x + replay.w + E_TRANSPORT.gap, y: rowY, w: E_TRANSPORT.timeWidth, h: E_TRANSPORT.rowHeight };
+  return { progress, replay, time };
+}
 /** The tools of the column (Text, Captions, Cuts: Style lives in the Captions panel and the caption's own bar). */
 export const E_TOOL_COUNT_MAX = 3;
 
@@ -92,6 +112,10 @@ export function editorRects(
   }
   if (vis.next) {
     out.push({ name: "next", x: w - E_NEXT.right - E_NEXT.width, y: h - insetBottom - E_NEXT.bottomOffset - E_NEXT.height, w: E_NEXT.width, h: E_NEXT.height });
+  }
+  if (vis.transport) {
+    const t = transportRects({ w, h, insetBottom });
+    out.push(t.progress, t.replay, t.time);
   }
   if (vis.readyLabel) {
     out.push({ name: "ready", x: E_READY.left, y: insetTop + E_READY.topOffset, w: E_READY.width, h: E_READY.height });

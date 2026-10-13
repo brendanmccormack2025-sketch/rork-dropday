@@ -5,7 +5,8 @@ import { isLoaded } from "expo-font";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import type { CaptionStyle } from "@/lib/editModel";
-import { hexToRgba, paletteById, paletteFor, type PaletteRole } from "@/lib/palette";
+import { hexToRgba } from "@/lib/palette";
+import { STYLE_TABS, TAB_LABEL, captionPick, captionSelected, swatchesFor, type StyleSwatch, type StyleTab } from "@/lib/styleTabs";
 import {
   availableCaptionFonts,
   previewFontFamily,
@@ -40,8 +41,7 @@ type Props = {
   onClose: () => void;
 };
 
-type Target = PaletteRole;
-const TAB_LABEL: Record<Target, string> = { text: "Text", outline: "Outline", background: "Background" };
+type Target = StyleTab;
 const SIZES: CaptionOutline[] = ["thin", "medium", "thick"];
 const SIZE_BAR: Record<CaptionOutline, number> = { thin: 2, medium: 4, thick: 7 };
 
@@ -54,23 +54,15 @@ const SIZE_BAR: Record<CaptionOutline, number> = { thin: 2, medium: 4, thick: 7 
 export default function CaptionStyleSheet({ visible, style, supportsFont, embeddedFonts = [], supportsOutline = false, onChange, onReset, onClose }: Props) {
   const look = resolveCaptionLook(style);
   const [target, setTarget] = useState<Target>("text");
-  const [lastBackground, setLastBackground] = useState("black");
-  const hasBackground = look.backgroundColorId !== "none";
   const outlineOn = look.outline !== null;
-  const active: Target = target === "outline" && !(supportsOutline && outlineOn) ? "text" : target === "background" && !hasBackground ? "text" : target;
-  const colors = paletteFor(active);
-  const currentId = active === "text" ? look.textColorId : active === "outline" ? (look.outline?.colorId ?? "black") : look.backgroundColorId;
-  const tabs: Target[] = supportsOutline ? ["text", "outline", "background"] : ["text", "background"];
+  // one control set, never disabled (Outline only where the build can burn an outline in)
+  const tabs: Target[] = supportsOutline ? STYLE_TABS : STYLE_TABS.filter((t) => t !== "outline");
+  const active: Target = tabs.includes(target) ? target : "text";
+  const swatches = swatchesFor(active);
+  const selectedId = captionSelected(look, active);
   const fonts = availableCaptionFonts(supportsFont, embeddedFonts);
 
-  const pick = (id: string) => {
-    if (active === "text") onChange({ textColor: id });
-    else if (active === "outline") onChange({ outlineColor: id });
-    else {
-      setLastBackground(id);
-      onChange({ backgroundColor: id });
-    }
-  };
+  const pick = (sw: StyleSwatch) => onChange(captionPick(active, sw, look));
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -147,75 +139,52 @@ export default function CaptionStyleSheet({ visible, style, supportsFont, embedd
 
           <View style={styles.tabs}>
             {tabs.map((t) => {
-              const enabled = t === "text" || (t === "outline" ? outlineOn : hasBackground);
               const on = active === t;
               return (
                 <Pressable
                   key={t}
                   onPress={() => setTarget(t)}
-                  disabled={!enabled}
-                  style={[styles.tab, on && styles.chipOn, !enabled && styles.dimmed]}
+                  style={[styles.tab, on && styles.chipOn]}
                   accessibilityRole="button"
                   accessibilityLabel={`${TAB_LABEL[t]} color`}
-                  accessibilityState={{ selected: on, disabled: !enabled }}
+                  accessibilityState={{ selected: on }}
                 >
                   <UiText style={[styles.tabText, on && styles.chipTextOn]}>{TAB_LABEL[t]}</UiText>
                 </Pressable>
               );
             })}
+            <Pressable
+              onPress={() => onChange({ shadow: !look.shadow })}
+              style={[styles.shadowBtn, look.shadow && styles.chipOn]}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: look.shadow }}
+              accessibilityLabel="Shadow"
+            >
+              <View>
+                <UiText style={[styles.shadowGlyph, styles.shadowGlyphBack, look.shadow && styles.shadowGlyphBackOn]}>A</UiText>
+                <UiText style={[styles.shadowGlyph, look.shadow && styles.chipTextOn]}>A</UiText>
+              </View>
+            </Pressable>
           </View>
 
           <View style={styles.palette}>
-            {colors.map((c) => {
-              const on = currentId === c.id;
+            {swatches.map((c) => {
+              const on = selectedId === c.id;
               return (
                 <Pressable
                   key={c.id}
-                  onPress={() => pick(c.id)}
+                  onPress={() => pick(c)}
                   style={styles.swatchHit}
                   accessibilityRole="button"
                   accessibilityLabel={`${TAB_LABEL[active]} ${c.label}`}
                   accessibilityState={{ selected: on }}
                 >
-                  <View style={[styles.swatch, c.hex.length === 9 && styles.swatchChecker, on && styles.swatchOn]}>
-                    <View style={[StyleSheet.absoluteFill, { borderRadius: 16, backgroundColor: hexToRgba(c.hex) }]} />
+                  <View style={[styles.swatch, c.hex === null && styles.swatchNone, c.hex !== null && c.hex.length === 9 && styles.swatchChecker, on && styles.swatchOn]}>
+                    {c.hex === null ? <View style={styles.noneSlash} /> : <View style={[StyleSheet.absoluteFill, { borderRadius: 16, backgroundColor: hexToRgba(c.hex) }]} />}
                   </View>
                 </Pressable>
               );
             })}
-          </View>
-
-          <View style={styles.switches}>
-            {supportsOutline && (
-              <Switch
-                label="Outline"
-                on={outlineOn}
-                onPress={() => {
-                  if (outlineOn) {
-                    onChange({ outline: null });
-                    setTarget("text");
-                  } else {
-                    onChange({ outline: "thin", outlineColor: paletteById(look.outline?.colorId)?.id ?? "black" });
-                    setTarget("outline");
-                  }
-                }}
-              />
-            )}
-            <Switch label="Shadow" on={look.shadow} onPress={() => onChange({ shadow: !look.shadow })} />
-            <Switch
-              label="Background"
-              on={hasBackground}
-              onPress={() => {
-                if (hasBackground) {
-                  setLastBackground(look.backgroundColorId);
-                  onChange({ backgroundColor: "none" });
-                  setTarget("text");
-                } else {
-                  onChange({ backgroundColor: lastBackground });
-                  setTarget("background");
-                }
-              }}
-            />
           </View>
 
           {look.lowContrast && <UiText style={styles.note}>The text and background are close in color. Your colors are kept as picked.</UiText>}
@@ -231,15 +200,6 @@ export default function CaptionStyleSheet({ visible, style, supportsFont, embedd
         </Pressable>
       </Pressable>
     </Modal>
-  );
-}
-
-function Switch({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.switchBtn, on && styles.switchOn]} accessibilityRole="switch" accessibilityState={{ checked: on }} accessibilityLabel={label}>
-      <View style={[styles.dot, on && styles.dotOn]} />
-      <UiText style={[styles.switchText, on && styles.switchTextOn]}>{label}</UiText>
-    </Pressable>
   );
 }
 
@@ -264,19 +224,17 @@ const styles = StyleSheet.create({
   tabs: { flexDirection: "row", gap: 8 },
   tab: { height: 36, paddingHorizontal: 16, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: theme.card, borderWidth: 1.5, borderColor: "transparent" },
   tabText: { fontSize: 13, fontWeight: "700" as const, color: theme.text },
-  dimmed: { opacity: 0.35 },
+  shadowBtn: { marginLeft: "auto", width: 44, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: theme.card, borderWidth: 1.5, borderColor: "transparent" },
+  shadowGlyph: { fontSize: 17, fontWeight: "900" as const, color: theme.text, includeFontPadding: false },
+  shadowGlyphBack: { position: "absolute", left: 2, top: 2, color: "rgba(10,10,10,0.3)" },
+  shadowGlyphBackOn: { color: "rgba(255,255,255,0.4)" },
+  swatchNone: { backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
+  noneSlash: { width: 36, height: 2, backgroundColor: theme.accent, transform: [{ rotate: "-45deg" }] },
   palette: { flexDirection: "row", flexWrap: "wrap", gap: 2 },
   swatchHit: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   swatch: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: "rgba(10,10,10,0.14)", overflow: "hidden" },
   swatchChecker: { backgroundColor: "#8E8E93" },
   swatchOn: { borderColor: theme.accent, borderWidth: 3 },
-  switches: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  switchBtn: { minWidth: 100, height: 40, borderRadius: 20, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: theme.card, borderWidth: 1.5, borderColor: "transparent" },
-  switchOn: { backgroundColor: theme.text },
-  switchText: { fontSize: 13, fontWeight: "700" as const, color: theme.text },
-  switchTextOn: { color: "#FFFFFF" },
-  dot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: "rgba(10,10,10,0.35)" },
-  dotOn: { backgroundColor: theme.accent, borderColor: theme.accent },
   note: { fontSize: 11, color: theme.textMuted },
   actions: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 },
   resetBtn: { height: 40, justifyContent: "center" },
