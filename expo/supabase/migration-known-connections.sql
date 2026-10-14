@@ -21,6 +21,9 @@ create extension if not exists pgcrypto with schema extensions;
 
 -- Old follows (DropDay era) are ignored unless this is turned on; users cannot see or manage them in Trial.
 alter table public.trial_engine_config add column if not exists known_source_follows boolean not null default false;
+-- Friends count as known (hidden from testing posts, never in their verdict) unless this is turned off. They still get
+-- survived posts in their feed. Off = friendship alone changes nothing; the hide list and contacts still apply.
+alter table public.trial_engine_config add column if not exists known_source_friends boolean not null default true;
 
 -- ── hashing ──────────────────────────────────────────────────────────────────
 create or replace function public.trial_hash_phone(p_e164 text)
@@ -189,8 +192,10 @@ begin
   union all
   -- friends (migration-friends-messages.sql), either direction
   select f.user_a, f.user_b, 'friend'::text from public.friendships f
+   where (select known_source_friends from public.trial_engine_config where id)
   union all
-  select f.user_b, f.user_a, 'friend'::text from public.friendships f$fb$;
+  select f.user_b, f.user_a, 'friend'::text from public.friendships f
+   where (select known_source_friends from public.trial_engine_config where id)$fb$;
   end if;
   execute $v$
 create or replace view public.known_connections as
@@ -212,6 +217,61 @@ create or replace view public.known_connections as
   select h.owner_id, h.hidden_user_id, 'hide_list'::text from public.hide_from_list h$v$ || friend_branch;
 end $kc$;
 revoke all on public.known_connections from anon, authenticated;
+
+-- ── the hide list is stronger than "known": never in that person's feed, testing OR survived ─
+-- (contacts and friends only miss the testing phase). The creator's profile stays open to them: a survived post can still be
+-- found by visiting it on purpose. Used by get_feed_engine (migration-trial-engine.sql). Internal (revoked below, trial_ prefix).
+create or replace function public.trial_feed_hidden(p_creator uuid, p_viewer uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from public.hide_from_list h where h.owner_id = p_creator and h.hidden_user_id = p_viewer)
+$$;
+
+-- ── testing posts cannot be read around the feed ─────────────────────────────
+-- Without this, anyone signed in could select another person's testing posts straight from the posts table. A testing
+-- post is readable by its creator, by anyone the creator does not know, and by a friend the creator sent it to themselves
+-- in a message (the sharing rule: nobody else can send a testing post to people the creator knows). Queued posts: the
+-- creator only. Reactions and every
+-- other status are untouched (survived posts stay public, ended ones are already hidden by posts_hide_ended).
+-- Answers only about the caller themselves, so it tells nobody who knows whom.
+create or replace function public.posts_testing_readable(p_post_id uuid, p_creator uuid)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+  opened boolean := false;
+begin
+  if me is null then return false; end if;
+  if me = p_creator then return true; end if;
+  if not public.trial_is_silenced(p_creator, me) then return true; end if;
+  if to_regclass('public.chat_messages') is not null then
+    execute 'select exists (select 1 from public.chat_messages m join public.chat_conversations c on c.id = m.conversation_id
+                             where m.post_id = $1 and m.sender_id = $2 and m.deleted_at is null and $3 in (c.user_a, c.user_b))'
+      into opened using p_post_id, p_creator, me;
+  end if;
+  return opened;
+end;
+$$;
+revoke all on function public.posts_testing_readable(uuid, uuid) from public, anon;
+grant execute on function public.posts_testing_readable(uuid, uuid) to authenticated;
+
+drop policy if exists posts_testing_not_for_known on public.posts;
+create policy posts_testing_not_for_known on public.posts
+  as restrictive for select to anon, authenticated
+  using (
+    parent_post_id is not null
+    or status not in ('trial', 'queued')
+    or user_id = auth.uid()
+    or (status = 'trial' and public.posts_testing_readable(id, user_id))
+  );
 
 -- ── internals are not callable by apps (trial_is_silenced would be an oracle for "who knows whom") ─
 do $$

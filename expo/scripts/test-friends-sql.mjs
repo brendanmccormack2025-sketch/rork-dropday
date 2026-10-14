@@ -266,6 +266,17 @@ if (!BIN) {
       ok("so a friend of the creator is silenced for the creator's testing posts", q(`select public.trial_is_silenced('${U(1)}','${U(2)}')`) === "t" && q(`select public.trial_is_silenced('${U(2)}','${U(1)}')`) === "t");
       ok("a stranger is not", q(`select public.trial_is_silenced('${U(1)}','${U(9)}')`) === "f");
       ok("clients cannot read known_connections", !as(U(1), "select * from public.known_connections").ok);
+      // a testing post read straight from the posts table: a friend of the creator only if the creator sent it to them
+      mkP(11, U(1), "trial");
+      const readsP = (uid) => as(uid, `select count(*) from public.posts where id='${P(11)}'`).out;
+      eq("a friend cannot read the creator's testing post directly; a stranger can", [readsP(U(2)), readsP(U(9))], ["0", "1"]);
+      ok("(setup) the creator sends it to that friend", as(U(1), `select public.send_post_to_friend('${U(2)}', '${P(11)}')`).ok);
+      eq("...now the friend can open it", readsP(U(2)), "1");
+      // the friends switch
+      Q(`update public.trial_engine_config set known_source_friends=false`);
+      eq("switch off: friendship alone is not 'known' any more", [q(`select count(*) from public.known_connections where source='friend'`), q(`select public.trial_is_silenced('${U(1)}','${U(2)}')`)], ["0", "f"]);
+      Q(`update public.trial_engine_config set known_source_friends=true`);
+      eq("switch on (default): friends are known again", q(`select count(*) from public.known_connections where source='friend'`), "2");
 
       // ── 6. views that came from a message never count ──
       wipe();

@@ -576,6 +576,25 @@ if (!BIN) {
       ok("the list is one direction: the hidden person's own posts still reach the owner's feed pool", (() => { mkPost(P2, U(4)); return viewerOf(U(1)).includes(P2); })());
       ok("removing them from the list lets them see it", (() => { asUser(U(1), `delete from public.hide_from_list where hidden_user_id='${U(4)}'`); return viewerOf(U(4)).includes(P1); })());
 
+      // hide list, part 2: never in their feed (testing or survived), the profile stays open, no reading around the feed
+      {
+        const asOut = (uid, sql) => asUser(uid, sql).stdout.trim().split("\n").pop();
+        const reads = (uid, id) => asOut(uid, `select count(*) from public.posts where id='${id}'`);
+        asUser(U(1), `insert into public.hide_from_list (owner_id, hidden_user_id) values ('${U(1)}','${U(4)}')`);
+        eq("a testing post read straight from the posts table: not by the hidden person; yes by a stranger and the creator", [reads(U(4), P1), reads(U(5), P1), reads(U(1), P1)], ["0", "1", "1"]);
+        eq("...nor by listing the creator's testing posts", asOut(U(4), `select count(*) from public.posts where user_id='${U(1)}' and status='trial'`), "0");
+        Q(`update public.posts set status='queued' where id='${P2}'`);
+        eq("a queued post: only its creator can read it", [reads(U(4), P2), reads(U(1), P2)], ["1", "0"]);
+        Q(`update public.posts set status='trial' where id='${P2}'`);
+        Q(`update public.posts set status='survived', survived_at=now(), distribution_started_at=now(), distribution_expires_at=now()+interval '24 hours' where id='${P1}'`);
+        ok("survived: still never in the hidden person's feed; a stranger gets it", !viewerOf(U(4)).includes(P1) && viewerOf(U(5)).includes(P1));
+        eq("...but visiting the creator's profile shows it, and it can be opened", [asOut(U(4), `select count(*) from public.profile_posts('${U(1)}') where post_id='${P1}'`), reads(U(4), P1)], ["1", "1"]);
+        ok("the hide list never counts against the creator: the hidden person is not in the post's viewer pool", q(`select count(*) from public.trial_pool('${P1}') where user_id='${U(4)}'`) === "0");
+        asUser(U(1), `delete from public.hide_from_list where hidden_user_id='${U(4)}'`);
+        ok("removed from the list: the survived post reaches their feed again", viewerOf(U(4)).includes(P1));
+        ok("clients cannot ask whether someone hid them (internal check)", asUser(U(4), `select public.trial_feed_hidden('${U(1)}','${U(4)}')`).status !== 0);
+      }
+
       // removal and account deletion
       asUser(U(1), `select public.sync_my_contacts(array['${NUM[2]}'])`);
       asUser(U(1), `select public.remove_my_contacts()`);

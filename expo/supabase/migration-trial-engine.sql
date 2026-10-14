@@ -1426,6 +1426,7 @@ begin
       and not exists (select 1 from public.reports r where r.reporter_id = me and r.target_type = 'post' and r.target_id = p.id)
       and not public.trial_exposed(p.id, me)
       and not (p.id = any (seen))
+      and not public.trial_feed_hidden(p.user_id, me)   -- the creator's hide list: never in this person's feed
     order by a.score desc, p.survived_at desc nulls last
     limit cfg.affinity_feed_boost
   ) x;
@@ -1465,6 +1466,7 @@ begin
     join public.posts p on p.id = u.id
     where not (u.id = any (front)) and not (u.id = any (seen))
       and ((p.status = 'survived' and (p.distribution_expires_at is null or p.distribution_expires_at > now())
+                and not public.trial_feed_hidden(p.user_id, me)   -- the creator's hide list: not even once it survived
             or (p.status = 'trial' and not public.trial_is_silenced(p.user_id, me) and exists (select 1 from public.trial_assignments t where t.post_id = p.id and t.viewer_id = me and t.released_at is null)))
            or (p.user_id = me and p.status in ('trial', 'incomplete', 'survived')))   -- 'incomplete' / 'archived' / 'expired': never served to others
     order by u.ord
