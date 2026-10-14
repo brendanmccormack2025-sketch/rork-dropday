@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: theme.accent,
   },
-  brandLogo: { width: 190, height: 68 },
+  brandLogo: { width: 136, height: 64 },
   tagline: {
     color: theme.textMuted,
     fontSize: 15,

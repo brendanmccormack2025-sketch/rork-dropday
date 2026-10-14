@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   header: { alignItems: "center", gap: 8, marginTop: 20, marginBottom: 28 },
-  brandLogo: { width: 96, height: 34 },
+  brandLogo: { width: 64, height: 30 },
   title: {
     color: theme.text,
     fontSize: 26,
