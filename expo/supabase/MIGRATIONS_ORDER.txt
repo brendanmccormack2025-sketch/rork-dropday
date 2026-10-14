@@ -3,7 +3,8 @@
 #
 # Every file below is IDEMPOTENT (safe to run again and again) and none of them defines an older version of something a
 # later file defines. migration-known-connections.sql must stay LAST (it revokes client access to the trial_* functions
-# created by the files before it, so it has to see all of them).
+# created by the files before it, so it has to see all of them; it also adds the friends branch to the known_connections
+# view, so migration-friends-messages.sql comes right before it).
 #
 # Keep this file up to date whenever a migration is added or changed.
 
@@ -15,8 +16,8 @@ migration-expire-posts-cron.sql
 migration-survived-profile.sql
 migration-hide-ended.sql
 migration-views-exclude-author.sql
-migration-known-connections.sql
 migration-friends-messages.sql
+migration-known-connections.sql
 
 # ── NOT run by ship.sh, on purpose ───────────────────────────────────────────────────────────────────────────────
 # Baseline, applied once when the database was created. Re-running them would put OLDER definitions back over newer

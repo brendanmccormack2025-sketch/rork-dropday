@@ -178,6 +178,21 @@ grant execute on function public.set_my_phone(text), public.clear_my_phone(), pu
   public.remove_my_contacts(), public.delete_my_privacy_data(), public.my_privacy_status() to authenticated;
 
 -- ── known_connections: one view, one UNION branch per source ─────────────────
+-- The view is built in a DO block so the friends branch is only added when the friends table exists (migration-friends-messages.sql
+-- runs BEFORE this file in MIGRATIONS_ORDER.txt; this file is always the last one, so it sees every table it needs).
+do $kc$
+declare
+  friend_branch text := '';
+begin
+  if to_regclass('public.friendships') is not null then
+    friend_branch := $fb$
+  union all
+  -- friends (migration-friends-messages.sql), either direction
+  select f.user_a, f.user_b, 'friend'::text from public.friendships f
+  union all
+  select f.user_b, f.user_a, 'friend'::text from public.friendships f$fb$;
+  end if;
+  execute $v$
 create or replace view public.known_connections as
   -- follows, either direction
   select f.follower_id as user_id, f.followee_id as other_id, 'follow'::text as source from public.follows f
@@ -194,8 +209,8 @@ create or replace view public.known_connections as
     from public.contact_hashes c join public.user_phone_hash p on p.hash = c.hash and p.user_id <> c.owner_id
   union all
   -- the creator's own "hide my trials from" list (creator -> hidden person)
-  select h.owner_id, h.hidden_user_id, 'hide_list'::text from public.hide_from_list h;
-  -- union all select ... 'friend'::text from public.friends ...   (messaging feature: add the branch here)
+  select h.owner_id, h.hidden_user_id, 'hide_list'::text from public.hide_from_list h$v$ || friend_branch;
+end $kc$;
 revoke all on public.known_connections from anon, authenticated;
 
 -- ── internals are not callable by apps (trial_is_silenced would be an oracle for "who knows whom") ─

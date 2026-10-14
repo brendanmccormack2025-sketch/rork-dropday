@@ -108,6 +108,11 @@ if (!BIN) {
       const f1 = psqlFile("t", fm), f2 = psqlFile("t", fm);
       if (/ERROR/.test(f1.stderr + f2.stderr)) console.log((f1.stderr + f2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 6).join("\n"));
       eq("the friends migration applies cleanly, and again (idempotent)", [/ERROR/.test(f1.stderr), /ERROR/.test(f2.stderr)], [false, false]);
+      // as in MIGRATIONS_ORDER.txt, known-connections runs right after (it adds the friends branch to the view)
+      const kcPath = join(sqlDir, "migration-known-connections.sql");
+      const kc1 = psqlFile("t", kcPath), kc2 = psqlFile("t", kcPath);
+      eq("known-connections after friends applies cleanly, and again", [/ERROR/.test(kc1.stderr), /ERROR/.test(kc2.stderr)], [false, false]);
+      eq("MIGRATIONS_ORDER.txt: friends right before known-connections, which stays last", (() => { const o = readFileSync(join(sqlDir, "MIGRATIONS_ORDER.txt"), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")); return [o[o.length - 2], o[o.length - 1]]; })(), ["migration-friends-messages.sql", "migration-known-connections.sql"]);
 
       const U = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
       const asUser = (uid, sql) => psql("t", `set role authenticated; set request.jwt.claim.sub='${uid}'; ${sql}`, ["-v", "ON_ERROR_STOP=1"]);
@@ -214,10 +219,13 @@ if (!BIN) {
       ok("...not to someone in the creator's contacts (either direction)", !as(U(2), `select public.send_post_to_friend('${U(4)}', '${P(2)}')`).ok);
       ok("...not to someone on the creator's hide list", !as(U(2), `select public.send_post_to_friend('${U(5)}', '${P(2)}')`).ok);
       ok("...not to a friend of the creator", !as(U(2), `select public.send_post_to_friend('${U(6)}', '${P(2)}')`).ok);
+      eq("\"Send to friend\" lists only who may get a testing post: the sender's friends the creator does not know", as(U(2), `select string_agg(id::text, ',' order by id) from public.friends_for_post('${P(2)}')`).out, [U(3), U(10)].join(","));
       eq("nothing was written by the rejected sends", q(`select count(*) from public.chat_messages where post_id='${P(2)}'`), "1");
       ok("the same holds if the creator knows the recipient by phone the other way round", (() => { as(U(3), `select public.set_my_phone('${NUM(3)}')`); Q(`delete from public.contact_hashes`); as(U(3), `select public.sync_my_contacts(array['${NUM(1)}'])`); as(U(1), `select public.set_my_phone('${NUM(1)}')`); return !as(U(2), `select public.send_post_to_friend('${U(3)}', '${P(2)}')`).ok; })());
       Q(`delete from public.contact_hashes; delete from public.user_phone_hash; delete from public.chat_messages where post_id='${P(2)}'`);
       ok("the creator sends their own testing post to their friends", as(U(1), `select public.send_post_to_friend('${U(6)}', '${P(2)}')`).ok && as(U(1), `select public.send_post_to_friend('${U(8)}', '${P(2)}')`).ok);
+      eq("...and the creator sees all their friends for their own post", as(U(1), `select string_agg(id::text, ',' order by id) from public.friends_for_post('${P(2)}')`).out, [U(6), U(8)].join(","));
+      eq("a survived post lists every friend (a minor, too, unless it is mature)", as(U(2), `select count(*) from public.friends_for_post('${P(1)}')`).out, "5");
       ok("...but not to someone who is not their friend", !as(U(1), `select public.send_post_to_friend('${U(9)}', '${P(2)}')`).ok);
       mkP(3, U(1), "trial");
       ok("someone who never saw the testing post cannot send it (no guessing ids)", !as(U(2), `select public.send_post_to_friend('${U(3)}', '${P(3)}')`).ok);

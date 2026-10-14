@@ -1,6 +1,7 @@
 -- Tryal: friends (mutual, free) and 1:1 direct messages between friends (idempotent).
--- Run AFTER migration-known-connections.sql (it replaces the known_connections view with one more branch: friends) and
--- migration-hide-ended.sql. Run manually in the Supabase SQL editor.
+-- Run BEFORE migration-known-connections.sql (which adds the 'friend' branch to the known_connections view when the
+-- friendships table exists; run that file again if you run this one on its own) and after migration-hide-ended.sql. Run
+-- manually in the Supabase SQL editor.
 --
 -- There are no followers in Tryal. People become friends by
 --   * an invite link: every user has a personal link whose token is SIGNED (HMAC-SHA256 over "user.version" with a secret
@@ -490,12 +491,13 @@ $$;
 -- Can this post be shown to this person through a message right now? (also decides "This post isn't available")
 create or replace function public.chat_post_available(p_post_id uuid, p_recipient uuid, p_sender uuid)
 returns boolean
-language sql
+language plpgsql
 stable
 security definer
 set search_path = public
 as $$
-  select exists (
+begin
+  return exists (
     select 1 from public.posts p
     where p.id = p_post_id
       and p.parent_post_id is null
@@ -511,7 +513,37 @@ as $$
            or not exists (select 1 from public.known_connections k where k.user_id = p.user_id and k.other_id = p_recipient)
         ))
       )
-  )
+  );
+end;
+$$;
+
+-- THE rule for sending a post to a person (used by send_post_to_friend and by friends_for_post, so what the app shows and
+-- what the server accepts cannot differ). Does not check friendship or blocks between sender and recipient.
+create or replace function public.chat_can_send_post(p_post_id uuid, p_sender uuid, p_to uuid)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  p record;
+begin
+  select * into p from public.posts where id = p_post_id;
+  if not found or p.parent_post_id is not null or p.moderation_status <> 'active' then return false; end if;
+  if p.is_mature and public.friends_is_minor(p_to) then return false; end if;
+  if p.status = 'survived' and p.distribution_expires_at > now() then
+    return true;                                                -- a survived post: any friend
+  elsif p.status = 'trial' then
+    if p.user_id = p_sender then return true; end if;           -- the creator, to their own friends
+    if p.user_id = p_to then return false; end if;
+    if not public.trial_exposed(p.id, p_sender) then return false; end if;                 -- no guessing of ids
+    if public.friends_blocked(p.user_id, p_to) then return false; end if;
+    -- the creator's known people (contacts either direction, hide list, friends) never get it before it survives
+    return not exists (select 1 from public.known_connections k where k.user_id = p.user_id and k.other_id = p_to);
+  end if;
+  return false;
+end;
 $$;
 
 create or replace function public.send_post_to_friend(p_to uuid, p_post_id uuid, p_note text default null)
@@ -524,7 +556,6 @@ declare
   me uuid := auth.uid();
   cid uuid;
   mid uuid;
-  p record;
   note text := nullif(btrim(coalesce(p_note, '')), '');
 begin
   if me is null then raise exception 'not signed in' using errcode = '28000'; end if;
@@ -532,35 +563,27 @@ begin
     raise exception 'that note is too long' using errcode = '22023';
   end if;
   cid := public.chat_conversation_for(p_to);                    -- friends only, not blocked
-  select * into p from public.posts where id = p_post_id;
-  if not found or p.parent_post_id is not null or p.moderation_status <> 'active' then
-    raise exception 'this post cannot be sent' using errcode = '42501';
-  end if;
-  if p.status = 'survived' and p.distribution_expires_at > now() then
-    null;                                                        -- any friend
-  elsif p.status = 'trial' then
-    if p.user_id = me then
-      null;                                                      -- the creator, to their own friends
-    elsif not public.trial_exposed(p.id, me) then
-      raise exception 'this post cannot be sent' using errcode = '42501';
-    elsif exists (select 1 from public.known_connections k where k.user_id = p.user_id and k.other_id = p_to) then
-      raise exception 'this post cannot be sent to that person' using errcode = '42501';   -- they know the creator: not before it survives
-    elsif public.friends_blocked(p.user_id, p_to) then
-      raise exception 'this post cannot be sent to that person' using errcode = '42501';
-    elsif p.user_id = p_to then
-      raise exception 'this post cannot be sent to that person' using errcode = '42501';
-    end if;
-  else
-    raise exception 'this post cannot be sent' using errcode = '42501';
-  end if;
-  if p.is_mature and public.friends_is_minor(p_to) then
+  if not public.chat_can_send_post(p_post_id, me, p_to) then
     raise exception 'this post cannot be sent to that person' using errcode = '42501';
   end if;
-  insert into public.chat_messages (conversation_id, sender_id, body, post_id, was_post) values (cid, me, note, p.id, true) returning id into mid;
+  insert into public.chat_messages (conversation_id, sender_id, body, post_id, was_post) values (cid, me, note, p_post_id, true) returning id into mid;
   update public.chat_conversations set last_message_at = now() where id = cid;
   perform public.friends_notify(p_to, me, 'message');
   return mid;
 end;
+$$;
+
+-- The friends this post may be sent to: the list "Send to friend" shows. People the creator knows are simply not in it.
+create or replace function public.friends_for_post(p_post_id uuid)
+returns table (id uuid, username text, display_name text, avatar_url text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select f.id, f.username, f.display_name, f.avatar_url
+  from public.my_friends() f
+  where auth.uid() is not null and public.chat_can_send_post(p_post_id, auth.uid(), f.id)
 $$;
 
 create or replace function public.delete_my_message(p_message_id uuid)
@@ -744,33 +767,17 @@ begin
   end if;
 end $$;
 
--- ── friends are known people: one more branch of known_connections ───────────────
-create or replace view public.known_connections as
-  select f.follower_id as user_id, f.followee_id as other_id, 'follow'::text as source from public.follows f
-   where (select known_source_follows from public.trial_engine_config where id)
-  union all
-  select f.followee_id, f.follower_id, 'follow'::text from public.follows f
-   where (select known_source_follows from public.trial_engine_config where id)
-  union all
-  select c.owner_id, p.user_id, 'contact'::text
-    from public.contact_hashes c join public.user_phone_hash p on p.hash = c.hash and p.user_id <> c.owner_id
-  union all
-  select p.user_id, c.owner_id, 'contact'::text
-    from public.contact_hashes c join public.user_phone_hash p on p.hash = c.hash and p.user_id <> c.owner_id
-  union all
-  select h.owner_id, h.hidden_user_id, 'hide_list'::text from public.hide_from_list h
-  union all
-  -- friends, either direction
-  select f.user_a, f.user_b, 'friend'::text from public.friendships f
-  union all
-  select f.user_b, f.user_a, 'friend'::text from public.friendships f;
-revoke all on public.known_connections from anon, authenticated;
+-- ── friends are known people ────────────────────────────────────────────────────
+-- known_connections gets its 'friend' branch from migration-known-connections.sql, which runs after this file (it adds the
+-- branch when this table exists). If you run this file on its own, run migration-known-connections.sql again afterwards.
+
 
 -- ── who may call what ────────────────────────────────────────────────────────────
 revoke all on function
   public.friends_blocked(uuid, uuid), public.friends_are(uuid, uuid), public.friends_is_minor(uuid),
   public.friends_notify(uuid, uuid, text), public.friends_make(uuid, uuid, text), public.friends_secret(),
-  public.friends_sign(uuid, integer), public.chat_post_available(uuid, uuid, uuid), public.message_sourced_view_guard()
+  public.friends_sign(uuid, integer), public.chat_post_available(uuid, uuid, uuid), public.chat_can_send_post(uuid, uuid, uuid),
+  public.message_sourced_view_guard()
   from public, anon, authenticated;
 revoke all on function
   public.my_invite_token(), public.rotate_my_invite(), public.redeem_invite(text), public.send_friend_request(uuid),
@@ -778,7 +785,7 @@ revoke all on function
   public.search_people(text), public.my_friends(), public.my_friend_requests(), public.chat_conversation_for(uuid),
   public.send_message(uuid, text), public.send_post_to_friend(uuid, uuid, text), public.delete_my_message(uuid),
   public.report_message(uuid, text), public.mark_conversation_read(uuid), public.my_conversations(),
-  public.my_unread_messages(), public.open_shared_post(uuid), public.chat_can_read(uuid)
+  public.my_unread_messages(), public.open_shared_post(uuid), public.chat_can_read(uuid), public.friends_for_post(uuid)
   from public, anon;
 grant execute on function
   public.my_invite_token(), public.rotate_my_invite(), public.redeem_invite(text), public.send_friend_request(uuid),
@@ -786,5 +793,5 @@ grant execute on function
   public.search_people(text), public.my_friends(), public.my_friend_requests(), public.chat_conversation_for(uuid),
   public.send_message(uuid, text), public.send_post_to_friend(uuid, uuid, text), public.delete_my_message(uuid),
   public.report_message(uuid, text), public.mark_conversation_read(uuid), public.my_conversations(),
-  public.my_unread_messages(), public.open_shared_post(uuid), public.chat_can_read(uuid)
+  public.my_unread_messages(), public.open_shared_post(uuid), public.chat_can_read(uuid), public.friends_for_post(uuid)
   to authenticated;
