@@ -40,8 +40,8 @@ export const INVITE_TEXT = "Join me on Tryal";
 /** user id (32 hex) . version . signature (32 hex): the token the server signs (my_invite_token). */
 export const INVITE_TOKEN_RE = /^[0-9a-f]{32}\.[0-9]{1,6}\.[0-9a-f]{32}$/;
 
-/** The page that opens the app (or the App Store). Set EXPO_PUBLIC_INVITE_BASE_URL once the domain exists. */
-export const DEFAULT_INVITE_BASE = "https://tryal.app";
+/** The page that opens the app (or the App Store). Hosted on Cloudflare Pages (direct upload of the DropDay-Legal site); EXPO_PUBLIC_INVITE_BASE_URL overrides it. */
+export const DEFAULT_INVITE_BASE = "https://tryal.pages.dev";
 
 export function inviteWebLink(token: string, base: string = DEFAULT_INVITE_BASE): string {
   return `${base.replace(/\/+$/, "")}/i/${token}`;

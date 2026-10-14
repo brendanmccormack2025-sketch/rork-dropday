@@ -25,7 +25,7 @@
       },
       "usesAppleSignIn": true,
       "associatedDomains": [
-        "applinks:tryal.app"
+        "applinks:tryal.pages.dev"
       ],
       "buildNumber": "20"
     },
