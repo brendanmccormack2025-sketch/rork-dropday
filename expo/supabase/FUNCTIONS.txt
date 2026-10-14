@@ -3,8 +3,8 @@
 # --use-api (server-side bundling: no Docker needed). schedule=<file> is applied after the function is deployed. Blank lines
 # and # comments are ignored. Keep this file up to date whenever a function is added.
 
-send-push  schedule=supabase/schedule-send-push.sql   --no-verify-jwt   # authorizes the caller itself (service key), like delete-media
 delete-media  schedule=supabase/schedule-delete-media.sql   --no-verify-jwt   # the function authorizes the caller itself (legacy service_role JWT or sb_secret_ key); the gateway JWT check would reject sb_secret_ keys
+send-push  schedule=supabase/schedule-send-push.sql   --no-verify-jwt   # authorizes the caller itself (service key), like delete-media
 
 # ── delete-media ─────────────────────────────────────────────────────────────────────────────────────────────────
 # What: removes the Storage files queued in trial_media_delete_queue when a post ends or stays incomplete.
