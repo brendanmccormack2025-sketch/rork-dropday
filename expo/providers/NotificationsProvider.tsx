@@ -38,6 +38,7 @@ export type NotificationRow = {
   post: {
     thumbnail_url: string | null;
     media_type: string;
+    parent_post_id?: string | null;
   } | null;
 };
 
@@ -63,7 +64,7 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
         const { data, error } = await supabase
           .from("notifications")
           .select(
-            "id, recipient_id, actor_id, type, post_id, read, created_at, extra_count, actor:profiles!notifications_actor_id_fkey(username, display_name, avatar_url), post:posts!notifications_post_id_fkey(thumbnail_url, media_type)"
+            "id, recipient_id, actor_id, type, post_id, read, created_at, extra_count, actor:profiles!notifications_actor_id_fkey(username, display_name, avatar_url), post:posts!notifications_post_id_fkey(thumbnail_url, media_type, parent_post_id)"
           )
           .eq("recipient_id", userId)
           .order("created_at", { ascending: false })

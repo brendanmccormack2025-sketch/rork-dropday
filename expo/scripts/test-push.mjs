@@ -28,6 +28,7 @@ const one = (r) => buildPushes([r])[0];
 // ── mapping, every type ──
 eq("survived", [one(row({ type: "verdict_survived", actor_id: null })).title, one(row({ type: "verdict_survived", actor_id: null })).body], ["Tryal", "Your post survived Tryal 🏆"]);
 eq("reaction", [one(row()).title, one(row()).body], ["Tryal", "Ana reacted to your post"]);
+eq("a reply to my reaction", one(row({ on_reaction: true })).body, "Ana replied to your reaction");
 for (const [m, text] of [[1, "Your post got its first like"], [5, "Your post reached 5 likes"], [10, "Your post reached 10 likes"], [25, "Your post reached 25 likes"]]) eq(`like milestone ${m}`, one(row({ type: "like", milestone: m })).body, text);
 eq("friend request: the sender's name", [one(row({ type: "friend_request", post_id: null })).title, one(row({ type: "friend_request", post_id: null })).body], ["Ana", "sent you a friend request"]);
 eq("friend accept", [one(row({ type: "friend_accept", post_id: null })).title, one(row({ type: "friend_accept", post_id: null })).body], ["Ana", "is now your friend"]);

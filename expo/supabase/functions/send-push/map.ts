@@ -23,6 +23,8 @@ export type ClaimedRow = {
   recipient_minor: boolean;
   tokens: string[];
   milestone: number | null;
+  /** reaction rows: true when the post reacted to is itself a reaction (a reply to the recipient's reaction) */
+  on_reaction?: boolean | null;
   last_was_post: boolean | null;
   preview: string | null;
 };
@@ -96,7 +98,8 @@ function textFor(rows: ClaimedRow[]): { title: string; body: string } {
     case "reaction": {
       const names = [...new Set(rows.map(nameOf))];
       const others = names.length - 1;
-      return { title: "Tryal", body: others > 0 ? `${names[0]} and ${others} ${others === 1 ? "other" : "others"} reacted to your post` : `${names[0]} reacted to your post` };
+      const what = first.on_reaction ? "replied to your reaction" : "reacted to your post";
+      return { title: "Tryal", body: others > 0 ? `${names[0]} and ${others} ${others === 1 ? "other" : "others"} ${what}` : `${names[0]} ${what}` };
     }
     case "like": {
       const n = Math.max(...rows.map((r) => r.milestone ?? 0));

@@ -261,6 +261,8 @@ begin
       'created_at', r.created_at, 'attempts', r.push_attempts + 1,
       'actor_name', actor_name, 'recipient_minor', minor, 'tokens', to_jsonb(toks),
       'milestone', ms,
+      -- a reaction whose post is itself a reaction is a reply to the recipient's reaction
+      'on_reaction', case when r.type = 'reaction' then exists (select 1 from public.posts p where p.id = r.post_id and p.parent_post_id is not null) end,
       'last_was_post', case when r.type = 'message' then coalesce(last_post, false) end,
       -- the text of a message leaves the database only for an adult who turned previews on
       'preview', case when r.type = 'message' and not minor and prefs.preview and not coalesce(last_post, false) then left(last_body, 120) end

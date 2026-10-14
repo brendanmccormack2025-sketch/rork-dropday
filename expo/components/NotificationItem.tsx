@@ -78,7 +78,7 @@ export default function NotificationItem({
         : "liked your post";
   } else if (notif.type === "reaction") {
     icon = <Zap color={theme.accent} size={15} strokeWidth={2} fill={theme.accent} />;
-    actionText = "reacted to your post";
+    actionText = notif.post?.parent_post_id ? "replied to your reaction" : "reacted to your post";
   } else if (notif.type === "friend_request") {
     actionText = "sent you a friend request";
   } else if (notif.type === "friend_accept") {
