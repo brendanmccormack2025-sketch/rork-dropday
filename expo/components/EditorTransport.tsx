@@ -151,9 +151,10 @@ export default function EditorTransport({
 
 const styles = StyleSheet.create({
   row: { position: "absolute", flexDirection: "row", alignItems: "center", gap: E_TRANSPORT.gap },
-  replay: { width: E_TRANSPORT.replay, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.4)" },
-  time: { height: 24, borderRadius: 12, paddingHorizontal: 9, justifyContent: "center", backgroundColor: "rgba(0,0,0,0.4)" },
-  timeText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  // No panel behind the icon or the time: they sit on the video with a soft text shadow so they stay readable.
+  replay: { width: E_TRANSPORT.replay, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  time: { height: 24, justifyContent: "center" },
+  timeText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"], textShadowColor: "rgba(0,0,0,0.7)", textShadowRadius: 3, textShadowOffset: { width: 0, height: 1 } },
   bar: { position: "absolute", justifyContent: "center" },
   track: { position: "absolute", left: 0, right: 0, top: (E_PROGRESS.height - E_PROGRESS.track) / 2, height: E_PROGRESS.track, borderRadius: E_PROGRESS.track / 2, backgroundColor: "rgba(255,255,255,0.3)" },
   fill: { position: "absolute", left: 0, top: (E_PROGRESS.height - E_PROGRESS.track) / 2, height: E_PROGRESS.track, borderRadius: E_PROGRESS.track / 2, backgroundColor: "#FFFFFF" },

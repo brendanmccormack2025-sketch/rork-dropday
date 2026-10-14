@@ -57,7 +57,7 @@ const edit = read("../app/edit.tsx");
   const stepFns = edit.slice(edit.indexOf("const handleBackPress"), edit.indexOf("// On the Cuts screen undo"));
   ok("going back or forward never touches clips, overlays, captions or history", !/setClips|setTextOverlays|setEditModel|historyRef|pushSnapshot|userEdit|captions\.\w+\(/.test(stepFns));
   ok("the video players are hooks of the component, so they survive the steps", /useVideoPlayer\(/.test(edit) && !/step === "[a-z]+" && useVideoPlayer/.test(edit));
-  ok("Android's back button walks the steps", /BackHandler\.addEventListener\("hardwareBackPress"/.test(edit) && /backStep\(stepRef\.current/.test(edit));
+  ok("Android's back button walks the steps", /BackHandler\.addEventListener\("hardwareBackPress"/.test(edit) && /backAction\(\{/.test(edit) && /backRef\.current\(true\)/.test(edit));
   ok("the separate Preview button and modal are gone", !/EditPreviewModal|handleOpenFullPreview|accessibilityLabel="Preview"/.test(edit));
 }
 

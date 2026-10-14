@@ -41,10 +41,10 @@ const idle = { step: "edit", textEditing: false, panelOpen: false, keyboardUp: f
 {
   const column = { x: 309, y: 120, w: 56, h: 160 };
   eq("paused: everything at full strength", chromeFade({ isPlaying: false, gesturing: false, selectedRect: null, columnRect: column }), { topBar: 1, toolColumn: 1 });
-  eq("playing: the top bar and the tool column step back to 40%", chromeFade({ isPlaying: true, gesturing: false, selectedRect: null, columnRect: column }), { topBar: PLAYING_CHROME_OPACITY, toolColumn: PLAYING_CHROME_OPACITY });
-  eq("dragging or pinching an overlay or the caption: both fade out", chromeFade({ isPlaying: false, gesturing: true, selectedRect: null, columnRect: column }), { topBar: 0, toolColumn: 0 });
-  eq("...also while playing", chromeFade({ isPlaying: true, gesturing: true, selectedRect: null, columnRect: column }), { topBar: 0, toolColumn: 0 });
-  eq("a selected overlay under the column fades the column (the top bar stays)", chromeFade({ isPlaying: false, gesturing: false, selectedRect: { x: 250, y: 150, w: 120, h: 40 }, columnRect: column }), { topBar: 1, toolColumn: 0 });
+  eq("playing: the top bar and the tool column step back to 60%", chromeFade({ isPlaying: true, gesturing: false, selectedRect: null, columnRect: column }), { topBar: PLAYING_CHROME_OPACITY, toolColumn: PLAYING_CHROME_OPACITY });
+  eq("dragging or pinching an overlay or the caption: both step back to 35%, never hidden", chromeFade({ isPlaying: false, gesturing: true, selectedRect: null, columnRect: column }), { topBar: 0.35, toolColumn: 0.35 });
+  eq("...also while playing", chromeFade({ isPlaying: true, gesturing: true, selectedRect: null, columnRect: column }), { topBar: 0.35, toolColumn: 0.35 });
+  eq("a selected overlay under the column steps the column back to 35% (the top bar stays)", chromeFade({ isPlaying: false, gesturing: false, selectedRect: { x: 250, y: 150, w: 120, h: 40 }, columnRect: column }), { topBar: 1, toolColumn: 0.35 });
   eq("...one clear of it does not", chromeFade({ isPlaying: false, gesturing: false, selectedRect: { x: 20, y: 150, w: 200, h: 40 }, columnRect: column }).toolColumn, 1);
   eq("...nor one at the same height but left of it", chromeFade({ isPlaying: false, gesturing: false, selectedRect: { x: 100, y: 130, w: 200, h: 40 }, columnRect: column }).toolColumn, 1);
 }

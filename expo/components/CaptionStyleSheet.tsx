@@ -36,6 +36,8 @@ type Props = {
   embeddedFonts?: EmbeddedFonts;
   /** True only on a build that burns an outline in (1.0.5): the outline controls are hidden otherwise. */
   supportsOutline?: boolean;
+  /** The sheet's height when it is shown, so the editor can lift the video clear of it (the caption stays visible while styling). */
+  onHeight?: (height: number) => void;
   onChange: (patch: CaptionLookPatch) => void;
   onReset: () => void;
   onClose: () => void;
@@ -51,7 +53,7 @@ const SIZE_BAR: Record<CaptionOutline, number> = { thin: 2, medium: 4, thick: 7 
  * work in any combination. Every tap applies instantly (the live preview follows; the render re-runs after its usual
  * debounce) and is one undo step. The colors are exactly the ones picked: a low contrast only shows a hint.
  */
-export default function CaptionStyleSheet({ visible, style, supportsFont, embeddedFonts = [], supportsOutline = false, onChange, onReset, onClose }: Props) {
+export default function CaptionStyleSheet({ visible, style, supportsFont, embeddedFonts = [], supportsOutline = false, onHeight, onChange, onReset, onClose }: Props) {
   const look = resolveCaptionLook(style);
   const [target, setTarget] = useState<Target>("text");
   const outlineOn = look.outline !== null;
@@ -67,7 +69,7 @@ export default function CaptionStyleSheet({ visible, style, supportsFont, embedd
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable style={styles.sheet} onPress={() => {}} onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}>
           <View style={styles.grabber} />
           <UiText weight={800} style={styles.title}>
             Caption style
@@ -204,7 +206,8 @@ export default function CaptionStyleSheet({ visible, style, supportsFont, embedd
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.35)" },
+  // No dimming: the caption being styled stays fully visible above the sheet.
+  backdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "transparent" },
   sheet: { backgroundColor: theme.bg, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 28, gap: 12, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   grabber: { alignSelf: "center", width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(10,10,10,0.18)" },
   title: { fontSize: 17, color: theme.text },

@@ -25,7 +25,7 @@ import {
 import UiText from "@/components/UiText";
 import { FadeView, PlayIndicator, PreviewStatusChip } from "@/components/EditorChromeBits";
 import EditorTransport from "@/components/EditorTransport";
-import { chromeFade, newTextPlacement, overlayScreenRect, toolColumnLeft } from "@/lib/editorFade";
+import { CHROME_AWAKE_MS, chromeFade, newTextPlacement, overlayScreenRect, toolColumnLeft } from "@/lib/editorFade";
 import { CAPTIONS_EDIT_BAR_HEIGHT, E_BAR, E_NEXT, E_READY, E_TOOLS, E_TOP_BAR, captionLift, chromeVisibility, editorRects } from "@/lib/editorChrome";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import ReAnimated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
@@ -65,7 +65,8 @@ import { guidesVisible } from "@/lib/guides";
 import { cancelTextEdit, textOverlaysForSave } from "@/lib/textOverlayStyle";
 import { MERGE_FAILED_TEXT, MERGE_PREPARING_TEXT, mergeVideoClips, shouldMerge } from "@/lib/mergeClips";
 import { renderMerge } from "@/lib/mergeNative";
-import { backStep, initialStep, nextStep, selectionBarSide, stepLayout, videoTapAction, type EditorStep } from "@/lib/editorFlow";
+import { captionLookKey, drawCaptionsLive, lookSignature } from "@/lib/previewFreshness";
+import { backAction, initialStep, nextStep, selectionBarSide, stepLayout, videoTapAction, type EditorStep } from "@/lib/editorFlow";
 import { DEFAULT_TEXT_OVERLAY_POS, TEXT_MAX_WIDTH, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame, frameToFrac } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
@@ -394,6 +395,7 @@ export default function EditScreen() {
   const [cutsOpen, setCutsOpen] = useState(false);
   const [captionsPanelOpen, setCaptionsPanelOpen] = useState(false);
   const [captionsSheetH, setCaptionsSheetH] = useState(0);
+  const [styleSheetH, setStyleSheetH] = useState(0);
   const [keyboardH, setKeyboardH] = useState(0);
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -473,6 +475,18 @@ export default function EditScreen() {
     };
   }, [user?.id]);
   const [textEditorVisible, setTextEditorVisible] = useState(false);
+  // Any touch on the editor wakes the top bar and the tool column to full strength for a moment (they only step back
+  // while the video plays and nothing was touched).
+  const [chromeAwake, setChromeAwake] = useState(false);
+  const chromeAwakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wakeChrome = useCallback(() => {
+    setChromeAwake(true);
+    if (chromeAwakeTimer.current) clearTimeout(chromeAwakeTimer.current);
+    chromeAwakeTimer.current = setTimeout(() => setChromeAwake(false), CHROME_AWAKE_MS);
+  }, []);
+  useEffect(() => () => {
+    if (chromeAwakeTimer.current) clearTimeout(chromeAwakeTimer.current);
+  }, []);
   const [editingOverlayId, setEditingOverlayId] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
@@ -931,16 +945,14 @@ export default function EditScreen() {
   // Android's back button walks the steps back: Post -> editor -> Cuts -> leave.
   const stepRef = useRef<EditorStep>(step);
   stepRef.current = step;
+  const backRef = useRef<(fromHardware?: boolean) => boolean>(() => false);
   const isVideoRef = useRef(isVideo);
   isVideoRef.current = isVideo;
   useEffect(() => {
     if (Platform.OS !== "android") return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      const to = backStep(stepRef.current, { isVideo: isVideoRef.current });
-      if (to === "exit") return false;
-      setIsPlaying(false);
-      setStep(to);
-      return true;
+      // The same decision as the Back button (sheets close first); leaving the editor is left to the navigator.
+      return backRef.current(true);
     });
     return () => sub.remove();
   }, []);
@@ -4419,14 +4431,59 @@ export default function EditScreen() {
     if (navigation.canGoBack()) router.back();
     else router.replace("/(tabs)");
   };
-  const handleBackPress = () => {
-    const to = backStep(step, { isVideo });
-    if (to === "exit") {
-      leaveEditor();
-      return;
+  // Back, from any state: the topmost open thing closes first (see backAction), then the step goes back, then the editor is left.
+  const performBack = (fromHardware = false): boolean => {
+    const action = backAction({
+      step,
+      isVideo,
+      textEditorVisible,
+      styleSheetOpen,
+      captionsPanelOpen,
+      markerSheetOpen: !!markerSheet,
+      cutsSheetOpen: cutsOpen && aiEditsEnabled,
+      explainerVisible: captions.explainerVisible,
+      hasSelection: !!selectedOverlayId || captionSelected,
+    });
+    if (action.type === "close") {
+      switch (action.what) {
+        case "textEditor":
+          handleTextEditorCancel();
+          break;
+        case "styleSheet":
+          setStyleSheetOpen(false);
+          break;
+        case "captionsPanel":
+          setCaptionsPanelOpen(false);
+          break;
+        case "markerSheet":
+          setMarkerSheet(null);
+          break;
+        case "cutsSheet":
+          handleCloseCuts();
+          break;
+        case "explainer":
+          captions.onNotNow();
+          break;
+        case "selection":
+          setCaptionSelected(false);
+          setSelectedOverlayId(null);
+          break;
+      }
+      return true;
     }
     setIsPlaying(false);
-    setStep(to);
+    if (action.type === "exit") {
+      // The hardware button leaves through the navigator (false = not handled here).
+      if (fromHardware) return false;
+      leaveEditor();
+      return true;
+    }
+    setStep(action.to);
+    return true;
+  };
+  backRef.current = performBack;
+  const handleBackPress = () => {
+    performBack();
   };
   // "Next" / "Done": nothing stays selected going forward, and the clip selection of the timeline ends.
   // On the Cuts screen undo / redo are about the cuts first (the automatic edit's history), then the timeline.
@@ -4475,16 +4532,23 @@ export default function EditScreen() {
         maxWidth: (frameDims.w / feedCrop.visibleW) * TEXT_MAX_WIDTH,
       })
     : null;
-  const fade = chromeFade({ isPlaying, gesturing: guideGesture.active || !!dragOverlayInfo?.isDragging, selectedRect: selectedTextRect, columnRect });
+  const fade = chromeFade({
+    isPlaying,
+    gesturing: guideGesture.active || !!dragOverlayInfo?.isDragging,
+    selectedRect: selectedTextRect,
+    columnRect,
+    awake: chromeAwake,
+    editing: textEditorVisible || panelOpen || keyboardH > 0,
+  });
   // With the Captions panel open the video slides up so the caption stays visible above the panel (or the keyboard).
   const screenH = Dimensions.get("window").height;
-  const previewLift = captionsPanelOpen && isVideo && captions.captionsOn
+  const previewLift = (captionsPanelOpen || styleSheetOpen) && isVideo && captions.captionsOn
     ? captionLift({
         frameTop: (previewAreaSize.h - frameDims.h) / 2,
         frameHeight: frameDims.h,
         captionYFrac: captionStyle?.yCenter ?? defaultCaptionStyle().yCenter,
         captionHalfHeight: 44,
-        visibleBottom: screenH - keyboardH - Math.max(captionsSheetH, keyboardH > 0 ? CAPTIONS_EDIT_BAR_HEIGHT : 0),
+        visibleBottom: screenH - keyboardH - Math.max(styleSheetOpen ? styleSheetH : captionsSheetH, keyboardH > 0 ? CAPTIONS_EDIT_BAR_HEIGHT : 0),
       })
     : 0;
   const selectionY = selectedOverlay ? selectedOverlay.y : (captionStyle?.yCenter ?? defaultCaptionStyle().yCenter);
@@ -4499,7 +4563,7 @@ export default function EditScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.screen}>
+      <View style={styles.screen} onTouchStart={wakeChrome}>
         <StatusBar style={step === "edit" ? "light" : "dark"} />
 
         {/* ── Top bar: the Cuts screen ─────────────────────────────── */}
@@ -4726,11 +4790,12 @@ export default function EditScreen() {
                 }}
               >
               <CaptionPreview
+                key={captionLookKey(captionStyle)}
                 lines={captions.lines}
                 positionMs={displayPosition}
                 frameW={fullVideoW}
                 frameH={fullVideoH}
-                invisible={false}
+                invisible={!drawCaptionsLive(null, lookSignature(captionStyle, textOverlays))}
                 style={captionStyle}
                 isPlaying={isPlaying}
                 selected={captionSelected}
@@ -5220,6 +5285,7 @@ export default function EditScreen() {
         supportsOutline={supportsTextOutline}
         onChange={handleCaptionLook}
         onReset={handleCaptionLookReset}
+        onHeight={setStyleSheetH}
         onClose={() => setStyleSheetOpen(false)}
       />
 

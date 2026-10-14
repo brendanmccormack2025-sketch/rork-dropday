@@ -9,6 +9,7 @@ import Animated, {
 } from "react-native-reanimated";
 import type { TextOverlay, TextBackgroundStyle } from "@/providers/PostsProvider";
 import * as Haptics from "expo-haptics";
+import { overlayLookKey } from "@/lib/previewFreshness";
 import OverlayText from "@/components/OverlayText";
 import { shouldBuzz, snapToCenter } from "@/lib/guides";
 import { TOUCH_PAD, createGestureTracker } from "@/lib/overlayGestures";
@@ -311,7 +312,7 @@ export default function DraggableTextOverlay({
       <GestureDetector gesture={gesture}>
         <View collapsable={false} style={styles.touch}>
           <View style={styles.box}>
-            <OverlayText text={overlay.text} look={overlay} layout={layout} onLayout={handleLayout} />
+            <OverlayText key={overlayLookKey(overlay)} text={overlay.text} look={overlay} layout={layout} onLayout={handleLayout} />
 
             {/* Selection outline: the same dashed white outline the caption uses */}
             {isSelected && (

@@ -5,6 +5,7 @@ import { Play } from "lucide-react-native";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { E_PLAY, READY_LABEL_FADE_MS, READY_LABEL_SHOW_MS } from "@/lib/editorChrome";
+import { MIN_CHROME_OPACITY } from "@/lib/editorFade";
 
 /** The play icon: a round, semi-transparent circle (no dark square), shown only while paused, fading out on play. */
 export function PlayIndicator({ visible }: { visible: boolean }) {
@@ -70,15 +71,17 @@ const styles = StyleSheet.create({
   chipText: { color: "#fff", fontSize: 11, fontWeight: "700" as const },
 });
 
-/** A view that fades to `opacity` (native driver). At 0 it ignores touches; otherwise its children keep theirs. */
+/**
+ * The container of the top bar and the tool column. A plain View whose opacity is a number from chromeFade (never
+ * below MIN_CHROME_OPACITY): no animation driver (a natively animated opacity left the vector icons blank and the buttons
+ * dead on device), `box-none` always so its buttons take touches at any opacity, and the opacity is only set when it is
+ * below 1 (at full strength the view is not a transparency group at all).
+ */
 export function FadeView({ opacity, style, children }: { opacity: number; style?: StyleProp<ViewStyle>; children?: React.ReactNode }) {
-  const value = useRef(new Animated.Value(opacity)).current;
-  useEffect(() => {
-    Animated.timing(value, { toValue: opacity, duration: 180, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
-  }, [opacity, value]);
+  const o = Number.isFinite(opacity) ? Math.max(MIN_CHROME_OPACITY, Math.min(1, opacity)) : 1;
   return (
-    <Animated.View pointerEvents={opacity === 0 ? "none" : "box-none"} style={[style, { opacity: value }]}>
+    <View pointerEvents="box-none" collapsable={false} style={o < 1 ? [style, { opacity: o }] : style}>
       {children}
-    </Animated.View>
+    </View>
   );
 }

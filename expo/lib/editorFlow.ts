@@ -27,6 +27,43 @@ export function backStep(step: EditorStep, args: { isVideo: boolean }): EditorSt
   return "exit";
 }
 
+/** What Back does right now: the topmost thing open closes first, then the step goes back, then the editor is left. */
+export type BackAction =
+  | { type: "close"; what: "textEditor" | "styleSheet" | "captionsPanel" | "markerSheet" | "cutsSheet" | "explainer" | "selection" }
+  | { type: "step"; to: EditorStep }
+  | { type: "exit" };
+
+export type BackState = {
+  step: EditorStep;
+  isVideo: boolean;
+  textEditorVisible: boolean;
+  styleSheetOpen: boolean;
+  captionsPanelOpen: boolean;
+  markerSheetOpen: boolean;
+  /** The Cuts sheet is showing (open and the automatic edits panel is on). */
+  cutsSheetOpen: boolean;
+  explainerVisible: boolean;
+  /** A text overlay or the caption is selected. */
+  hasSelection: boolean;
+};
+
+/**
+ * Back from any state: playing or paused makes no difference (the caller pauses). An open sheet closes first, topmost
+ * first (the text editor, the caption style, the Captions panel, a marker, the Cuts sheet, the explainer), then a
+ * selection is dropped (full-screen editor only), then the step goes back (Post -> editor -> Cuts), then the editor is left.
+ */
+export function backAction(s: BackState): BackAction {
+  if (s.textEditorVisible) return { type: "close", what: "textEditor" };
+  if (s.styleSheetOpen) return { type: "close", what: "styleSheet" };
+  if (s.captionsPanelOpen) return { type: "close", what: "captionsPanel" };
+  if (s.markerSheetOpen) return { type: "close", what: "markerSheet" };
+  if (s.cutsSheetOpen) return { type: "close", what: "cutsSheet" };
+  if (s.explainerVisible) return { type: "close", what: "explainer" };
+  if (s.step === "edit" && s.hasSelection) return { type: "close", what: "selection" };
+  const to = backStep(s.step, { isVideo: s.isVideo });
+  return to === "exit" ? { type: "exit" } : { type: "step", to };
+}
+
 /** The "Cuts" tool of the full-screen editor. */
 export function cutsStep(args: { isVideo: boolean }): EditorStep | null {
   return args.isVideo ? "cuts" : null;
