@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tryal",
     "slug": "fgum9ff0goqjv4vh7u4xf",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/images/trial-icon-bars.png",
     "scheme": "rork-fgum9ff0goqjv4vh7u4xf",
@@ -24,6 +24,9 @@
         "NSContactsUsageDescription": "Tryal checks your contacts so friends and family only see your posts after they survive Tryal. Contacts are never shared."
       },
       "usesAppleSignIn": true,
+      "associatedDomains": [
+        "applinks:tryal.app"
+      ],
       "buildNumber": "20"
     },
     "android": {

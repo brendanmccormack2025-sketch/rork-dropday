@@ -1,6 +1,6 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
 
-/** The web link (https://…/i/<token>), once the app owns it (universal links, next build), goes to the same place as the app link. */
+/** The web link (https://tryal.app/i/<token>, a universal link from 1.0.6) goes to the same place as the app link. */
 export default function WebInviteRedirect() {
   const { token } = useLocalSearchParams<{ token: string }>();
   return <Redirect href={`/invite/${String(token)}` as never} />;
