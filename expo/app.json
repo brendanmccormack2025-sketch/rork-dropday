@@ -4,7 +4,7 @@
     "slug": "fgum9ff0goqjv4vh7u4xf",
     "version": "1.0.4",
     "orientation": "portrait",
-    "icon": "./assets/images/trial-icon-mark.png",
+    "icon": "./assets/images/trial-icon-bars.png",
     "scheme": "rork-fgum9ff0goqjv4vh7u4xf",
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
@@ -28,8 +28,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/trial-icon-mark.png",
-        "backgroundColor": "#F5F3EE"
+        "foregroundImage": "./assets/images/trial-icon-bars-foreground.png",
+        "backgroundColor": "#FFFFFF"
       },
       "package": "app.rork.fgum9ff0goqjv4vh7u4xf",
       "permissions": [
