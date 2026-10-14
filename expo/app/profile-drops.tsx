@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useCallback } from "react";
-import { Pressable, Share, StyleSheet, View } from "react-native";
+import React, { useEffect, useMemo, useCallback, useState } from "react";
+import { Pressable, StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react-native";
 
 import { FeedListView } from "@/components/FeedListView";
+import SendToFriendSheet from "@/components/SendToFriendSheet";
 import { theme } from "@/constants/theme";
 import { usePosts, isOnOwnProfile, type Post } from "@/providers/PostsProvider";
 import { profilePostIds } from "@/lib/profilePosts";
@@ -121,16 +122,8 @@ export default function ProfileDropsScreen() {
     [router],
   );
 
-  const handleShare = useCallback(
-    async (post: Post) => {
-      try {
-        await Share.share({
-          message: `Check out this video on Tryal: ${post.media_url}`,
-        });
-      } catch {}
-    },
-    [],
-  );
+  const [sendPost, setSendPost] = useState<Post | null>(null);
+  const handleShare = useCallback((post: Post) => setSendPost(post), []);
 
   const profileDisplay = useMemo(
     () =>
@@ -147,6 +140,7 @@ export default function ProfileDropsScreen() {
   const bottomInset = insets.bottom + 8;
 
   return (
+    <>
     <FeedListView
       posts={posts}
       isLoading={isLoading}
@@ -199,6 +193,8 @@ export default function ProfileDropsScreen() {
         </View>
       }
     />
+    <SendToFriendSheet post={sendPost} onClose={() => setSendPost(null)} />
+    </>
   );
 }
 

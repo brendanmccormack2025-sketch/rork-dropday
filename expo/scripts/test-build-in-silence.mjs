@@ -30,7 +30,9 @@ eq("re-sync at most once a week", [shouldResync(null, 1e12), shouldResync(1e12, 
 
 const contacts = read("../lib/contacts.ts"), settings = read("../app/settings.tsx"), layout = read("../app/_layout.tsx"), auth = read("../providers/AuthProvider.tsx");
 eq("native module detected at runtime and required lazily (no import of expo-contacts at the top)", [/requireOptionalNativeModule\("ExpoContacts"\)/.test(contacts), /require\("expo-contacts"\)/.test(contacts), /^import .*expo-contacts/m.test(contacts)], [true, true, false]);
-eq("contacts read phone numbers only", [/Fields\.PhoneNumbers/.test(contacts), /Fields\.(Name|Emails|Image)/.test(contacts)], [true, false]);
+const syncPart = contacts.slice(0, contacts.indexOf("export type InviteContact"));
+eq("the contacts SYNC (hashing, for build in silence) reads phone numbers only", [/Fields\.PhoneNumbers/.test(syncPart), /Fields\.(Name|Emails|Image)/.test(syncPart)], [true, false]);
+eq("the invite list is the only place that reads names (on the phone, never uploaded; see test-friends.mjs)", /Fields\.Name/.test(contacts.slice(contacts.indexOf("export type InviteContact"))), true);
 eq("settings: Privacy section; the Contacts row only when the module exists", [/Your phone number/.test(settings), /Hide my posts from…/.test(settings), /show: isContactsAvailable\(\)/.test(settings)], [true, true, true]);
 eq("weekly re-sync on app open, one-time phone step, account deletion clears the privacy data", [/syncContactsIfDue\(id\)/.test(layout), /onboarding-phone/.test(layout), /delete_my_privacy_data/.test(auth)], [true, true, true]);
 eq("the explanation text", PHONE_EXPLANATION, "So people in your contacts don't see your posts while they're on Tryal");

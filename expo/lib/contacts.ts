@@ -15,10 +15,10 @@ type ContactsModule = {
   requestPermissionsAsync: () => Promise<{ granted: boolean }>;
   getPermissionsAsync: () => Promise<{ granted: boolean }>;
   getContactsAsync: (o: { fields: string[]; pageSize: number; pageOffset: number }) => Promise<{
-    data: Array<{ phoneNumbers?: Array<{ number?: string; digits?: string }> }>;
+    data: Array<{ id?: string; name?: string; phoneNumbers?: Array<{ number?: string; digits?: string }> }>;
     hasNextPage: boolean;
   }>;
-  Fields: { PhoneNumbers: string };
+  Fields: { PhoneNumbers: string; Name?: string };
 };
 
 export function isContactsAvailable(): boolean {
@@ -102,4 +102,32 @@ export async function removeContactsData(userId: string): Promise<boolean> {
 
 export async function isContactsEnabled(userId: string): Promise<boolean> {
   return (await AsyncStorage.getItem(enabledKey(userId))) === "1";
+}
+
+export type InviteContact = { id: string; name: string; number: string };
+
+/**
+ * The names and numbers the "Invite" list shows: read on the phone when the person taps "Choose from contacts", kept in
+ * memory only and never uploaded (this is not the contacts sync above). Asks the system for permission; a person who says no
+ * still has the invite link and username search.
+ */
+export async function listContactsToInvite(): Promise<{ status: "ok" | "denied" | "unavailable"; contacts: InviteContact[] }> {
+  const mod = loadModule();
+  if (!mod) return { status: "unavailable", contacts: [] };
+  const perm = await mod.requestPermissionsAsync();
+  if (!perm.granted) return { status: "denied", contacts: [] };
+  const region = deviceRegion();
+  const out: InviteContact[] = [];
+  let offset = 0;
+  for (let page = 0; page < 20; page++) {
+    const res = await mod.getContactsAsync({ fields: [mod.Fields.PhoneNumbers, mod.Fields.Name ?? "name"], pageSize: 500, pageOffset: offset });
+    for (const c of res.data) {
+      const number = collectNumbers([c], region)[0];
+      if (number && c.name) out.push({ id: c.id ?? `${c.name}:${number}`, name: c.name, number });
+    }
+    if (!res.hasNextPage) break;
+    offset += 500;
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return { status: "ok", contacts: out };
 }

@@ -34,6 +34,12 @@ export function redirectSystemPath({
     return "/edit";
   }
 
+  // Friend invite links: tryal-scheme://invite/<token> and the web link https://…/i/<token> keep their path.
+  if (path.startsWith("/invite/") || path.startsWith("/i/")) {
+    const token = path.split("/")[2]?.split(/[?#]/)[0];
+    return token ? `/invite/${token}` : "/";
+  }
+
   if (path.startsWith("/feed") || path === "/") {
     return "/";
   }

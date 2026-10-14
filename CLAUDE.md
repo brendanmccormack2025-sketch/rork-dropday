@@ -1,9 +1,9 @@
 # Tryal
 The product is called **Tryal** (renamed from "Trial"; user-facing text only). Code, DB values and identifiers keep the old name: the stored status is `'trial'`, tables/RPCs/migrations/notification types, the slug, bundle identifier, scheme and EAS project are unchanged and must not be renamed. All user-visible strings say "Tryal" (screens, notifications, permission texts, share text, errors); scripts/test-brand-name.mjs fails if "Trial" comes back into one. Wordmarks: expo/assets/images/tryal-wordmark.png on light screens, tryal-wordmark-white.png on dark ones (trial-wordmark.png is kept, unused).
 
-There is no follower system. "Known people" are phone contacts (a match in either direction) plus the creator's hide list (plus messaging friends, later); they only see a post after it survives.
+There is no follower system. "Known people" are phone contacts (a match in either direction) plus the creator's hide list plus friends; they only see a post after it survives.
 
-Three systems: AI video editor, content testing, a fresh feed. Core loop: upload video -> AI edit -> Post ("Put it on Tryal") -> tested by strangers -> survives -> 24-hour distribution -> expires. No follower/following system; no DMs or groups. Profile = username, picture, bio, external links (Instagram, TikTok, YouTube, website), not a grid of all videos. Navigation: Feed, Create/AI Editor, Profile.
+Three systems: AI video editor, content testing, a fresh feed. Core loop: upload video -> AI edit -> Post ("Put it on Tryal") -> tested by strangers -> survives -> 24-hour distribution -> expires. No follower/following system; no groups and no comments. Friends (mutual: invite link, request, or username) can send each other 1:1 text messages and posts (supabase/migration-friends-messages.sql); friends are known people. Profile = username, picture, bio, external links (Instagram, TikTok, YouTube, website), not a grid of all videos. Navigation: Feed, Create/AI Editor, Profile.
 
 ## Stack
 React Native + Expo + TypeScript, Supabase (SQL migrations in expo/supabase/), EAS builds. Run all EAS/expo commands from expo/.

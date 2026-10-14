@@ -694,7 +694,7 @@ function isParentUnavailableError(message: string | null | undefined): boolean {
   return /cannot react/i.test(message ?? "");
 }
 
-const FEED_POST_SELECT =
+export const FEED_POST_SELECT =
   "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, qualified_view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)";
 
 /** true: For You comes from get_feed (server order). false: the old on-device query + rankFeed. */
@@ -716,7 +716,7 @@ function loadedFeedIds(data: InfiniteData<FeedPage, number> | undefined): string
 const FEED_STATUSES = ["trial", "incomplete", "survived"];
 
 /** Map a raw posts row (FEED_POST_SELECT shape) to a Post. */
-function mapFeedRow(row: Record<string, unknown>): Post {
+export function mapFeedRow(row: Record<string, unknown>): Post {
   return {
     id: row.id as string,
     user_id: row.user_id as string,

@@ -44,6 +44,14 @@ export default function NotificationsScreen() {
 
   const handleTap = useCallback(
     (notif: NotificationRow) => {
+      if (notif.type === "friend_request") {
+        router.push("/people" as never);
+        return;
+      }
+      if (notif.type === "friend_accept" && notif.actor_id) {
+        router.push(`/messages/${notif.actor_id}` as never);
+        return;
+      }
       if (notif.post_id) {
         router.push(`/post/${notif.post_id}/reaction-tree` as never);
       }

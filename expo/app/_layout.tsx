@@ -38,6 +38,7 @@ import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { syncContactsIfDue } from "@/lib/contacts";
+import { redeemPendingInvite } from "@/lib/invite";
 import { phonePromptKey } from "@/lib/phonePrompt";
 import { PostsProvider } from "@/providers/PostsProvider";
 import { GroupsProvider } from "@/providers/GroupsProvider";
@@ -79,6 +80,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (phoneStepChecked.current === id) return;
     phoneStepChecked.current = id;
     void syncContactsIfDue(id);
+    void redeemPendingInvite();   // an invite link opened before the account existed
     AsyncStorage.getItem(phonePromptKey(id)).then((seen) => {
       if (!seen) router.push("/onboarding-phone" as never);
     }, () => {});

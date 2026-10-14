@@ -13,7 +13,10 @@ export type NotificationType =
   | "verdict_survived"
   | "verdict_archived"
   | "verdict_incomplete"
-  | "followed_post_survived";
+  | "followed_post_survived"
+  | "friend_request"
+  | "friend_accept"
+  | "message";
 
 export type NotificationRow = {
   id: string;

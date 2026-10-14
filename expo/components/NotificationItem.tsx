@@ -15,7 +15,7 @@ import type { NotificationRow } from "@/providers/NotificationsProvider";
  * follow_request, follow_accept, followed_post_survived) and anything unknown
  * render nothing.
  */
-const DISPLAYED_TYPES: string[] = ["like", "reaction", "verdict_survived"];   // posts that end or stay incomplete disappear quietly: no such notifications
+const DISPLAYED_TYPES: string[] = ["like", "reaction", "verdict_survived", "friend_request", "friend_accept"];   // "message" rows exist for the push; chats show their own unread dot   // posts that end or stay incomplete disappear quietly: no such notifications
 
 export function isDisplayedNotification(notif: { type: string }): boolean {
   return DISPLAYED_TYPES.includes(notif.type);
@@ -79,6 +79,10 @@ export default function NotificationItem({
   } else if (notif.type === "reaction") {
     icon = <Zap color={theme.accent} size={15} strokeWidth={2} fill={theme.accent} />;
     actionText = "reacted to your post";
+  } else if (notif.type === "friend_request") {
+    actionText = "sent you a friend request";
+  } else if (notif.type === "friend_accept") {
+    actionText = "is now your friend";
   } else if (notif.type === "verdict_survived") {
     icon = <Trophy color={theme.success} size={15} strokeWidth={2} />;
     actionText = "Your post survived Tryal 🏆";

@@ -31,6 +31,8 @@ import { FEED_CAUGHT_UP_BODY, FEED_CAUGHT_UP_BUTTON, FEED_CAUGHT_UP_TITLE } from
 import { theme } from "@/constants/theme";
 import { usePosts, type Post, resolveAvatarUrl } from "@/providers/PostsProvider";
 import { useNotifications } from "@/providers/NotificationsProvider";
+import { useUnreadMessages } from "@/hooks/useUnreadMessages";
+import SendToFriendSheet from "@/components/SendToFriendSheet";
 import { supabase } from "@/lib/supabase";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
@@ -39,6 +41,8 @@ const FREE_VIEWS_BEFORE_GATE = 5;
 export default function FeedScreen() {
   const router = useRouter();
   const { unreadCount } = useNotifications();
+  const { unread: unreadMessages } = useUnreadMessages();
+  const [sendPost, setSendPost] = useState<Post | null>(null);
   const {
     feed, feedLoading, feedError, postedBannerAt, fetchMoreFeed, refetchFeed, refreshFeed,
     refetchMyPosts, optimisticPosts, lastPostCreatedAtRef,
@@ -111,10 +115,7 @@ export default function FeedScreen() {
         isRefreshing={refreshing}
         initialIndex={0}
         showGate={gateActive}
-        onSharePost={(post) => {
-          // DM sharing disabled for this build — native share sheet only.
-          Share.share({ message: `Check out this video on Tryal: ${post.media_url}` }).catch(() => {});
-        }}
+        onSharePost={(post) => setSendPost(post)}
         onReactionsPost={(post) => {
           router.push(`/post/${post.id}/reaction-tree` as never);
         }}
@@ -128,16 +129,27 @@ export default function FeedScreen() {
                   contentFit="contain"
                 />
               </View>
-              {/* Notifications bell, top-right (right of the wordmark, below the status bar) */}
-              <Pressable
-                onPress={() => router.push("/notifications" as never)}
-                style={styles.bellBtn}
-                hitSlop={10}
-                accessibilityLabel="Notifications"
-              >
-                <Bell color="#fff" size={20} strokeWidth={2} />
-                {unreadCount > 0 && <View style={styles.bellDot} />}
-              </Pressable>
+              {/* Messages (paper plane) and the notifications bell, top-right, below the status bar */}
+              <View style={styles.headerActions} pointerEvents="box-none">
+                <Pressable
+                  onPress={() => router.push("/messages" as never)}
+                  style={styles.bellBtn}
+                  hitSlop={10}
+                  accessibilityLabel="Messages"
+                >
+                  <Send color="#fff" size={20} strokeWidth={2} />
+                  {unreadMessages > 0 && <View style={styles.bellDot} />}
+                </Pressable>
+                <Pressable
+                  onPress={() => router.push("/notifications" as never)}
+                  style={styles.bellBtn}
+                  hitSlop={10}
+                  accessibilityLabel="Notifications"
+                >
+                  <Bell color="#fff" size={20} strokeWidth={2} />
+                  {unreadCount > 0 && <View style={styles.bellDot} />}
+                </Pressable>
+              </View>
             </View>
           </SafeAreaView>
         }
@@ -151,6 +163,8 @@ export default function FeedScreen() {
           ) : undefined
         }
       />
+
+      <SendToFriendSheet post={sendPost} onClose={() => setSendPost(null)} />
 
       {bannerVisible ? (
         <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.bannerWrap}>
@@ -426,6 +440,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 10 },
   // The wordmark file has transparent margins (about 14% each side), so it is drawn larger than its visible letters and pulled left to line up with the header's edge.
   brandLogo: { width: 101, height: 36, marginLeft: -15 },
   bellBtn: {
