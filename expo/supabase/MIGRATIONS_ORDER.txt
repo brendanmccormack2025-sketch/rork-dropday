@@ -16,6 +16,7 @@ migration-survived-profile.sql
 migration-hide-ended.sql
 migration-views-exclude-author.sql
 migration-known-connections.sql
+migration-friends-messages.sql
 
 # ── NOT run by ship.sh, on purpose ───────────────────────────────────────────────────────────────────────────────
 # Baseline, applied once when the database was created. Re-running them would put OLDER definitions back over newer
@@ -34,3 +35,5 @@ migration-known-connections.sql
 #
 # One manual step no script can do: the contact-hash pepper in Supabase Vault (see migration-known-connections.sql):
 #   select vault.create_secret('<64+ random characters>', 'trial_contact_pepper');
+# And one for friend invite links (migration-friends-messages.sql; changing it kills every link in circulation):
+#   select vault.create_secret('<64+ random characters>', 'tryal_invite_secret');

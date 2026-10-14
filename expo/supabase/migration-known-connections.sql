@@ -5,7 +5,7 @@
 --   follow     a follow in either direction
 --   contact    the creator's contacts contain the viewer's phone, or the viewer's contacts contain the creator's
 --   hide_list  the creator's "Hide my trials from..." list (one direction: creator -> hidden person)
---   (friends from the messaging feature: just one more UNION ALL branch at the bottom of the view)
+--   friend     (added by migration-friends-messages.sql, which runs after this file and replaces the view with its extra branch)
 -- The engine and the feed only call trial_is_silenced() and never change when a source is added.
 --
 -- PRIVACY: phone numbers are UNVERIFIED and are used ONLY for this invisible exclusion. They are never shown to anyone,
