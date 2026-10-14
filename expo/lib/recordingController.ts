@@ -9,7 +9,7 @@
  *
  * Pure apart from the injected deps (the native camera); erasable TypeScript only so the Node tests can run it.
  */
-import { canRecordMore, maxDurationSeconds, remainingMs, type CameraSegment } from "./cameraSegments.ts";
+import { MAX_CAMERA_MS, canRecordMore, maxDurationSeconds, remainingMs, type CameraSegment } from "./cameraSegments.ts";
 
 export type RecState = "idle" | "recording" | "stopping";
 
@@ -29,6 +29,8 @@ export type RecordingDeps = {
   afterFlipSettled(): Promise<void>;
   /** The segments recorded so far (the 60 s cap is worked out from them). */
   getSegments(): CameraSegment[];
+  /** The cap for this take in ms (default 60 s; a video reaction is shorter, REACTION_MAX_MS). */
+  maxMs?(): number;
   onSegment(segment: CameraSegment & { uri: string; type: "video" }): void;
   /** Delete a file of a segment that was dropped as empty. */
   discardFile?(uri: string): void;
@@ -47,6 +49,8 @@ export type RecordingDeps = {
 };
 
 export const FULL_TEXT = "That's the 60 seconds. Tap ✓, or delete the last clip to record more.";
+/** The full-take message for a cap (60 s gives FULL_TEXT). */
+export const fullText = (maxMs: number): string => FULL_TEXT.replace("60 seconds", `${Math.round(maxMs / 1000)} seconds`);
 export const NOT_READY_TEXT = "Camera not ready. Please try again.";
 export const NOT_SAVED_TEXT = "Recording could not be saved. Please try again.";
 
@@ -74,6 +78,11 @@ export class RecordingController {
   private takeId = "";
   /** When the last segment resolved (the start of the flip gap). */
   private lastResolvedAt = 0;
+  /** This take's cap in ms (60 s unless the screen says otherwise, e.g. a reaction). */
+  private cap(): number {
+    const m = this.deps.maxMs?.();
+    return typeof m === "number" && m > 0 ? m : MAX_CAMERA_MS;
+  }
 
   constructor(deps: RecordingDeps) {
     this.deps = deps;
@@ -93,8 +102,8 @@ export class RecordingController {
   /** Start a segment. Only from idle; false when ignored or refused. */
   start(): boolean {
     if (this.state !== "idle") return false;
-    if (!canRecordMore(this.deps.getSegments())) {
-      this.deps.onError(FULL_TEXT);
+    if (!canRecordMore(this.deps.getSegments(), 0, this.cap())) {
+      this.deps.onError(fullText(this.cap()));
       return false;
     }
     this.deps.onError(null);
@@ -163,7 +172,7 @@ export class RecordingController {
         this.deps.switchFacing();
         await this.deps.afterFlipSettled();
         this.switching = false;
-        if (this.stopRequested || !canRecordMore(this.deps.getSegments())) break;
+        if (this.stopRequested || !canRecordMore(this.deps.getSegments(), 0, this.cap())) break;
         continuation = true;
       }
     } catch (e) {
@@ -186,12 +195,12 @@ export class RecordingController {
     // Stopped (or flipped) before the camera even started: nothing was recorded.
     if (this.stopRequested || this.flipRequested) return;
     const segments = this.deps.getSegments();
-    const maxSec = maxDurationSeconds(segments);
+    const maxSec = maxDurationSeconds(segments, 0, this.cap());
     let startedAt = this.deps.now();
     this.recording = true;
     const mine = ++this.token;
     // Safety net: the recorder is given the remaining time, but if it does not stop by itself, stop it.
-    void this.deps.delay(remainingMs(segments) + 400).then(() => {
+    void this.deps.delay(remainingMs(segments, 0, this.cap()) + 400).then(() => {
       if (this.recording && this.token === mine) this.deps.stopNative();
     });
     let result: { uri?: string } | null | undefined;

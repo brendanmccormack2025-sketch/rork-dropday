@@ -32,7 +32,7 @@ import { theme } from "@/constants/theme";
 import { useCameraRecorder } from "@/hooks/useCameraRecorder";
 import { SCREEN_LIGHT_COLOR } from "@/lib/cameraFlash";
 import { createScreenLight, nativeBrightness } from "@/lib/screenLight";
-import { MAX_CAMERA_MS, barSegments, canProceed, totalMs, usableSegments } from "@/lib/cameraSegments";
+import { MAX_CAMERA_MS, REACTION_MAX_MS, barSegments, canProceed, totalMs, usableSegments } from "@/lib/cameraSegments";
 
 /** Record button: a 76 pt circle inside an 88 pt touch target (the minimum is 72). */
 const RECORD_SIZE = 76;
@@ -119,6 +119,8 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
   const navigation = useNavigation();
   const { reactingTo, rootDropId } = useLocalSearchParams<{ reactingTo?: string; rootDropId?: string }>();
   const insets = useSafeAreaInsets();
+  // A video reaction is at most 10 s; a post up to 60 s.
+  const capMs = reactingTo || rootDropId ? REACTION_MAX_MS : MAX_CAMERA_MS;
 
   const {
     cameraRef,
@@ -148,7 +150,7 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
     teardown,
     handleCameraReady,
     isCameraReady,
-  } = useCameraRecorder();
+  } = useCameraRecorder({ maxMs: capMs });
 
   const clipsRef = useRef(clips);
   clipsRef.current = clips;
@@ -377,7 +379,7 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
   const spinDeg = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.07] });
   const showNext = canProceed(clips);
-  const takeSeconds = Math.min(60, Math.floor((totalMs(clips) + liveMs) / 1000));
+  const takeSeconds = Math.min(Math.round(capMs / 1000), Math.floor((totalMs(clips) + liveMs) / 1000));
 
   return (
     <GestureHandlerRootView style={styles.fullscreen}>
@@ -425,7 +427,7 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
 
       {/* Segmented progress bar: the take against 60 s, a notch where each segment starts */}
       <View style={[styles.segBar, { top: insets.top + 6 }]} pointerEvents="none" accessibilityLabel="Recording progress">
-        {barSegments(clips, isRecording ? { ms: liveMs, runId: takeRef.current?.id } : undefined).map((seg, i) => (
+        {barSegments(clips, isRecording ? { ms: liveMs, runId: takeRef.current?.id } : undefined, capMs).map((seg, i) => (
           <View
             key={i}
             style={[

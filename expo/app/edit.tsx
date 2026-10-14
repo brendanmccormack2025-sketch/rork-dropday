@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { reactionTooLong } from "@/lib/cameraSegments";
 import {
   ActivityIndicator,
   Alert,
@@ -4347,6 +4348,12 @@ export default function EditScreen() {
       }
 
       if (finishingCaptionsRef.current) return; // already waiting for captions: one Post at a time
+      // A video reaction is at most 10 s (the camera stops there; a clip from the library or a longer edit is caught here).
+      const tooLong = reactingTo ? reactionTooLong(totalDurationMs) : null;
+      if (tooLong) {
+        setError(tooLong);
+        return;
+      }
       setError(null);
       setSuccess(null);
       // Captions still on their way: "Finishing captions…" and wait up to 10 s, then post without them.
@@ -4393,7 +4400,7 @@ export default function EditScreen() {
         err instanceof Error ? err.message : "Something went wrong. Please try again.",
       );
     }
-  }, [clips, router, user, session, executePost]);
+  }, [clips, router, user, session, executePost, reactingTo, totalDurationMs]);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (draftId && !draftsLoaded) {

@@ -7,7 +7,7 @@ import * as Haptics from "expo-haptics";
 import { deleteAsync } from "@/lib/fileSystemCompat";
 import { recordMetric } from "@/lib/clientErrors";
 import { FACING_READ_TIMEOUT_MS, withTimeout } from "@/lib/cameraStart";
-import { deleteLastRun, type CameraSegment } from "@/lib/cameraSegments";
+import { MAX_CAMERA_MS, deleteLastRun, type CameraSegment } from "@/lib/cameraSegments";
 import { flashMode } from "@/lib/cameraFlash";
 import { RecordingController, type RecState } from "@/lib/recordingController";
 
@@ -42,7 +42,10 @@ function haptic(style: Haptics.ImpactFeedbackStyle): void {
   if (Platform.OS !== "web") Haptics.impactAsync(style).catch(() => {});
 }
 
-export function useCameraRecorder() {
+export function useCameraRecorder(options: { maxMs?: number } = {}) {
+  // The take's cap (a reaction is shorter than a post); read through a ref so the controller is made once.
+  const maxMsRef = useRef<number>(options.maxMs ?? MAX_CAMERA_MS);
+  maxMsRef.current = options.maxMs ?? MAX_CAMERA_MS;
   // One CameraView, always mounted. Flipping only changes its `facing` prop.
   const cameraRef = useRef<CameraView>(null);
   const cameraReadyRef = useRef(false);
@@ -150,6 +153,7 @@ export function useCameraRecorder() {
             });
           }),
         getSegments: () => clipsRef.current as CameraSegment[],
+        maxMs: () => maxMsRef.current,
         discardFile: (uri) => {
           deleteAsync(uri, { idempotent: true }).catch(() => {});
         },

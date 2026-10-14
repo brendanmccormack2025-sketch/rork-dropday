@@ -73,7 +73,7 @@ const seg = (id, runId, ms, type = "video") => ({ id, uri: `file:///${id}.mov`, 
   eq("deleting a run frees the time again", canRecordMore(deleteLastRun([seg("a", "r1", 30000), seg("b", "r2", 30000)]).kept), true);
   const hook = read("../hooks/useCameraRecorder.ts");
   const ctl = read("../lib/recordingController.ts");
-  ok("the recorder gets the remaining time as maxDuration, and a full take refuses to start", /maxDurationSeconds\(segments\)/.test(ctl) && /!canRecordMore\(this\.deps\.getSegments\(\)\)/.test(ctl));
+  ok("the recorder gets the remaining time as maxDuration, and a full take refuses to start", /maxDurationSeconds\(segments, 0, this\.cap\(\)\)/.test(ctl) && /!canRecordMore\(this\.deps\.getSegments\(\), 0, this\.cap\(\)\)/.test(ctl));
   ok("each file's recorded length is kept for the bar and the cap", /const ranMs = Math\.max\(0, this\.deps\.now\(\) - startedAt\)/.test(ctl) && /measuredMs: ranMs/.test(ctl) && /measuredMs: seg\.measuredMs/.test(hook));
 }
 
@@ -117,6 +117,18 @@ const seg = (id, runId, ms, type = "video") => ({ id, uri: `file:///${id}.mov`, 
   const dbg = (extra) => formatAiDebug({ sourceDurationMs: 30000, clips: [], sourceUri: "x", proposals: [], candidates: [], transcription: null, hookTrims: [], fillers: [], userCuts: [], protection: { ranges: [], affected: [] }, ...extra }).split("\n").find((l) => l.startsWith("Transcription"));
   eq("the debug says what transcription is waiting for", dbg({ transcriptionWaitingFor: "the merge" }), "Transcription: not run (waiting for the merge)");
   eq("(and is unchanged without a reason)", dbg({}), "Transcription: not run");
+}
+
+// ── video reactions are at most 10 s ──
+{
+  const cs = await import("../lib/cameraSegments.ts");
+  eq("10 s cap; a little rounding is fine", [cs.REACTION_MAX_MS, cs.reactionTooLong(10_000), cs.reactionTooLong(10_200)], [10_000, null, null]);
+  eq("too long: says how much to trim", [cs.reactionTooLong(11_000), cs.reactionTooLong(14_500)], ["Reactions can be up to 10 seconds. Trim 1 more second to post it.", "Reactions can be up to 10 seconds. Trim 5 more seconds to post it."]);
+  eq("the bar fills against 10 s for a reaction", cs.barSegments([{ id: "a", uri: "u", type: "video", runId: "r", measuredMs: 5_000 }], undefined, 10_000)[0].widthFrac, 0.5);
+  eq("remaining time uses the reaction cap", [cs.remainingMs([], 0, 10_000), cs.remainingMs([])], [10_000, 60_000]);
+  const cam = read("../app/camera.tsx"), ed = read("../app/edit.tsx");
+  ok("the camera uses the 10 s cap when reacting", /reactingTo \|\| rootDropId \? REACTION_MAX_MS : MAX_CAMERA_MS/.test(cam) && /useCameraRecorder\(\{ maxMs: capMs \}\)/.test(cam));
+  ok("the editor will not post a reaction over 10 s (a library clip or a longer edit)", /reactingTo \? reactionTooLong\(totalDurationMs\)/.test(ed));
 }
 
 // ── camera roll accepts only one video ──

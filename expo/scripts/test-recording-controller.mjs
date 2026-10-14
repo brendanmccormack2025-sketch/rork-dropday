@@ -82,6 +82,19 @@ function rig(opts = {}) {
   eq("the states went idle -> recording -> stopping -> idle", r.states, ["recording", "stopping", "idle"]);
 }
 
+// ── a video reaction: the take stops at 10 s ──
+{
+  const r = rig();
+  r.deps.maxMs = () => 10_000;
+  const c = new RecordingController(r.deps);
+  c.toggle();
+  await tick(); await tick();
+  eq("a reaction asks the camera for at most 10 s (a post asks for 60)", r.log.find((l) => l.startsWith("record(")), "record(10)");
+  c.stop(); await c.settled();
+  r.segments.length = 0; r.segments.push({ id: "full", uri: "file:///full.mov", type: "video", measuredMs: 10_000 });
+  eq("a full 10 s reaction cannot record more, and says 10 seconds", [c.start(), r.errors.pop()], [false, "That's the 10 seconds. Tap ✓, or delete the last clip to record more."]);
+}
+
 // ── double-tap guard ──
 {
   const r = rig();
