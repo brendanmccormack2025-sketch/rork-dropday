@@ -112,7 +112,7 @@ if (!BIN) {
       const kcPath = join(sqlDir, "migration-known-connections.sql");
       const kc1 = psqlFile("t", kcPath), kc2 = psqlFile("t", kcPath);
       eq("known-connections after friends applies cleanly, and again", [/ERROR/.test(kc1.stderr), /ERROR/.test(kc2.stderr)], [false, false]);
-      eq("MIGRATIONS_ORDER.txt: friends right before known-connections, which stays last", (() => { const o = readFileSync(join(sqlDir, "MIGRATIONS_ORDER.txt"), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")); return [o[o.length - 2], o[o.length - 1]]; })(), ["migration-friends-messages.sql", "migration-known-connections.sql"]);
+      eq("MIGRATIONS_ORDER.txt: friends, then push, then known-connections, which stays last", (() => { const o = readFileSync(join(sqlDir, "MIGRATIONS_ORDER.txt"), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")); return o.slice(-3); })(), ["migration-friends-messages.sql", "migration-push.sql", "migration-known-connections.sql"]);
 
       const U = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
       const asUser = (uid, sql) => psql("t", `set role authenticated; set request.jwt.claim.sub='${uid}'; ${sql}`, ["-v", "ON_ERROR_STOP=1"]);
