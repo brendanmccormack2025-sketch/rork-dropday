@@ -69,6 +69,13 @@ for (const dir of DIRS) for (const p of files(dir)) {
 }
 eq("no user-facing string in the app says Trial (literals with words, JSX text, labels)", hits, []);
 
+eq("no user-facing string uses Tryal as a plural noun (\"Tryals\"): plain words instead", hits.length === 0 && DIRS.flatMap(files).filter((p) => /\bTryals\b/.test(stripComments(read(p)))), []);
+
+// the operating entity is the owner's real legal name until the LLC exists; Tryal stays the app / service name
+const legal = read("constants/legal.ts");
+eq("legal text: the operator is Brendan McCormack (\"Tryal\", \"we\") in the Terms and the Privacy Policy", (legal.match(/Brendan McCormack \(\\"Tryal\\", \\"we,\\"/g) ?? []).length, 2);
+eq("legal text: nothing is 'operated by Tryal'", /operated by Tryal/.test(legal) || /^\s*"Tryal \(\\"we/m.test(legal), false);
+
 // app.json: the name and every permission text
 const app = JSON.parse(read("app.json")).expo;
 const strings = [];

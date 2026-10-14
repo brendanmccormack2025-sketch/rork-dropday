@@ -10,7 +10,7 @@ import { HIDE_TRIALS_EXPLAINER } from "@/lib/privacyTexts";
 
 type P = { id: string; username: string };
 
-/** Settings → Hide my Tryals from…: search usernames, add or remove people. Works without contacts. */
+/** Settings → Hide my posts from…: search usernames, add or remove people. Works without contacts. */
 export default function HideTrialsScreen() {
   const { user } = useAuth();
   const [hidden, setHidden] = useState<P[]>([]);
@@ -53,7 +53,7 @@ export default function HideTrialsScreen() {
   const hiddenIds = new Set(hidden.map((h) => h.id));
 
   return (
-    <SettingsScaffold title="Hide my Tryals from…">
+    <SettingsScaffold title="Hide my posts from…">
       <UiText style={s.text}>{HIDE_TRIALS_EXPLAINER}</UiText>
       <TextInput value={q} onChangeText={setQ} placeholder="Search usernames" placeholderTextColor={theme.textDim} autoCapitalize="none" autoCorrect={false} style={s.input} />
       {results.filter((r) => !hiddenIds.has(r.id)).map((p) => (

@@ -32,7 +32,7 @@ struct AuthSheet: View {
                         Text(mode == .signIn ? "Welcome back" : "Join Tryal")
                             .font(.title2.bold())
                             .foregroundStyle(Theme.text)
-                        Text("Sign in to post your Tryal")
+                        Text("Sign in to post your video")
                             .font(.subheadline)
                             .foregroundStyle(Theme.textMuted)
                     }

@@ -113,7 +113,7 @@ export default function FeedScreen() {
         showGate={gateActive}
         onSharePost={(post) => {
           // DM sharing disabled for this build — native share sheet only.
-          Share.share({ message: `Check out this Tryal: ${post.media_url}` }).catch(() => {});
+          Share.share({ message: `Check out this video on Tryal: ${post.media_url}` }).catch(() => {});
         }}
         onReactionsPost={(post) => {
           router.push(`/post/${post.id}/reaction-tree` as never);
@@ -224,7 +224,7 @@ function GateOverlay({
         </View>
         <UiText style={styles.gateTitle}>Post to unlock</UiText>
         <UiText style={styles.gateSub}>
-          You've watched {viewed} posts. Post your Tryal to keep watching
+          You've watched {viewed} posts. Post your video to keep watching
           the feed.
         </UiText>
         <Pressable onPress={onDrop} style={styles.gateBtn}>
@@ -288,7 +288,7 @@ function ShareSheet({
   const handleNativeShare = async () => {
     try {
       await Share.share({
-        message: `Check out this Tryal: ${post.media_url}`,
+        message: `Check out this video on Tryal: ${post.media_url}`,
       });
     } catch {}
   };

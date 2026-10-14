@@ -125,7 +125,7 @@ export default function ProfileDropsScreen() {
     async (post: Post) => {
       try {
         await Share.share({
-          message: `Check out this Tryal: ${post.media_url}`,
+          message: `Check out this video on Tryal: ${post.media_url}`,
         });
       } catch {}
     },

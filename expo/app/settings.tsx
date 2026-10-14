@@ -178,7 +178,7 @@ export default function SettingsScreen() {
             {[
               { label: "Your phone number", href: "/settings/phone", icon: <Phone color={theme.textMuted} size={18} strokeWidth={2} />, show: true },
               { label: "Contacts", href: "/settings/contacts", icon: <Users color={theme.textMuted} size={18} strokeWidth={2} />, show: isContactsAvailable() },
-              { label: "Hide my Tryals from…", href: "/settings/hide-trials", icon: <EyeOff color={theme.textMuted} size={18} strokeWidth={2} />, show: true },
+              { label: "Hide my posts from…", href: "/settings/hide-trials", icon: <EyeOff color={theme.textMuted} size={18} strokeWidth={2} />, show: true },
             ]
               .filter((r) => r.show)
               .map((r) => (

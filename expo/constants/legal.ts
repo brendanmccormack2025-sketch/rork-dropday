@@ -29,7 +29,7 @@ export const TERMS_OF_USE: LegalDocument = {
   title: "Terms of Use",
   lastUpdated: "September 24, 2026",
   intro:
-    "Welcome to Tryal. These Terms of Use (\"Terms\") govern your access to and use of the Tryal mobile application (the \"App\"), operated by Tryal (\"we,\" \"us,\" or \"our\"). By creating an account or using the App, you agree to these Terms.",
+    "Welcome to Tryal. These Terms of Use (\"Terms\") govern your access to and use of the Tryal mobile application (the \"App\"), operated by Brendan McCormack (\"Tryal\", \"we,\" \"us,\" or \"our\"). By creating an account or using the App, you agree to these Terms.",
   sections: [
     {
       heading: "1. Eligibility",
@@ -128,7 +128,7 @@ export const PRIVACY_POLICY: LegalDocument = {
   title: "Privacy Policy",
   lastUpdated: "September 24, 2026",
   intro:
-    "Tryal (\"we,\" \"us,\" or \"our\") operates the Tryal mobile application (the \"App\"). This Privacy Policy explains what information we collect, how we use it, and your rights regarding that information.",
+    "Brendan McCormack (\"Tryal\", \"we,\" \"us,\" or \"our\") operates the Tryal mobile application (the \"App\"). This Privacy Policy explains what information we collect, how we use it, and your rights regarding that information.",
   sections: [
     {
       heading: "1. Information We Collect",
