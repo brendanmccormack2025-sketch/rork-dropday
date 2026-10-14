@@ -162,6 +162,9 @@ if [ -z "$DRY" ]; then
   if node "$SQL_RUNNER" query "select count(*) as n from vault.decrypted_secrets where name = 'trial_contact_pepper'" 2>/dev/null | grep -q '"n":[ ]*0'; then
     NOTES+=("Vault secret trial_contact_pepper is not set (phone numbers cannot be saved): select vault.create_secret('<64+ random characters>', 'trial_contact_pepper');")
   fi
+  if node "$SQL_RUNNER" query "select count(*) as n from vault.decrypted_secrets where name = 'tryal_invite_secret'" 2>/dev/null | grep -q '"n":[ ]*0'; then
+    NOTES+=("Vault secret tryal_invite_secret is not set (friend invite links cannot be made): select vault.create_secret('<64+ random characters>', 'tryal_invite_secret');")
+  fi
   for f in "${SCHEDULE_FAILED[@]}"; do
     NOTES+=("$f is deployed but its dry run / schedule did NOT go through (see the message above); the files stay queued until it does. Run ./ship.sh again after fixing it.")
   done

@@ -39,6 +39,7 @@ import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { syncContactsIfDue } from "@/lib/contacts";
 import { redeemPendingInvite } from "@/lib/invite";
+import { installPushHandlers, registerForPush, watchPushToken } from "@/lib/push";
 import { phonePromptKey } from "@/lib/phonePrompt";
 import { PostsProvider } from "@/providers/PostsProvider";
 import { GroupsProvider } from "@/providers/GroupsProvider";
@@ -71,6 +72,16 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (id) void flushClientErrors(id);
   }, [session?.user?.id]);
 
+  // A tap on a push opens the screen it names (only routes the app knows); the saved token follows system changes.
+  useEffect(() => {
+    const offTap = installPushHandlers((route) => router.push(route as never));
+    const offToken = watchPushToken();
+    return () => {
+      offTap();
+      offToken();
+    };
+  }, [router]);
+
   // Build in silence: re-sync contacts (only if the user turned it on) on app open, at most weekly; and offer the
   // optional phone number step once per account (after the auth screens are gone).
   const phoneStepChecked = React.useRef<string | null>(null);
@@ -81,6 +92,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     phoneStepChecked.current = id;
     void syncContactsIfDue(id);
     void redeemPendingInvite();   // an invite link opened before the account existed
+    void registerForPush(id);     // ask once, then save this phone's Expo push token for the account
     AsyncStorage.getItem(phonePromptKey(id)).then((seen) => {
       if (!seen) router.push("/onboarding-phone" as never);
     }, () => {});

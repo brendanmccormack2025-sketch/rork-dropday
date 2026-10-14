@@ -1,3 +1,4 @@
+import { unregisterPush } from "@/lib/push";
 import createContextHook from "@nkzw/create-context-hook";
 import type { Session, User } from "@supabase/supabase-js";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
@@ -282,6 +283,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, []);
 
   const signOut = useCallback(async () => {
+    await unregisterPush();   // this phone stops getting this person's pushes
     await supabase.auth.signOut();
     queryClient.clear();
   }, [queryClient]);
@@ -313,6 +315,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     // Sign out locally and clear all cached queries.
+    await unregisterPush();
     await supabase.auth.signOut();
     queryClient.clear();
   }, [queryClient]);

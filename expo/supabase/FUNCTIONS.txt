@@ -3,6 +3,7 @@
 # --use-api (server-side bundling: no Docker needed). schedule=<file> is applied after the function is deployed. Blank lines
 # and # comments are ignored. Keep this file up to date whenever a function is added.
 
+send-push  schedule=supabase/schedule-send-push.sql   --no-verify-jwt   # authorizes the caller itself (service key), like delete-media
 delete-media  schedule=supabase/schedule-delete-media.sql   --no-verify-jwt   # the function authorizes the caller itself (legacy service_role JWT or sb_secret_ key); the gateway JWT check would reject sb_secret_ keys
 
 # ── delete-media ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -15,3 +16,12 @@ delete-media  schedule=supabase/schedule-delete-media.sql   --no-verify-jwt   # 
 #          2) stores the project's service role key in Vault as service_role_key (fetched with SUPABASE_ACCESS_TOKEN),
 #          3) applies supabase/schedule-delete-media.sql: pg_cron + pg_net call the function with ?run=1 every 15 minutes.
 #          If any of that fails, ship.sh still publishes the app update and lists what to redo.
+
+# ── send-push ────────────────────────────────────────────────────────────────────────────────────────────────────
+# What: sends Expo push notifications for new rows in public.notifications (survived, reactions, like milestones, friend
+#       request / accept, messages), honours push_prefs, retries failures, removes dead tokens (also from receipts).
+# Needs: migration-push.sql applied (ship.sh does, see MIGRATIONS_ORDER.txt). Optional secret EXPO_ACCESS_TOKEN
+#        (Expo enhanced push security): npx supabase secrets set EXPO_ACCESS_TOKEN=<token> --project-ref tfdjymogbtfavdzgfqas
+# Calls:   POST /functions/v1/send-push          -> dry run (counts the waiting rows)
+#          POST /functions/v1/send-push?run=1    -> sends. Header: Authorization: Bearer <service role key>.
+# Schedule: pg_cron + pg_net every minute (schedule= above), set up by ship.sh like delete-media.

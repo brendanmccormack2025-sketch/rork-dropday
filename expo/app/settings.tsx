@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ban, ChevronLeft, EyeOff, FileText, LogOut, Phone, Scissors, Shield, Trash2, User, Users } from "lucide-react-native";
+import { Ban, Bell, ChevronLeft, EyeOff, FileText, LogOut, Phone, Scissors, Shield, Trash2, User, Users } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -178,6 +178,7 @@ export default function SettingsScreen() {
             {[
               { label: "Your phone number", href: "/settings/phone", icon: <Phone color={theme.textMuted} size={18} strokeWidth={2} />, show: true },
               { label: "Contacts", href: "/settings/contacts", icon: <Users color={theme.textMuted} size={18} strokeWidth={2} />, show: isContactsAvailable() },
+              { label: "Notifications", href: "/settings/notifications", icon: <Bell color={theme.textMuted} size={18} strokeWidth={2} />, show: true },
               { label: "Hide my posts from…", href: "/settings/hide-trials", icon: <EyeOff color={theme.textMuted} size={18} strokeWidth={2} />, show: true },
             ]
               .filter((r) => r.show)
