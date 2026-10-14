@@ -16,7 +16,7 @@ export default function CaptionsExplainer({ visible, onContinue, onNotNow }: Pro
             Editing, on your phone
           </UiText>
           <UiText style={styles.body}>
-            Trial analyzes your speech on your phone to edit your video. Nothing is uploaded.
+            Tryal analyzes your speech on your phone to edit your video. Nothing is uploaded.
           </UiText>
           <Pressable onPress={onContinue} style={styles.primary}>
             <UiText weight={700} style={styles.primaryText}>

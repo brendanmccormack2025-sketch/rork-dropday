@@ -78,7 +78,7 @@ const edit = read("../app/edit.tsx");
 // ── the Post screen ──
 {
   const post = edit.slice(edit.indexOf('{step === "post" && (\n          <ScrollView'), edit.indexOf("Full-screen editor: tools"));
-  ok("thumbnail, the Trial line, mature content, camera roll switch, Save Draft and Post are on the Post screen", /thumbWrap/.test(post) && /On Trial, people who don't know you/.test(post) && /Mark as mature content/.test(post) && /Save to camera roll/.test(post) && /Save Draft/.test(post) && /handlePostPress/.test(post));
+  ok("thumbnail, the Tryal line, mature content, camera roll switch, Save Draft and Post are on the Post screen", /thumbWrap/.test(post) && /On Tryal, people who don't know you/.test(post) && /Mark as mature content/.test(post) && /Save to camera roll/.test(post) && /Save Draft/.test(post) && /handlePostPress/.test(post));
   ok("the camera-roll switch is still remembered per user", /setSaveEditedToRoll\(v, user\?\.id\)/.test(post));
   ok("the retry-after-failed-post row is here too", /POST_FAILED_TEXT/.test(post));
   ok("Post still goes through safePost", /void safePost\(/.test(edit) && /POST_FAILED_TEXT/.test(edit));

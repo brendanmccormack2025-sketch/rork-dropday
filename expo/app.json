@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Trial",
+    "name": "Tryal",
     "slug": "fgum9ff0goqjv4vh7u4xf",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/images/trial-icon-bars.png",
     "scheme": "rork-fgum9ff0goqjv4vh7u4xf",
@@ -16,12 +16,12 @@
         "UIBackgroundModes": [
           "remote-notification"
         ],
-        "NSCameraUsageDescription": "Trial uses your camera to record your videos and reactions.",
-        "NSSpeechRecognitionUsageDescription": "Trial analyzes your speech on your phone to edit your video. Nothing is uploaded.",
-        "NSMicrophoneUsageDescription": "Trial uses your microphone to record sound with your videos.",
-        "NSPhotoLibraryUsageDescription": "Trial needs access to your photo library so you can choose videos to put on Trial.",
-        "NSPhotoLibraryAddUsageDescription": "Trial saves the videos you record to your photo library.",
-        "NSContactsUsageDescription": "Trial checks your contacts so friends and family only see your posts after they survive Trial. Contacts are never shared."
+        "NSCameraUsageDescription": "Tryal uses your camera to record your videos and reactions.",
+        "NSSpeechRecognitionUsageDescription": "Tryal analyzes your speech on your phone to edit your video. Nothing is uploaded.",
+        "NSMicrophoneUsageDescription": "Tryal uses your microphone to record sound with your videos.",
+        "NSPhotoLibraryUsageDescription": "Tryal needs access to your photo library so you can choose videos to put on Tryal.",
+        "NSPhotoLibraryAddUsageDescription": "Tryal saves the videos you record to your photo library.",
+        "NSContactsUsageDescription": "Tryal checks your contacts so friends and family only see your posts after they survive Tryal. Contacts are never shared."
       },
       "usesAppleSignIn": true,
       "buildNumber": "20"
@@ -76,22 +76,22 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Trial needs access to your photos so you can choose a video to put on Trial.",
-          "cameraPermission": "Trial uses your camera to record your videos and reactions."
+          "photosPermission": "Tryal needs access to your photos so you can choose a video to put on Tryal.",
+          "cameraPermission": "Tryal uses your camera to record your videos and reactions."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Trial uses your camera to record your videos and reactions.",
-          "microphonePermission": "Trial uses your microphone to record sound with your videos."
+          "cameraPermission": "Tryal uses your camera to record your videos and reactions.",
+          "microphonePermission": "Tryal uses your microphone to record sound with your videos."
         }
       ],
       [
         "expo-media-library",
         {
-          "photosPermission": "Trial accesses your photo library so you can choose videos and save your recordings.",
-          "savePhotosPermission": "Trial saves the videos you record to your photo library."
+          "photosPermission": "Tryal accesses your photo library so you can choose videos and save your recordings.",
+          "savePhotosPermission": "Tryal saves the videos you record to your photo library."
         }
       ],
       [
@@ -104,7 +104,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/trial-wordmark.png",
+          "image": "./assets/images/tryal-wordmark.png",
           "resizeMode": "contain",
           "backgroundColor": "#F5F3EE"
         }

@@ -108,7 +108,7 @@ export default function GroupFeedScreen() {
     if (!perm.granted) {
       Alert.alert(
         "Media Library Access",
-        "Trial needs access to your photo library to post to the group. You can grant this in Settings.",
+        "Tryal needs access to your photo library to post to the group. You can grant this in Settings.",
         [
           { text: "Cancel", style: "cancel" },
           {

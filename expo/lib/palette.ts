@@ -20,7 +20,7 @@ export const TRIAL_RED = "#E8291C";
 export const PALETTE: PaletteColor[] = [
   { id: "white", label: "White", hex: "#FFFFFF" },
   { id: "black", label: "Black", hex: "#000000" },
-  { id: "red", label: "Trial red", hex: TRIAL_RED },
+  { id: "red", label: "Tryal red", hex: TRIAL_RED },
   { id: "yellow", label: "Yellow", hex: "#FFD400" },
   { id: "orange", label: "Orange", hex: "#FF8A1F" },
   { id: "green", label: "Green", hex: "#1FC45A" },

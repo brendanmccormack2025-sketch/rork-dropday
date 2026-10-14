@@ -42,3 +42,8 @@ Only Montserrat is embedded.
 
 Test matrix: `scripts/test-text-styles.mjs` checks every font x text color x background (none, 11 solids, 2 translucent)
 x outline (off, 3 sizes) x shadow for overlays and captions, with and without the 1.0.5 capabilities.
+
+## Rename to Tryal (1.0.5)
+`app.json` `name` is "Tryal" (the name under the icon, CFBundleDisplayName) and every `NS*UsageDescription` says Tryal; the version is 1.0.5.
+Slug, bundle identifier, package, scheme and EAS project are unchanged. Both need the new build: the display name and the permission texts are
+native (Info.plist), as are the new icon and splash wordmark.

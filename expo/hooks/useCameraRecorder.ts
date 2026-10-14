@@ -202,7 +202,7 @@ export function useCameraRecorder() {
         if (!res.granted) {
           Alert.alert(
             "Microphone Access",
-            "Trial needs microphone access to record video with sound. You can grant this in Settings.",
+            "Tryal needs microphone access to record video with sound. You can grant this in Settings.",
             [
               { text: "Cancel", style: "cancel" },
               { text: "Open Settings", onPress: () => (Platform.OS === "ios" ? Linking.openURL("app-settings:") : Linking.openSettings()) },

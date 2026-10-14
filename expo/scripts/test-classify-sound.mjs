@@ -434,7 +434,7 @@ eq("the new thresholds", [SOUND_CLASSIFIER_CONFIG.laughMinBursts, SOUND_CLASSIFI
   const text = formatAiDebug({ sourceDurationMs: D, clips, sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [], alignment, speechBaselineDb: -25.8, userCuts: cut.decisions.filter((d) => d.origin === "user") });
   const lines = text.split("\n");
   eq("the alignment summary and baseline are at the top of the share text", lines.slice(0, 4), [
-    "Trial AI debug",
+    "Tryal AI debug",
     "Timeline check: 41 words 0:01.2-0:47.8, loudness 0:48.8; word time on sound 64% as is, best 91% at +300 ms",
     "Speech baseline: -25.8 dB",
     "Clip duration: 0:20.0 (edited 0:17.7)",

@@ -193,7 +193,7 @@ export default function CaptionStyleSheet({ visible, style, supportsFont, embedd
 
           <View style={styles.actions}>
             <Pressable onPress={onReset} hitSlop={8} style={styles.resetBtn}>
-              <UiText style={styles.secondary}>Reset to Trial style</UiText>
+              <UiText style={styles.secondary}>Reset to Tryal style</UiText>
             </Pressable>
             <Pressable onPress={onClose} hitSlop={8} style={styles.doneBtn}>
               <UiText style={styles.primary}>Done</UiText>

@@ -12,7 +12,7 @@ type SurvivalStatus = NonNullable<Post["status"]>;
 /** Pill copy + color per survival status. */
 // Posts that end or stay incomplete are never shown, so they have no badge.
 const BADGES: Partial<Record<SurvivalStatus, { label: string; color: string }>> = {
-  trial: { label: "ON TRIAL", color: theme.accent },
+  trial: { label: "ON TRYAL", color: theme.accent },
   survived: { label: "SURVIVED", color: theme.success },
   queued: { label: "QUEUED", color: theme.textMuted },
 };

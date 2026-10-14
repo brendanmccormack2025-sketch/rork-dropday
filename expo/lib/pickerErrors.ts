@@ -41,6 +41,6 @@ export const PICKER_ERROR_MESSAGES: Record<Exclude<PickerErrorKind, "cancelled">
   unreadable_photo:
     "This photo could not be read. Open it in Photos until it finishes loading, or choose another one.",
   no_permission:
-    "Trial cannot see this photo or video. Allow access to your photos in Settings (choose all photos, or add this one to the ones you share) and try again.",
+    "Tryal cannot see this photo or video. Allow access to your photos in Settings (choose all photos, or add this one to the ones you share) and try again.",
   unknown: "Something went wrong opening your library. Try again.",
 };

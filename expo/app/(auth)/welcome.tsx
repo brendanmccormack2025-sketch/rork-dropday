@@ -87,7 +87,7 @@ export default function WelcomeScreen() {
           {/* Logo */}
           <Animated.View style={{ transform: [{ translateY }] }}>
             <Image
-              source={require("@/assets/images/trial-wordmark.png")}
+              source={require("@/assets/images/tryal-wordmark.png")}
               style={styles.brandLogo}
               contentFit="contain"
             />

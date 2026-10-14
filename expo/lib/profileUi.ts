@@ -30,7 +30,7 @@ export function avatarInitial(name: string): string {
 export type OwnTab = "survived" | "trial" | "drafts";
 export const OWN_TABS: Array<{ key: OwnTab; label: string }> = [
   { key: "survived", label: "Survived" },
-  { key: "trial", label: "On Trial" },
+  { key: "trial", label: "On Tryal" },
   { key: "drafts", label: "Drafts" },
 ];
 
@@ -50,5 +50,5 @@ export function initialOwnTab(posts: TabPost[]): OwnTab {
 }
 
 export const EMPTY_OWN_SURVIVED_TITLE = "Your wins live here.";
-export const EMPTY_OWN_SURVIVED_BODY = "Put something on Trial.";
+export const EMPTY_OWN_SURVIVED_BODY = "Put something on Tryal.";
 export const EMPTY_OTHER_SURVIVED = "No survived posts yet";

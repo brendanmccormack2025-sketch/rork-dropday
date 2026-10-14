@@ -113,7 +113,7 @@ export default function FeedScreen() {
         showGate={gateActive}
         onSharePost={(post) => {
           // DM sharing disabled for this build — native share sheet only.
-          Share.share({ message: `Check out this Trial: ${post.media_url}` }).catch(() => {});
+          Share.share({ message: `Check out this Tryal: ${post.media_url}` }).catch(() => {});
         }}
         onReactionsPost={(post) => {
           router.push(`/post/${post.id}/reaction-tree` as never);
@@ -123,7 +123,7 @@ export default function FeedScreen() {
             <View style={styles.headerRow} pointerEvents="box-none">
               <View style={styles.brandRow}>
                 <Image
-                  source={require("@/assets/images/trial-wordmark.png")}
+                  source={require("@/assets/images/tryal-wordmark-white.png")}
                   style={styles.brandLogo}
                   contentFit="contain"
                 />
@@ -161,7 +161,7 @@ export default function FeedScreen() {
             accessibilityLabel="Dismiss"
           >
             <UiText style={styles.bannerText}>
-              Your post is on Trial. If it survives, it's pushed to more people for 24 hours.
+              Your post is on Tryal. If it survives, it's pushed to more people for 24 hours.
             </UiText>
             <X color="#fff" size={16} />
           </Pressable>
@@ -190,7 +190,7 @@ function EmptyState({ error, onRetry, onCreate }: { error: boolean; onRetry: () 
         <Video color={theme.textDim} size={44} strokeWidth={1.5} />
       )}
       <UiText style={styles.emptyTitle}>
-        {error ? "Can't reach Trial right now" : FEED_CAUGHT_UP_TITLE}
+        {error ? "Can't reach Tryal right now" : FEED_CAUGHT_UP_TITLE}
       </UiText>
       <UiText style={styles.emptySub}>
         {error ? "Check your connection and try again." : FEED_CAUGHT_UP_BODY}
@@ -224,7 +224,7 @@ function GateOverlay({
         </View>
         <UiText style={styles.gateTitle}>Post to unlock</UiText>
         <UiText style={styles.gateSub}>
-          You've watched {viewed} posts. Post your Trial to keep watching
+          You've watched {viewed} posts. Post your Tryal to keep watching
           the feed.
         </UiText>
         <Pressable onPress={onDrop} style={styles.gateBtn}>
@@ -288,7 +288,7 @@ function ShareSheet({
   const handleNativeShare = async () => {
     try {
       await Share.share({
-        message: `Check out this Trial: ${post.media_url}`,
+        message: `Check out this Tryal: ${post.media_url}`,
       });
     } catch {}
   };
@@ -426,7 +426,8 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  brandLogo: { width: 72, height: 22 },
+  // The wordmark file has transparent margins (about 14% each side), so it is drawn larger than its visible letters and pulled left to line up with the header's edge.
+  brandLogo: { width: 101, height: 36, marginLeft: -15 },
   bellBtn: {
     width: 36,
     height: 36,

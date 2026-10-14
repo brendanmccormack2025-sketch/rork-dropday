@@ -29,10 +29,10 @@ struct AuthSheet: View {
                         Image(systemName: "drop.fill")
                             .font(.system(size: 40))
                             .foregroundStyle(Theme.accent)
-                        Text(mode == .signIn ? "Welcome back" : "Join Trial")
+                        Text(mode == .signIn ? "Welcome back" : "Join Tryal")
                             .font(.title2.bold())
                             .foregroundStyle(Theme.text)
-                        Text("Sign in to post your Trial")
+                        Text("Sign in to post your Tryal")
                             .font(.subheadline)
                             .foregroundStyle(Theme.textMuted)
                     }

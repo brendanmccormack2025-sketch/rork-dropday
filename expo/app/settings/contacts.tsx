@@ -22,7 +22,7 @@ export default function ContactsScreen() {
   if (!available) {
     return (
       <SettingsScaffold title="Contacts">
-        <UiText style={s.text}>Contacts matching isn't available in this version of the app. Update Trial to use it.</UiText>
+        <UiText style={s.text}>Contacts matching isn't available in this version of the app. Update Tryal to use it.</UiText>
       </SettingsScaffold>
     );
   }
@@ -33,10 +33,10 @@ export default function ContactsScreen() {
     const r = await enableContacts(user.id);
     setBusy(false);
     setEnabled(r === "granted");
-    setMsg(r === "granted" ? "Done. Your contacts are checked in the background." : r === "denied" ? "No problem. Trial works fully without it." : "Not available in this version.");
+    setMsg(r === "granted" ? "Done. Your contacts are checked in the background." : r === "denied" ? "No problem. Tryal works fully without it." : "Not available in this version.");
   };
   const remove = () => {
-    Alert.alert("Remove my contacts data", "This deletes the contact hashes Trial stored for you.", [
+    Alert.alert("Remove my contacts data", "This deletes the contact hashes Tryal stored for you.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Remove",

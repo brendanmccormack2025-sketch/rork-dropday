@@ -81,7 +81,7 @@ export default function NotificationItem({
     actionText = "reacted to your post";
   } else if (notif.type === "verdict_survived") {
     icon = <Trophy color={theme.success} size={15} strokeWidth={2} />;
-    actionText = "Your post survived Trial 🏆";
+    actionText = "Your post survived Tryal 🏆";
   }
 
   return (

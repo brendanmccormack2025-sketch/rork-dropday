@@ -37,7 +37,7 @@ type SuggestedUser = {
 };
 
 const SHARE_MESSAGE =
-  "Join me on Trial — share one post a night. It's addictive. 🚀";
+  "Join me on Tryal — share one post a night. It's addictive. 🚀";
 const SHARE_URL = "https://dropday.app";
 
 export default function FriendsScreen() {

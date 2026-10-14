@@ -2433,7 +2433,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (variables.parentPostId && isParentUnavailableError((err as Error)?.message)) {
         showAlert(
           "This post is no longer available",
-          "Its trial ended or it expired, so it can't take new reactions.",
+          "Its Tryal ended or it expired, so it can't take new reactions.",
         );
         if (variables.optimisticTempId) removeOptimisticPost(variables.optimisticTempId);
         try {

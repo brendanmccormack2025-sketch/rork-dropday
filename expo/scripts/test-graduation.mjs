@@ -34,7 +34,7 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
   eq("everyone can react (graduated and restricted too)", ["active", "graduated", "restricted"].map(canReact), [true, true, true]);
   const g = postingBlock("graduated");
   eq("graduated sees the positive screen", [g.title, g.kind], ["You made it 🎓", "graduated"]);
-  ok("(it says they can still watch, react, message and support emerging creators)", /graduated from Trial/.test(GRADUATED_BODY) && /watch, react, message and support emerging creators/.test(GRADUATED_BODY));
+  ok("(it says they can still watch, react, message and support emerging creators)", /graduated from Tryal/.test(GRADUATED_BODY) && /watch, react, message and support emerging creators/.test(GRADUATED_BODY));
   eq("restricted sees a neutral message", [postingBlock("restricted").title, postingBlock("restricted").kind], ["Posting is currently restricted", "restricted"]);
   ok("(and not the celebration)", !/🎓|made it/.test(postingBlock("restricted").title + postingBlock("restricted").body));
 }

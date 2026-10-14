@@ -110,15 +110,15 @@ export default function ProfileScreen() {
         icon={<Trophy color={colors.textTertiary} size={36} strokeWidth={1.6} />}
         title={EMPTY_OWN_SURVIVED_TITLE}
         body={EMPTY_OWN_SURVIVED_BODY}
-        actionLabel="Put it on Trial"
+        actionLabel="Put it on Tryal"
         onAction={() => router.push("/camera")}
       />
     ) : (
       <ProfileEmpty
         icon={<Video color={colors.textTertiary} size={36} strokeWidth={1.6} />}
-        title="Nothing on Trial right now"
-        body="Put something on Trial."
-        actionLabel="Put it on Trial"
+        title="Nothing on Tryal right now"
+        body="Put something on Tryal."
+        actionLabel="Put it on Tryal"
         onAction={() => router.push("/camera")}
       />
     );

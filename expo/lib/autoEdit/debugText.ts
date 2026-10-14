@@ -105,7 +105,7 @@ export function formatAiDebug(input: AiDebugInput): string {
   const { clips, sourceUri: uri } = input;
   const editedMs = clips.reduce((sum, c) => sum + Math.max(0, c.trimEndMs - c.trimStartMs), 0);
   const lines: string[] = [];
-  lines.push("Trial AI debug");
+  lines.push("Tryal AI debug");
   // How the transcription went comes first, then the alignment summary.
   const t = input.transcription;
   if (t) {

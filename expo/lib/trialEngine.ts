@@ -4,7 +4,7 @@
  * watched and shows the creator where their post stands.
  */
 
-export const TRIAL_ON_TRIAL_TITLE = "YOUR VIDEO IS ON TRIAL";
+export const TRIAL_ON_TRIAL_TITLE = "YOUR VIDEO IS ON TRYAL";
 
 /** Seconds of watching that mean "watched to the end" when the clip is at least that long. */
 const COMPLETED_FRACTION = 0.9;
@@ -46,8 +46,8 @@ export function creatorTrialNote(status: string | null | undefined, queuePositio
 
 /** The feed's empty state (nothing assigned and nothing eligible to watch): never a blank screen. */
 export const FEED_CAUGHT_UP_TITLE = "You're all caught up";
-export const FEED_CAUGHT_UP_BODY = "Be the first to put something on Trial";
-export const FEED_CAUGHT_UP_BUTTON = "Put it on Trial";
+export const FEED_CAUGHT_UP_BODY = "Be the first to put something on Tryal";
+export const FEED_CAUGHT_UP_BUTTON = "Put it on Tryal";
 
 /** "Queued: up next" for the first post in line, "Queued: #2 in line" after that. */
 export function queuedLabel(position: number | null | undefined): string {

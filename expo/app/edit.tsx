@@ -5064,7 +5064,7 @@ export default function EditScreen() {
           )}
           {!reactingTo && (
             <UiText style={styles.trialNote}>
-              On Trial, people who don't know you test your video. If it survives, it's pushed to more people for 24 hours.
+              On Tryal, people who don't know you test your video. If it survives, it's pushed to more people for 24 hours.
             </UiText>
           )}
           <View style={styles.matureRow}>

@@ -131,7 +131,7 @@ export default function SignUpScreen() {
             >
               <View style={styles.header}>
             <Image
-              source={require("@/assets/images/trial-wordmark.png")}
+              source={require("@/assets/images/tryal-wordmark.png")}
               style={styles.brandLogo}
               contentFit="contain"
             />

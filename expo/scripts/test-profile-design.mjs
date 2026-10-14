@@ -21,7 +21,7 @@ for (const w of [375, 390, 430]) {
 }
 eq("375 pt phone: tiles are 113 x 201", gridTileSize(375), { width: 113, height: 201 });
 eq("avatar without a photo: the initial on a soft tint, the same every time", [avatarInitial(" brendan"), avatarTint("brendan") === avatarTint("brendan"), AVATAR_TINTS.includes(avatarTint("tester"))], ["B", true, true]);
-eq("own tabs: Survived, On Trial, Drafts", OWN_TABS.map((t) => t.label), ["Survived", "On Trial", "Drafts"]);
+eq("own tabs: Survived, On Tryal, Drafts", OWN_TABS.map((t) => t.label), ["Survived", "On Tryal", "Drafts"]);
 
 const posts = [
   { id: "s", status: "survived", survived_at: "2026-10-01" }, { id: "e", status: "expired", survived_at: "2026-09-01" },
@@ -35,12 +35,12 @@ eq("no stats anywhere: no counts of survived posts, likes, followers or failures
 eq("no SURVIVED badge on tiles (the tile has the view count with a play icon and, for queued posts, a small Queued label)", [/TrialStatusBadge/.test(parts + own + other), /Queued/.test(parts), /<Play /.test(parts)], [false, true, true]);
 eq("own profile: Edit profile as one soft button, Settings as a small round icon button, tabs with an animated underline", [/label="Edit profile"/.test(own), /RoundIconButton label="Settings"/.test(own), /Animated\.timing/.test(parts) && /ProfileTabs/.test(own)], [true, true, true]);
 eq("other users' profile: Survived grid only, no tabs, no Edit / Settings", [/ProfileTabs/.test(other), /Edit profile/.test(other), /Settings/.test(other), /isOnOtherProfile/.test(other)], [false, false, false, true]);
-eq("empty states: own and others'", [/Your wins live here\./.test(read("../lib/profileUi.ts")), /Put something on Trial\./.test(read("../lib/profileUi.ts")), /No survived posts yet/.test(read("../lib/profileUi.ts")), /router\.push\("\/camera"\)/.test(own)], [true, true, true, true]);
+eq("empty states: own and others'", [/Your wins live here\./.test(read("../lib/profileUi.ts")), /Put something on Tryal\./.test(read("../lib/profileUi.ts")), /No survived posts yet/.test(read("../lib/profileUi.ts")), /router\.push\("\/camera"\)/.test(own)], [true, true, true, true]);
 eq("3-column grid on both screens", [/numColumns=\{GRID_COLUMNS\}/.test(own), /numColumns=\{GRID_COLUMNS\}/.test(other)], [true, true]);
 eq("the profile viewer opens the same list as the tapped tab", [/tab,? \} as never|initialIndex: String\(index\), tab/.test(own), /params\.tab/.test(drops)], [true, true]);
 eq("verified badge stays next to the name (compact)", [/VerifiedCreatorBadge compact/.test(own), /VerifiedCreatorBadge compact/.test(other)], [true, true]);
 eq("links: round icon buttons through the shared helper (only the ones set)", [/getCreatorLinks/.test(parts), /openCreatorLink/.test(parts), /size=\{36\}/.test(parts)], [true, true, true]);
 eq("tab bar: light blur + hairline border, no dark gradient", [/BlurView/.test(tabs), /tint="light"/.test(tabs), /hairlineWidth/.test(tabs), /LinearGradient|rgba\(0,0,0,0\.75\)|rgba\(255,255,255,0\.75\)/.test(tabs)], [true, true, true, false]);
-eq("app.json version untouched", JSON.parse(read("../app.json")).expo.version, "1.0.4");
+eq("app.json version untouched", JSON.parse(read("../app.json")).expo.version, "1.0.5");
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

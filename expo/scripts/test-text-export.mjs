@@ -152,7 +152,7 @@ function checkLayout(name, ov) {
   const plugin = app.expo.plugins.find((p) => Array.isArray(p) && p[0] === "expo-font")[1].fonts.join("\n");
   for (const f of TEXT_FONTS) ok(`app.json embeds ${f.psName}`, plugin.includes(f.family.replace(/_(\d+)(\w+)$/, "_$1$2") + ".ttf"));
   for (const path of app.expo.plugins.find((p) => Array.isArray(p) && p[0] === "expo-font")[1].fonts) ok(`font file exists: ${path}`, existsSync(new URL("../" + path, import.meta.url)));
-  eq("app.json stays at 1.0.4", app.expo.version, "1.0.4");
+  eq("app.json is at 1.0.5 (the build that ships this)", app.expo.version, "1.0.5");
   const idx = read("../modules/video-render/index.ts");
   ok("module exports supportsTextOverlays", /export const supportsTextOverlays: boolean = native\?\.supportsTextOverlays === true/.test(idx));
   const edit = read("../app/edit.tsx");

@@ -36,7 +36,7 @@ export type CaptionColorPreset = { id: string; label: string; /** #RRGGBB (#RRGG
 export const CAPTION_FONTS: CaptionFontPreset[] = [
   // The fonts every 1.0.4 build can burn in:
   { id: "classic", label: "Classic", fontName: "Montserrat-ExtraBold", jsFamily: "Montserrat_800ExtraBold", widthFactor: 1.12 },
-  { id: "trial", label: "Trial", fontName: null, widthFactor: 1 },
+  { id: "trial", label: "Tryal", fontName: null, widthFactor: 1 },
   { id: "avenir", label: "Avenir", fontName: "AvenirNext-Heavy", widthFactor: 1.02 },
   { id: "futura", label: "Futura", fontName: "Futura-Bold", widthFactor: 0.98 },
   { id: "condensed", label: "Condensed", fontName: "HelveticaNeue-CondensedBlack", widthFactor: 0.78 },

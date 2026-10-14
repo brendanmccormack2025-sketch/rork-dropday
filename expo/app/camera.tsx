@@ -339,7 +339,7 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
         <StatusBar style="light" />
         <CameraIcon color={theme.accent} size={48} />
         <UiText style={styles.permTitle}>Camera Access</UiText>
-        <UiText style={styles.permSub}>Trial needs your camera to capture content.</UiText>
+        <UiText style={styles.permSub}>Tryal needs your camera to capture content.</UiText>
         {wasPrompted ? (
           <PrimaryButton
             label="Open Settings"

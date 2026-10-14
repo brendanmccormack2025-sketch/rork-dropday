@@ -90,7 +90,7 @@ export const CAPTION_STYLES: OverlayStylePreset[] = [
   },
   {
     id: "trial",
-    label: "Trial",
+    label: "Tryal",
     spec: {
       fontSize: 38, fontWeight: "heavy", color: "#FFFFFF", backgroundColor: "#000000",
       backgroundPadding: 18, cornerRadius: 11, yCenter: 0.72, maxWidth: 0.86,

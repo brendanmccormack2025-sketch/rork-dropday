@@ -16,7 +16,7 @@ export function parseCreatorStatus(value: unknown): CreatorStatus {
 export const BADGE_LABEL = "Verified Big Creator";
 
 export const GRADUATED_TITLE = "You made it 🎓";
-export const GRADUATED_BODY = "You've graduated from Trial. You can still watch, react, message and support emerging creators.";
+export const GRADUATED_BODY = "You've graduated from Tryal. You can still watch, react, message and support emerging creators.";
 export const RESTRICTED_TITLE = "Posting is currently restricted";
 export const RESTRICTED_BODY = "You can still watch, react and message.";
 

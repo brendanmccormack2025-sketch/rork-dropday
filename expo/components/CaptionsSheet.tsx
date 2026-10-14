@@ -140,7 +140,7 @@ export default function CaptionsSheet({
 
                   <View style={styles.actions}>
                     <Pressable onPress={onResetStyle} hitSlop={8} style={styles.target}>
-                      <UiText style={styles.secondary}>Reset to Trial style</UiText>
+                      <UiText style={styles.secondary}>Reset to Tryal style</UiText>
                     </Pressable>
                     <Pressable onPress={onClose} hitSlop={8} style={styles.target}>
                       <UiText style={styles.primary}>Done</UiText>

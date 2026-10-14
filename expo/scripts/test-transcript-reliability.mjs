@@ -190,7 +190,7 @@ eq("the threshold is 2 s", EMPTY_TRANSCRIPT_MIN_SOUND_MS, 2000);
   const clips = keepRangesToClips(URI, [{ startMs: 0, endMs: 10000 }]);
   const base = { sourceDurationMs: 10000, clips, sourceUri: URI, proposals: [], candidates: [], hookTrims: [], fillers: [] };
   const top = (transcription) => formatAiDebug({ ...base, transcription }).split("\n").slice(0, 3);
-  eq("ok, from the cache", top({ status: "ok", wordCount: 41, fromCache: true, key: `${URI}|1000|5` }), ["Trial AI debug", "Transcription: ok; 41 words; from cache: yes", `Cache key: ${URI}|1000|5`]);
+  eq("ok, from the cache", top({ status: "ok", wordCount: 41, fromCache: true, key: `${URI}|1000|5` }), ["Tryal AI debug", "Transcription: ok; 41 words; from cache: yes", `Cache key: ${URI}|1000|5`]);
   eq("an error shows its code and reason", top({ status: "error", code: "EMPTY_TRANSCRIPT_WITH_SPEECH", message: "no words", wordCount: 0, fromCache: false, key: "k" })[1], "Transcription: error (EMPTY_TRANSCRIPT_WITH_SPEECH: no words); 0 words; from cache: no");
   eq("denied and unavailable", [top({ status: "denied", code: "ERR_SPEECH_NOT_AUTHORIZED", wordCount: 0, fromCache: false, key: null })[1], top({ status: "unavailable", code: "NOT_IN_BUILD", message: "speech-captions not in this build", wordCount: 0, fromCache: false, key: null })[1]], [
     "Transcription: denied (ERR_SPEECH_NOT_AUTHORIZED); 0 words; from cache: no",
