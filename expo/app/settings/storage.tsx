@@ -52,7 +52,10 @@ export default function StorageScreen() {
         Space Tryal's files use on this phone. Drafts and posts still uploading are never deleted. Files from the last 15 minutes are kept while you work.
       </UiText>
       {!report ? (
-        <ActivityIndicator color={theme.accent} />
+        <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+          <ActivityIndicator color={theme.accent} />
+          <UiText style={s.text}>Counting files… (you can tap Free up space now)</UiText>
+        </View>
       ) : (
         <View style={{ gap: 10 }}>
           {ROWS.map((r) => (
@@ -67,7 +70,7 @@ export default function StorageScreen() {
           </View>
         </View>
       )}
-      <Pressable onPress={free} disabled={busy || !report} style={({ pressed }) => [s.button, (pressed || busy) && { opacity: 0.6 }]}>
+      <Pressable onPress={free} disabled={busy} style={({ pressed }) => [s.button, (pressed || busy) && { opacity: 0.6 }]}>
         {busy ? <ActivityIndicator color="#fff" /> : <UiText style={s.buttonText}>Free up space</UiText>}
       </Pressable>
       {message ? <UiText style={s.ok}>{message}</UiText> : null}

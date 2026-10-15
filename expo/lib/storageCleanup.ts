@@ -42,27 +42,37 @@ function deletableDirs(): string[] {
   return [`${documentDirectory}post_uploads/`, `${documentDirectory}thumbnails/`, `${caches}Camera/`, `${caches}ImagePicker/`, `${caches}VideoThumbnails/`];
 }
 
-async function walk(root: FileEntry["root"], base: string, dir: string, depth: number, out: FileEntry[], only?: string[]): Promise<void> {
+const PARALLEL = 24;
+
+async function walk(root: FileEntry["root"], base: string, dir: string, depth: number, out: FileEntry[], only?: string[], keep?: string[]): Promise<void> {
   let names: string[] = [];
   try {
     names = await readDirectoryAsync(dir);
   } catch {
     return;
   }
-  for (const name of names) {
+  const one = async (name: string): Promise<void> => {
     const uri = `${dir}${encodeURI(name)}`;
     try {
+      // expo's camera / picker folders live in expo's cacheDirectory: name them from there ("Camera/…", "ImagePicker/…")
+      const from = root === "caches" && cacheDirectory && cacheDirectory !== base && uri.startsWith(cacheDirectory) ? cacheDirectory : base;
       const info = await getInfoAsync(uri, { size: true });
-      if (!info.exists) continue;
+      if (!info.exists) return;
       if (info.isDirectory) {
         const sub = `${uri}/`;
         // with `only`: go into a folder only on the way to (or inside) one of those folders
         const wanted = !only || only.some((d) => d.startsWith(sub) || sub.startsWith(d));
-        if (wanted && depth < MAX_DEPTH) await walk(root, base, sub, depth + 1, out, only);
-        continue;
+        if (!wanted || depth >= MAX_DEPTH) return;
+        // Report only: a folder that can hold nothing deletable (an image cache with thousands of files) is counted as
+        // one entry when the system gives its size, instead of asking about every file in it.
+        const onPath = keep?.some((d) => d.startsWith(sub) || sub.startsWith(d)) ?? true;
+        if (!onPath && typeof info.size === "number" && info.size > 0) {
+          out.push({ uri: sub, rel: decodeURI(sub.slice(from.length)), root, size: info.size, modifiedMs: Math.round((info.modificationTime ?? 0) * 1000) });
+          return;
+        }
+        await walk(root, base, sub, depth + 1, out, only, keep);
+        return;
       }
-      // expo's camera / picker folders live in expo's cacheDirectory: name them from there ("Camera/…", "ImagePicker/…")
-      const from = root === "caches" && cacheDirectory && cacheDirectory !== base && uri.startsWith(cacheDirectory) ? cacheDirectory : base;
       out.push({
         uri,
         rel: decodeURI(uri.slice(from.length)),
@@ -73,14 +83,18 @@ async function walk(root: FileEntry["root"], base: string, dir: string, depth: n
     } catch {
       // unreadable entry: leave it alone
     }
-  }
+  };
+  // a few at a time: one file system call after another was far too slow for folders with many files
+  for (let k = 0; k < names.length; k += PARALLEL) await Promise.all(names.slice(k, k + PARALLEL).map(one));
 }
 
 /** Every file in the app's Documents, Caches and tmp folders (`deletableOnly`: just where temporary files can be). */
 export async function listAppFiles(deletableOnly = false): Promise<FileEntry[]> {
   const out: FileEntry[] = [];
   const only = deletableOnly ? deletableDirs() : undefined;
-  for (const r of roots()) await walk(r.root, r.uri, r.uri, 0, out, only);
+  // the report walks everything, but only file by file where temporary files or drafts can be
+  const keep = deletableOnly ? undefined : [...deletableDirs(), `${documentDirectory}drafts/`];
+  for (const r of roots()) await walk(r.root, r.uri, r.uri, 0, out, only, keep);
   return out;
 }
 
