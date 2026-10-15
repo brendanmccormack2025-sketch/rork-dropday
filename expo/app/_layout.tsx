@@ -39,6 +39,7 @@ import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { syncContactsIfDue } from "@/lib/contacts";
 import { redeemPendingInvite } from "@/lib/invite";
+import { isDebugOwner } from "@/constants/debug";
 import { scheduleLaunchCleanup } from "@/lib/storageCleanup";
 import { installPushHandlers, registerForPush, watchPushToken } from "@/lib/push";
 import { phonePromptKey } from "@/lib/phonePrompt";
@@ -75,7 +76,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   // Temporary video files left by earlier runs (camera takes, merges, renders, staged uploads) are deleted a few
   // seconds after launch; drafts and pending uploads keep theirs (lib/storageCleanup.ts).
-  useEffect(() => scheduleLaunchCleanup(), []);
+  useEffect(() => scheduleLaunchCleanup(8000, isDebugOwner(session?.user?.id)), [session?.user?.id]);
 
   // A tap on a push opens the screen it names (only routes the app knows); the saved token follows system changes.
   useEffect(() => {

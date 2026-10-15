@@ -39,7 +39,9 @@ function roots(): Array<{ root: FileEntry["root"]; uri: string }> {
 function deletableDirs(): string[] {
   if (!documentDirectory) return [];
   const caches = cacheDirectory || documentDirectory.replace(/Documents\/?$/, "Library/Caches/");
-  return [`${documentDirectory}post_uploads/`, `${documentDirectory}thumbnails/`, `${caches}Camera/`, `${caches}ImagePicker/`, `${caches}VideoThumbnails/`];
+  // tmp/ as a whole: the photo picker leaves its copies in sub-folders there
+  const tmp = documentDirectory.replace(/Documents\/?$/, "tmp/");
+  return [`${documentDirectory}post_uploads/`, `${documentDirectory}thumbnails/`, `${caches}Camera/`, `${caches}ImagePicker/`, `${caches}VideoThumbnails/`, ...(tmp !== documentDirectory ? [tmp] : [])];
 }
 
 const PARALLEL = 24;
@@ -152,7 +154,34 @@ export function cleanUpTemporaryFiles(before: number, reason: "launch"): Promise
 }
 
 /** Called once from the root layout: tidy up what earlier runs left behind, after the app has settled. */
-export function scheduleLaunchCleanup(delayMs = 8000): () => void {
-  const t = setTimeout(() => void cleanUpTemporaryFiles(LAUNCHED_AT, "launch"), delayMs);
+export function scheduleLaunchCleanup(delayMs = 8000, measure = false): () => void {
+  const t = setTimeout(() => {
+    void cleanUpTemporaryFiles(LAUNCHED_AT, "launch").then(() => (measure ? recordStorageSummary() : undefined));
+  }, delayMs);
   return () => clearTimeout(t);
+}
+
+/**
+ * Where the space is, by folder (the two top levels of Documents, Library/Caches and tmp), as one metric in
+ * client_errors. Owner account only, once per launch, after the cleanup: it reads every file, which is slow.
+ */
+export async function recordStorageSummary(): Promise<void> {
+  try {
+    const files = await listAppFiles(false);
+    const by = new Map<string, { bytes: number; files: number }>();
+    let total = 0;
+    for (const f of files) {
+      const key = `${f.root}/${f.rel.split("/").slice(0, 2).join("/")}`;
+      const e = by.get(key) ?? { bytes: 0, files: 0 };
+      e.bytes += f.size;
+      e.files++;
+      by.set(key, e);
+      total += f.size;
+    }
+    const top = [...by.entries()].sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 15)
+      .map(([k, v]) => `${k}=${Math.round(v.bytes / 1048576)}MB/${v.files}`);
+    void recordMetric("storageSummary", { totalMB: Math.round(total / 1048576), files: files.length, top: top.join(" ; ") });
+  } catch {
+    // diagnostics only
+  }
 }

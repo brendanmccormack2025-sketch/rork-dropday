@@ -75,7 +75,7 @@ eq("the report adds up by kind", [rep.drafts.bytes, rep.camera.bytes, rep.upload
 const posts = read("../providers/PostsProvider.tsx"), cleanup = read("../lib/storageCleanup.ts"), edit = read("../app/edit.tsx"), layout = read("../app/_layout.tsx");
 const key = (src, name) => (new RegExp(`${name} = "([^"]+)"`).exec(src) ?? [])[1];
 eq("the cleanup reads the same stored lists the app writes", [key(cleanup, "DRAFTS_KEY"), key(cleanup, "OPTIMISTIC_POSTS_KEY")], [key(posts, "DRAFTS_KEY"), key(posts, "OPTIMISTIC_POSTS_KEY")]);
-ok("launch cleanup is scheduled from the root layout", /useEffect\(\(\) => scheduleLaunchCleanup\(\), \[\]\)/.test(layout));
+ok("launch cleanup is scheduled from the root layout", /useEffect\(\(\) => scheduleLaunchCleanup\(8000, isDebugOwner\(session\?\.user\?\.id\)\), \[session\?\.user\?\.id\]\)/.test(layout));
 ok("a saved post deletes its staged copies", /stagedCopiesToDelete\(\[rawInput\.uri/.test(posts));
 ok("deleting a draft deletes its cover", /const cover = draftProjects\.find/.test(posts));
 ok("the frame grabber's cache file is deleted after the cover is copied", /await deleteAsync\(result\.uri, \{ idempotent: true \}\)/.test(edit));
