@@ -39,7 +39,6 @@ import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { syncContactsIfDue } from "@/lib/contacts";
 import { redeemPendingInvite } from "@/lib/invite";
-import { DIAG_PUSH_ON } from "@/lib/diagFlags";
 import { setPerfScreen, startPerfWatch } from "@/lib/perfWatch";
 import { scheduleLaunchCleanup } from "@/lib/storageCleanup";
 import { installPushHandlers, registerForPush, watchPushToken } from "@/lib/push";
@@ -84,7 +83,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   // A tap on a push opens the screen it names (only routes the app knows); the saved token follows system changes.
   useEffect(() => {
-    if (!DIAG_PUSH_ON) return;
     const offTap = installPushHandlers((route) => router.push(route as never));
     const offToken = watchPushToken();
     return () => {
@@ -103,7 +101,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     phoneStepChecked.current = id;
     void syncContactsIfDue(id);
     void redeemPendingInvite();   // an invite link opened before the account existed
-    if (DIAG_PUSH_ON) void registerForPush(id);     // ask once, then save this phone's Expo push token for the account
+    void registerForPush(id);     // ask once, then save this phone's Expo push token for the account
     AsyncStorage.getItem(phonePromptKey(id)).then((seen) => {
       if (!seen) router.push("/onboarding-phone" as never);
     }, () => {});

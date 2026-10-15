@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 
 import { myUnreadMessages, subscribeAnyMessage } from "@/lib/friends";
 import { useAuth } from "@/providers/AuthProvider";
-import { DIAG_UNREAD_LIVE_ON } from "@/lib/diagFlags";
 
 /** Unread chat messages for the red dot on the feed's message icon: fetched, then kept fresh by Realtime. */
 export function useUnreadMessages(): { unread: number; refresh: () => void } {
@@ -21,7 +20,6 @@ export function useUnreadMessages(): { unread: number; refresh: () => void } {
   }, [userId]);
 
   useEffect(() => {
-    if (!DIAG_UNREAD_LIVE_ON) return;
     refresh();
     if (!userId) return;
     // a Realtime hiccup must never break the feed: subscribing is best effort, and a slow poll covers a missed event
