@@ -81,7 +81,7 @@ ok("deleting a draft deletes its cover", /const cover = draftProjects\.find/.tes
 ok("the frame grabber's cache file is deleted after the cover is copied", /await deleteAsync\(result\.uri, \{ idempotent: true \}\)/.test(edit));
 ok("saving an opened draft again never copies its own files a second time", /if \(c\.uri\.startsWith\(draftDir\)\) return c\.uri;/.test(edit));
 ok("...and drops files it no longer uses, after the new version is stored", edit.indexOf("draftLeftovers(") > edit.indexOf("await saveDraftProject(project);"));
-ok("Settings has a Storage screen", /settings\/storage/.test(read("../app/settings.tsx")) && /cleanUpNow/.test(read("../app/settings/storage.tsx")));
+ok("automatic only: no Storage screen or button", !/settings\/storage/.test(read("../app/settings.tsx")) && !/cleanUpNow/.test(cleanup));
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
 process.exit(failed ? 1 : 0);

@@ -3,16 +3,17 @@
  * The rules (what may be deleted, and when) are in lib/storageCleanupCore.ts; this file only reads the directories,
  * deletes what the plan says, and reports. Never throws.
  *
- *   - At every launch (a few seconds in): temporary files from EARLIER runs that no draft or pending upload mentions.
- *   - Settings → Storage → "Free up space": the same, for files older than 15 minutes (a camera-roll save that is still
- *     rendering is never pulled from under it).
+ * Automatic, no button: at every launch (a few seconds in) it deletes temporary files from EARLIER runs that no saved
+ * draft or pending upload mentions. Files of this run are never touched (the editor, camera or a camera-roll save may be
+ * using them); a successful post deletes its own staged copies at once (PostsProvider). Drafts are never deleted, and
+ * posts and reactions live on the server: only the phone's leftover working copies go.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
 import { cacheDirectory, deleteAsync, documentDirectory, getInfoAsync, readDirectoryAsync } from "@/lib/fileSystemCompat";
 import { recordBreadcrumb, recordMetric } from "@/lib/clientErrors";
-import { planCleanup, summarize, type FileEntry, type StorageReport } from "@/lib/storageCleanupCore";
+import { planCleanup, type FileEntry } from "@/lib/storageCleanupCore";
 
 /** The stored lists whose files must survive (same keys as providers/PostsProvider.tsx). */
 export const DRAFTS_KEY = "dropday:draftProjects:v2";
@@ -20,7 +21,6 @@ export const OPTIMISTIC_POSTS_KEY = "dropday:optimisticPosts";
 
 /** When this run of the app started: anything written before it belongs to an earlier run. */
 export const LAUNCHED_AT = Date.now();
-const MANUAL_MIN_AGE_MS = 15 * 60 * 1000;
 const MAX_DEPTH = 4;
 
 function roots(): Array<{ root: FileEntry["root"]; uri: string }> {
@@ -92,11 +92,6 @@ export async function listAppFiles(deletableOnly = false): Promise<FileEntry[]> 
   return out;
 }
 
-export async function storageReport(): Promise<StorageReport> {
-  recordBreadcrumb("storageReport:listing");
-  return summarize(await listAppFiles());
-}
-
 /** The stored drafts and pending uploads, or null when they could not be read (then nothing is deleted). */
 async function storedReferences(): Promise<string[] | null> {
   try {
@@ -115,7 +110,7 @@ let running: Promise<CleanupResult> | null = null;
 const RUNNING_KEY = "tryal:storageCleanupRunning";
 
 /** Delete temporary files last written before `before` that nothing stored refers to. One run at a time. */
-export function cleanUpTemporaryFiles(before: number, reason: "launch" | "manual"): Promise<CleanupResult> {
+export function cleanUpTemporaryFiles(before: number, reason: "launch"): Promise<CleanupResult> {
   if (running) return running;
   running = (async (): Promise<CleanupResult> => {
     const result: CleanupResult = { removedFiles: 0, removedBytes: 0, failed: 0, keptReferenced: 0, keptRecent: 0 };
@@ -160,9 +155,4 @@ export function cleanUpTemporaryFiles(before: number, reason: "launch" | "manual
 export function scheduleLaunchCleanup(delayMs = 8000): () => void {
   const t = setTimeout(() => void cleanUpTemporaryFiles(LAUNCHED_AT, "launch"), delayMs);
   return () => clearTimeout(t);
-}
-
-/** Settings → Storage → Free up space. */
-export function cleanUpNow(): Promise<CleanupResult> {
-  return cleanUpTemporaryFiles(Date.now() - MANUAL_MIN_AGE_MS, "manual");
 }
