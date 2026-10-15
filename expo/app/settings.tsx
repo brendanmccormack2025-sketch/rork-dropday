@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ban, Bell, ChevronLeft, EyeOff, FileText, LogOut, Phone, Scissors, Shield, Trash2, User, Users } from "lucide-react-native";
+import { Ban, Bell, ChevronLeft, EyeOff, FileText, HardDrive, LogOut, Phone, Scissors, Shield, Trash2, User, Users } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -170,6 +170,12 @@ export default function SettingsScreen() {
                 </View>
               </>
             ) : null}
+            <View style={styles.rowDivider} />
+            <Pressable onPress={() => router.push("/settings/storage" as never)} style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
+              <HardDrive color={theme.textMuted} size={18} strokeWidth={2} />
+              <UiText style={styles.rowText}>Storage</UiText>
+              <ChevronLeft color={theme.textDim} size={18} strokeWidth={2} style={{ transform: [{ rotate: "180deg" }] }} />
+            </Pressable>
           </View>
 
           {/* Privacy section: build in silence */}

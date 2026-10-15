@@ -36,7 +36,8 @@ import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
 import { VideoView, useVideoPlayer, createVideoPlayer, type VideoPlayer } from "expo-video";
 import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
-import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync, deleteAsync } from "@/lib/fileSystemCompat";
+import { documentDirectory, getInfoAsync, makeDirectoryAsync, copyAsync, deleteAsync, readDirectoryAsync } from "@/lib/fileSystemCompat";
+import { draftLeftovers, stagedCopiesToDelete } from "@/lib/storageCleanupCore";
 import { waitForFileReady } from "@/lib/waitForFileReady";
 import * as Haptics from "expo-haptics";
 import {
@@ -3764,7 +3765,12 @@ export default function EditScreen() {
       const permanentDir = `${documentDirectory}thumbnails/`;
       await makeDirectoryAsync(permanentDir, { intermediates: true });
       const permanentUri = `${permanentDir}cover_${Date.now()}.jpg`;
-      await copyAsync({ from: result.uri, to: permanentUri });
+      try {
+        await copyAsync({ from: result.uri, to: permanentUri });
+      } finally {
+        // the frame grabber's own file (in the cache) is not needed once copied
+        await deleteAsync(result.uri, { idempotent: true }).catch(() => {});
+      }
       return permanentUri;
     } catch {
       return null;
@@ -3814,6 +3820,8 @@ export default function EditScreen() {
             }
             const srcSize = srcInfo.size ?? 0;
 
+            // Already this draft's own file (saving an opened draft again): keep it, never a second copy.
+            if (c.uri.startsWith(draftDir)) return c.uri;
             const ext = c.uri.match(/\.(\w+)(?:\?|$)/)?.[1] ?? (c.type === "video" ? "mp4" : "jpg");
             const destUri = `${draftDir}${c.id}.${ext}`;
             if (c.uri !== destUri) {
@@ -3887,6 +3895,20 @@ export default function EditScreen() {
         updatedAt: Date.now(),
       };
       await saveDraftProject(project);
+      // Space: the previous cover of this draft, and files in its folder the saved draft no longer uses (clips deleted
+      // or replaced since the last save). Only after the new version is stored.
+      const previous = draftId ? draftProjects.find((d) => d.id === draftId) : undefined;
+      if (previous?.coverThumbnailUri && previous.coverThumbnailUri !== project.coverThumbnailUri) {
+        for (const u of stagedCopiesToDelete([previous.coverThumbnailUri])) await deleteAsync(u, { idempotent: true }).catch(() => {});
+      }
+      try {
+        const names = await readDirectoryAsync(draftDir);
+        for (const u of draftLeftovers(names.map((n) => `${draftDir}${n}`), permanentClips.map((c) => c.uri))) {
+          await deleteAsync(u, { idempotent: true }).catch(() => {});
+        }
+      } catch {
+        // tidying up is optional
+      }
       setSuccess("Draft saved");
       setTimeout(() => {
         if (!draftId) {

@@ -21,6 +21,7 @@ import {
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { readFeedRows, type EngineFeedRow } from "@/lib/trialEngine";
 import { isOnOwnProfilePost } from "@/lib/profileVisibility";
+import { stagedCopiesToDelete } from "@/lib/storageCleanupCore";
 import { concatMP4Files } from "@/src/integrations/concatMP4";
 
 /**
@@ -877,6 +878,9 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     async (id: string) => {
       // Remove permanent media files from document directory
       const draftDir = `${documentDirectory}drafts/${id}/`;
+      // its cover image lives outside the draft folder
+      const cover = draftProjects.find((d) => d.id === id)?.coverThumbnailUri;
+      for (const u of stagedCopiesToDelete([cover])) await deleteAsync(u, { idempotent: true }).catch(() => {});
       try {
         const dirInfo = await getInfoAsync(draftDir);
         if (dirInfo.exists) {
@@ -2293,6 +2297,12 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       }
       if (input.cleanupUri) {
         await deleteAsync(input.cleanupUri, { idempotent: true }).catch(() => {});
+      }
+      // The copies staged for this upload (clips, render, cover) are on the server now. Only files the editor made
+      // for the upload (post_uploads/, thumbnails/) are deleted, never the source clips (a camera-roll save may still
+      // be reading them; the launch cleanup takes those later).
+      for (const u of stagedCopiesToDelete([rawInput.uri, ...(rawInput.segmentUris ?? []), rawInput.thumbnailUri, input.uri, ...(input.segmentUris ?? [])])) {
+        await deleteAsync(u, { idempotent: true }).catch(() => {});
       }
 
       // ── Clean up stitch temp files ─────────────────────────────────

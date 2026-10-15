@@ -159,3 +159,11 @@ export async function deleteAsync(
   }
   return NativeFS.deleteAsync(_path, _options);
 }
+
+// ── readDirectoryAsync ───────────────────────────────────────────────────────
+
+/** Names inside a directory (not full paths). Empty on web. */
+export async function readDirectoryAsync(uri: string): Promise<string[]> {
+  if (Platform.OS === "web") return [];
+  return NativeFS.readDirectoryAsync(uri);
+}
