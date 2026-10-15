@@ -21,6 +21,8 @@ import { parseCreatorStatus, postingBlock } from "@/lib/creatorStatus";
 import { usePosts } from "@/providers/PostsProvider";
 import { MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
 import { launchLibraryWithRetry } from "@/lib/pickerRetry";
+import CaptionsExplainer from "@/components/CaptionsExplainer";
+import { needsSpeechPrimer, primeSpeechPermission, skipSpeechPrimer } from "@/lib/speechPermission";
 import { PICKER_ERROR_MESSAGES, classifyPickerError } from "@/lib/pickerErrors";
 
 /** Mirrors the Clip shape the camera flow hands to /edit — same pipeline. */
@@ -176,6 +178,23 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
   const { myProfile } = usePosts();
   const block = postingBlock(parseCreatorStatus(myProfile?.creator_status));
 
+  // First time only: explain and ask for speech permission here, before the first video reaches the editor (the
+  // editor's AI edit and captions need it, and a system prompt in the middle of the first edit left it unedited).
+  const [primerFor, setPrimerFor] = useState<null | "camera" | "library">(null);
+  const choose = useCallback(async (which: "camera" | "library") => {
+    if (await needsSpeechPrimer()) setPrimerFor(which);
+    else if (which === "camera") openCamera();
+    else void openLibrary();
+  }, [openCamera, openLibrary]);
+  const afterPrimer = useCallback(async (allow: boolean) => {
+    const next = primerFor;
+    setPrimerFor(null);
+    if (allow) await primeSpeechPermission();
+    else await skipSpeechPrimer();
+    if (next === "camera") openCamera();
+    else if (next === "library") void openLibrary();
+  }, [primerFor, openCamera, openLibrary]);
+
   return (
     <Modal
       visible={visible}
@@ -197,7 +216,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
           </UiText>
 
           <Pressable
-            onPress={openCamera}
+            onPress={() => void choose("camera")}
             style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
             android_ripple={null}
           >
@@ -213,7 +232,7 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
           </Pressable>
 
           <Pressable
-            onPress={() => openLibrary()}
+            onPress={() => void choose("library")}
             disabled={isPicking}
             style={({ pressed }) => [
               styles.option,
@@ -280,6 +299,8 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
           )}
         </View>
       </View>
+      {/* inside the sheet's Modal: iOS shows one modal at a time */}
+      <CaptionsExplainer visible={primerFor !== null} onContinue={() => void afterPrimer(true)} onNotNow={() => void afterPrimer(false)} />
     </Modal>
   );
 }

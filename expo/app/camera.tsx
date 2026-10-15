@@ -29,6 +29,7 @@ import { usePosts } from "@/providers/PostsProvider";
 import { recordClientError } from "@/lib/clientErrors";
 import { CAMERA_FAILED_TEXT, startFailure } from "@/lib/cameraStart";
 import { theme } from "@/constants/theme";
+import { recordBreadcrumb } from "@/lib/clientErrors";
 import { useCameraRecorder } from "@/hooks/useCameraRecorder";
 import { SCREEN_LIGHT_COLOR } from "@/lib/cameraFlash";
 import { createScreenLight, nativeBrightness } from "@/lib/screenLight";
@@ -206,6 +207,14 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
 
   // Start watchdog: a camera that has not reported ready in time (or failed to mount) is a failed start, not a freeze.
   const viewMounted = !!permission?.granted && facingLoaded;
+  // how far the camera got, for crashes that leave no report (uploaded at the next launch)
+  useEffect(() => recordBreadcrumb("camera: screen mounted"), []);
+  useEffect(() => {
+    if (viewMounted) recordBreadcrumb("camera: preview mounted");
+  }, [viewMounted]);
+  useEffect(() => {
+    if (isCameraReady) recordBreadcrumb("camera: ready");
+  }, [isCameraReady]);
   useEffect(() => {
     if (cameraMountError) {
       onFailure("mount-error");

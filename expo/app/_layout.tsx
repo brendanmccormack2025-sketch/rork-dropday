@@ -39,6 +39,7 @@ import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { syncContactsIfDue } from "@/lib/contacts";
 import { redeemPendingInvite } from "@/lib/invite";
+import { setPerfScreen, startPerfWatch } from "@/lib/perfWatch";
 import { scheduleLaunchCleanup } from "@/lib/storageCleanup";
 import { installPushHandlers, registerForPush, watchPushToken } from "@/lib/push";
 import { phonePromptKey } from "@/lib/phonePrompt";
@@ -66,7 +67,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   // The error recorder knows where the app is and who is signed in; reports saved by an earlier run go up now.
   useEffect(() => {
     setErrorContext({ screen: pathname });
+    setPerfScreen(pathname);
   }, [pathname]);
+  // the flight recorder for crashes iOS leaves no report for (lib/perfWatch.ts)
+  useEffect(() => startPerfWatch(), []);
   useEffect(() => {
     const id = session?.user?.id ?? null;
     setErrorContext({ userId: id });

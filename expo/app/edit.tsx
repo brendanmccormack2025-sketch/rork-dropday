@@ -942,6 +942,12 @@ export default function EditScreen() {
     return total;
   }, [clips]);
 
+  // how far the editor got, for crashes that leave no report (uploaded at the next launch)
+  useEffect(() => {
+    recordBreadcrumb("editor: opened", { clips: clips.length, ms: Math.round(totalDurationMs), reaction: !!reactingTo });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const activeClip: DraftClip | undefined = clips[activeIndex];
   const isVideo = activeClip?.type === "video";
   // Android's back button walks the steps back: Post -> editor -> Cuts -> leave.
