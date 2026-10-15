@@ -116,7 +116,8 @@ ok("Expo token shape", EXPO_TOKEN_RE.test("ExponentPushToken[abc_DEF-123]") && E
   const push = read("../lib/push.ts"), layout = read("../app/_layout.tsx"), auth = read("../providers/AuthProvider.tsx");
   ok("on sign-in the app asks (once per account) and saves the Expo push token", /registerForPush\(id\)/.test(layout) && /requestPermissionsAsync\(\)/.test(push) && /getExpoPushTokenAsync/.test(push) && /register_push_token/.test(push) && /askedKey\(userId\)/.test(push));
   ok("it is registered only for a signed-in person, not on the auth screens", /if \(!id \|\| segments\[0\] === "\(auth\)"\) return;[\s\S]{0,400}registerForPush\(id\)/.test(layout));
-  ok("a rotated token is saved again", /addPushTokenListener/.test(push) && /watchPushToken\(\)/.test(layout));
+  // no token listener: fetching the token fires it again (an endless loop that heated the phone and crashed the camera)
+  ok("no push-token listener (it looped); the token is refreshed by registerForPush at launch, once per run", !/addPushTokenListener\(/.test(push) && /registeredFor === userId/.test(push));
   ok("signing out (and deleting the account) removes this phone's token first", (auth.match(/await unregisterPush\(\)/g) ?? []).length === 2 && /remove_push_token/.test(push));
   ok("nothing here can break sign-in: expo-notifications is loaded lazily and every call is guarded", /require\("expo-notifications"\)/.test(push) && !/^import .* from "expo-notifications"/m.test(push) && (push.match(/catch/g) ?? []).length >= 6);
   ok("a tap opens only a known route", /routeFromPushData\(response\.notification\.request\.content\.data\)/.test(push));

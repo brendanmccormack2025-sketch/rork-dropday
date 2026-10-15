@@ -40,7 +40,10 @@ async function save(token: string): Promise<void> {
  * On sign-in: ask for permission the first time for this account (afterwards only a silent refresh, if it is still
  * granted), then register the token. Safe to call on every app start.
  */
+let registeredFor: string | null = null;
 export async function registerForPush(userId: string): Promise<void> {
+  if (registeredFor === userId) return; // once per app run and account
+  registeredFor = userId;
   try {
     if (Platform.OS === "web") return;
     const N = load();
@@ -61,25 +64,13 @@ export async function registerForPush(userId: string): Promise<void> {
   }
 }
 
-/** Keeps the saved token current if the system rotates it. Returns the unsubscribe function. */
+/**
+ * Deliberately does nothing. It used to listen for token changes and fetch the Expo token again on each one, but fetching
+ * the token makes iOS report the device token again, which fired the listener again: an endless loop that heated the
+ * phone and made the camera and editor crash. registerForPush() at every launch keeps the saved token current instead.
+ */
 export function watchPushToken(): () => void {
-  try {
-    const N = load();
-    if (!N) return () => {};
-    const sub = N.addPushTokenListener((t) => {
-      void (async () => {
-        try {
-          const res = await N.getExpoPushTokenAsync(projectId() ? { projectId: projectId() } : undefined);
-          await save(res.data);
-        } catch {
-          void t;
-        }
-      })();
-    });
-    return () => sub.remove();
-  } catch {
-    return () => {};
-  }
+  return () => {};
 }
 
 /** Before signing out: this phone stops getting this person's pushes. */
