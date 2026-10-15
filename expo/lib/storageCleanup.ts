@@ -159,8 +159,15 @@ export function cleanUpTemporaryFiles(before: number): Promise<CleanupResult> {
   return running;
 }
 
+/**
+ * OFF while the camera / editor crashes are tracked down: every launch run so far started listing and never finished,
+ * and the crashes, heat and freezes began with it. A successful post still deletes its own staged copies.
+ */
+export const LAUNCH_CLEANUP_ENABLED = false;
+
 /** Called once from the root layout: tidy up what earlier runs left behind, once the app has settled. */
 export function scheduleLaunchCleanup(delayMs = 20000): () => void {
+  if (!LAUNCH_CLEANUP_ENABLED) return () => {};
   const t = setTimeout(() => void cleanUpTemporaryFiles(LAUNCHED_AT), delayMs);
   return () => clearTimeout(t);
 }
