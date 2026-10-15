@@ -11,7 +11,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
 import { cacheDirectory, deleteAsync, documentDirectory, getInfoAsync, readDirectoryAsync } from "@/lib/fileSystemCompat";
-import { recordMetric } from "@/lib/clientErrors";
+import { recordBreadcrumb, recordMetric } from "@/lib/clientErrors";
 import { planCleanup, summarize, type FileEntry, type StorageReport } from "@/lib/storageCleanupCore";
 
 /** The stored lists whose files must survive (same keys as providers/PostsProvider.tsx). */
@@ -44,7 +44,7 @@ function deletableDirs(): string[] {
 
 const PARALLEL = 24;
 
-async function walk(root: FileEntry["root"], base: string, dir: string, depth: number, out: FileEntry[], only?: string[], keep?: string[]): Promise<void> {
+async function walk(root: FileEntry["root"], base: string, dir: string, depth: number, out: FileEntry[], only?: string[]): Promise<void> {
   let names: string[] = [];
   try {
     names = await readDirectoryAsync(dir);
@@ -56,21 +56,17 @@ async function walk(root: FileEntry["root"], base: string, dir: string, depth: n
     try {
       // expo's camera / picker folders live in expo's cacheDirectory: name them from there ("Camera/…", "ImagePicker/…")
       const from = root === "caches" && cacheDirectory && cacheDirectory !== base && uri.startsWith(cacheDirectory) ? cacheDirectory : base;
-      const info = await getInfoAsync(uri, { size: true });
+      // NO size option: on a folder it makes the system add up everything inside (slow, and the likely crash on
+      // system folders); a plain file reports its size anyway.
+      const info = await getInfoAsync(uri);
       if (!info.exists) return;
       if (info.isDirectory) {
         const sub = `${uri}/`;
         // with `only`: go into a folder only on the way to (or inside) one of those folders
         const wanted = !only || only.some((d) => d.startsWith(sub) || sub.startsWith(d));
-        if (!wanted || depth >= MAX_DEPTH) return;
-        // Report only: a folder that can hold nothing deletable (an image cache with thousands of files) is counted as
-        // one entry when the system gives its size, instead of asking about every file in it.
-        const onPath = keep?.some((d) => d.startsWith(sub) || sub.startsWith(d)) ?? true;
-        if (!onPath && typeof info.size === "number" && info.size > 0) {
-          out.push({ uri: sub, rel: decodeURI(sub.slice(from.length)), root, size: info.size, modifiedMs: Math.round((info.modificationTime ?? 0) * 1000) });
-          return;
-        }
-        await walk(root, base, sub, depth + 1, out, only, keep);
+        // the system's own folders (com.apple.*, Snapshots) are never ours to read
+        if (!wanted || depth >= MAX_DEPTH || /^(com\.apple|Snapshots$)/.test(name)) return;
+        await walk(root, base, sub, depth + 1, out, only);
         return;
       }
       out.push({
@@ -92,13 +88,12 @@ async function walk(root: FileEntry["root"], base: string, dir: string, depth: n
 export async function listAppFiles(deletableOnly = false): Promise<FileEntry[]> {
   const out: FileEntry[] = [];
   const only = deletableOnly ? deletableDirs() : undefined;
-  // the report walks everything, but only file by file where temporary files or drafts can be
-  const keep = deletableOnly ? undefined : [...deletableDirs(), `${documentDirectory}drafts/`];
-  for (const r of roots()) await walk(r.root, r.uri, r.uri, 0, out, only, keep);
+  for (const r of roots()) await walk(r.root, r.uri, r.uri, 0, out, only);
   return out;
 }
 
 export async function storageReport(): Promise<StorageReport> {
+  recordBreadcrumb("storageReport:listing");
   return summarize(await listAppFiles());
 }
 
@@ -116,14 +111,28 @@ export type CleanupResult = { removedFiles: number; removedBytes: number; failed
 
 let running: Promise<CleanupResult> | null = null;
 
+/** Set while a cleanup runs. Still set at the next launch = the app died during it: that launch skips the cleanup. */
+const RUNNING_KEY = "tryal:storageCleanupRunning";
+
 /** Delete temporary files last written before `before` that nothing stored refers to. One run at a time. */
 export function cleanUpTemporaryFiles(before: number, reason: "launch" | "manual"): Promise<CleanupResult> {
   if (running) return running;
   running = (async (): Promise<CleanupResult> => {
     const result: CleanupResult = { removedFiles: 0, removedBytes: 0, failed: 0, keptReferenced: 0, keptRecent: 0 };
     try {
+      const unfinished = await AsyncStorage.getItem(RUNNING_KEY).catch(() => null);
+      if (unfinished && reason === "launch") {
+        // the last one never finished (the app closed or crashed in it): not again at launch; the button still works
+        await AsyncStorage.removeItem(RUNNING_KEY).catch(() => {});
+        void recordMetric("storageCleanupSkipped", { after: unfinished });
+        return result;
+      }
+      await AsyncStorage.setItem(RUNNING_KEY, `${reason}@${new Date().toISOString()}`).catch(() => {});
+      // where it got to, in case the app dies on the way (uploaded at the next launch)
+      recordBreadcrumb(`storageCleanup:${reason}:listing`);
       const files = await listAppFiles(true);
       const plan = planCleanup(files, await storedReferences(), before);
+      recordBreadcrumb(`storageCleanup:${reason}:deleting`, { files: plan.remove.length, bytes: plan.removeBytes, listed: files.length });
       result.keptReferenced = plan.keptReferenced;
       result.keptRecent = plan.keptRecent;
       for (const f of plan.remove) {
@@ -136,6 +145,7 @@ export function cleanUpTemporaryFiles(before: number, reason: "launch" | "manual
         }
       }
       if (result.removedFiles > 0 || result.failed > 0) void recordMetric("storageCleanup", { reason, ...result });
+      await AsyncStorage.removeItem(RUNNING_KEY).catch(() => {});
     } catch {
       // never break the app over cleanup
     }
