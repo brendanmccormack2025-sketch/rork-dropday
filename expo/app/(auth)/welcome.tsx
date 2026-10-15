@@ -19,7 +19,6 @@ import { useAuth } from "@/providers/AuthProvider";
 
 export default function WelcomeScreen() {
   const floatAnim = useRef(new Animated.Value(0)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.loop(
@@ -38,52 +37,19 @@ export default function WelcomeScreen() {
         }),
       ])
     ).start();
-
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, {
-          toValue: 1,
-          duration: 2200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(glowAnim, {
-          toValue: 0,
-          duration: 2200,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-  }, [floatAnim, glowAnim]);
+  }, [floatAnim]);
 
   const translateY = floatAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, -8],
   });
 
-  const ringOpacity = glowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.3, 0.06],
-  });
-  const ringScale = glowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 1.55],
-  });
 
   return (
     <ScreenBackground>
       <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
         {/* Hero */}
         <View style={styles.hero}>
-          {/* Pulsing ring */}
-          <Animated.View
-            style={[
-              styles.ring,
-              {
-                opacity: ringOpacity,
-                transform: [{ scale: ringScale }],
-              },
-            ]}
-          />
           {/* Logo */}
           <Animated.View style={{ transform: [{ translateY }] }}>
             <Image
@@ -92,7 +58,7 @@ export default function WelcomeScreen() {
               contentFit="contain"
             />
           </Animated.View>
-          <UiText style={styles.tagline}>Post it. See if it survives.</UiText>
+          <UiText style={styles.tagline}>A safe place to try ideas and grow your audience.</UiText>
         </View>
 
         {/* Actions */}
@@ -142,19 +108,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
   },
-  ring: {
-    position: "absolute",
-    width: 200,
-    height: 200,
-    borderRadius: 0,
-    borderWidth: 1.5,
-    borderColor: theme.accent,
-  },
   brandLogo: { width: 136, height: 64 },
   tagline: {
     color: theme.textMuted,
     fontSize: 15,
     fontWeight: "500" as const,
+    textAlign: "center" as const,
+    maxWidth: 280,
   },
   actions: { gap: 12, paddingBottom: 8 },
   legal: {

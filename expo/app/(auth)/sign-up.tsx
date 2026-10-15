@@ -144,7 +144,7 @@ export default function SignUpScreen() {
               label="Username"
               value={username}
               onChangeText={setUsername}
-              placeholder="dropper"
+              placeholder="yourname"
               autoCapitalize="none"
               maxLength={24}
             />
