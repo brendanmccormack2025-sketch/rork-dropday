@@ -53,6 +53,14 @@ export const FULL_TEXT = "That's the 60 seconds. Tap ✓, or delete the last cli
 export const fullText = (maxMs: number): string => FULL_TEXT.replace("60 seconds", `${Math.round(maxMs / 1000)} seconds`);
 export const NOT_READY_TEXT = "Camera not ready. Please try again.";
 export const NOT_SAVED_TEXT = "Recording could not be saved. Please try again.";
+/** iOS refuses to record while the microphone is taken (a phone or FaceTime call, another app recording). */
+export const RECORDING_FAILED_TEXT = "Couldn't record. If you're on a call, hang up and try again.";
+
+/** What the person sees when the camera refuses to record: never a raw native exception. */
+export function recordingErrorText(e: unknown): string {
+  void e; // the native message ("CameraRecordingFailedException … CameraVideoRecording.swift:126") means nothing to people
+  return RECORDING_FAILED_TEXT;
+}
 
 /** After asking the camera to stop, ask again this often while it is still recording. */
 const STOP_RETRY_MS = 300;
@@ -176,7 +184,7 @@ export class RecordingController {
         continuation = true;
       }
     } catch (e) {
-      this.deps.onError(e instanceof Error ? e.message : "Recording failed.");
+      this.deps.onError(recordingErrorText(e));
     } finally {
       this.recording = false;
       this.deps.onSwitching?.(false);
@@ -241,7 +249,7 @@ export class RecordingController {
       this.recording = false;
       this.token++;
       if (!this.stopRequested && !this.flipRequested) {
-        this.deps.onError(e instanceof Error ? e.message : "Recording failed.");
+        this.deps.onError(recordingErrorText(e));
         this.stopRequested = true;
       }
       return;
