@@ -33,6 +33,7 @@ import { usePosts, type Post, resolveAvatarUrl } from "@/providers/PostsProvider
 import { useNotifications } from "@/providers/NotificationsProvider";
 import { useUnreadMessages } from "@/hooks/useUnreadMessages";
 import SendToFriendSheet from "@/components/SendToFriendSheet";
+import { DIAG_SEND_SHEET_ON } from "@/lib/diagFlags";
 import { supabase } from "@/lib/supabase";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
@@ -164,7 +165,7 @@ export default function FeedScreen() {
         }
       />
 
-      <SendToFriendSheet post={sendPost} onClose={() => setSendPost(null)} />
+      {DIAG_SEND_SHEET_ON || sendPost ? <SendToFriendSheet post={sendPost} onClose={() => setSendPost(null)} /> : null}
 
       {bannerVisible ? (
         <SafeAreaView edges={["top"]} pointerEvents="box-none" style={styles.bannerWrap}>
