@@ -442,7 +442,7 @@ const styles = StyleSheet.create({
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 10 },
   // The wordmark file is tightly cropped (aspect about 2.13:1), so it sits flush with the header's edge.
-  brandLogo: { width: 60, height: 28 },
+  brandLogo: { width: 62, height: 25 },
   bellBtn: {
     width: 36,
     height: 36,

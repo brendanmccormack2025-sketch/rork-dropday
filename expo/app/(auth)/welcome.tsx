@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
   },
-  brandLogo: { width: 136, height: 64 },
+  brandLogo: { width: 140, height: 56 },
   tagline: {
     color: theme.textMuted,
     fontSize: 15,

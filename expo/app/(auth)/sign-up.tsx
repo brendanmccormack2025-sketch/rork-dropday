@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   header: { alignItems: "center", gap: 8, marginTop: 14, marginBottom: 22 },
-  brandLogo: { width: 64, height: 30 },
+  brandLogo: { width: 66, height: 27 },
   title: { color: theme.text, fontSize: 26, fontWeight: "900" as const },
   sub: { color: theme.textMuted, fontSize: 15 },
   form: { gap: 14 },
