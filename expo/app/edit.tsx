@@ -4225,9 +4225,11 @@ export default function EditScreen() {
           overlays: textOverlays,
           fontNames: supportedFontNames,
         });
-        const postedUri = saveToRollRef.current && rendered && savedText.length === 0 ? await stageExportFallback(rendered.uri) : null;
+        // Reactions and replies are never saved to the camera roll: only the creator's own posts.
+        const saveThis = isRootPost && saveToRollRef.current;
+        const postedUri = saveThis && rendered && savedText.length === 0 ? await stageExportFallback(rendered.uri) : null;
         void startPostExport({
-          enabled: saveToRollRef.current && Platform.OS !== "web",
+          enabled: saveThis && Platform.OS !== "web",
           clips,
           captionOverlays: captionOverlaysForPost,
           textOverlays: savedText,
@@ -5133,7 +5135,7 @@ export default function EditScreen() {
               ios_backgroundColor={theme.border}
             />
           </View>
-          {isVideo && Platform.OS !== "web" && (
+          {isVideo && isRootPost && Platform.OS !== "web" && (
             <View style={styles.saveRollRow}>
               <UiText style={styles.saveRollText}>Save to camera roll</UiText>
               <Switch
@@ -5149,7 +5151,7 @@ export default function EditScreen() {
               />
             </View>
           )}
-          {isVideo && Platform.OS !== "web" && saveToRoll && supportsTextOverlays && (
+          {isVideo && isRootPost && Platform.OS !== "web" && saveToRoll && supportsTextOverlays && (
             <View style={styles.saveRollRow}>
               <UiText style={styles.saveRollText}>Include text in saved video</UiText>
               <Switch

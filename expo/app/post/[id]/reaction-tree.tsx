@@ -358,7 +358,6 @@ export default function ReactionTreeScreen() {
             <ArrowLeft color={overVideo ? "#FFFFFF" : theme.text} size={22} strokeWidth={2} />
           </Pressable>
           <View style={styles.headerCenter}>
-            <Sparkles color={theme.accent} size={16} />
             <UiText style={[styles.headerTitle, overVideo && styles.headerTextOnVideo]}>Reactions</UiText>
           </View>
           <View style={styles.headerSpacer} />
@@ -791,13 +790,6 @@ function ReactionItem({
             <UiText style={styles.actionLabel}>Reply</UiText>
           </Pressable>
         )}
-
-        <View style={styles.actionBtn}>
-          <Sparkles color="#fff" size={28} strokeWidth={2} />
-          <UiText style={styles.actionLabel}>
-            {String(post.like_count ?? 0)}
-          </UiText>
-        </View>
 
         {isOwner && (
           <Pressable onPress={handleDeleteReaction} style={styles.actionBtn} hitSlop={8}>

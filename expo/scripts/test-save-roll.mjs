@@ -100,7 +100,8 @@ const captions = captionLinesToEditOverlays(buildCaptionLines([{ text: "hi", sta
   const r = await saveToCameraRoll({ enabled: false, render: async () => (calls.push("render"), { uri: "x" }), ensurePermission: async () => (calls.push("perm"), true), save: async () => void calls.push("save"), cleanup: async () => {} });
   eq("switch off: nothing rendered, no permission asked, nothing saved", [r, calls], [{ status: "off" }, []]);
   const edit = read("../app/edit.tsx");
-  ok("Post passes the switch to the export", /enabled: saveToRollRef\.current/.test(edit));
+  ok("Post passes the switch to the export", /const saveThis = isRootPost && saveToRollRef\.current;/.test(edit) && /enabled: saveThis && Platform\.OS !== "web"/.test(edit));
+  ok("reactions and replies are never saved to the camera roll (and show no switch)", /const isRootPost = !reactingTo && !rootDropId;/.test(edit) && /\{isVideo && isRootPost && Platform\.OS !== "web" && \(/.test(edit));
   ok("the switch is near Post, on by default, remembered per user", /useState\(true\)/.test(edit) && /setSaveEditedToRoll\(v, user\?\.id\)/.test(edit) && /getSaveEditedToRoll\(user\?\.id\)/.test(edit));
   ok("the setting is stored per user", /SAVE_EDITED_KEY\}:\$\{userId\}/.test(read("../lib/autoEditSettings.ts")));
   const exp = read("../lib/exportEdit.ts");
