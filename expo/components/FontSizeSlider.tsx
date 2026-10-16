@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 4,
-    borderRadius: 0,
+    borderRadius: 999,
     backgroundColor: "rgba(10,10,10,0.12)",
   },
   trackFill: {
@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
     left: 0,
     top: 18,
     height: 4,
-    borderRadius: 0,
+    borderRadius: 999,
     backgroundColor: "rgba(255,255,255,0.35)",
   },
   thumb: {
@@ -166,7 +166,7 @@ const styles = StyleSheet.create({
     top: 7,
     width: 26,
     height: 26,
-    borderRadius: 0,
+    borderRadius: 13,
     backgroundColor: "#fff",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },

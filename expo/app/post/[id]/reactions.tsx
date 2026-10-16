@@ -116,7 +116,9 @@ export default function PostReactionsScreen() {
         </View>
       ) : reactions.length === 0 ? (
         <View style={styles.center}>
-          <Sparkles color={theme.textDim} size={48} strokeWidth={1.5} />
+          <View style={styles.emptyIcon}>
+            <Sparkles color={theme.accent} size={34} strokeWidth={1.8} />
+          </View>
           <UiText style={styles.emptyTitle}>No reactions yet</UiText>
           <UiText style={styles.emptySub}>
             Be the first to react to this post.
@@ -164,7 +166,7 @@ export default function PostReactionsScreen() {
       )}
 
       {/* Record Reaction button — always visible for non-creators */}
-      {!reactionsLoading && (
+      {!reactionsLoading && reactions.length > 0 && (
         <SafeAreaView edges={["bottom"]} style={styles.reactSafe}>
           <Pressable
             onPress={() => {
@@ -176,7 +178,7 @@ export default function PostReactionsScreen() {
             ]}
           >
             <Reply color="#fff" size={18} strokeWidth={2.5} />
-            <UiText style={styles.reactBtnText}>Record Reaction</UiText>
+            <UiText style={styles.reactBtnText}>Record a reaction</UiText>
           </Pressable>
         </SafeAreaView>
       )}
@@ -430,10 +432,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  headerSpacer: { width: 40, height: 40 },
+  emptyIcon: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: "rgba(232,41,28,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
   headerBtn: {
     width: 38,
     height: 38,
-    borderRadius: 0,
+    borderRadius: 19,
     backgroundColor: "rgba(10,10,10,0.08)",
     alignItems: "center",
     justifyContent: "center",
@@ -467,12 +479,12 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     color: theme.text,
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: "900" as const,
   },
   emptySub: {
     color: theme.textMuted,
-    fontSize: 13,
+    fontSize: 15,
     textAlign: "center",
     lineHeight: 19,
   },
@@ -526,7 +538,7 @@ const styles = StyleSheet.create({
     marginTop: -16,
     width: 32,
     height: 32,
-    borderRadius: 0,
+    borderRadius: 16,
     backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center",
     justifyContent: "center",
@@ -551,7 +563,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 20,
     paddingVertical: 12,
-    borderRadius: 0,
+    borderRadius: 999,
     backgroundColor: "rgba(10,10,10,0.12)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
@@ -594,7 +606,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 30,
     height: 30,
-    borderRadius: 0,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -635,7 +647,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 14,
     minHeight: 50,
-    borderRadius: 0,
+    borderRadius: 999,
     backgroundColor: theme.accent,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 0 },
@@ -660,7 +672,7 @@ const styles = StyleSheet.create({
     right: 16,
     width: 36,
     height: 36,
-    borderRadius: 0,
+    borderRadius: 18,
     backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center" as const,
     justifyContent: "center" as const,
@@ -684,7 +696,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 14,
     minHeight: 50,
-    borderRadius: 0,
+    borderRadius: 999,
     backgroundColor: theme.accent,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 0 },

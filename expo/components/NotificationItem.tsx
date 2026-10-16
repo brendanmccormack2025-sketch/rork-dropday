@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
   unreadDot: {
     width: 8,
     height: 8,
-    borderRadius: 0,
+    borderRadius: 4,
     backgroundColor: theme.accent,
   },
   notifAvatarWrap: {
@@ -172,7 +172,7 @@ const styles = StyleSheet.create({
     right: -4,
     width: 20,
     height: 20,
-    borderRadius: 0,
+    borderRadius: 10,
     backgroundColor: theme.bgElevated,
     alignItems: "center",
     justifyContent: "center",
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
   notifThumbWrap: {
     width: 44,
     height: 44,
-    borderRadius: 0,
+    borderRadius: 10,
     overflow: "hidden",
     backgroundColor: theme.card,
   },

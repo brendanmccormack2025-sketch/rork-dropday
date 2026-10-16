@@ -117,12 +117,12 @@ export default function EditChoiceScreen() {
       <SafeAreaView edges={["top", "bottom"]} style={{ flex: 1 }}>
         <View style={styles.header}>
           <Pressable onPress={back} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Back">
-            <ChevronLeft color={theme.text} size={24} strokeWidth={2.5} />
+            <ChevronLeft color={theme.text} size={22} strokeWidth={2.5} />
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={styles.content}>
           <UiText weight={800} style={styles.title}>
-            How should we edit it?
+            How should we edit it<UiText weight={800} style={styles.titleAccent}>?</UiText>
           </UiText>
           <UiText style={styles.subtitle}>Nothing changes until you choose. Your original video is always kept, so you can come back and choose again.</UiText>
 
@@ -165,6 +165,8 @@ export default function EditChoiceScreen() {
                           onValueChange={(v) => setCustom((c) => ({ ...c, [f.key]: v }))}
                           disabled={busy}
                           trackColor={{ true: theme.accent, false: theme.border }}
+                          thumbColor="#fff"
+                          ios_backgroundColor={theme.border}
                           accessibilityLabel={f.title}
                         />
                       </View>
@@ -196,22 +198,23 @@ export default function EditChoiceScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.bg },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingVertical: 4 },
-  iconBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingVertical: 8 },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border, alignItems: "center", justifyContent: "center" },
   content: { paddingHorizontal: 20, paddingBottom: 24, gap: 12 },
-  title: { fontSize: 26, color: theme.text, marginTop: 4 },
+  title: { fontSize: 30, lineHeight: 36, letterSpacing: -0.8, color: theme.text, marginTop: 4 },
+  titleAccent: { color: theme.accent, fontSize: 30, lineHeight: 36 },
   subtitle: { fontSize: 15, lineHeight: 21, color: theme.textMuted, marginBottom: 8 },
-  option: { backgroundColor: theme.card, borderRadius: 16, borderWidth: 1.5, borderColor: theme.border, overflow: "hidden" },
-  optionSelected: { borderColor: theme.accent },
-  optionHead: { flexDirection: "row", alignItems: "center", gap: 14, padding: 14, minHeight: 76 },
-  optionIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: theme.bg, alignItems: "center", justifyContent: "center" },
+  option: { backgroundColor: theme.card, borderRadius: 22, borderWidth: 2, borderColor: "transparent", overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  optionSelected: { borderColor: theme.accent, backgroundColor: "#FFF7F5" },
+  optionHead: { flexDirection: "row", alignItems: "center", gap: 14, padding: 16, minHeight: 80 },
+  optionIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: "rgba(232,41,28,0.1)", alignItems: "center", justifyContent: "center" },
   optionIconSelected: { backgroundColor: theme.accent },
   optionCopy: { flex: 1, gap: 3 },
-  optionTitle: { fontSize: 16, color: theme.text },
+  optionTitle: { fontSize: 17, color: theme.text },
   optionBody: { fontSize: 13, lineHeight: 18, color: theme.textMuted },
-  radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: theme.border, alignItems: "center", justifyContent: "center" },
+  radio: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: theme.border, alignItems: "center", justifyContent: "center" },
   radioOn: { backgroundColor: theme.accent, borderColor: theme.accent },
-  features: { borderTopWidth: 1, borderTopColor: theme.border, paddingHorizontal: 14, paddingVertical: 4 },
+  features: { marginHorizontal: 16, marginBottom: 12, borderRadius: 16, backgroundColor: theme.card, paddingHorizontal: 14, paddingVertical: 2 },
   feature: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
   featureTitle: { fontSize: 15, color: theme.text },
   featureBody: { fontSize: 13, lineHeight: 18, color: theme.textMuted },

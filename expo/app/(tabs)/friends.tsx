@@ -345,7 +345,7 @@ const styles = StyleSheet.create({
   headerBadge: {
     minWidth: 22,
     height: 22,
-    borderRadius: 0,
+    borderRadius: 11,
     backgroundColor: theme.danger,
     alignItems: "center",
     justifyContent: "center",
@@ -363,7 +363,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     backgroundColor: "rgba(232,41,28,0.08)",
-    borderRadius: 0,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(232,41,28,0.15)",
     paddingHorizontal: 14,
@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
   inviteBannerIcon: {
     width: 32,
     height: 32,
-    borderRadius: 0,
+    borderRadius: 16,
     backgroundColor: "rgba(232,41,28,0.14)",
     alignItems: "center",
     justifyContent: "center",
@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
   sectionBadge: {
     width: 28,
     height: 28,
-    borderRadius: 0,
+    borderRadius: 14,
     backgroundColor: "rgba(232,41,28,0.12)",
     alignItems: "center",
     justifyContent: "center",
@@ -467,7 +467,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 46,
     height: 46,
-    borderRadius: 0,
+    borderRadius: 23,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -492,7 +492,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
     paddingHorizontal: 16,
     paddingVertical: 9,
-    borderRadius: 0,
+    borderRadius: 999,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,

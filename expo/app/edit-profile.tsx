@@ -501,7 +501,7 @@ const styles = StyleSheet.create({
   topBtn: {
     width: 40,
     height: 40,
-    borderRadius: 0,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -534,7 +534,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 96,
     height: 96,
-    borderRadius: 0,
+    borderRadius: 48,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
@@ -549,7 +549,7 @@ const styles = StyleSheet.create({
   },
   avatarOverlay: {
     ...StyleSheet.absoluteFill,
-    borderRadius: 0,
+    borderRadius: 48,
     backgroundColor: "rgba(0,0,0,0.35)",
     alignItems: "center",
     justifyContent: "center",
@@ -581,7 +581,7 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: "rgba(10,10,10,0.06)",
-    borderRadius: 0,
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: theme.text,

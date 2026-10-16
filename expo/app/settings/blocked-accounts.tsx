@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     backgroundColor: theme.card,
-    borderRadius: 0,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(10,10,10,0.07)",
   },
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
   unblockBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 0,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
     backgroundColor: "rgba(10,10,10,0.05)",

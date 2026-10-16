@@ -38,7 +38,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 18,
     paddingVertical: 12,
-    borderRadius: 0,
+    borderRadius: 999,
     backgroundColor: theme.primary,
   },
   linkText: { color: "#fff", fontWeight: "700" as const },

@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
 
   sectionCard: {
     backgroundColor: theme.card,
-    borderRadius: 0,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(10,10,10,0.07)",
     overflow: "hidden",
@@ -406,7 +406,7 @@ const styles = StyleSheet.create({
 
   dangerCard: {
     backgroundColor: "rgba(232,41,28,0.06)",
-    borderRadius: 0,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(232,41,28,0.15)",
     overflow: "hidden",

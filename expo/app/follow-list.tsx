@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 36,
     height: 36,
-    borderRadius: 0,
+    borderRadius: 18,
     backgroundColor: "rgba(10,10,10,0.07)",
     alignItems: "center",
     justifyContent: "center",
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 46,
     height: 46,
-    borderRadius: 0,
+    borderRadius: 23,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -318,7 +318,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
     paddingHorizontal: 16,
     paddingVertical: 9,
-    borderRadius: 0,
+    borderRadius: 999,
     shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,

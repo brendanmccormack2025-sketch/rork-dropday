@@ -138,19 +138,19 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 0,
+    borderRadius: 20,
     backgroundColor: theme.card,
   },
   tabSwitcher: {
     flexDirection: "row",
     backgroundColor: theme.card,
-    borderRadius: 0,
+    borderRadius: 999,
     padding: 3,
   },
   tab: {
     paddingVertical: 7,
     paddingHorizontal: 14,
-    borderRadius: 0,
+    borderRadius: 999,
   },
   tabActive: {
     backgroundColor: theme.accent,
