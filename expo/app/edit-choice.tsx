@@ -121,8 +121,8 @@ export default function EditChoiceScreen() {
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={styles.content}>
-          <UiText weight={800} style={styles.title}>
-            How should we edit it<UiText weight={800} style={styles.titleAccent}>?</UiText>
+          <UiText weight={800} style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+            How should we edit<UiText weight={800} style={styles.titleAccent}>?</UiText>
           </UiText>
           <UiText style={styles.subtitle}>Nothing changes until you choose. Your original video is always kept, so you can come back and choose again.</UiText>
 
