@@ -50,7 +50,7 @@ export default function PrimaryButton({
         ]}
       >
         <LinearGradient
-          colors={["#E8291C", "#E8291C", "#B71C12"]}
+          colors={["#F0402F", "#E8291C", "#C91F14"]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
           style={styles.gradient}
@@ -95,24 +95,26 @@ export default function PrimaryButton({
 
 const styles = StyleSheet.create({
   wrap: {
-    borderRadius: 0,
+    borderRadius: 999,
     overflow: "hidden",
   },
   gradient: {
+    minHeight: 56,
     paddingVertical: 15,
     paddingHorizontal: 20,
     alignItems: "center",
     justifyContent: "center",
   },
   inner: {
+    minHeight: 56,
     paddingVertical: 14,
     paddingHorizontal: 20,
     alignItems: "center",
     justifyContent: "center",
   },
   outline: {
-    borderWidth: 1,
-    borderColor: theme.border,
+    borderWidth: 1.5,
+    borderColor: theme.text,
     backgroundColor: theme.bgElevated,
   },
   ghost: {

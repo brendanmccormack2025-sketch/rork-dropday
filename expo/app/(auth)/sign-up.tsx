@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -17,6 +17,7 @@ import { ArrowLeft, Check, Mail } from "lucide-react-native";
 
 import ScreenBackground from "@/components/ScreenBackground";
 import PrimaryButton from "@/components/PrimaryButton";
+import AuthField from "@/components/AuthField";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -29,6 +30,8 @@ export default function SignUpScreen() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showCheckInbox, setShowCheckInbox] = useState<boolean>(false);
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   // Self-reported 13+ age confirmation
   const [ageConfirmed, setAgeConfirmed] = useState<boolean>(false);
@@ -86,7 +89,8 @@ export default function SignUpScreen() {
         <SafeAreaView style={styles.safe}>
           <Pressable
             onPress={() => setShowCheckInbox(false)}
-            style={styles.back}
+            style={[styles.back, { marginTop: 8 }]}
+            accessibilityLabel="Back"
           >
             <ArrowLeft color={theme.text} size={22} />
           </Pressable>
@@ -111,177 +115,151 @@ export default function SignUpScreen() {
     );
   }
 
+  const checkbox = (checked: boolean, toggle: () => void, children: React.ReactNode) => (
+    <Pressable onPress={toggle} style={styles.termsRow} accessibilityRole="checkbox" accessibilityState={{ checked }}>
+      <View style={[styles.checkbox, checked && styles.checkboxChecked]}>{checked ? <Check color="#FFFFFF" size={15} strokeWidth={3} /> : null}</View>
+      <UiText style={styles.termsText}>{children}</UiText>
+    </Pressable>
+  );
+
   return (
     <ScreenBackground>
       <SafeAreaView style={styles.safe}>
-        <Pressable onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }} style={styles.back}>
-          <ArrowLeft color={theme.text} size={22} />
-        </Pressable>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.kb}
-        >
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.scrollContent}
-          >
-            <Pressable
-              onPress={() => { Keyboard.dismiss(); }}
-              style={styles.innerDismiss}
-            >
-              <View style={styles.header}>
-            <Image
-              source={require("@/assets/images/tryal-wordmark.png")}
-              style={styles.brandLogo}
-              contentFit="contain"
-            />
-            <UiText style={styles.title}>Start posting</UiText>
-            <UiText style={styles.sub}>Create your account in seconds.</UiText>
-          </View>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.kb}>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <Pressable onPress={() => Keyboard.dismiss()} style={styles.innerDismiss} accessible={false}>
+              <View style={styles.topRow}>
+                <Pressable
+                  onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
+                  style={styles.back}
+                  hitSlop={8}
+                  accessibilityLabel="Back"
+                >
+                  <ArrowLeft color={theme.text} size={22} />
+                </Pressable>
+                <Image source={require("@/assets/images/tryal-wordmark.png")} style={styles.brandLogo} contentFit="contain" accessibilityLabel="Tryal" />
+                <View style={styles.backSpacer} />
+              </View>
 
-          <View style={styles.form}>
-            <Field
-              label="Username"
-              value={username}
-              onChangeText={setUsername}
-              placeholder="yourname"
-              autoCapitalize="none"
-              maxLength={24}
-            />
-            <Field
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="you@email.com"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              autoComplete="email"
-            />
-            <Field
-              label="Password"
-              value={password}
-              onChangeText={setPassword}
-              placeholder="At least 6 characters"
-              secureTextEntry
-              autoComplete="password-new"
-            />
-            {error ? <UiText style={styles.error}>{error}</UiText> : null}
-            <Pressable
-              onPress={() => setAgeConfirmed((v) => !v)}
-              style={styles.termsRow}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: ageConfirmed }}
-            >
-              <View
-                style={[styles.checkbox, ageConfirmed && styles.checkboxChecked]}
-              >
-                {ageConfirmed ? (
-                  <Check color="#FFFFFF" size={16} strokeWidth={3} />
-                ) : null}
-              </View>
-              <UiText style={styles.termsText}>
-                I confirm that I am 13 years of age or older.
-              </UiText>
-            </Pressable>
-            <Pressable
-              onPress={() => setAgreedToTerms((v) => !v)}
-              style={styles.termsRow}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: agreedToTerms }}
-            >
-              <View
-                style={[
-                  styles.checkbox,
-                  agreedToTerms && styles.checkboxChecked,
-                ]}
-              >
-                {agreedToTerms ? (
-                  <Check color="#FFFFFF" size={16} strokeWidth={3} />
-                ) : null}
-              </View>
-              <UiText style={styles.termsText}>
-                I agree to the{" "}
-                <UiText
-                  style={styles.termsLink}
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    router.push("/(auth)/legal?tab=terms");
-                  }}
-                >
-                  Terms of Use
+              <View style={styles.header}>
+                <UiText weight={800} style={styles.title} accessibilityRole="header">
+                  Start posting<UiText weight={800} style={styles.dot}>.</UiText>
                 </UiText>
-                {" and "}
-                <UiText
-                  style={styles.termsLink}
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    router.push("/(auth)/legal?tab=privacy");
-                  }}
-                >
-                  Privacy Policy
-                </UiText>
-                .
-              </UiText>
+                <UiText style={styles.sub}>Create your account in seconds.</UiText>
+              </View>
+
+              <View style={styles.form}>
+                <AuthField
+                  label="Username"
+                  value={username}
+                  onChangeText={setUsername}
+                  placeholder="yourname"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={24}
+                  textContentType="username"
+                  returnKeyType="next"
+                  onSubmitEditing={() => emailRef.current?.focus()}
+                />
+                <AuthField
+                  ref={emailRef}
+                  label="Email"
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="you@email.com"
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  autoComplete="email"
+                  textContentType="emailAddress"
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordRef.current?.focus()}
+                />
+                <AuthField
+                  ref={passwordRef}
+                  label="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="At least 6 characters"
+                  secureTextEntry
+                  autoComplete="password-new"
+                  textContentType="newPassword"
+                  returnKeyType="done"
+                />
+                {error ? (
+                  <View style={styles.errorBox}>
+                    <UiText style={styles.error}>{error}</UiText>
+                  </View>
+                ) : null}
+                <View style={styles.checks}>
+                  {checkbox(ageConfirmed, () => setAgeConfirmed((v) => !v), "I confirm that I am 13 years of age or older.")}
+                  {checkbox(
+                    agreedToTerms,
+                    () => setAgreedToTerms((v) => !v),
+                    <>
+                      I agree to the{" "}
+                      <UiText
+                        style={styles.termsLink}
+                        onPress={(e) => {
+                          e.stopPropagation?.();
+                          router.push("/(auth)/legal?tab=terms");
+                        }}
+                      >
+                        Terms of Use
+                      </UiText>
+                      {" and "}
+                      <UiText
+                        style={styles.termsLink}
+                        onPress={(e) => {
+                          e.stopPropagation?.();
+                          router.push("/(auth)/legal?tab=privacy");
+                        }}
+                      >
+                        Privacy Policy
+                      </UiText>
+                      .
+                    </>,
+                  )}
+                </View>
+                <PrimaryButton label="Create account" onPress={onSubmit} loading={loading} disabled={!agreedToTerms || !ageConfirmed} style={{ marginTop: 4 }} />
+                <Pressable onPress={() => router.replace("/(auth)/sign-in")} style={styles.switch} hitSlop={6}>
+                  <UiText style={styles.switchText}>
+                    Already have an account? <UiText weight={800} style={styles.switchAccent}>Sign in</UiText>
+                  </UiText>
+                </Pressable>
+              </View>
             </Pressable>
-            <PrimaryButton
-              label="Create account"
-              onPress={onSubmit}
-              loading={loading}
-              disabled={!agreedToTerms || !ageConfirmed}
-            />
-            <Pressable
-              onPress={() => router.replace("/(auth)/sign-in")}
-              style={styles.switch}
-            >
-              <UiText style={styles.switchText}>
-                Already have an account?{" "}
-                <UiText style={styles.switchAccent}>Sign in</UiText>
-              </UiText>
-            </Pressable>
-          </View>
-        </Pressable>
-      </ScrollView>
+          </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </ScreenBackground>
   );
 }
 
-function Field(
-  props: React.ComponentProps<typeof TextInput> & { label: string }
-) {
-  const { label, style, ...rest } = props;
-  return (
-    <View style={styles.fieldWrap}>
-      <UiText style={styles.fieldLabel}>{label}</UiText>
-      <TextInput
-        {...rest}
-        placeholderTextColor={theme.textDim}
-        style={[styles.input, style]}
-      />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1, paddingHorizontal: 24 },
   kb: { flex: 1 },
-  scrollContent: { flexGrow: 1, paddingBottom: 40 },
+  scrollContent: { flexGrow: 1, paddingBottom: 32 },
+  topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
+  backSpacer: { width: 44 },
+  dot: { color: theme.accent, fontSize: 36, lineHeight: 42 },
+  checks: { gap: 4 },
+  errorBox: { backgroundColor: "rgba(232,41,28,0.08)", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
   innerDismiss: { flex: 1 },
   back: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 0,
     backgroundColor: theme.card,
-    marginTop: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
-  header: { alignItems: "center", gap: 8, marginTop: 14, marginBottom: 22 },
+  header: { gap: 8, marginTop: 32, marginBottom: 26 },
   brandLogo: { width: 66, height: 27 },
-  title: { color: theme.text, fontSize: 26, fontWeight: "900" as const },
-  sub: { color: theme.textMuted, fontSize: 15 },
-  form: { gap: 14 },
+  title: { color: theme.text, fontSize: 36, lineHeight: 42, letterSpacing: -0.8 },
+  sub: { color: theme.textMuted, fontSize: 16 },
+  form: { gap: 16 },
   fieldWrap: { gap: 8 },
   fieldLabel: {
     color: theme.textMuted,
@@ -357,7 +335,7 @@ const styles = StyleSheet.create({
   },
   monthChipText: { color: theme.textMuted, fontSize: 13, fontWeight: "600" as const },
   monthChipTextActive: { color: "#fff", fontSize: 13, fontWeight: "700" as const },
-  error: { color: theme.danger, fontSize: 13, fontWeight: "500" as const },
+  error: { color: theme.danger, fontSize: 14, fontWeight: "600" as const },
   info: { color: theme.success, fontSize: 13, fontWeight: "500" as const },
   termsRow: {
     flexDirection: "row",
@@ -366,9 +344,9 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 0,
+    width: 24,
+    height: 24,
+    borderRadius: 8,
     borderWidth: 2,
     borderColor: theme.border,
     alignItems: "center",
@@ -381,17 +359,17 @@ const styles = StyleSheet.create({
   },
   termsText: {
     color: theme.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 14,
+    lineHeight: 20,
     flex: 1,
   },
   termsLink: {
     color: theme.accent,
     fontWeight: "600" as const,
   },
-  switch: { alignItems: "center", marginTop: 6 },
-  switchText: { color: theme.textMuted, fontSize: 14 },
-  switchAccent: { color: theme.accent, fontWeight: "700" as const },
+  switch: { alignItems: "center", marginTop: 4, paddingVertical: 6 },
+  switchText: { color: theme.textMuted, fontSize: 15 },
+  switchAccent: { color: theme.accent },
   checkInboxWrap: {
     flex: 1,
     alignItems: "center",
@@ -400,18 +378,19 @@ const styles = StyleSheet.create({
     paddingBottom: 60,
   },
   mailIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 0,
-    backgroundColor: theme.card,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: "rgba(232,41,28,0.1)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
   },
   checkInboxTitle: {
     color: theme.text,
-    fontSize: 24,
+    fontSize: 30,
     fontWeight: "900" as const,
+    letterSpacing: -0.6,
   },
   checkInboxBody: {
     color: theme.textMuted,
