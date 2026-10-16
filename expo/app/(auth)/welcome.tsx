@@ -58,7 +58,7 @@ export default function WelcomeScreen() {
               contentFit="contain"
             />
           </Animated.View>
-          <UiText style={styles.tagline}>A safe place to create and grow your audience</UiText>
+          <UiText style={styles.tagline}>A place where normal people become content creators</UiText>
         </View>
 
         {/* Actions */}
