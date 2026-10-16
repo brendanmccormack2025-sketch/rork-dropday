@@ -93,6 +93,8 @@ alter table public.trial_engine_config
   add column if not exists stall_minutes       integer not null default 30,   -- an assignment nobody opened for this long frees its slot
   add column if not exists ondemand_batch      integer not null default 10,   -- most posts one feed request can newly assign to a viewer
   add column if not exists ondemand_max_unseen integer not null default 20,   -- stop assigning while this many assigned posts are unseen
+  add column if not exists min_active          integer not null default 1,      -- survive only with this many strangers who liked / shared / reacted ...
+  add column if not exists min_active_fraction double precision not null default 0.05, -- ... or this share of the strangers who saw it, whichever is more
   add column if not exists small_pool_everyone integer not null default 50,   -- active pool this small or smaller: everybody gets every testing post
   add column if not exists prior_min           double precision not null default 1,     -- prior strength k = clamp(prior_pool_fraction * pool, prior_min, prior_strength)
   add column if not exists prior_pool_fraction double precision not null default 0.25,
@@ -1072,12 +1074,19 @@ declare
   ready boolean;
   verdict text := 'testing';
   window_h double precision;
+  active integer;
+  need_active integer;
 begin
   select * into post from public.posts where id = p_post_id;
   select * into st from public.trial_post_state where post_id = p_post_id for update;
   if post.id is null or st.post_id is null or st.decision is not null then return 'testing'; end if;
 
   select count(*), coalesce(sum(score), 0) into n, sum_s from public.trial_post_scores(p_post_id);
+  -- Watching is not enough to survive: strangers must actively respond (like, share or video reaction), at least
+  -- min_active of them or min_active_fraction of those who saw it, whichever is more.
+  select count(*) into active from public.trial_post_score_details(p_post_id) d
+   where not d.excluded and (d.liked or d.shared or d.reacted);
+  need_active := greatest(cfg.min_active, ceil(cfg.min_active_fraction * n)::integer);
   -- pool_unexposed = viewers who could still show up for this post: they have been active since it was created and their
 -- slot was not given back for inactivity. Inactive / released viewers do not block a decision (they count again if they
 -- return before it: opening the feed makes them active and on-demand assignment revives their slot).
@@ -1095,7 +1104,7 @@ begin
   min_survive := least(public.trial_clamp_int(ceil(cfg.survive_fraction * pool_total), cfg.survive_min, cfg.survive_max), greatest(cfg.survive_floor, pool_total));
   min_fail    := least(public.trial_clamp_int(ceil(cfg.fail_fraction * pool_total),    cfg.fail_min,    cfg.fail_max),    greatest(cfg.fail_floor,    pool_total));
 
-  if n >= min_survive and p >= cfg.p_survive then
+  if n >= min_survive and p >= cfg.p_survive and active >= need_active then
     verdict := 'survived'; reason := 'confidence';
   elsif n >= min_fail and p <= cfg.p_fail then
     verdict := 'failed'; reason := 'confidence';
@@ -1103,7 +1112,9 @@ begin
     -- POOL EXHAUSTED: every eligible (non-known) viewer has seen it and nobody is left to assign, so waiting 24 h cannot
     -- add information. Decide on the posterior mean: survive above the bar, ended well below it, otherwise incomplete.
     reason := 'pool_exhausted';
-    if alpha / (alpha + beta) >= p_bar - 1e-9 then   -- a tie survives
+    if active < need_active then
+      verdict := 'failed';                           -- everyone available saw it and too few responded: Tryal ended
+    elsif alpha / (alpha + beta) >= p_bar - 1e-9 then   -- a tie survives
       verdict := 'survived';
     elsif alpha / (alpha + beta) < cfg.exhausted_fail_ratio * p_bar then
       verdict := 'failed';

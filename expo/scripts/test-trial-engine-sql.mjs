@@ -128,7 +128,7 @@ if (!BIN) {
         Q(`delete from public.trial_engine_log; delete from public.trial_post_state; delete from public.trial_assignments; delete from public.notifications;
            delete from public.post_view_stats; delete from public.post_raw_views; delete from public.post_qualified_views; delete from public.likes;
            delete from public.viewer_creator_affinity; delete from public.trial_feed_opens; delete from public.follows; delete from public.hide_from_list; delete from public.contact_hashes; delete from public.user_phone_hash; delete from public.posts; delete from public.user_blocks;
-           update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
+           update public.trial_engine_config set min_active=0, min_active_fraction=0, engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
       };
       const score = (post) => Object.fromEntries(q(`select viewer_id::text || '=' || round(score::numeric,3) from public.trial_post_scores('${post}') order by 1`).split("\n").filter(Boolean).map((l) => l.split("=")));
 
@@ -252,7 +252,7 @@ if (!BIN) {
       ok("once seen, it is no longer pushed to the front again", !feedOf(asked[0]).startsWith(P1) || true);
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       ok("legacy mode: the feed is the plain get_feed again (outsider sees it)", feedOf(outsider).includes(P1));
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
+      Q(`update public.trial_engine_config set min_active=0, min_active_fraction=0, engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
       const pg = q(`set role authenticated; set request.jwt.claim.sub='${outsider}'; select count(*) || ':' || max(page_rows) from public.get_feed_engine(20, 0)`).split("\n").pop();
       ok("page_rows reports the source rows so the app can detect the end of the feed", /^\d+:\d+$/.test(pg));
 
@@ -309,7 +309,7 @@ if (!BIN) {
       eq("legacy: a new post is NOT given a cohort or engine state", [q(`select count(*) from public.trial_post_state`), q(`select count(*) from public.trial_assignments`)], ["0", "0"]);
       engine();
       eq("legacy: the old rule ran (25 h, below the exposure gate -> silent 'incomplete', no engine notification, no engine log)", [status(P1), notif("verdict_incomplete"), q("select count(*) from public.trial_engine_log")], ["incomplete", "0", "0"]);
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
+      Q(`update public.trial_engine_config set min_active=0, min_active_fraction=0, engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
       freshWorld(20);
       mkPost(P1, U(1), 1500);
       engine();
@@ -453,7 +453,7 @@ if (!BIN) {
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       prep(); Q(`update public.trial_engine_config set engine_mode='legacy'`);
       ok("legacy mode: opening the feed assigns nothing", (() => { viewerOf(V); return q("select count(*) from public.trial_assignments") === "0"; })());
-      Q(`update public.trial_engine_config set engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
+      Q(`update public.trial_engine_config set min_active=0, min_active_fraction=0, engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
       ok("a clean slate for the next run", true);
 
       // 13) A. small-app rule: while the active pool is small, everybody gets every testing post
@@ -621,6 +621,22 @@ if (!BIN) {
       for (const v of [2, 3, 4]) view(P1, U(v), { watch: 8000, dur: 12000 });
       engine();
       eq("pool of 3, modest but above the bar (not enough confidence alone) -> survives on exhaustion, reason logged", [status(P1), reasonOf(P1)], ["survived", "pool_exhausted"]);
+      // watching is not enough: at least max(min_active, 5% of viewers) strangers must like / share / react
+      freshWorld(4);
+      Q(`update public.trial_engine_config set min_active=1, min_active_fraction=0.05`);
+      mkPost(P1, U(1));
+      for (const v of [2, 3, 4]) view(P1, U(v), { watch: 12000, dur: 12000 });
+      engine();
+      eq("everyone watched to the end but nobody liked, shared or reacted -> ended on exhaustion", [status(P1), reasonOf(P1)], ["archived", "pool_exhausted"]);
+      freshWorld(4);
+      Q(`update public.trial_engine_config set min_active=1, min_active_fraction=0.05`);
+      mkPost(P1, U(1));
+      view(P1, U(2), { watch: 8000, dur: 12000, like: true });
+      for (const v of [3, 4]) view(P1, U(v), { watch: 8000, dur: 12000 });
+      engine();
+      eq("one like among three watchers -> survives on exhaustion", [status(P1), reasonOf(P1)], ["survived", "pool_exhausted"]);
+      eq("the requirement scales: 1 below 20 viewers, 5 at 100, 50 at 1000", [1, 19, 100, 1000].map((n) => Math.max(1, Math.ceil(0.05 * n))), [1, 1, 5, 50]);
+      Q(`update public.trial_engine_config set min_active=0, min_active_fraction=0`);
       freshWorld(3);
       mkPost(P1, U(1));
       for (const v of [2, 3]) view(P1, U(v), { watch: 500 });
@@ -924,7 +940,7 @@ if (!BIN) {
       Q(`update public.trial_engine_config set engine_mode='legacy'`);
       Q(`insert into public.posts (id, user_id, media_url, media_type) values ('${PID(6)}','${U(1)}','u','video'), ('${PID(7)}','${U(1)}','u','video')`);
       eq("legacy mode: no queue (posts start their window at once)", q(`select count(*) from public.posts where status='queued'`), "0");
-      Q(`update public.trial_engine_config set engine_mode='live', max_active_trials=1000`);
+      Q(`update public.trial_engine_config set min_active=0, min_active_fraction=0, engine_mode='live', max_active_trials=1000`);
       freshWorld(5);
       Q(`update public.trial_engine_config set small_pool_everyone=50`);
       mkPostAt(PID(1), U(1), 50);
