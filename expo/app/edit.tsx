@@ -153,6 +153,7 @@ import { planHookTrim } from "@/lib/autoEdit/hookTrim";
 import { silenceCutsFromDetection } from "@/lib/autoEdit/silenceCuts";
 import { keepRangesToClips } from "@/lib/editModel";
 import { SENSITIVITY_PRESETS, detectSilences, type Sensitivity } from "@/lib/silenceDetection";
+import { needsTranscription, parseEditChoice } from "@/lib/editChoice";
 import { getAutoEditEnabled, getAutoEditSensitivity, getIncludeTextInSave, getSaveEditedToRoll, setAutoEditSensitivity, setIncludeTextInSave, setSaveEditedToRoll } from "@/lib/autoEditSettings";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -313,13 +314,18 @@ export default function EditScreen() {
     draftId,
     reactingTo,
     rootDropId,
+    edit: editParam,
   } = useLocalSearchParams<{
     clips: string;
     videoUrl?: string;
     draftId?: string;
     reactingTo?: string;
     rootDropId?: string;
+    /** The choice made on the edit-choice screen (lib/editChoice.ts); missing = the old automatic behaviour. */
+    edit?: string;
   }>();
+  // Only the edits the creator chose run (Keep original: none). Read once: the choice does not change while open.
+  const editChoice = useMemo(() => parseEditChoice(editParam), [editParam]);
 
   const _editMountT0 = useRef<number>(Date.now());
 
@@ -587,6 +593,7 @@ export default function EditScreen() {
   const firstClip0 = clips[0];
   const autoEditPossible =
     AUTO_EDIT_ENABLED &&
+    editChoice.silence &&
     !reactingTo &&
     !rootDropId &&
     !draftId &&
@@ -617,6 +624,9 @@ export default function EditScreen() {
     {
       wordEdits: editModel ? (editModel.state.captionEdits ?? NO_EDITS) : (localCaption.edits ?? NO_EDITS),
       onWordEdits: (next) => captionEditsHandlerRef.current(next),
+      initialOn: editChoice.captions,
+      // Keep original / no transcript-based edit chosen: speech is analyzed only if the creator turns captions on.
+      onlyWhenOn: !needsTranscription(editChoice),
     },
   );
   // Captions are still on their way: transcription running, or the AI plan not finished.
@@ -2777,6 +2787,8 @@ export default function EditScreen() {
 
   useEffect(() => {
     if (!AUTO_EDIT_ENABLED || autoEditStartedRef.current) return;
+    // Pause removal runs only when chosen (Keep original / Customize without it: never).
+    if (!editChoice.silence) return;
     if (reactingTo || rootDropId || draftId) return;
     if (AUTO_TRIM_OWNER_ONLY && (!user?.id || user.id !== OWNER_USER_ID)) return;
     const clip = clips.length === 1 ? clips[0] : undefined;
@@ -2788,7 +2800,8 @@ export default function EditScreen() {
 
     autoEditStartedRef.current = true;
     (async () => {
-      if (!(await getAutoEditEnabled())) return;
+      // An explicit choice already decided (the setting is its default); without one the setting decides, as before.
+      if (!editChoice.explicit && !(await getAutoEditEnabled())) return;
       if (mountedRef.current) setAutoEditRunning(true);
       const sensitivity = await getAutoEditSensitivity();
       const result = await autoEdit(
@@ -3673,6 +3686,11 @@ export default function EditScreen() {
     const words = captions.words;
     const uri = captions.transcribedUri;
     if (!words || !uri || planDone) return;
+    // Ums, filler words and a slow start are cut only when chosen; the transcript is still used for captions.
+    if (!editChoice.cleanup) {
+      setPlanDone(true);
+      return;
+    }
     (async () => {
       try {
         const loud = await analysis.loudness(uri);

@@ -158,6 +158,15 @@ function RootLayoutNav() {
           }}
         />
         <Stack.Screen
+          name="edit-choice"
+          options={{
+            presentation: "fullScreenModal",
+            animation: "slide_from_right",
+            gestureEnabled: false,
+            contentStyle: { backgroundColor: theme.bg },
+          }}
+        />
+        <Stack.Screen
           name="edit"
           options={{
             presentation: "fullScreenModal",

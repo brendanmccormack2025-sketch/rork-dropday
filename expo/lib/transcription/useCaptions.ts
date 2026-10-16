@@ -23,6 +23,10 @@ export type CaptionsOptions = {
   /** Caption edits kept outside (in the edit state, so undo / redo cover them); undefined = kept here. */
   wordEdits?: WordEdits;
   onWordEdits?: (next: WordEdits) => void;
+  /** Captions shown at the start (the edit choice); the rollout default when undefined. */
+  initialOn?: boolean;
+  /** Transcribe only once captions are switched on (Keep original: nothing runs unless the creator asks for captions). */
+  onlyWhenOn?: boolean;
 };
 
 /**
@@ -40,7 +44,9 @@ export function useCaptions(
   captionStyle?: CaptionStyle | null,
   options?: CaptionsOptions,
 ) {
-  const [captionsOn, setCaptionsOn] = useState(CAPTIONS_ON_BY_DEFAULT);
+  const [captionsOn, setCaptionsOn] = useState(options?.initialOn ?? CAPTIONS_ON_BY_DEFAULT);
+  // Whether transcription may run now (enabled, and captions asked for when it waits for them).
+  const active = enabled && (!options?.onlyWhenOn || captionsOn);
   const [status, setStatus] = useState<Status>("waiting");
   const [transcript, setTranscript] = useState<{
     /** The sources it was made for (uris joined). */
@@ -123,7 +129,7 @@ export function useCaptions(
   }, []);
 
   useEffect(() => {
-    if (!enabled || !ready || status !== "waiting") return;
+    if (!active || !ready || status !== "waiting") return;
     if (sources.length === 0) {
       setTranscriptionInfo({
         status: "skipped",
@@ -145,7 +151,7 @@ export function useCaptions(
       else setStatus("asking");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, ready, status, sourcesKey, run]);
+  }, [active, ready, status, sourcesKey, run]);
 
   // A source file was added to the timeline after the transcript: transcribe again (cached per file).
   useEffect(() => {

@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import UiText from "@/components/UiText";
+import { wantsEditChoice } from "@/lib/editChoice";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
@@ -316,7 +317,9 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
     const params: Record<string, string> = { clips: JSON.stringify(forEditor) };
     if (reactingTo) params.reactingTo = reactingTo;
     if (rootDropId) params.rootDropId = rootDropId;
-    router.push({ pathname: "/edit", params });
+    // A new video post: how to edit it is chosen first (nothing is edited before that). Reactions go straight on.
+    const target = wantsEditChoice({ clips: forEditor, reactingTo, rootDropId }) ? "/edit-choice" : "/edit";
+    router.push({ pathname: target, params });
   }, [clips, isRecording, reactingTo, rootDropId, router]);
 
   // "Delete last": confirm, then the most recent segment (and its file) is removed. Repeatable.

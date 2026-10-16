@@ -21,8 +21,7 @@ import { parseCreatorStatus, postingBlock } from "@/lib/creatorStatus";
 import { usePosts } from "@/providers/PostsProvider";
 import { MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
 import { launchLibraryWithRetry } from "@/lib/pickerRetry";
-import CaptionsExplainer from "@/components/CaptionsExplainer";
-import { needsSpeechPrimer, primeSpeechPermission, skipSpeechPrimer } from "@/lib/speechPermission";
+import { wantsEditChoice } from "@/lib/editChoice";
 import { PICKER_ERROR_MESSAGES, classifyPickerError } from "@/lib/pickerErrors";
 
 /** Mirrors the Clip shape the camera flow hands to /edit — same pipeline. */
@@ -138,8 +137,9 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
       };
 
       onClose();
+      // A video: how to edit it is chosen first (nothing is edited before that). A photo goes straight to the editor.
       router.push({
-        pathname: "/edit",
+        pathname: wantsEditChoice({ clips: [clip] }) ? "/edit-choice" : "/edit",
         params: { clips: JSON.stringify([clip]) },
       });
     } catch (e) {
@@ -178,22 +178,12 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
   const { myProfile } = usePosts();
   const block = postingBlock(parseCreatorStatus(myProfile?.creator_status));
 
-  // First time only: explain and ask for speech permission here, before the first video reaches the editor (the
-  // editor's AI edit and captions need it, and a system prompt in the middle of the first edit left it unedited).
-  const [primerFor, setPrimerFor] = useState<null | "camera" | "library">(null);
+  // The speech permission (captions and AI cleanup need it) is asked on the edit-choice screen, and only when an edit
+  // that needs it is chosen (app/edit-choice.tsx).
   const choose = useCallback(async (which: "camera" | "library") => {
-    if (await needsSpeechPrimer()) setPrimerFor(which);
-    else if (which === "camera") openCamera();
+    if (which === "camera") openCamera();
     else void openLibrary();
   }, [openCamera, openLibrary]);
-  const afterPrimer = useCallback(async (allow: boolean) => {
-    const next = primerFor;
-    setPrimerFor(null);
-    if (allow) await primeSpeechPermission();
-    else await skipSpeechPrimer();
-    if (next === "camera") openCamera();
-    else if (next === "library") void openLibrary();
-  }, [primerFor, openCamera, openLibrary]);
 
   return (
     <Modal
@@ -299,8 +289,6 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
           )}
         </View>
       </View>
-      {/* inside the sheet's Modal: iOS shows one modal at a time */}
-      <CaptionsExplainer visible={primerFor !== null} onContinue={() => void afterPrimer(true)} onNotNow={() => void afterPrimer(false)} />
     </Modal>
   );
 }
