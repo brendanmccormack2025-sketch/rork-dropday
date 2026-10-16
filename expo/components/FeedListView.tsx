@@ -16,6 +16,8 @@ import { FeedItem } from "@/components/FeedItem";
 import { theme } from "@/constants/theme";
 import { usePosts, type Post } from "@/providers/PostsProvider";
 import { isPosting, playingIndex, rowKey, scrollTarget } from "@/lib/postingFeed";
+import { useQueryClient } from "@tanstack/react-query";
+import { prefetchReactions } from "@/lib/reactionsQuery";
 
 const { height: SCREEN_H } = Dimensions.get("window");
 
@@ -125,6 +127,13 @@ export function FeedListView({
   ).current;
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
+
+  // The post on screen: its reactions are loaded now, so opening them is instant.
+  const qc = useQueryClient();
+  const activePost = posts[activeIndex];
+  useEffect(() => {
+    if (activePost) prefetchReactions(qc, activePost);
+  }, [qc, activePost?.id, activePost?.reaction_count]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // An upload starts: the new post is first, so show it. Nothing else plays meanwhile (see playingIndex).
   const posting = isPosting(posts);

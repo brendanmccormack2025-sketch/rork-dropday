@@ -5,7 +5,6 @@ import {
   Alert,
   Dimensions,
   FlatList,
-  InteractionManager,
   Platform,
   Pressable,
   StyleSheet,
@@ -25,6 +24,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Flag, Heart, Sparkles, Reply, RotateCcw, ShieldCheck, Trash2, Video } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
+import { REACTION_SELECT, REACTIONS_STALE_MS, fetchReactions, fetchRootDrop, mapReactionRow, reactionsKey, rootDropKey } from "@/lib/reactionsQuery";
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { FeedAvatar } from "@/components/Avatar";
 import { supabase } from "@/lib/supabase";
@@ -55,31 +55,10 @@ export default function ReactionTreeScreen() {
 
   // ── Query 1: root Drop's creator ──────────────────────────────────────
   const rootDropQuery = useQuery({
-    queryKey: ["post", id],
+    queryKey: rootDropKey(id ?? ""),
     enabled: !!id,
-    staleTime: 30_000,
-    queryFn: async (): Promise<{
-      user_id: string | null;
-      status: string | null;
-      moderation_status: string | null;
-    } | null> => {
-      if (!id) return null;
-      const { data, error } = await supabase
-        .from("posts")
-        .select("user_id, status, moderation_status")
-        .eq("id", id)
-        .maybeSingle();
-      if (error) {
-        console.error("[reaction-tree] root drop query error", error.message);
-        return null;
-      }
-      if (!data) return null;
-      return {
-        user_id: (data.user_id as string) ?? null,
-        status: (data.status as string) ?? null,
-        moderation_status: (data.moderation_status as string) ?? null,
-      };
-    },
+    staleTime: REACTIONS_STALE_MS,
+    queryFn: () => fetchRootDrop(id!),
   });
 
   const rootDrop = rootDropQuery.data ?? null;
@@ -94,50 +73,14 @@ export default function ReactionTreeScreen() {
       (rootDrop?.moderation_status ?? "inactive") !== "active");
 
   // ── Query 2: tier 1 reactions (parent_post_id = root drop) ────────────
+  // Usually already in the cache (the feed loads it while the post is on screen), so it shows at once; it is still
+  // refreshed in the background on every open so new reactions appear.
   const tier1Query = useQuery({
-    queryKey: ["reactions", id],
+    queryKey: reactionsKey(id ?? ""),
     enabled: !!id && !rootUnavailable,
-    staleTime: 30_000,
-    queryFn: async (): Promise<Post[]> => {
-      if (!id) return [];
-
-      const { data: rows, error } = await supabase
-        .from("posts")
-        .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)",
-        )
-        .eq("parent_post_id", id)
-        .eq("moderation_status", "active")
-        .order("created_at", { ascending: false })
-        .limit(200);
-
-      if (error) {
-        console.error("[reaction-tree] tier1 query error", error.message);
-        return [];
-      }
-
-      return ((rows ?? []) as Record<string, unknown>[]).map((row) => ({
-        id: row.id as string,
-        user_id: row.user_id as string,
-        media_url: row.media_url as string,
-        media_type: row.media_type as "image" | "video",
-        caption: (row.caption as string | null) ?? null,
-        parent_post_id: (row.parent_post_id as string | null) ?? null,
-        segments: null,
-        audio_url: null,
-        trim_data: null,
-        text_overlays: null,
-        thumbnail_url: (row.thumbnail_url as string | null) ?? null,
-        moderation_status: (row.moderation_status as string | undefined) ?? "active",
-        status: (row.status as Post["status"]) ?? "trial",
-        media_deleted_at: (row.media_deleted_at as string | null) ?? null,
-        follower_visibility: (row.follower_visibility as boolean | null) ?? true,
-        created_at: row.created_at as string,
-        like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
-        comment_count: (row.comment_count as number | undefined) ?? 0,
-        profile: (row.profiles as Post["profile"]) ?? null,
-      }));
-    },
+    staleTime: REACTIONS_STALE_MS,
+    refetchOnMount: "always",
+    queryFn: () => fetchReactions(id!),
   });
 
   const tier1Posts = tier1Query.data ?? [];
@@ -193,9 +136,7 @@ export default function ReactionTreeScreen() {
       // their parent reaction.
       const { data: rows, error } = await supabase
         .from("posts")
-        .select(
-          "id, user_id, media_url, media_type, caption, parent_post_id, thumbnail_url, moderation_status, status, follower_visibility, created_at, media_deleted_at, likes(count), comment_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)",
-        )
+        .select(REACTION_SELECT)
         .in("parent_post_id", tier1Ids)
         .eq("moderation_status", "active")
         .order("created_at", { ascending: true })
@@ -206,27 +147,7 @@ export default function ReactionTreeScreen() {
         return [];
       }
 
-      return ((rows ?? []) as Record<string, unknown>[]).map((row) => ({
-        id: row.id as string,
-        user_id: row.user_id as string,
-        media_url: row.media_url as string,
-        media_type: row.media_type as "image" | "video",
-        caption: (row.caption as string | null) ?? null,
-        parent_post_id: (row.parent_post_id as string | null) ?? null,
-        segments: null,
-        audio_url: null,
-        trim_data: null,
-        text_overlays: null,
-        thumbnail_url: (row.thumbnail_url as string | null) ?? null,
-        moderation_status: (row.moderation_status as string | undefined) ?? "active",
-        status: (row.status as Post["status"]) ?? "trial",
-        media_deleted_at: (row.media_deleted_at as string | null) ?? null,
-        follower_visibility: (row.follower_visibility as boolean | null) ?? true,
-        created_at: row.created_at as string,
-        like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
-        comment_count: (row.comment_count as number | undefined) ?? 0,
-        profile: (row.profiles as Post["profile"]) ?? null,
-      }));
+      return ((rows ?? []) as Record<string, unknown>[]).map(mapReactionRow);
     },
   });
 
@@ -275,15 +196,14 @@ export default function ReactionTreeScreen() {
   // but silently fail to start playback.
   useFocusEffect(
     useCallback(() => {
-      const task = InteractionManager.runAfterInteractions(() => {
-        setScreenFocused(true);
-        setAudioModeAsync({
-          allowsRecording: false,
-          playsInSilentMode: true,
-        }).catch(() => {});
-      });
+      // Playback starts as soon as the screen is shown (waiting for "interactions" to finish could hold it back for
+      // seconds while other animations ran: the frozen first reaction).
+      setScreenFocused(true);
+      setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+      }).catch(() => {});
       return () => {
-        task.cancel();
         setScreenFocused(false);
       };
     }, []),
@@ -330,7 +250,8 @@ export default function ReactionTreeScreen() {
 
   const keyExtractor = useCallback((item: FeedItem) => item.post.id, []);
 
-  const isLoading = tier1Query.isLoading || rootDropQuery.isLoading;
+  // Show the reactions as soon as they are known; the post's own row only decides the "no longer available" case.
+  const isLoading = tier1Query.isPending && !tier1Query.data;
   const postCount = feedItems.length;
   // Header sits over a full-screen video only when the feed is showing; the
   // loading/empty/unavailable states are on the cream background.
@@ -568,7 +489,7 @@ function ReactionItem({
   const mediaGone = !!post.media_deleted_at;
   const player = useVideoPlayer(
     typeof post.media_url === "string" && post.media_url.length > 0 && !mediaGone
-      ? { uri: post.media_url }
+      ? { uri: post.media_url, useCaching: true }
       : null,
     (p) => {
       p.loop = true;
