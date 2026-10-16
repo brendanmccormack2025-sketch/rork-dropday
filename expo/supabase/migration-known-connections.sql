@@ -24,6 +24,10 @@ alter table public.trial_engine_config add column if not exists known_source_fol
 -- Friends count as known (hidden from testing posts, never in their verdict) unless this is turned off. They still get
 -- survived posts in their feed. Off = friendship alone changes nothing; the hide list and contacts still apply.
 alter table public.trial_engine_config add column if not exists known_source_friends boolean not null default true;
+-- Once: friends are known again by default (it was switched off while the rule was being decided); each creator lets
+-- particular friends test their posts instead (friend_test_optin). A later manual change of the switch is kept.
+alter table public.trial_engine_config add column if not exists friends_default_v2 boolean not null default false;
+update public.trial_engine_config set known_source_friends = true, friends_default_v2 = true where not friends_default_v2;
 
 -- ── hashing ──────────────────────────────────────────────────────────────────
 create or replace function public.trial_hash_phone(p_e164 text)
@@ -187,15 +191,18 @@ do $kc$
 declare
   friend_branch text := '';
 begin
-  if to_regclass('public.friendships') is not null then
+  if to_regclass('public.friendships') is not null and to_regclass('public.friend_test_optin') is not null then
     friend_branch := $fb$
   union all
   -- friends (migration-friends-messages.sql), either direction
+  -- (a friend the creator let in to test, friend_test_optin, is not known)
   select f.user_a, f.user_b, 'friend'::text from public.friendships f
    where (select known_source_friends from public.trial_engine_config where id)
+     and not exists (select 1 from public.friend_test_optin o where o.owner_id = f.user_a and o.friend_id = f.user_b)
   union all
   select f.user_b, f.user_a, 'friend'::text from public.friendships f
-   where (select known_source_friends from public.trial_engine_config where id)$fb$;
+   where (select known_source_friends from public.trial_engine_config where id)
+     and not exists (select 1 from public.friend_test_optin o where o.owner_id = f.user_b and o.friend_id = f.user_a)$fb$;
   end if;
   execute $v$
 create or replace view public.known_connections as

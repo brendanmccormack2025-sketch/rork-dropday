@@ -8,7 +8,7 @@ import { FeedAvatar } from "@/components/Avatar";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
-import { conversationFor, deleteMyMessage, fetchMessages, markConversationRead, reportMessage, sendMessage, subscribeMessages } from "@/lib/friends";
+import { conversationFor, deleteMyMessage, fetchMessages, friendCanTest, markConversationRead, reportMessage, sendMessage, setFriendCanTest, subscribeMessages } from "@/lib/friends";
 import { DELETED_MESSAGE_TEXT, friendlyError, mergeMessages, type ChatMessage, type Person } from "@/lib/friendsCore";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/AuthProvider";
@@ -117,8 +117,28 @@ export default function ChatScreen() {
     }
   };
 
-  const menu = () => {
+  const menu = async () => {
+    // Friends never see your posts while they're testing; this lets one friend in (their views then count like a stranger's).
+    let canTest = false;
+    try {
+      canTest = await friendCanTest(other);
+    } catch {
+      // the option still shows; setting it reports any problem
+    }
+    const who = person ? `@${person.username}` : "this friend";
+    const toggle = () =>
+      setFriendCanTest(other, !canTest)
+        .then(() =>
+          Alert.alert(
+            canTest ? "Done" : `${who} can test your posts`,
+            canTest
+              ? `${who} won't see your posts while they're testing. They'll see them once they survive.`
+              : `${who} can now be shown your posts while they're testing, and their reactions count like a stranger's.`,
+          ),
+        )
+        .catch(() => Alert.alert("Couldn't change that", "Please try again."));
     Alert.alert(person ? `@${person.username}` : "Options", undefined, [
+      { text: canTest ? "Stop letting them test my posts" : "Let them test my posts", onPress: () => void toggle() },
       { text: "Block", style: "destructive", onPress: () => blockUser(other) },
       { text: "Cancel", style: "cancel" },
     ]);
@@ -140,7 +160,7 @@ export default function ChatScreen() {
               {name}
             </UiText>
           </Pressable>
-          <Pressable onPress={menu} style={styles.iconBtn} hitSlop={8} accessibilityLabel="More">
+          <Pressable onPress={() => void menu()} style={styles.iconBtn} hitSlop={8} accessibilityLabel="More">
             <MoreHorizontal color={theme.text} size={20} />
           </Pressable>
         </View>

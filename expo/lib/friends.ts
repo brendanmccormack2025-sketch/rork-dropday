@@ -19,6 +19,9 @@ export const sendFriendRequest = (to: string) => rpc<"friends" | "requested">("s
 export const respondFriendRequest = (from: string, accept: boolean) => rpc<void>("respond_friend_request", { p_from: from, p_accept: accept });
 export const cancelFriendRequest = (to: string) => rpc<void>("cancel_friend_request", { p_to: to });
 export const removeFriend = (other: string) => rpc<void>("remove_friend", { p_other: other });
+/** Friends never see my testing posts, unless I let this one test them (private, mine only). */
+export const friendCanTest = (friend: string) => rpc<boolean>("friend_can_test", { p_friend: friend });
+export const setFriendCanTest = (friend: string, on: boolean) => rpc<void>("set_friend_can_test", { p_friend: friend, p_on: on });
 
 export const myConversations = () => rpc<Conversation[]>("my_conversations");
 export const myUnreadMessages = () => rpc<number>("my_unread_messages");

@@ -272,6 +272,16 @@ if (!BIN) {
       eq("a friend cannot read the creator's testing post directly; a stranger can", [readsP(U(2)), readsP(U(9))], ["0", "1"]);
       ok("(setup) the creator sends it to that friend", as(U(1), `select public.send_post_to_friend('${U(2)}', '${P(11)}')`).ok);
       eq("...now the friend can open it", readsP(U(2)), "1");
+      // a friend the creator lets in to test: not known any more (only that pair, only that direction), private, undone by unfriending
+      ok("only the creator decides, and only for a friend", !as(U(1), `select public.set_friend_can_test('${U(9)}', true)`).ok && as(U(1), `select public.set_friend_can_test('${U(2)}', true)`).ok);
+      eq("let in: the friend is not silenced for the creator's testing posts; the other direction still is", [q(`select public.trial_is_silenced('${U(1)}','${U(2)}')`), q(`select public.trial_is_silenced('${U(2)}','${U(1)}')`)], ["f", "t"]);
+      eq("the creator sees the setting; the friend cannot read it", [as(U(1), `select public.friend_can_test('${U(2)}')`).out, as(U(2), `select count(*) from public.friend_test_optin`).ok], ["t", false]);
+      as(U(1), `select public.set_friend_can_test('${U(2)}', false)`);
+      eq("switched back: silenced again", q(`select public.trial_is_silenced('${U(1)}','${U(2)}')`), "t");
+      as(U(1), `select public.set_friend_can_test('${U(2)}', true)`);
+      Q(`delete from public.friendships where user_a='${U(1)}' and user_b='${U(2)}'`);
+      eq("unfriending removes the exception", q(`select count(*) from public.friend_test_optin`), "0");
+      Q(`insert into public.friendships (user_a, user_b) values ('${U(1)}','${U(2)}')`);
       // the friends switch
       Q(`update public.trial_engine_config set known_source_friends=false`);
       eq("switch off: friendship alone is not 'known' any more", [q(`select count(*) from public.known_connections where source='friend'`), q(`select public.trial_is_silenced('${U(1)}','${U(2)}')`)], ["0", "f"]);

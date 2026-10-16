@@ -10,6 +10,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { savePhone } from "@/lib/privacy";
 import { PHONE_DETAIL, PHONE_EXPLANATION } from "@/lib/privacyTexts";
 import { phonePromptKey } from "@/lib/phonePrompt";
+import { isContactsAvailable, isContactsEnabled } from "@/lib/contacts";
 
 /** One-time optional step after signing up: add your phone number (or skip). */
 export default function OnboardingPhone() {
@@ -21,7 +22,9 @@ export default function OnboardingPhone() {
 
   const done = async () => {
     if (user?.id) await AsyncStorage.setItem(phonePromptKey(user.id), "1").catch(() => {});
-    router.replace("/(tabs)");
+    // next: contacts, unless this build has no contacts module or they are already on
+    const askContacts = !!user?.id && isContactsAvailable() && !(await isContactsEnabled(user.id).catch(() => false));
+    router.replace((askContacts ? "/onboarding-contacts" : "/(tabs)") as never);
   };
   const save = async () => {
     setBusy(true);

@@ -772,6 +772,66 @@ end $$;
 -- branch when this table exists). If you run this file on its own, run migration-known-connections.sql again afterwards.
 
 
+-- ── friends who may test my posts (the one exception to "friends are known") ─────────────
+-- A friend is hidden from my testing posts (known_connections, 'friend' branch). I can let a particular friend in (a fellow
+-- creator whose honest reaction I want): then they are tested like a stranger and their views count. Owner-only, private.
+create table if not exists public.friend_test_optin (
+  owner_id   uuid not null references auth.users(id) on delete cascade,
+  friend_id  uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (owner_id, friend_id),
+  check (owner_id <> friend_id)
+);
+alter table public.friend_test_optin enable row level security;
+revoke all on table public.friend_test_optin from anon, authenticated;
+
+create or replace function public.set_friend_can_test(p_friend uuid, p_on boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in' using errcode = '28000'; end if;
+  if coalesce(p_on, false) then
+    if not public.friends_are(auth.uid(), p_friend) then raise exception 'not friends' using errcode = '42501'; end if;
+    insert into public.friend_test_optin (owner_id, friend_id) values (auth.uid(), p_friend) on conflict do nothing;
+  else
+    delete from public.friend_test_optin where owner_id = auth.uid() and friend_id = p_friend;
+  end if;
+end;
+$$;
+
+create or replace function public.friend_can_test(p_friend uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from public.friend_test_optin where owner_id = auth.uid() and friend_id = p_friend)
+$$;
+
+-- No longer friends: the exception goes too (both directions).
+create or replace function public.friend_test_optin_cleanup()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.friend_test_optin
+   where (owner_id = old.user_a and friend_id = old.user_b) or (owner_id = old.user_b and friend_id = old.user_a);
+  return old;
+end;
+$$;
+drop trigger if exists friend_test_optin_cleanup on public.friendships;
+create trigger friend_test_optin_cleanup after delete on public.friendships
+  for each row execute function public.friend_test_optin_cleanup();
+revoke all on function public.friend_test_optin_cleanup() from public, anon, authenticated;
+revoke all on function public.set_friend_can_test(uuid, boolean), public.friend_can_test(uuid) from public, anon;
+grant execute on function public.set_friend_can_test(uuid, boolean), public.friend_can_test(uuid) to authenticated;
+
 -- ── who may call what ────────────────────────────────────────────────────────────
 revoke all on function
   public.friends_blocked(uuid, uuid), public.friends_are(uuid, uuid), public.friends_is_minor(uuid),

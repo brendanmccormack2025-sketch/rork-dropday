@@ -37,12 +37,12 @@ import SaveToRollToast from "@/components/SaveToRollToast";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { syncContactsIfDue } from "@/lib/contacts";
+import { isContactsAvailable, isContactsEnabled, syncContactsIfDue } from "@/lib/contacts";
 import { redeemPendingInvite } from "@/lib/invite";
 import { setPerfScreen, startPerfWatch } from "@/lib/perfWatch";
 import { scheduleLaunchCleanup } from "@/lib/storageCleanup";
 import { installPushHandlers, registerForPush, watchPushToken } from "@/lib/push";
-import { phonePromptKey } from "@/lib/phonePrompt";
+import { contactsPromptKey, phonePromptKey } from "@/lib/phonePrompt";
 import { PostsProvider } from "@/providers/PostsProvider";
 import { GroupsProvider } from "@/providers/GroupsProvider";
 import { NotificationsProvider } from "@/providers/NotificationsProvider";
@@ -102,8 +102,15 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     void syncContactsIfDue(id);
     void redeemPendingInvite();   // an invite link opened before the account existed
     void registerForPush(id);     // ask once, then save this phone's Expo push token for the account
-    AsyncStorage.getItem(phonePromptKey(id)).then((seen) => {
-      if (!seen) router.push("/onboarding-phone" as never);
+    AsyncStorage.multiGet([phonePromptKey(id), contactsPromptKey(id)]).then(async ([[, phoneSeen], [, contactsSeen]]) => {
+      if (!phoneSeen) {
+        router.push("/onboarding-phone" as never); // it goes on to the contacts step
+        return;
+      }
+      // accounts made before the contacts step existed: shown once, if contacts are not on yet
+      if (!contactsSeen && isContactsAvailable() && !(await isContactsEnabled(id).catch(() => false))) {
+        router.push("/onboarding-contacts" as never);
+      }
     }, () => {});
   }, [session?.user?.id, segments, router]);
 

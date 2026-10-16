@@ -4,3 +4,5 @@ export const PHONE_DETAIL = "Your number is optional, never shown to anyone, and
 export const CONTACTS_EXPLAINER_TITLE = "Keep your posts from people you know";
 export const CONTACTS_EXPLAINER_BODY = "Tryal checks your contacts so friends and family only see your posts after they survive Tryal. Only phone numbers are read, they are turned into one-way hashes, and your contacts are never shared or shown. You can say no and use Tryal fully, and remove this data any time in Settings.";
 export const HIDE_TRIALS_EXPLAINER = "People on this list never get your posts in their feed, while testing or after they survive, and never judge them. They can still message you and find your survived posts by visiting your profile. They are never told.";
+export const CONTACTS_ONBOARDING_TITLE = "Keep your tests away from people you know";
+export const CONTACTS_ONBOARDING_BODY = "Tryal uses your contacts so friends, family and coworkers never see or judge your posts while they're being tested. Strangers decide. Only phone numbers are read, turned into one-way codes, and never shared or shown. You can change this any time in Settings.";
