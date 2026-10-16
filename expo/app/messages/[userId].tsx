@@ -5,6 +5,7 @@ import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { ChevronLeft, MoreHorizontal, Send } from "lucide-react-native";
 
 import { FeedAvatar } from "@/components/Avatar";
+import SharedPostCard from "@/components/SharedPostCard";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
@@ -155,7 +156,7 @@ export default function ChatScreen() {
             <ChevronLeft color={theme.text} size={22} strokeWidth={2.5} />
           </Pressable>
           <Pressable style={styles.who} onPress={() => router.push(`/user/${other}` as never)} accessibilityLabel={`${name}'s profile`}>
-            {person ? <FeedAvatar profile={person} name={name} /> : null}
+            {person ? <FeedAvatar profile={person} name={name} size={34} /> : null}
             <UiText style={styles.title} numberOfLines={1}>
               {name}
             </UiText>
@@ -177,21 +178,36 @@ export default function ChatScreen() {
               renderItem={({ item }) => {
                 const mine = item.sender_id === user?.id;
                 const isPost = item.was_post && !item.deleted_at;
+                if (isPost) {
+                  return (
+                    <View style={[styles.postCol, mine ? styles.mineCol : styles.theirCol]}>
+                      <Pressable
+                        onPress={() => router.push(`/shared-post/${item.id}` as never)}
+                        onLongPress={() => onLongPress(item)}
+                        style={({ pressed }) => pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Watch post"
+                      >
+                        <SharedPostCard postId={item.post_id} />
+                      </Pressable>
+                      {item.body ? (
+                        <View style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
+                          <UiText style={[styles.text, mine && styles.onMine]}>{item.body}</UiText>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                }
                 return (
                   <View style={[styles.bubbleRow, mine ? styles.mineRow : styles.theirRow]}>
                     <Pressable
-                      onPress={isPost ? () => router.push(`/shared-post/${item.id}` as never) : undefined}
                       onLongPress={() => onLongPress(item)}
                       style={[styles.bubble, mine ? styles.mine : styles.theirs, item.deleted_at ? styles.deleted : null]}
-                      accessibilityRole={isPost ? "button" : undefined}
                     >
                       {item.deleted_at ? (
                         <UiText style={styles.deletedText}>{DELETED_MESSAGE_TEXT}</UiText>
                       ) : (
-                        <>
-                          {isPost ? <UiText style={[styles.postLabel, mine && styles.onMine]}>▶ Post — tap to watch</UiText> : null}
-                          {item.body ? <UiText style={[styles.text, mine && styles.onMine]}>{item.body}</UiText> : null}
-                        </>
+                        <UiText style={[styles.text, mine && styles.onMine]}>{item.body}</UiText>
                       )}
                     </Pressable>
                   </View>
@@ -238,7 +254,9 @@ const styles = StyleSheet.create({
   deletedText: { color: theme.textDim, fontSize: 14, fontStyle: "italic" },
   text: { color: theme.text, fontSize: 15 },
   onMine: { color: "#fff" },
-  postLabel: { color: theme.accent, fontSize: 13, fontWeight: "800" },
+  postCol: { gap: 4 },
+  mineCol: { alignItems: "flex-end" },
+  theirCol: { alignItems: "flex-start" },
   hint: { color: theme.textMuted, textAlign: "center", marginTop: 40, transform: [{ scaleY: -1 }] },
   error: { color: theme.danger, fontSize: 13, paddingHorizontal: 16, paddingBottom: 4 },
   composer: { flexDirection: "row", alignItems: "flex-end", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },

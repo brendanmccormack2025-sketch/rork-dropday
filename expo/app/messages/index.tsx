@@ -72,7 +72,7 @@ export default function MessagesScreen() {
               const name = item.display_name ?? item.username;
               return (
                 <Pressable onPress={() => router.push(`/messages/${item.other_id}` as never)} style={styles.row} accessibilityLabel={`Chat with ${item.username}`}>
-                  <FeedAvatar profile={item} name={name} />
+                  <FeedAvatar profile={item} name={name} size={52} />
                   <View style={{ flex: 1 }}>
                     <UiText style={[styles.name, badge ? styles.bold : null]} numberOfLines={1}>
                       {name}

@@ -14,9 +14,12 @@ import { theme } from "@/constants/theme";
 export function FeedAvatar({
   profile,
   name,
+  size = 30,
 }: {
   profile: { avatar_url?: string | null } | null | undefined;
   name: string;
+  /** Diameter in points (default 30). Always a circle. */
+  size?: number;
 }) {
   const avatarUri = useMemo(
     () => resolveAvatarUrl(profile?.avatar_url ?? null),
@@ -24,7 +27,7 @@ export function FeedAvatar({
   );
 
   return (
-    <View style={styles.avatarCircle}>
+    <View style={[styles.avatarCircle, size !== 30 && { width: size, height: size, borderRadius: size / 2 }]}>
       {avatarUri ? (
         <Image
           source={{ uri: avatarUri }}
@@ -34,7 +37,7 @@ export function FeedAvatar({
           cachePolicy="memory"
         />
       ) : (
-        <UiText style={styles.avatarText}>{name.charAt(0).toUpperCase()}</UiText>
+        <UiText style={[styles.avatarText, size !== 30 && { fontSize: Math.round(size * 0.42) }]}>{name.charAt(0).toUpperCase()}</UiText>
       )}
     </View>
   );
@@ -79,13 +82,11 @@ const styles = StyleSheet.create({
   avatarCircle: {
     width: 30,
     height: 30,
-    borderRadius: 0,
+    borderRadius: 15,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
   },
   avatarText: {
     color: "#fff",
@@ -95,7 +96,7 @@ const styles = StyleSheet.create({
   profileCircle: {
     width: 72,
     height: 72,
-    borderRadius: 0,
+    borderRadius: 36,
     backgroundColor: theme.primaryDeep,
     alignItems: "center",
     justifyContent: "center",
