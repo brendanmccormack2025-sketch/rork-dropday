@@ -226,7 +226,8 @@ begin
     end if;
 
     if skip is null and r.type = 'like' then
-      select count(*) into likes_n from public.likes l where l.post_id = r.post_id;
+      -- the creator's own like never counts toward a milestone
+      select count(*) into likes_n from public.likes l join public.posts p on p.id = l.post_id where l.post_id = r.post_id and l.user_id <> p.user_id;
       ms := public.push_like_milestone(likes_n);
       if ms is null or exists (select 1 from public.push_like_milestones x where x.post_id = r.post_id and x.milestone >= ms) then
         skip := 'not a like milestone';

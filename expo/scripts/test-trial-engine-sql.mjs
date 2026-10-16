@@ -637,6 +637,26 @@ if (!BIN) {
       eq("one like among three watchers -> survives on exhaustion", [status(P1), reasonOf(P1)], ["survived", "pool_exhausted"]);
       eq("the requirement scales: 1 below 20 viewers, 5 at 100, 50 at 1000", [1, 19, 100, 1000].map((n) => Math.max(1, Math.ceil(0.05 * n))), [1, 1, 5, 50]);
       Q(`update public.trial_engine_config set min_active=0, min_active_fraction=0`);
+
+      // The creator's own engagement never counts: liking and reacting to your own post adds nothing.
+      freshWorld(4);
+      Q(`update public.trial_engine_config set min_active=1, min_active_fraction=0.05`);
+      mkPost(P1, U(1));
+      view(P1, U(1), { watch: 12000, dur: 12000, done: true, like: true, react: true, share: true });   // the creator, everything
+      for (const v of [2, 3, 4]) view(P1, U(v), { watch: 12000, dur: 12000 });                         // strangers only watch
+      engine();
+      eq("creator likes, shares and reacts to own post, strangers only watch -> ended (own engagement adds nothing)", [status(P1), reasonOf(P1)], ["archived", "pool_exhausted"]);
+      eq("the creator is excluded from the scores", q(`select string_agg(excluded_reason, ',') from public.trial_post_score_details('${P1}') where excluded`), "creator");
+      eq("the creator's like and reaction are not active responders", q(`select count(*) from public.trial_post_score_details('${P1}') d where not d.excluded and (d.liked or d.shared or d.reacted)`), "0");
+      freshWorld(4);
+      Q(`update public.trial_engine_config set min_active=1, min_active_fraction=0.05`);
+      mkPost(P1, U(1));
+      view(P1, U(1), { watch: 12000, dur: 12000, like: true, react: true });
+      view(P1, U(2), { watch: 8000, dur: 12000, like: true });
+      for (const v of [3, 4]) view(P1, U(v), { watch: 8000, dur: 12000 });
+      engine();
+      eq("same post with one stranger's like -> survives (only strangers count)", status(P1), "survived");
+      Q(`update public.trial_engine_config set min_active=0, min_active_fraction=0`);
       freshWorld(3);
       mkPost(P1, U(1));
       for (const v of [2, 3]) view(P1, U(v), { watch: 500 });
