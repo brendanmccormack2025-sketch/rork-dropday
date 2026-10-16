@@ -327,6 +327,11 @@ if (!BIN) {
       ok("the anon role has no access at all", ["chat_messages", "chat_conversations", "friendships", "friend_requests", "message_post_opens", "invite_versions"].every((t) => psql("t", `set role anon; select count(*) from public.${t}`, ["-v", "ON_ERROR_STOP=1"]).status !== 0));
       ok("message_post_opens and invite_versions are not readable by clients", !as(U(1), "select * from public.message_post_opens").ok && !as(U(1), "select * from public.invite_versions").ok);
       eq("conversations never mix: the list shows only your own", [as(U(1), "select count(*) from public.my_conversations()").out, as(U(3), "select count(*) from public.my_conversations()").out], ["1", "1"]);
+
+      // every release re-runs the earlier migrations with message / friend notifications already in the table
+      ok("(setup) message notifications exist", q("select count(*) from public.notifications where type = 'message'") !== "0");
+      const again = [psqlFile("t", join(sqlDir, "migration-trial-engine.sql")), psqlFile("t", join(sqlDir, "migration-friends-messages.sql")), psqlFile("t", join(sqlDir, "migration-known-connections.sql"))];
+      eq("the trial engine, friends and known-connections migrations run again with those rows present", again.map((r) => /ERROR/.test(r.stderr)), [false, false, false]);
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });

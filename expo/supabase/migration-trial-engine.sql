@@ -152,8 +152,10 @@ begin
   end loop;
   alter table public.notifications
     add constraint notifications_type_check
+    -- every type a later migration adds must be here too (this file runs before them on every ship, with their rows present)
     check (type in ('like', 'reaction', 'follow', 'follow_request', 'follow_accept',
-                    'verdict_survived', 'verdict_archived', 'verdict_incomplete', 'followed_post_survived'));
+                    'verdict_survived', 'verdict_archived', 'verdict_incomplete', 'followed_post_survived',
+                    'friend_request', 'friend_accept', 'message'));
 end $$;
 
 -- ── 3. Watch time per view (was not recorded: raw views are impressions, qualified views a 3 s flag) ───
