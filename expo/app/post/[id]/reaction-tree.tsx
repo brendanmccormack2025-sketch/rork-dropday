@@ -6,13 +6,14 @@ import {
   Dimensions,
   FlatList,
   InteractionManager,
+  Platform,
   Pressable,
   StyleSheet,
   View,
   ViewToken,
 } from "react-native";
 import UiText from "@/components/UiText";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { VideoView, useVideoPlayer, type VideoPlayer } from "expo-video";
 import { setAudioModeAsync } from "expo-audio";
@@ -21,7 +22,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Flag, Heart, Sparkles, Reply, RotateCcw, ShieldCheck, Trash2 } from "lucide-react-native";
+import { ArrowLeft, Flag, Heart, Sparkles, Reply, RotateCcw, ShieldCheck, Trash2, Video } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
@@ -335,17 +336,24 @@ export default function ReactionTreeScreen() {
   // loading/empty/unavailable states are on the cream background.
   const overVideo = !rootUnavailable && !isLoading && feedItems.length > 0;
 
+  // The header sits below the status bar / Dynamic Island. A full-screen modal can report a 0 top inset on its first
+  // frame, which put the back button under the status bar where it cannot be tapped: never go above the iPhone's bar.
+  const insets = useSafeAreaInsets();
+  const headerTop = Math.max(insets.top, Platform.OS === "ios" ? 50 : 24) + 4;
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <View style={styles.root}>
       {overVideo && screenFocused && <StatusBar style="light" />}
       {/* Header */}
-      <SafeAreaView edges={["top"]} style={styles.headerSafe}>
+      <View style={[styles.headerSafe, { paddingTop: headerTop }]}>
         <View style={styles.headerRow}>
           <Pressable
             onPress={() => { if (navigation.canGoBack()) router.back(); else router.replace("/(tabs)"); }}
             style={[styles.headerBtn, overVideo && styles.headerBtnOnVideo]}
-            hitSlop={8}
+            hitSlop={14}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
           >
             <ArrowLeft color={overVideo ? "#FFFFFF" : theme.text} size={22} strokeWidth={2} />
           </Pressable>
@@ -360,7 +368,7 @@ export default function ReactionTreeScreen() {
             {postCount} reaction{postCount !== 1 ? "s" : ""}
           </UiText>
         )}
-      </SafeAreaView>
+      </View>
 
       {/* Body */}
       {rootUnavailable ? (
@@ -380,7 +388,7 @@ export default function ReactionTreeScreen() {
       ) : feedItems.length === 0 ? (
         <View style={styles.center}>
           <View style={styles.emptyIcon}>
-            <Sparkles color={theme.accent} size={34} strokeWidth={1.8} />
+            <Video color={theme.accent} size={34} strokeWidth={1.8} />
           </View>
           <UiText style={styles.emptyTitle}>No reactions yet</UiText>
           <UiText style={styles.emptySub}>
@@ -849,7 +857,6 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
     paddingHorizontal: 16,
-    paddingTop: 4,
     paddingBottom: 10,
   },
   headerRow: {
