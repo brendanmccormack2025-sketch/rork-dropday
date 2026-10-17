@@ -38,6 +38,9 @@ import { supabase } from "@/lib/supabase";
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 const FREE_VIEWS_BEFORE_GATE = 5;
 
+/** Away from the feed at least this long: it is refreshed on return (pull to refresh works any time). */
+const FEED_STALE_AFTER_MS = 5 * 60_000;
+
 export default function FeedScreen() {
   const router = useRouter();
   const { unreadCount } = useNotifications();
@@ -88,12 +91,24 @@ export default function FeedScreen() {
   // new post at the top, and an immediate refetch would re-run rankFeed()
   // before the self-boost window kicks in, potentially pushing the new
   // post down.
+  // When the feed last went out of view.
+  const lastBlurAtRef = useRef<number>(Date.now());
+  useFocusEffect(
+    useCallback(() => () => {
+      lastBlurAtRef.current = Date.now();
+    }, []),
+  );
   useFocusEffect(
     useCallback(() => {
       if (isFirstFocusRef.current) {
         isFirstFocusRef.current = false;
         return;
       }
+      // Coming back after a short visit elsewhere (a profile, messages, reactions, the camera): the feed stays as it
+      // was, so the video you were watching keeps playing. A refetch would re-rank the feed and drop posts already
+      // seen, swapping the video under your finger. After a longer time away it is refreshed.
+      const awayMs = Date.now() - lastBlurAtRef.current;
+      if (awayMs < FEED_STALE_AFTER_MS) return;
       const hasPendingUpload = optimisticPosts.some(
         (p) => p._optimistic?.status === "uploading",
       );

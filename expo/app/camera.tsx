@@ -20,7 +20,7 @@ import { BlurView } from "expo-blur";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
-import { setAudioModeAsync } from "expo-audio";
+import { enterRecordingMode, restorePlaybackMode } from "@/lib/audioSession";
 import { Camera as CameraIcon, Check, Delete, RefreshCw, X, Zap, ZapOff } from "lucide-react-native";
 
 import PrimaryButton from "@/components/PrimaryButton";
@@ -234,10 +234,8 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
 
   // Audio session: allow recording while the camera is mounted.
   useEffect(() => {
-    setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true }).catch(() => {});
-    return () => {
-      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
-    };
+    enterRecordingMode();
+    return () => restorePlaybackMode();
   }, []);
 
   useEffect(() => {

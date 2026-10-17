@@ -15,7 +15,7 @@ import UiText from "@/components/UiText";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { VideoView, useVideoPlayer, type VideoPlayer } from "expo-video";
-import { setAudioModeAsync } from "expo-audio";
+import { restorePlaybackMode } from "@/lib/audioSession";
 import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoStatusFeed";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
@@ -211,10 +211,7 @@ export default function ReactionTreeScreen() {
       // Playback starts as soon as the screen is shown (waiting for "interactions" to finish could hold it back for
       // seconds while other animations ran: the frozen first reaction).
       setScreenFocused(true);
-      setAudioModeAsync({
-        allowsRecording: false,
-        playsInSilentMode: true,
-      }).catch(() => {});
+      restorePlaybackMode();
       return () => {
         setScreenFocused(false);
       };
