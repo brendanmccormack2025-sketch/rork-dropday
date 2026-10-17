@@ -1,5 +1,6 @@
 import AVFoundation
 import ExpoModulesCore
+import NaturalLanguage
 import Speech
 
 // Audio is recognized in chunks of this length (seconds). Apple documents a
@@ -274,6 +275,85 @@ private func recognize(
   }
 }
 
+
+// ── iOS 26+: SpeechAnalyzer / SpeechTranscriber ─────────────────────────────────
+// Apple's newer on-device transcription model (the one behind Notes and Voice Memos): much more accurate than the
+// older on-device SFSpeechRecognizer, made for long-form audio, still entirely on the phone. Used when the phone and
+// language support it; anything else (older iOS, unsupported language, any error) falls back to SFSpeechRecognizer.
+// The API calls follow a shipping open-source tool (finnvoor/yap) that reads word times the same way.
+
+private struct TimedWord: Sendable {
+  let text: String
+  let startMs: Int
+  let endMs: Int
+}
+
+#if compiler(>=6.2)
+@available(iOS 26.0, *)
+private func analyzerWords(_ text: AttributedString) -> [TimedWord] {
+  let tokenizer = NLTokenizer(unit: .word)
+  let string = String(text.characters)
+  tokenizer.string = string
+  var out: [TimedWord] = []
+  for wordRange in tokenizer.tokens(for: string.startIndex..<string.endIndex) {
+    guard let attrStart = AttributedString.Index(wordRange.lowerBound, within: text),
+          let attrEnd = AttributedString.Index(wordRange.upperBound, within: text) else { continue }
+    let slice = text[attrStart..<attrEnd]
+    let word = String(slice.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+    if word.isEmpty { continue }
+    let ranges = slice.runs.compactMap(\.audioTimeRange)
+    guard let first = ranges.first, let last = ranges.last else { continue }
+    let startS = first.start.seconds
+    let endS = last.end.seconds
+    guard startS.isFinite, endS.isFinite else { continue }
+    out.append(TimedWord(text: word, startMs: Int((startS * 1000).rounded()), endMs: Int((max(endS, startS) * 1000).rounded())))
+  }
+  return out
+}
+
+/// nil: not usable on this phone / for this language (the caller falls back). Throws on a failure while transcribing.
+@available(iOS 26.0, *)
+private func transcribeWithAnalyzer(asset: AVAsset, durationSeconds: Double, localeId: String?) async throws -> (words: [TimedWord], locale: String)? {
+  guard SpeechTranscriber.isAvailable else { return nil }
+  let wanted = localeId.map { Locale(identifier: $0) } ?? Locale.current
+  let supported = await SpeechTranscriber.supportedLocales
+  guard let locale = supported.first(where: { $0.identifier(.bcp47) == wanted.identifier(.bcp47) })
+    ?? supported.first(where: { $0.language.languageCode == wanted.language.languageCode && $0.region == wanted.region })
+    ?? supported.first(where: { $0.language.languageCode == wanted.language.languageCode })
+  else { return nil }
+
+  let transcriber = SpeechTranscriber(
+    locale: locale,
+    transcriptionOptions: [],
+    reportingOptions: [],
+    attributeOptions: [.audioTimeRange]
+  )
+  let modules: [any SpeechModule] = [transcriber]
+
+  // The language model is downloaded once (by the system) when it is not on the phone yet.
+  let installed = await SpeechTranscriber.installedLocales
+  if !installed.contains(where: { $0.identifier(.bcp47) == locale.identifier(.bcp47) }) {
+    _ = try? await AssetInventory.reserve(locale: locale)
+    if let request = try await AssetInventory.assetInstallationRequest(supporting: modules) {
+      try await request.downloadAndInstall()
+    }
+  }
+
+  let audioURL = try await exportAudio(asset: asset, startSeconds: 0, lengthSeconds: durationSeconds)
+  defer { try? FileManager.default.removeItem(at: audioURL) }
+  let audioFile = try AVAudioFile(forReading: audioURL)
+
+  let analyzer = SpeechAnalyzer(modules: modules)
+  try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+
+  var words: [TimedWord] = []
+  for try await result in transcriber.results {
+    words.append(contentsOf: analyzerWords(result.text))
+  }
+  return (words, locale.identifier)
+}
+#endif
+
 private func transcribe(uri: String, localeId: String?) async throws -> [String: Any]? {
   let url = try fileURL(from: uri)
   guard FileManager.default.fileExists(atPath: url.path) else {
@@ -291,6 +371,29 @@ private func transcribe(uri: String, localeId: String?) async throws -> [String:
   guard asset.tracks(withMediaType: .audio).first != nil else {
     return nil
   }
+
+  #if compiler(>=6.2)
+  if #available(iOS 26.0, *) {
+    do {
+      if let r = try await transcribeWithAnalyzer(asset: asset, durationSeconds: durationSeconds, localeId: localeId) {
+        var seen = Set<String>()
+        let words: [[String: Any]] = r.words
+          .sorted { $0.startMs < $1.startMs }
+          .filter { seen.insert("\($0.startMs):\($0.text.lowercased())").inserted }
+          .map { ["text": $0.text, "startMs": $0.startMs, "endMs": $0.endMs, "confidence": 1.0] }
+        return [
+          "words": words,
+          "durationMs": Int((durationSeconds * 1000).rounded()),
+          "locale": r.locale,
+          "onDevice": true,
+          "engine": "speechAnalyzer",
+        ]
+      }
+    } catch {
+      // the older recognizer below gets a try
+    }
+  }
+  #endif
 
   // On-device recognition must exist for this locale; there is no server fallback.
   let locale = localeId.map { Locale(identifier: $0) } ?? Locale.current

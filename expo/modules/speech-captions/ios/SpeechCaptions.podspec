@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
-  s.frameworks = 'Speech', 'AVFoundation'
+  s.frameworks = 'Speech', 'AVFoundation', 'NaturalLanguage'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
