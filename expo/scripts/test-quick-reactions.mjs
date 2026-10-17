@@ -74,5 +74,7 @@ ok("reactions screen: a local file is played without the web cache", /useCaching
 ok("feed: the count follows the post's reactions list and my uploads", /reactionCountOf\(\{\n\s+cached: cachedReactions,/.test(feedItem) && /enabled: false,/.test(feedItem));
 ok("a posted reaction never turns an unknown list into a list of one (undercount)", /\/\/ no list cached yet: leave it[^\n]*\n\s+if \(!old\) return old;/.test(provider));
 
+ok("liking a reaction is saved (it decides the order), the heart answers at once", /toggleLike\.mutate\(\{ postId: post\.id, liked: next \}\);/.test(tree) && /onLike=\{\(\) => setLike\(true\)\}/.test(tree) && /onPress=\{\(\) => setLike\(!liked\)\}/.test(tree));
+ok("reactions are shown most-liked first, newest first on a tie", /if \(b\.score !== a\.score\) return b\.score - a\.score;\n\s+return b\.createdMs - a\.createdMs;/.test(tree) && /score: \(p\.like_count \?\? 0\)/.test(tree));
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

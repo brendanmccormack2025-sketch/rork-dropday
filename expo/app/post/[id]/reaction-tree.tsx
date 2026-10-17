@@ -406,16 +406,28 @@ function ReactionItem({
   const isReply = kind === "reply";
 
   const router = useRouter();
-  const [liked, setLiked] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
-  const { deleteReaction } = usePosts();
+  const { deleteReaction, toggleLike, likedPosts } = usePosts();
   const { user: authUser } = useAuth();
   const { reportContent } = useReportContent();
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
-  // a reaction still uploading has no server row yet: nothing to delete or report
+  // a reaction still uploading has no server row yet: nothing to delete, report or like
   const isPending = post.id.startsWith("opt_");
   const isOwner = !!authUser?.id && post.user_id === authUser.id && !isPending;
+  // Likes on a reaction are saved (they decide which reactions are shown first); the heart answers at once.
+  const likedOnServer = likedPosts.some((p) => p.id === post.id);
+  const [liked, setLikedState] = useState<boolean>(likedOnServer);
+  useEffect(() => setLikedState(likedOnServer), [likedOnServer]);
+  const setLike = useCallback(
+    (next: boolean) => {
+      if (isPending || !authUser?.id || next === liked) return;
+      setLikedState(next);
+      toggleLike.mutate({ postId: post.id, liked: next });
+    },
+    [isPending, authUser?.id, liked, toggleLike, post.id],
+  );
+  const likeCount = Math.max(0, (post.like_count ?? 0) - (likedOnServer ? 1 : 0) + (liked ? 1 : 0));
 
   // ── Pre-buffer gate: don't start playback until the first frame is ready.
   //    Uses onReadyForDisplay (deterministic, fires once) + a 3s safety timeout
@@ -630,7 +642,7 @@ function ReactionItem({
 
           {/* Double-tap to like zone */}
           <DoubleTapLikeZone
-            onLike={() => setLiked(true)}
+            onLike={() => setLike(true)}
             onSingleTap={() => setIsPaused((v) => !v)}
           />
 
@@ -697,7 +709,7 @@ function ReactionItem({
       {/* Side actions */}
       <View style={styles.actions} pointerEvents="box-none">
         <Pressable
-          onPress={() => setLiked((v) => !v)}
+          onPress={() => setLike(!liked)}
           style={styles.actionBtn}
           hitSlop={8}
         >
@@ -708,7 +720,7 @@ function ReactionItem({
             strokeWidth={2}
           />
           <UiText style={styles.actionLabel}>
-            {String((post.like_count ?? 0) + (liked ? 1 : 0))}
+            {String(likeCount)}
           </UiText>
         </Pressable>
 
