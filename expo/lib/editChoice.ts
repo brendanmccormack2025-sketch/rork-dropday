@@ -4,7 +4,7 @@
  *   silence  -> the silence-cut step (lib/ai/autoEdit.ts)
  *   cleanup  -> ums, filler words and a slow start, planned from the transcript (hook trim, filler / um cuts)
  *   captions -> captions shown on the video (from the same on-device transcript)
- * Transcription (on-device speech recognition) runs only when captions or cleanup need it.
+ * Transcription (on-device speech recognition) runs for any chosen edit (pause removal uses its word timings too).
  * Every edit stays non-destructive: cuts are instructions on the untouched source file, and the editor's own
  * "Keep original" / undo, or going back to the choice screen, returns to the source.
  *
@@ -74,9 +74,12 @@ export function parseEditChoice(raw: string | string[] | null | undefined): Edit
   return LEGACY_CHOICE;
 }
 
-/** On-device transcription is needed only for captions or the transcript-based cleanup. */
+/**
+ * On-device transcription runs for any edit: captions and the cleanup come from it, and pause removal uses its word
+ * timings so no cut clips a word (lib/autoEdit/wordGuard.ts). Keep original runs none.
+ */
 export function needsTranscription(c: EditChoice): boolean {
-  return c.captions || c.cleanup;
+  return c.captions || c.cleanup || c.silence;
 }
 
 /** True when a custom choice applies nothing (then it is the same as Keep original). */

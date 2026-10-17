@@ -24,7 +24,7 @@ eq("Keep original: no pause removal, no cleanup, no captions, no speech analysis
 eq("AI edit: everything, like before", steps(choiceFor("auto")), { silence: true, cleanup: true, captions: true, transcription: true });
 eq("AI edit follows the 'Auto-edit my videos' setting for pause removal", steps(choiceFor("auto", undefined, false)), { silence: false, cleanup: true, captions: true, transcription: true });
 eq("Customize: only captions", steps(choiceFor("custom", { silence: false, cleanup: false, captions: true })), { silence: false, cleanup: false, captions: true, transcription: true });
-eq("Customize: only pauses (no speech analysis needed)", steps(choiceFor("custom", { silence: true, cleanup: false, captions: false })), { silence: true, cleanup: false, captions: false, transcription: false });
+eq("Customize: only pauses (speech analysed so no pause cut clips a word)", steps(choiceFor("custom", { silence: true, cleanup: false, captions: false })), { silence: true, cleanup: false, captions: false, transcription: true });
 eq("Customize: cleanup without captions still transcribes (cuts come from the transcript)", steps(choiceFor("custom", { silence: false, cleanup: true, captions: false })), { silence: false, cleanup: true, captions: false, transcription: true });
 ok("Customize with everything off applies nothing (treated as Keep original)", appliesNothing(choiceFor("custom", { silence: false, cleanup: false, captions: false })));
 
@@ -77,8 +77,8 @@ const silenceStart = edit.indexOf("if (!AUTO_EDIT_ENABLED || autoEditStartedRef.
 ok("pause removal: the choice is checked before the silence step starts", silenceStart > 0 && edit.indexOf("if (!editChoice.silence) return;", silenceStart) > silenceStart && edit.indexOf("if (!editChoice.silence) return;", silenceStart) < edit.indexOf("const result = await autoEdit(", silenceStart));
 ok("an explicit choice is not overridden by the setting; without one the setting still decides", /if \(!editChoice\.explicit && !\(await getAutoEditEnabled\(\)\)\) return;/.test(edit));
 ok("the transcript waits for no silence step that was not chosen", /AUTO_EDIT_ENABLED &&\s*editChoice\.silence &&/.test(edit));
-const planStart = edit.indexOf("if (!words || !uri || planDone) return;");
-ok("cleanup: nothing is cut from the transcript unless chosen (checked before any planning)", planStart > 0 && edit.indexOf("if (!editChoice.cleanup) {", planStart) > planStart && edit.indexOf("if (!editChoice.cleanup) {", planStart) < edit.indexOf("planHookTrim(", planStart));
+ok("cleanup: ums, filler words and a slow start are cut only when chosen", /const planned = editChoice\.cleanup \? \[\.\.\.planHookTrim\(words, durationMs\), \.\.\.planFillerCuts\(words\)\] : \[\];/.test(edit) && /const umDecisions = editChoice\.cleanup \? umPlan\.decisions : \[\];/.test(edit) && !/mergePlan\(protectedState\.state, umPlan\.decisions/.test(edit));
+ok("pause cuts are kept clear of words once the transcript is known (and in undo history)", /const guarded = guardSilenceCutsAgainstWords\(model\.state, words\);/.test(edit) && /mergePlan\(guarded\.state, planned/.test(edit) && /guardSilenceCutsAgainstWords\(snap, words\)\.state/.test(edit));
 ok("captions start on or off as chosen", /initialOn: editChoice\.captions,/.test(edit));
 ok("Keep original: speech is analyzed only if the creator turns captions on later", /onlyWhenOn: !needsTranscription\(editChoice\),/.test(edit));
 const captions = read("../lib/transcription/useCaptions.ts");
