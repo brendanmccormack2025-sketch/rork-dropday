@@ -40,6 +40,6 @@ eq("queue positions: oldest queued first, other statuses ignored", [...queuePosi
 const profile = read("../app/(tabs)/profile.tsx"), badge2 = read("../components/TrialStatusBadge.tsx");
 eq("own profile lists queued posts with their place in line; other users' profiles do not", [/isOnOwnProfile/.test(profile), /status === "queued"/.test(read("../components/profile/ProfileParts.tsx")) || /queued=\{item\.post\.status === "queued"\}/.test(profile), /isOnOtherProfile/.test(read("../app/user/[id].tsx"))], [true, true, true]);
 eq("badge has a queued pill", /queued: \{ label: "QUEUED"/.test(badge2), true);
-eq("app.json version untouched", JSON.parse(read("../app.json")).expo.version, "1.0.5");
+eq("app.json version untouched", JSON.parse(read("../app.json")).expo.version, "1.0.6");
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

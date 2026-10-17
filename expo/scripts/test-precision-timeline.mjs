@@ -329,7 +329,7 @@ const TOTAL = 60_000;    // a one-minute video
   ok("the frame rate comes from the player (JS only)", /videoTrack\?\.frameRate/.test(edit));
   ok("the edge preview is its own paused player and ends when playback starts", /const edgePlayer = useVideoPlayer/.test(edit) && /if \(isPlaying && edgePreviewing\) handleEdgePreview\(null\)/.test(edit));
   ok("the timeline sits inside the editor's GestureHandlerRootView", /<GestureHandlerRootView style=\{\{ flex: 1 \}\}>/.test(edit));
-  ok("the app version is 1.0.5", /"version": "1\.0\.5"/.test(read("../app.json")));
+  ok("the app version is 1.0.6", /"version": "1\.0\.6"/.test(read("../app.json")));
 }
 
 // fling and zoom animation steps (JS, one call per frame)

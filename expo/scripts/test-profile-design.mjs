@@ -41,6 +41,6 @@ eq("the profile viewer opens the same list as the tapped tab", [/tab,? \} as nev
 eq("verified badge stays next to the name (compact)", [/VerifiedCreatorBadge compact/.test(own), /VerifiedCreatorBadge compact/.test(other)], [true, true]);
 eq("links: round icon buttons through the shared helper (only the ones set)", [/getCreatorLinks/.test(parts), /openCreatorLink/.test(parts), /size=\{36\}/.test(parts)], [true, true, true]);
 eq("tab bar: light blur + hairline border, no dark gradient", [/BlurView/.test(tabs), /tint="light"/.test(tabs), /hairlineWidth/.test(tabs), /LinearGradient|rgba\(0,0,0,0\.75\)|rgba\(255,255,255,0\.75\)/.test(tabs)], [true, true, true, false]);
-eq("app.json version untouched", JSON.parse(read("../app.json")).expo.version, "1.0.5");
+eq("app.json version untouched", JSON.parse(read("../app.json")).expo.version, "1.0.6");
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

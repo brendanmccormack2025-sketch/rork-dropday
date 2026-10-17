@@ -115,7 +115,7 @@ eq("errors in words, never the database's text", [friendlyError(new Error("you c
   }
   eq("every package the feature imports is already in package.json (no new native package: it ships as an update after 1.0.5)", missing, []);
   const app = JSON.parse(read("../app.json")).expo;
-  eq("app.json: still 1.0.5 and the same scheme; no new plugin for this feature", [app.version, typeof app.scheme, app.plugins.some((p) => /sms|messages|friends/i.test(JSON.stringify(p)))], ["1.0.5", "string", false]);
+  eq("app.json: 1.0.6 and the same scheme; no new plugin for this feature", [app.version, typeof app.scheme, app.plugins.some((p) => /sms|messages|friends/i.test(JSON.stringify(p)))], ["1.0.6", "string", false]);
 }
 
 console.log(failed === 0 ? "\nall passed" : `\n${failed} FAILED`);

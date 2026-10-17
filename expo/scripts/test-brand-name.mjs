@@ -87,7 +87,7 @@ const strings = [];
 eq("app.json: no text says Trial", strings.filter(([, v]) => /\bTrial\b/.test(v)).map(([k, v]) => `${k}: ${v}`), []);
 eq("app name under the icon is Tryal", app.name, "Tryal");
 eq("slug, scheme, bundle id and package are unchanged", [app.slug, app.scheme, app.ios?.bundleIdentifier, app.android?.package].every((v) => v === undefined || /^[a-z0-9.\-_]+$/.test(v) && !/tryal/i.test(v)), true);
-eq("version is 1.0.5", app.version, "1.0.5");
+eq("version is 1.0.6", app.version, "1.0.6");
 const infoPlist = app.ios?.infoPlist ?? {};
 eq("every NS*UsageDescription says Tryal", Object.entries(infoPlist).filter(([k]) => /^NS.*UsageDescription$/.test(k)).every(([, v]) => /\bTryal\b/.test(v)), true);
 
