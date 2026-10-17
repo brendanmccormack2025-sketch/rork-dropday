@@ -1,5 +1,7 @@
 import React, { useState } from "react";
-import { ActivityIndicator, Pressable } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
+import { Users } from "lucide-react-native";
+import { theme } from "@/constants/theme";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { contactsPromptKey } from "@/lib/phonePrompt";
@@ -37,13 +39,16 @@ export default function OnboardingContacts() {
 
   return (
     <SettingsScaffold title="Keep it private">
-      <UiText style={s.heading}>{CONTACTS_ONBOARDING_TITLE}</UiText>
-      <UiText style={s.text}>{CONTACTS_ONBOARDING_BODY}</UiText>
+      <View style={s.iconBadge}>
+        <Users color={theme.accent} size={32} strokeWidth={2.2} />
+      </View>
+      <UiText style={[s.heading, s.center]}>{CONTACTS_ONBOARDING_TITLE}</UiText>
+      <UiText style={[s.text, s.center]}>{CONTACTS_ONBOARDING_BODY}</UiText>
       <Pressable onPress={allow} disabled={busy} style={[s.button, busy && { opacity: 0.6 }]}>
         {busy ? <ActivityIndicator color="#fff" /> : <UiText style={s.buttonText}>Allow contacts</UiText>}
       </Pressable>
       <Pressable onPress={finish} hitSlop={8} style={{ alignItems: "center", paddingVertical: 10 }}>
-        <UiText style={s.text}>Not now</UiText>
+        <UiText style={[s.text, { fontWeight: "700" }]}>Not now</UiText>
       </Pressable>
     </SettingsScaffold>
   );

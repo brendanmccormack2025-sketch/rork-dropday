@@ -1,10 +1,11 @@
 import React, { useState } from "react";
-import { ActivityIndicator, Pressable, TextInput } from "react-native";
+import { ActivityIndicator, Pressable, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { SettingsScaffold, settingsStyles as s } from "@/components/SettingsScaffold";
 import UiText from "@/components/UiText";
+import { Phone } from "lucide-react-native";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import { savePhone } from "@/lib/privacy";
@@ -36,15 +37,18 @@ export default function OnboardingPhone() {
 
   return (
     <SettingsScaffold title="Almost there">
-      <UiText style={s.heading}>{PHONE_EXPLANATION}</UiText>
-      <UiText style={s.text}>{PHONE_DETAIL}</UiText>
+      <View style={s.iconBadge}>
+        <Phone color={theme.accent} size={32} strokeWidth={2.2} />
+      </View>
+      <UiText style={[s.heading, s.center]}>{PHONE_EXPLANATION}</UiText>
+      <UiText style={[s.text, s.center]}>{PHONE_DETAIL}</UiText>
       <TextInput value={value} onChangeText={setValue} placeholder="+1 415 555 2671" placeholderTextColor={theme.textDim} keyboardType="phone-pad" autoComplete="tel" style={s.input} />
       {error ? <UiText style={s.error}>{error}</UiText> : null}
       <Pressable onPress={save} disabled={busy || !value.trim()} style={[s.button, (busy || !value.trim()) && { opacity: 0.5 }]}>
         {busy ? <ActivityIndicator color="#fff" /> : <UiText style={s.buttonText}>Save</UiText>}
       </Pressable>
-      <Pressable onPress={done} style={s.secondary}>
-        <UiText style={s.secondaryText}>Skip for now</UiText>
+      <Pressable onPress={done} hitSlop={8} style={{ alignItems: "center", paddingVertical: 10 }}>
+        <UiText style={[s.text, { fontWeight: "700" }]}>Skip for now</UiText>
       </Pressable>
     </SettingsScaffold>
   );
