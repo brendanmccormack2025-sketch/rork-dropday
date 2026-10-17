@@ -154,6 +154,7 @@ import { silenceCutsFromDetection } from "@/lib/autoEdit/silenceCuts";
 import { keepRangesToClips } from "@/lib/editModel";
 import { SENSITIVITY_PRESETS, detectSilences, type Sensitivity } from "@/lib/silenceDetection";
 import { needsTranscription, parseEditChoice } from "@/lib/editChoice";
+import { guardSilenceCutsAgainstWords } from "@/lib/autoEdit/wordGuard";
 import { getAutoEditEnabled, getAutoEditSensitivity, getIncludeTextInSave, getSaveEditedToRoll, setAutoEditSensitivity, setIncludeTextInSave, setSaveEditedToRoll } from "@/lib/autoEditSettings";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -2110,7 +2111,15 @@ export default function EditScreen() {
     if (clipId !== selectedClipId) {
       trimNeedsSnapshotRef.current = true;
     }
-  }, [selectedClipId, clips]);
+    // A tapped clip plays at once from its own start, and only it (it loops until tapped off): playback no longer
+    // carries on through the rest of the video and only meets the clip seconds later.
+    if (idx >= 0) {
+      let start = 0;
+      for (let i = 0; i < idx; i++) start += effectiveDurationMs(clips[i]!);
+      handleSeek(start);
+      setTimeout(() => setIsPlaying(true), 66);
+    }
+  }, [selectedClipId, clips, handleSeek]);
 
   const handleTrim = useCallback(() => {
     if (!selectedClipId) {
@@ -3365,10 +3374,9 @@ export default function EditScreen() {
       const wasPlaying = isPlayingRef.current;
       const here = wasPlaying ? (samplePlayheadMs() ?? positionMsRef.current) : positionMsRef.current;
       const at = playheadOnSelect(loop, here);
-      if (Math.abs(at - here) > 1 || activeIndexRef.current !== loop.index) {
-        handleSeek(at);
-        if (wasPlaying) setTimeout(() => setIsPlaying(true), 60);
-      }
+      if (Math.abs(at - here) > 1 || activeIndexRef.current !== loop.index) handleSeek(at);
+      // A tapped piece plays (and loops) at once, whether the video was playing or paused.
+      setTimeout(() => setIsPlaying(true), 60);
     },
     [handleClearSelection, handleSeek, samplePlayheadMs],
   );
@@ -3474,7 +3482,7 @@ export default function EditScreen() {
     }
   }, [edgePlayer]);
   const handleEdgePreview = useCallback(
-    (ms: number | null) => {
+    (ms: number | null, sourceUri?: string) => {
       // The frame preview is a nicety: if its player complains, the timeline works without it.
       try {
         if (ms === null) {
@@ -3490,7 +3498,8 @@ export default function EditScreen() {
           }
           return;
         }
-        const uri = editStateRef.current?.state.sourceUri;
+        // the automatic edit's source, or (the simple timeline) the file of the clip being trimmed
+        const uri = sourceUri ?? editStateRef.current?.state.sourceUri;
         if (!uri || !Number.isFinite(ms)) return;
         edgeWantedMsRef.current = ms;
         if (edgeUriRef.current !== uri) {
@@ -3522,7 +3531,7 @@ export default function EditScreen() {
   useEffect(() => {
     if (step !== "cuts" || !selectedClipId) return;
     try {
-      const uri = editStateRef.current?.state.sourceUri;
+      const uri = editStateRef.current?.state.sourceUri ?? clipsRef.current.find((c) => c.id === selectedClipId && c.type === "video")?.uri;
       if (uri && edgeUriRef.current !== uri) {
         edgeUriRef.current = uri;
         edgePlayer.replace(uri);
@@ -3686,11 +3695,8 @@ export default function EditScreen() {
     const words = captions.words;
     const uri = captions.transcribedUri;
     if (!words || !uri || planDone) return;
-    // Ums, filler words and a slow start are cut only when chosen; the transcript is still used for captions.
-    if (!editChoice.cleanup) {
-      setPlanDone(true);
-      return;
-    }
+    // Ums, filler words and a slow start are cut only when chosen (editChoice.cleanup); the word guard (pause cuts never
+    // eat into a word) and laugh protection always apply to the cuts that exist.
     (async () => {
       try {
         const loud = await analysis.loudness(uri);
@@ -3706,19 +3712,25 @@ export default function EditScreen() {
         // Method 2: the 'um' sounds become reversible cuts (category Ums); laughs and
         // unsure sounds are display only.
         const sounds = analyzeUnexplained(loud.windows, 20, durationMs, words, undefined, captions.removedWords);
-        const planned = [...planHookTrim(words, durationMs), ...planFillerCuts(words)];
-        const afterMethod1 = mergePlan(model.state, planned, ["hookTrim", "fillerCut"]);
+        // Pause cuts were made from loudness alone: now that the words are known, none may clip one.
+        const guarded = guardSilenceCutsAgainstWords(model.state, words);
+        if (guarded.shortened + guarded.split + guarded.dropped > 0) {
+          console.log("[wordGuard]", JSON.stringify({ shortened: guarded.shortened, split: guarded.split, dropped: guarded.dropped }));
+        }
+        const planned = editChoice.cleanup ? [...planHookTrim(words, durationMs), ...planFillerCuts(words)] : [];
+        const afterMethod1 = mergePlan(guarded.state, planned, ["hookTrim", "fillerCut"]);
         // Laughs are protected first: no cut may remove time inside one.
         const protectPlan = planLaughProtection(sounds);
         const protectedState = mergePlan(afterMethod1.state, protectPlan, ["laughProtect"]);
         const stretchedPlan = planStretchedUms(loud.windows, 20, durationMs, words);
         const umPlan = planUmCuts(protectedState.state, [...sounds, ...blockUmsOverlapping(stretchedPlan.sounds, captions.removedWords)], durationMs);
-        const merged = mergePlan(protectedState.state, umPlan.decisions, ["umCut"]);
+        const umDecisions = editChoice.cleanup ? umPlan.decisions : [];
+        const merged = mergePlan(protectedState.state, umDecisions, ["umCut"]);
         // AI planning is not an undo step: saved snapshots are re-planned, not extended.
         historyRef.current = mapHistory(historyRef.current, (snap) =>
           mergePlan(
-            mergePlan(mergePlan(snap, planned, ["hookTrim", "fillerCut"]).state, protectPlan, ["laughProtect"]).state,
-            umPlan.decisions,
+            mergePlan(mergePlan(guardSilenceCutsAgainstWords(snap, words).state, planned, ["hookTrim", "fillerCut"]).state, protectPlan, ["laughProtect"]).state,
+            umDecisions,
             ["umCut"],
           ).state,
         );
@@ -4964,6 +4976,7 @@ export default function EditScreen() {
                 onSelectClip={handleSelectClip}
                 onClipUpdate={handleClipUpdate}
                 onTrimRelease={handleTrimRelease}
+                onScrub={handleEdgePreview}
                 onDeselectAndPreview={() => handleDeselectAndPreview()}
                 onReorderClips={handleReorderClips}
                 markers={timelineMarkers}
@@ -4985,6 +4998,7 @@ export default function EditScreen() {
             onSelectClip={handleSelectClip}
             onClipUpdate={handleClipUpdate}
             onTrimRelease={handleTrimRelease}
+            onScrub={handleEdgePreview}
             onDeselectAndPreview={() => handleDeselectAndPreview()}
             onReorderClips={handleReorderClips}
             markers={timelineMarkers}

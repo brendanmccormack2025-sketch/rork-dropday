@@ -74,6 +74,8 @@ interface TimelineEditorProps {
   onClipUpdate: (clipId: string, updates: Partial<DraftClip>) => void;
   /** Called when the user releases a trim handle — the parent should start isolated playback */
   onTrimRelease?: () => void;
+  /** While a handle is dragged: the frame of `sourceUri` at `sourceMs` is shown in the preview; null ends it. */
+  onScrub?: (sourceMs: number | null, sourceUri?: string) => void;
   /** Called when the user taps empty space to deselect and preview the full timeline */
   onDeselectAndPreview?: () => void;
   /** Called when the user reorders a clip via long-press drag */
@@ -270,6 +272,7 @@ export default function TimelineEditor({
   onSelectClip,
   onClipUpdate,
   onTrimRelease,
+  onScrub,
   onDeselectAndPreview,
   onReorderClips,
   markers,
@@ -319,9 +322,11 @@ export default function TimelineEditor({
     if (crossedBoundary(cfg.boundaries, seamLastMsRef.current, drag.clampedMs)) triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
     seamLastMsRef.current = drag.clampedMs;
     setSeamDrag({ edge, drag });
+    scrub(drag.clampedMs, cfg.sourceUri);
   }, []);
   const handleSeamEnd = useCallback((edge: SeamEdgeInfo, newMs: number) => {
     setSeamDrag(null);
+    scrub(null);
     seamsRef.current?.onDragEnd(edge, newMs);
   }, []);
 
@@ -427,6 +432,22 @@ export default function TimelineEditor({
   useEffect(() => { onSelectClipRef.current = onSelectClip; }, [onSelectClip]);
   useEffect(() => { onClipUpdateRef.current = onClipUpdate; }, [onClipUpdate]);
   useEffect(() => { onTrimReleaseRef.current = onTrimRelease; }, [onTrimRelease]);
+  const onScrubRef = useRef(onScrub);
+  onScrubRef.current = onScrub;
+  // ~30 previews a second at most: each one is a seek of the preview player
+  const lastScrubAtRef = useRef(0);
+  const scrub = (ms: number | null, uri?: string) => {
+    if (ms !== null) {
+      const now = Date.now();
+      if (now - lastScrubAtRef.current < 33) return;
+      lastScrubAtRef.current = now;
+    }
+    try {
+      onScrubRef.current?.(ms, uri);
+    } catch {
+      // the preview is optional
+    }
+  };
   useEffect(() => { onDeselectAndPreviewRef.current = onDeselectAndPreview; }, [onDeselectAndPreview]);
   useEffect(() => { onReorderClipsRef.current = onReorderClips; }, [onReorderClips]);
   useEffect(() => { selectedLayoutRef.current = selectedLayout; }, [selectedLayout]);
@@ -740,6 +761,7 @@ export default function TimelineEditor({
           onClipUpdateRef.current(sl.clip.id, {
             trimStartMs: newStart,
           });
+          if (sl.clip.type === "video") scrub(newStart, sl.clip.uri);
           const dragPx = msToPx(newStart - trimDragStartMs.current);
           setLeftTrimDragPx(dragPx);
           trimAutoScroll(TRIM_HANDLE_W, "left");
@@ -748,12 +770,14 @@ export default function TimelineEditor({
           setIsTrimming(null);
           setLeftTrimDragPx(0);
           cancelTrimAutoScroll();
+          scrub(null);
           onTrimReleaseRef.current?.();
         },
         onPanResponderTerminate: () => {
           setIsTrimming(null);
           setLeftTrimDragPx(0);
           cancelTrimAutoScroll();
+          scrub(null);
           onTrimReleaseRef.current?.();
         },
       }),
@@ -787,16 +811,19 @@ export default function TimelineEditor({
           onClipUpdateRef.current(sl.clip.id, {
             trimEndMs: newEnd,
           });
+          if (sl.clip.type === "video") scrub(newEnd, sl.clip.uri);
           trimAutoScroll(TRIM_HANDLE_W, "right");
         },
         onPanResponderRelease: () => {
           setIsTrimming(null);
           cancelTrimAutoScroll();
+          scrub(null);
           onTrimReleaseRef.current?.();
         },
         onPanResponderTerminate: () => {
           setIsTrimming(null);
           cancelTrimAutoScroll();
+          scrub(null);
           onTrimReleaseRef.current?.();
         },
       }),
