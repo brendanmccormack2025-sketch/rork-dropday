@@ -428,6 +428,8 @@ begin
     union all
     select user_id,           last_open           from public.trial_feed_opens     where last_open >= since
   ) a
+  -- only people who still have an account: a deleted account's old views / likes / feed opens never put it in a pool
+  where exists (select 1 from public.profiles pr where pr.id = a.uid)
   group by a.uid;
 
   w := cfg.pool_window_hours;
@@ -542,6 +544,7 @@ as $$
   left join public.viewer_creator_affinity a on a.viewer_id = u.user_id and a.creator_id = p.user_id
   where u.last_active >= now() - ((select active_window_hours from public.trial_engine_state where id) * interval '1 hour')
     and u.user_id <> p.user_id
+    and exists (select 1 from public.profiles pr where pr.id = u.user_id)   -- an account deleted since the last refresh
     and not public.trial_is_silenced(p.user_id, u.user_id)
     and not exists (
       select 1 from public.user_blocks b

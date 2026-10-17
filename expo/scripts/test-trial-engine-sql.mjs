@@ -657,6 +657,19 @@ if (!BIN) {
       engine();
       eq("same post with one stranger's like -> survives (only strangers count)", status(P1), "survived");
       Q(`update public.trial_engine_config set min_active=0, min_active_fraction=0`);
+
+      // A deleted account's leftover activity (feed opens, an active-users row) never gets it into a pool: assigning it
+      // would break the foreign key and stop the whole engine run (it stopped ship.sh once).
+      freshWorld(4);
+      const GHOST = "99999999-9999-4999-8999-999999999999";
+      Q(`insert into public.trial_feed_opens (user_id, last_open) values ('${GHOST}', now()) on conflict (user_id) do update set last_open = now()`);
+      Q(`insert into public.trial_active_users (user_id, last_active) values ('${GHOST}', now()) on conflict (user_id) do update set last_active = now()`);
+      mkPost(P1, U(1));
+      engine();
+      eq("a deleted account is never in the pool, and the engine run does not fail", [q(`select count(*) from public.trial_pool('${P1}') where user_id = '${GHOST}'`), q(`select count(*) from public.trial_assignments where viewer_id = '${GHOST}'`)], ["0", "0"]);
+      Q(`select public.trial_refresh_active()`);
+      eq("the next refresh leaves the deleted account out of the active users", q(`select count(*) from public.trial_active_users where user_id = '${GHOST}'`), "0");
+      Q(`delete from public.trial_feed_opens where user_id = '${GHOST}'`);
       freshWorld(3);
       mkPost(P1, U(1));
       for (const v of [2, 3]) view(P1, U(v), { watch: 500 });
