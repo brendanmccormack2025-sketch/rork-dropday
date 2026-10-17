@@ -670,6 +670,52 @@ if (!BIN) {
       Q(`select public.trial_refresh_active()`);
       eq("the next refresh leaves the deleted account out of the active users", q(`select count(*) from public.trial_active_users where user_id = '${GHOST}'`), "0");
       Q(`delete from public.trial_feed_opens where user_id = '${GHOST}'`);
+
+      // ── Run-through with the LIVE settings (the defaults in trial_engine_config, as on Supabase) ──
+      const live = () => Q(`update public.trial_engine_config set min_active=1, min_active_fraction=0.05, small_pool_everyone=50, fraud_weights_min_pool=50, max_active_trials=2`);
+      const full = { watch: 12000, dur: 12000, done: true };
+      const scenario = (users, plan) => {
+        freshWorld(users);
+        live();
+        mkPost(P1, U(1));
+        plan();
+        engine();
+        return [status(P1), reasonOf(P1)];
+      };
+      // 20 people on the app: the creator + 19 strangers
+      eq("LIVE 20 users: strong post (12 watch to the end, 6 like, 2 react) -> survives", scenario(20, () => {
+        for (let v = 2; v <= 13; v++) view(P1, U(v), { ...full, like: v <= 7, react: v === 8 || v === 9 });
+      })[0], "survived");
+      eq("LIVE 20 users: all 19 watch to the end, nobody responds -> ended", scenario(20, () => {
+        for (let v = 2; v <= 20; v++) view(P1, U(v), full);
+      }), ["archived", "pool_exhausted"]);
+      eq("LIVE 20 users: all 19 swipe away in a second -> ended", scenario(20, () => {
+        for (let v = 2; v <= 20; v++) view(P1, U(v), { watch: 1000, dur: 12000 });
+      })[0], "archived");
+      eq("LIVE 20 users: only 3 have seen it so far (all liked) -> still testing, too early to judge", scenario(20, () => {
+        for (let v = 2; v <= 4; v++) view(P1, U(v), { ...full, like: true });
+      })[0], "trial");
+      eq("LIVE 20 users: half swipe, half watch, 1 likes -> survives (1 of 19 = the 5% minimum, average above the bar)", scenario(20, () => {
+        for (let v = 2; v <= 20; v++) view(P1, U(v), v <= 10 ? { watch: 1000, dur: 12000 } : { ...full, like: v === 11 });
+      })[0], "survived");
+      // 5 people on the app: the creator + 4 strangers
+      eq("LIVE 5 users: all 4 watch, 1 likes -> survives", scenario(5, () => {
+        for (let v = 2; v <= 5; v++) view(P1, U(v), { ...full, like: v === 2 });
+      })[0], "survived");
+      eq("LIVE 5 users: all 4 watch, nobody responds -> ended", scenario(5, () => {
+        for (let v = 2; v <= 5; v++) view(P1, U(v), full);
+      })[0], "archived");
+      eq("LIVE 5 users: 2 of 4 seen it, nobody responds -> still testing (others may still respond)", scenario(5, () => {
+        for (let v = 2; v <= 3; v++) view(P1, U(v), full);
+      })[0], "trial");
+      // after surviving: 24 hours in feeds, then gone
+      scenario(5, () => { for (let v = 2; v <= 5; v++) view(P1, U(v), { ...full, like: true }); });
+      eq("LIVE survived: in feeds for 24 hours from now", q(`select round(extract(epoch from distribution_expires_at - now()) / 3600) from public.posts where id='${P1}'`), "24");
+      eq("LIVE survived: the creator is told once", q(`select count(*) from public.notifications where post_id='${P1}' and type='verdict_survived'`), "1");
+      Q(`update public.posts set distribution_expires_at = now() - interval '1 minute' where id='${P1}'`);
+      Q(`select public.expire_posts()`);
+      eq("LIVE after 24 hours: expired", status(P1), "expired");
+      Q(`update public.trial_engine_config set min_active=0, min_active_fraction=0, small_pool_everyone=0, fraud_weights_min_pool=0, max_active_trials=1000`);
       freshWorld(3);
       mkPost(P1, U(1));
       for (const v of [2, 3]) view(P1, U(v), { watch: 500 });
