@@ -14,7 +14,8 @@ import { CONTACTS_ONBOARDING_BODY, CONTACTS_ONBOARDING_TITLE } from "@/lib/priva
 
 /**
  * Right after the phone step, once per account: contacts are what keeps people you know away from your testing posts,
- * so they are asked for here, plainly and prominently. Apple requires the app to work without them, so "Not now" stays.
+ * so they are explained here, and Continue ALWAYS shows the system prompt (Apple 5.1.1(iv): no "Not now" and no way to
+ * close this message before the prompt). The user says no in the system prompt itself; the app works without contacts.
  */
 export default function OnboardingContacts() {
   const router = useRouter();
@@ -38,17 +39,14 @@ export default function OnboardingContacts() {
   };
 
   return (
-    <SettingsScaffold title="Keep it private">
+    <SettingsScaffold title="Keep it private" hideBack>
       <View style={s.iconBadge}>
         <Users color={theme.accent} size={32} strokeWidth={2.2} />
       </View>
       <UiText style={[s.heading, s.center]}>{CONTACTS_ONBOARDING_TITLE}</UiText>
       <UiText style={[s.text, s.center]}>{CONTACTS_ONBOARDING_BODY}</UiText>
       <Pressable onPress={allow} disabled={busy} style={[s.button, busy && { opacity: 0.6 }]}>
-        {busy ? <ActivityIndicator color="#fff" /> : <UiText style={s.buttonText}>Allow contacts</UiText>}
-      </Pressable>
-      <Pressable onPress={finish} hitSlop={8} style={{ alignItems: "center", paddingVertical: 10 }}>
-        <UiText style={[s.text, { fontWeight: "700" }]}>Not now</UiText>
+        {busy ? <ActivityIndicator color="#fff" /> : <UiText style={s.buttonText}>Continue</UiText>}
       </Pressable>
     </SettingsScaffold>
   );

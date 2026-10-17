@@ -4,12 +4,13 @@ import { Modal, Pressable, StyleSheet, View } from "react-native";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 
-type Props = { visible: boolean; onContinue: () => void; onNotNow: () => void };
+/** No "Not now": Apple (5.1.1(iv)) requires a message before a permission prompt to always lead to the prompt. */
+type Props = { visible: boolean; onContinue: () => void; onNotNow?: () => void };
 
 /** Shown once, before the first transcription, ahead of the system speech permission prompt. */
-export default function CaptionsExplainer({ visible, onContinue, onNotNow }: Props) {
+export default function CaptionsExplainer({ visible, onContinue }: Props) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onNotNow}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onContinue}>
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <UiText weight={800} style={styles.title}>
@@ -21,11 +22,6 @@ export default function CaptionsExplainer({ visible, onContinue, onNotNow }: Pro
           <Pressable onPress={onContinue} style={styles.primary}>
             <UiText weight={700} style={styles.primaryText}>
               Continue
-            </UiText>
-          </Pressable>
-          <Pressable onPress={onNotNow} hitSlop={8} style={styles.secondary}>
-            <UiText weight={700} style={styles.secondaryText}>
-              Not now
             </UiText>
           </Pressable>
         </View>
@@ -47,13 +43,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.bg,
     borderWidth: 1,
     borderColor: theme.border,
+    borderRadius: 28,
     padding: 24,
     gap: 14,
   },
   title: { fontSize: 20, color: theme.text },
   body: { fontSize: 15, lineHeight: 21, color: theme.textMuted },
-  primary: { backgroundColor: theme.accent, paddingVertical: 14, alignItems: "center", marginTop: 6 },
+  primary: { backgroundColor: theme.accent, borderRadius: 999, minHeight: 52, justifyContent: "center", alignItems: "center", marginTop: 6 },
   primaryText: { color: "#fff", fontSize: 15 },
-  secondary: { alignItems: "center", paddingVertical: 6 },
-  secondaryText: { color: theme.textMuted, fontSize: 14 },
 });

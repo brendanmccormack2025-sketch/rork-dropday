@@ -416,15 +416,6 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
                 if (!micPermission?.granted) await requestMicPermission();
               }}
             />
-            <Pressable
-              onPress={async () => {
-                await requestPermission();
-                if (!micPermission?.granted) await requestMicPermission();
-              }}
-              style={{ marginTop: 12, padding: 12 }}
-            >
-              <UiText style={styles.permCancel}>Not now</UiText>
-            </Pressable>
           </>
         )}
       </View>

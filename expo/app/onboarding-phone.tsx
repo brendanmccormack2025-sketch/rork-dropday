@@ -36,7 +36,7 @@ export default function OnboardingPhone() {
   };
 
   return (
-    <SettingsScaffold title="Almost there">
+    <SettingsScaffold title="Almost there" hideBack>
       <View style={s.iconBadge}>
         <Phone color={theme.accent} size={32} strokeWidth={2.2} />
       </View>

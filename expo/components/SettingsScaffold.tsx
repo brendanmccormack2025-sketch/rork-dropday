@@ -8,14 +8,14 @@ import { theme } from "@/constants/theme";
 import UiText from "@/components/UiText";
 
 /** Header with a back button + a scrolling body, for the small settings screens. */
-export function SettingsScaffold({ title, children }: { title: string; children: React.ReactNode }) {
+export function SettingsScaffold({ title, children, hideBack }: { title: string; children: React.ReactNode; hideBack?: boolean }) {
   const router = useRouter();
   const navigation = useNavigation();
   return (
     <View style={styles.root}>
       <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
         <View style={styles.header}>
-          <Pressable
+          {hideBack ? <View style={styles.backSpacer} /> : <Pressable
             onPress={() => {
               if (navigation.canGoBack()) router.back();
               else router.replace("/settings");
@@ -24,7 +24,7 @@ export function SettingsScaffold({ title, children }: { title: string; children:
             hitSlop={8}
           >
             <ChevronLeft color={theme.text} size={22} strokeWidth={2.5} />
-          </Pressable>
+          </Pressable>}
           <UiText style={styles.title}>{title}</UiText>
           <View style={styles.backSpacer} />
         </View>
