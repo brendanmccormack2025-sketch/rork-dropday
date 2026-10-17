@@ -2391,7 +2391,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         qc.setQueryData<Post[]>(
           ["reactions", newPost.parent_post_id],
           (old) => {
-            if (!old) return [newPost];
+            // no list cached yet: leave it (the refetch above brings the whole list; a list of one would undercount)
+            if (!old) return old;
             if (old.some((p) => p.id === newPost.id)) return old;
             return [newPost, ...old];
           },

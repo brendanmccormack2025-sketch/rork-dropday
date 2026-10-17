@@ -88,7 +88,16 @@ export default function ReactionTreeScreen() {
 
   // ── Follow set for ranking ────────────────────────────────────────────
   // Reuse the existing following array from PostsProvider — no extra fetch.
-  const { following, reportedReactionIds } = usePosts();
+  const { following, reportedReactionIds, optimisticPosts, myProfile } = usePosts();
+  // My reactions still uploading show at once (posted straight from the camera), as mine, until the real ones arrive.
+  const uploading = useMemo(
+    () =>
+      optimisticPosts
+        .filter((p) => p._optimistic && p._optimistic.status !== "failed" && p.parent_post_id)
+        .map((p) => ({ ...p, profile: p.profile ?? (myProfile as Post["profile"]) ?? null })),
+    [optimisticPosts, myProfile],
+  );
+  const pendingTier1 = useMemo(() => uploading.filter((p) => p.parent_post_id === id), [uploading, id]);
 
   // ── Rank tier 1 reactions by blended score ────────────────────────────
   // Score = like_count + (10 if the reactor is followed by the current
@@ -151,7 +160,10 @@ export default function ReactionTreeScreen() {
     },
   });
 
-  const tier2Posts = tier2Query.data ?? [];
+  const tier2Posts = useMemo(
+    () => [...(tier2Query.data ?? []), ...uploading.filter((p) => !!p.parent_post_id && tier1Ids.includes(p.parent_post_id))],
+    [tier2Query.data, uploading, tier1Ids],
+  );
 
   // ── Build interleaved feed items ──────────────────────────────────────────
   // Tier 1 reactions are ranked by blended score (see rankedTier1Posts).
@@ -175,7 +187,7 @@ export default function ReactionTreeScreen() {
     }
 
     const items: FeedItem[] = [];
-    for (const reaction of rankedTier1Posts) {
+    for (const reaction of [...pendingTier1, ...rankedTier1Posts]) {
       items.push({ kind: "reaction", post: reaction });
       const replies = repliesByParent.get(reaction.id);
       if (replies) {
@@ -185,7 +197,7 @@ export default function ReactionTreeScreen() {
       }
     }
     return items;
-  }, [rankedTier1Posts, tier2Posts, blockedUserIds, reportedReactionIds, user?.id, following]);
+  }, [pendingTier1, rankedTier1Posts, tier2Posts, blockedUserIds, reportedReactionIds, user?.id, following]);
 
   const qc = useQueryClient();
 
@@ -251,7 +263,7 @@ export default function ReactionTreeScreen() {
   const keyExtractor = useCallback((item: FeedItem) => item.post.id, []);
 
   // Show the reactions as soon as they are known; the post's own row only decides the "no longer available" case.
-  const isLoading = tier1Query.isPending && !tier1Query.data;
+  const isLoading = tier1Query.isPending && !tier1Query.data && pendingTier1.length === 0;
   const postCount = feedItems.length;
   // Header sits over a full-screen video only when the feed is showing; the
   // loading/empty/unavailable states are on the cream background.
@@ -401,7 +413,9 @@ function ReactionItem({
   const { reportContent } = useReportContent();
   const name =
     post.profile?.display_name || post.profile?.username || "dropper";
-  const isOwner = !!authUser?.id && post.user_id === authUser.id;
+  // a reaction still uploading has no server row yet: nothing to delete or report
+  const isPending = post.id.startsWith("opt_");
+  const isOwner = !!authUser?.id && post.user_id === authUser.id && !isPending;
 
   // ── Pre-buffer gate: don't start playback until the first frame is ready.
   //    Uses onReadyForDisplay (deterministic, fires once) + a 3s safety timeout
@@ -489,7 +503,7 @@ function ReactionItem({
   const mediaGone = !!post.media_deleted_at;
   const player = useVideoPlayer(
     typeof post.media_url === "string" && post.media_url.length > 0 && !mediaGone
-      ? { uri: post.media_url, useCaching: true }
+      ? { uri: post.media_url, useCaching: post.media_url.startsWith("http") }
       : null,
     (p) => {
       p.loop = true;
@@ -718,7 +732,7 @@ function ReactionItem({
             <UiText style={styles.actionLabel}>Delete</UiText>
           </Pressable>
         )}
-        {!isOwner && (
+        {!isOwner && !isPending && (
           <Pressable onPress={() => reportContent("reaction", post.id)} style={styles.actionBtn} hitSlop={8}>
             <Flag color="#fff" size={22} strokeWidth={2} />
             <UiText style={styles.actionLabel}>Report</UiText>

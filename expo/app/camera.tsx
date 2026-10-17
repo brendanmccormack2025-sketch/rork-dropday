@@ -27,6 +27,8 @@ import PrimaryButton from "@/components/PrimaryButton";
 import PostingBlockedView from "@/components/PostingBlockedView";
 import { parseCreatorStatus, postingBlock } from "@/lib/creatorStatus";
 import { usePosts } from "@/providers/PostsProvider";
+import { postReactionNow } from "@/lib/postReactionCore";
+import { reactionIo } from "@/lib/postReaction";
 import { recordClientError } from "@/lib/clientErrors";
 import { CAMERA_FAILED_TEXT, startFailure } from "@/lib/cameraStart";
 import { theme } from "@/constants/theme";
@@ -310,6 +312,51 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
     else router.replace("/(tabs)");
   }, [router, teardown, navigation]);
 
+  // A reaction (or a reply in a reaction tree) is posted straight from here: no edit choice, no editor, no Post screen.
+  const { createPost, addOptimisticPost, updateOptimisticProgress } = usePosts();
+  const isReaction = !!(reactingTo || rootDropId);
+  const [postingReaction, setPostingReaction] = useState(false);
+  const postingReactionRef = useRef(false);
+  const postReaction = useCallback(async () => {
+    const parentId = reactingTo || rootDropId;
+    if (!parentId || !canProceed(clips) || isRecording || postingReactionRef.current) return;
+    postingReactionRef.current = true;
+    setPostingReaction(true);
+    recordBreadcrumb("camera: post reaction");
+    const result = await postReactionNow(
+      usableSegments(clips).map((c) => ({ uri: c.uri, type: c.type })),
+      parentId,
+      {
+        ...reactionIo,
+        addOptimistic: (payload, parent) => addOptimisticPost(payload, parent),
+        upload: (u) =>
+          createPost.mutate({
+            uri: u.uri,
+            mediaType: u.mediaType,
+            parentPostId: u.parentPostId,
+            thumbnailUri: u.thumbnailUri,
+            optimisticTempId: u.optimisticTempId,
+            onProgress: (percent: number) => updateOptimisticProgress(u.optimisticTempId, percent),
+          }),
+      },
+    );
+    if (!result.ok) {
+      postingReactionRef.current = false;
+      setPostingReaction(false);
+      void recordClientError(new Error(result.message), { kind: "post", stage: "reaction" });
+      Alert.alert(result.message, undefined, [{ text: "OK" }]);
+      return;
+    }
+    teardown();
+    try {
+      router.dismissAll();
+    } catch {
+      if (navigation.canGoBack()) router.back();
+    }
+    // The reactions of the post the reaction belongs to (a reply goes back to the root post's reactions).
+    router.replace(`/post/${rootDropId || reactingTo}/reaction-tree` as never);
+  }, [clips, isRecording, reactingTo, rootDropId, addOptimisticPost, createPost, updateOptimisticProgress, teardown, router, navigation]);
+
   const goToEdit = useCallback(() => {
     if (!canProceed(clips) || isRecording) return;
     // The recorder's own timing is only for the bar; the editor measures the real lengths.
@@ -539,14 +586,14 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
         <View style={styles.sideSlot}>
           {showNext && (
             <Pressable
-              onPress={goToEdit}
-              disabled={isRecording}
-              style={[styles.sideBtn, styles.nextBtn, isRecording && styles.sideBtnDisabled]}
+              onPress={isReaction ? () => void postReaction() : goToEdit}
+              disabled={isRecording || postingReaction}
+              style={[styles.sideBtn, styles.nextBtn, (isRecording || postingReaction) && styles.sideBtnDisabled]}
               accessibilityRole="button"
-              accessibilityState={{ disabled: isRecording }}
-              accessibilityLabel="Proceed to editor"
+              accessibilityState={{ disabled: isRecording || postingReaction, busy: postingReaction }}
+              accessibilityLabel={isReaction ? "Post reaction" : "Proceed to editor"}
             >
-              <Check color="#fff" size={26} strokeWidth={3} />
+              {postingReaction ? <ActivityIndicator color="#fff" /> : <Check color="#fff" size={26} strokeWidth={3} />}
             </Pressable>
           )}
         </View>

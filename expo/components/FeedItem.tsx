@@ -16,6 +16,9 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
+import { REACTIONS_STALE_MS, fetchReactions, reactionsKey } from "@/lib/reactionsQuery";
+import { reactionCountOf } from "@/lib/postReactionCore";
 import {
   Heart,
   Music,
@@ -324,7 +327,7 @@ export const FeedItem = memo(function FeedItem({
   const [containerDims, setContainerDims] = useState<{ w: number; h: number }>(
     { w: SCREEN_W, h: SCREEN_H },
   );
-  const { reactionsByParent, deletePost, toggleLike, likedPosts } = usePosts();
+  const { reactionsByParent, deletePost, toggleLike, likedPosts, optimisticPosts } = usePosts();
   const { user } = useAuth();
   const { reportContent } = useReportContent();
   const liked = likedPosts.some((p) => p.id === post.id);
@@ -333,7 +336,20 @@ export const FeedItem = memo(function FeedItem({
   useEffect(() => { setLikedOptimistic(liked); }, [liked]);
   const router = useRouter();
   const isOwner = !!user?.id && post.user_id === user.id;
-  const reactionCount = reactionsByParent[post.id]?.length ?? 0;
+  // The freshest count we hold: this post's own reactions list (preloaded while the post is on screen and updated the
+  // moment a reaction is posted) plus my reactions still uploading; else the count that came with the post.
+  const { data: cachedReactions } = useQuery({
+    queryKey: reactionsKey(post.id),
+    queryFn: () => fetchReactions(post.id),
+    enabled: false,
+    staleTime: REACTIONS_STALE_MS,
+  });
+  const reactionCount = reactionCountOf({
+    cached: cachedReactions,
+    serverCount: post.reaction_count,
+    recent: reactionsByParent[post.id],
+    pending: optimisticPosts.filter((p) => p._optimistic && p._optimistic.status !== "failed" && p.parent_post_id === post.id).length,
+  });
   // Once the media file is deleted (after expiry) no player is ever mounted.
   const isPlayableVideo = post.media_type === "video" && !post.media_deleted_at;
   // Multi-segment playback: if post.segments exists, cycle through them
