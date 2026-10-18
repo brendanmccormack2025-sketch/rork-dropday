@@ -564,6 +564,8 @@ export default function EditScreen() {
   // URIs the players were last asked to load (replace() dedupe)
   // The last player reset (Keep original / undo), for the owner's debug text.
   const lastResetRef = useRef<PlaybackDebug["lastReset"] | undefined>(undefined);
+  /** A load that was started but dropped before reaching the player (see the replace effects). */
+  const PLAYER_LOAD_PENDING = "\u0000pending";
   const loadedAUriRef = useRef<string | null>(null);
   const loadedBUriRef = useRef<string | null>(null);
   // Keep imperative player refs in sync with the player instances
@@ -1068,13 +1070,18 @@ export default function EditScreen() {
       let cancelled = false;
       // Wait for the file to be fully written before handing it to the player —
       // recordAsync/picker URIs can still be finalizing at navigation time.
+      let applied = false;
       void (async () => {
         const ready = targetUri ? await waitForFileReady(targetUri) : true;
         if (cancelled) return;
+        applied = true;
         playerA.replace(ready && target ? { uri: target.uri } : null);
       })();
       return () => {
         cancelled = true;
+        // Re-run before the file check finished (a draft: the second player is armed at once): the load was dropped,
+        // so forget it, or the re-run sees "already loaded" and the player stays black.
+        if (!applied && loadedAUriRef.current === targetUri) loadedAUriRef.current = PLAYER_LOAD_PENDING;
       };
     }
   }, [activeSlot, videoSource, preloadSource, playerA, videoLoadNonce]);
@@ -1085,13 +1092,18 @@ export default function EditScreen() {
     if (loadedBUriRef.current !== targetUri) {
       loadedBUriRef.current = targetUri;
       let cancelled = false;
+      let applied = false;
       void (async () => {
         const ready = targetUri ? await waitForFileReady(targetUri) : true;
         if (cancelled) return;
+        applied = true;
         playerB.replace(ready && target ? { uri: target.uri } : null);
       })();
       return () => {
         cancelled = true;
+        // Re-run before the file check finished (a draft: the second player is armed at once): the load was dropped,
+        // so forget it, or the re-run sees "already loaded" and the player stays black.
+        if (!applied && loadedBUriRef.current === targetUri) loadedBUriRef.current = PLAYER_LOAD_PENDING;
       };
     }
   }, [activeSlot, videoSource, preloadSource, playerB, videoLoadNonce]);
