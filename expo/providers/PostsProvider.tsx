@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { documentDirectory, cacheDirectory, getInfoAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
+import { rebaseToContainer } from "@/lib/containerPath";
 import { router } from "expo-router";
 import { showAlert } from "@/lib/showAlert";
 import { swapOptimistic } from "@/lib/postingFeed";
@@ -837,8 +838,11 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(DRAFTS_KEY);
+        const stored = await AsyncStorage.getItem(DRAFTS_KEY);
+        // paths saved before an app update point at the old container folder: rebase them (lib/containerPath.ts)
+        const raw = stored ? rebaseToContainer(stored, documentDirectory) : stored;
         if (raw) {
+          if (raw !== stored) void AsyncStorage.setItem(DRAFTS_KEY, raw).catch(() => {});
           const parsed = JSON.parse(raw) as DraftProject[];
           // Sort newest first
           parsed.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -1725,7 +1729,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(OPTIMISTIC_POSTS_KEY);
+        const storedPosts = await AsyncStorage.getItem(OPTIMISTIC_POSTS_KEY);
+        const raw = storedPosts ? rebaseToContainer(storedPosts, documentDirectory) : storedPosts;
         if (raw) {
           const parsed = JSON.parse(raw) as Post[];
           const fixed = parsed.map((p) =>
