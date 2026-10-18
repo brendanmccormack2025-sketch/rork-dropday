@@ -4132,7 +4132,7 @@ export default function EditScreen() {
           const srcInfo = await getInfoAsync(c.uri);
           if (!srcInfo.exists) {
             throw new Error(
-              `Source file missing before copy — clip[${i}]: ${c.uri.slice(0, 60)}`,
+              `Source file missing before copy — clip[${i}]: …${c.uri.slice(-80)}`,
             );
           }
           const srcSize = srcInfo.size ?? 0;

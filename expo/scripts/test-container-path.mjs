@@ -4,7 +4,7 @@
  *   node --experimental-strip-types --no-warnings scripts/test-container-path.mjs
  */
 import { readFileSync } from "node:fs";
-import { containerIdOf, rebaseToContainer } from "../lib/containerPath.ts";
+import { containerIdOf, draftFileCandidates, healDraftFiles, rebaseToContainer } from "../lib/containerPath.ts";
 
 let failed = 0;
 function eq(name, a, b) { const ok = JSON.stringify(a) === JSON.stringify(b); if (!ok) failed++; console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `\n      got  ${JSON.stringify(a)}\n      want ${JSON.stringify(b)}`}`); }
@@ -31,8 +31,31 @@ eq("already current: unchanged", rebaseToContainer(JSON.stringify(fixed), docsNo
 eq("web / Android: unchanged", rebaseToContainer(draft, "file:///data/user/0/app/files/"), draft);
 eq("remote urls untouched", rebaseToContainer('{"u":"https://x.supabase.co/storage/v1/a.mp4"}', docsNow), '{"u":"https://x.supabase.co/storage/v1/a.mp4"}');
 
+// ── healing: the file is found where it really is ──
+const files = new Set([`${docsNow}drafts/draft_1/c1.mov`, `${docsNow}thumbnails/cover_1.jpg`]);
+const exists = async (u) => files.has(u);
+const odd = [{
+  id: "draft_1",
+  clips: [{ id: "c1", type: "video", uri: `file:///private/var/mobile/Containers/Data/Application/${OLD}/Documents/drafts/draft_1/c1.mov` }],
+  coverThumbnailUri: `/var/mobile/Containers/Data/Application/${OLD}/Documents/thumbnails/cover_1.jpg`,
+  editState: { state: { sourceUri: `file:///var/mobile/Containers/Data/Application/${OLD}/Documents/drafts/draft_1/c1.mov` } },
+}];
+const healed = await healDraftFiles(odd, docsNow, exists);
+eq("heal: a clip in any old path form is found under Documents now", healed.drafts[0].clips[0].uri, `${docsNow}drafts/draft_1/c1.mov`);
+eq("heal: the cover (bare path form) too", healed.drafts[0].coverThumbnailUri, `${docsNow}thumbnails/cover_1.jpg`);
+eq("heal: the edit's source too", healed.drafts[0].editState.state.sourceUri, `${docsNow}drafts/draft_1/c1.mov`);
+ok("heal: reports a change (so it is saved back)", healed.changed);
+const moved = await healDraftFiles([{ id: "draft_1", clips: [{ uri: "file:///somewhere/else/c1.mov" }] }], docsNow, exists);
+eq("heal: found by name in the draft's own folder", moved.drafts[0].clips[0].uri, `${docsNow}drafts/draft_1/c1.mov`);
+const fine = [{ id: "draft_1", clips: [{ uri: `${docsNow}drafts/draft_1/c1.mov` }] }];
+const same = await healDraftFiles(fine, docsNow, exists);
+ok("heal: a draft whose files are there is untouched", !same.changed && same.drafts === fine);
+const gone = await healDraftFiles([{ id: "d2", clips: [{ uri: "file:///x/Library/Caches/Camera/a.mov" }] }], docsNow, exists);
+ok("heal: a file that is nowhere is left as it was", !gone.changed && gone.drafts[0].clips[0].uri === "file:///x/Library/Caches/Camera/a.mov");
+eq("candidates for a Documents path", draftFileCandidates(`file:///old/Documents/drafts/d/c.mov`, "d", docsNow), [`${docsNow}drafts/d/c.mov`, `${docsNow}thumbnails/c.mov`]);
+
 const provider = readFileSync(new URL("../providers/PostsProvider.tsx", import.meta.url), "utf8");
-ok("drafts are rebased when loaded (and saved back)", /rebaseToContainer\(stored, documentDirectory\)/.test(provider) && /if \(raw !== stored\) void AsyncStorage\.setItem\(DRAFTS_KEY, raw\)/.test(provider));
+ok("drafts are rebased and healed when loaded (and saved back)", /rebaseToContainer\(stored, documentDirectory\)/.test(provider) && /healDraftFiles\(loaded, documentDirectory/.test(provider) && /if \(raw !== stored \|\| healed\.changed\) void AsyncStorage\.setItem\(DRAFTS_KEY/.test(provider));
 ok("pending uploads are rebased when loaded", /rebaseToContainer\(storedPosts, documentDirectory\)/.test(provider));
 const cleanup = readFileSync(new URL("../lib/storageCleanupCore.ts", import.meta.url), "utf8");
 ok("the launch cleanup never deletes draft files", /DELETABLE[^\n]*new Set<Area>\(\[(?![^\]]*"drafts")/.test(cleanup));

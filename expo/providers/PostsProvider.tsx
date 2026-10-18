@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { documentDirectory, cacheDirectory, getInfoAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
-import { rebaseToContainer } from "@/lib/containerPath";
+import { healDraftFiles, rebaseToContainer } from "@/lib/containerPath";
 import { router } from "expo-router";
 import { showAlert } from "@/lib/showAlert";
 import { swapOptimistic } from "@/lib/postingFeed";
@@ -842,8 +842,13 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         // paths saved before an app update point at the old container folder: rebase them (lib/containerPath.ts)
         const raw = stored ? rebaseToContainer(stored, documentDirectory) : stored;
         if (raw) {
-          if (raw !== stored) void AsyncStorage.setItem(DRAFTS_KEY, raw).catch(() => {});
-          const parsed = JSON.parse(raw) as DraftProject[];
+          const loaded = JSON.parse(raw) as DraftProject[];
+          // a file not where the saved path says (any older path form): find it in the draft's own folder
+          const healed = await healDraftFiles(loaded, documentDirectory, (u) =>
+            getInfoAsync(u).then((i) => i.exists).catch(() => false),
+          );
+          const parsed = healed.drafts;
+          if (raw !== stored || healed.changed) void AsyncStorage.setItem(DRAFTS_KEY, JSON.stringify(parsed)).catch(() => {});
           // Sort newest first
           parsed.sort((a, b) => b.updatedAt - a.updatedAt);
           setDraftProjects(parsed);
