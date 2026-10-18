@@ -882,6 +882,32 @@ if (!BIN) {
       const after = feedIds(U(4));
       ok("posts the viewer already watched are not pinned to the top again", after[0] !== PID(1) && after[0] !== PID(6) && after.slice(0, 5).every((id) => id !== PID(1) && id !== PID(6)));
 
+      // discovery first, popularity second: testing posts, then EVERY survived post; each creator's best survived
+      // post before anyone's second; most liked first; the creator's own likes never count
+      {
+        freshWorld(10);
+        Q(`update public.trial_engine_config set small_pool_everyone=50`);
+        const survive = (id) => Q(`update public.posts set status='survived', survived_at=now(), distribution_started_at=now(), distribution_expires_at=now()+interval '24 hours' where id='${id}'`);
+        const likeBy = (id, users) => users.forEach((u) => Q(`insert into public.likes (user_id, post_id) values ('${U(u)}','${id}') on conflict do nothing`));
+        mkPostAt(PID(1), U(2), 50); survive(PID(1)); likeBy(PID(1), [3, 4, 5, 6, 7]);        // @2: 5 likes
+        mkPostAt(PID(2), U(2), 49); survive(PID(2)); likeBy(PID(2), [3, 4, 5, 6]);           // @2: 4 likes (their 2nd)
+        mkPostAt(PID(3), U(3), 48); survive(PID(3)); likeBy(PID(3), [4]);                    // @3: 1 like
+        mkPostAt(PID(4), U(4), 47); survive(PID(4)); likeBy(PID(4), [4]);                    // @4: only their own like -> 0
+        mkPostAt(PID(5), U(5), 46); survive(PID(5)); likeBy(PID(5), [3, 6]);                 // @5: 2 likes
+        Q(`insert into public.posts (user_id, media_url, media_type, parent_post_id) values ('${U(6)}','u','video','${PID(3)}')`);   // a reaction -> @3 scores 1 + 2 = 3, above @5's 2 likes
+        mkPostAt(PID(6), U(6), 10);                                                           // still testing
+        const f = feedIds(U(9));
+        eq("FEED the testing post comes first", f[0], PID(6));
+        eq("FEED every survived post in its window is in the feed", [PID(1), PID(2), PID(3), PID(4), PID(5)].every((id) => f.includes(id)), true);
+        eq("FEED each creator's best before anyone's second, most liked first (reactions count double, own likes never)", f.slice(1), [PID(1), PID(3), PID(5), PID(4), PID(2)]);
+        Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${PID(1)}','${U(9)}')`);
+        eq("FEED a survived post already watched moves behind the unwatched ones (still shown)", feedIds(U(9)).slice(-1), [PID(1)]);
+        Q(`update public.posts set distribution_expires_at = now() - interval '1 minute' where id='${PID(2)}'`);
+        eq("FEED its 24 hours over: it leaves the feed", feedIds(U(9)).includes(PID(2)), false);
+        const p1 = feedIds(U(9), 2), p2 = feedIds(U(9), 2, 2, p1), p3 = feedIds(U(9), 2, 4, [...p1, ...p2]);
+        eq("FEED paged 2 at a time: nothing repeated or lost", [new Set([...p1, ...p2, ...p3]).size, [...p1, ...p2, ...p3].length], [5, 5]);
+      }
+
       // pool exhausted: inactive / released viewers do not block; one who returns is counted
       freshWorld(5);
       mkPost(P1, U(1));

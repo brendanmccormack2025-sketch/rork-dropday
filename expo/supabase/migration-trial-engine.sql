@@ -100,7 +100,8 @@ alter table public.trial_engine_config
   add column if not exists prior_pool_fraction double precision not null default 0.25,
   add column if not exists fraud_weights_min_pool integer not null default 50,   -- new-account / like-everything / affinity weights only above this active pool
   add column if not exists exhausted_fail_ratio double precision not null default 0.67,   -- pool exhausted: ended below ratio * bar
-  add column if not exists min_exhausted_viewers integer not null default 5,   -- pool exhausted decides EARLY only with this many strangers judged; fewer: keep testing to 24 h, then the same rule
+  add column if not exists min_exhausted_viewers integer not null default 5,
+  add column if not exists survived_reaction_weight double precision not null default 2,   -- survived ranking: a video reaction counts as this many likes   -- pool exhausted decides EARLY only with this many strangers judged; fewer: keep testing to 24 h, then the same rule
   add column if not exists known_source_follows boolean not null default false,   -- old follows count as "people you know" (off: DropDay-era follows are ignored)
   add column if not exists max_active_trials  integer not null default 2,      -- posts one creator can have in testing at once; extra posts wait as 'queued'
   add column if not exists build_in_silence    boolean not null default true;           -- people you know never see (or influence) your post while it is on trial
@@ -1470,37 +1471,40 @@ begin
     rest_offset := p_offset - a_count;
   end if;
 
-  if feed_ok and (rest_limit > 0 or use_seen) then
-    if use_seen then
-      -- the whole of get_feed's first 100 (its maximum page); what was already delivered is filtered out below
-      execute $q$ select coalesce(array_agg(f.post_id order by f.position), '{}'), count(*)::integer from public.get_feed(100, 0) f $q$
-        into rest_ids, src_rows;
-    else
-      execute $q$ select coalesce(array_agg(f.post_id order by f.position), '{}'), count(*)::integer from public.get_feed($1, $2) f $q$
-        into rest_ids, src_rows using rest_limit, rest_offset;
-    end if;
-  end if;
-
-  -- drop testing posts this viewer is not assigned to (own posts stay), and anything already placed in front or seen
-  rest_ids := array(
-    select u.id
-    from unnest(rest_ids) with ordinality as u(id, ord)
-    join public.posts p on p.id = u.id
-    where not (u.id = any (front)) and not (u.id = any (seen))
-      and ((p.status = 'survived' and (p.distribution_expires_at is null or p.distribution_expires_at > now())
-                and not public.trial_feed_hidden(p.user_id, me)   -- the creator's hide list: not even once it survived
-            or (p.status = 'trial' and not public.trial_is_silenced(p.user_id, me) and exists (select 1 from public.trial_assignments t where t.post_id = p.id and t.viewer_id = me and t.released_at is null)))
-           or (p.user_id = me and p.status in ('trial', 'incomplete', 'survived')))   -- 'incomplete' / 'archived' / 'expired': never served to others
-    order by u.ord
-  );
+  -- SURVIVED POSTS, after every testing post (discovery first, popularity second). Ranked here, not by the dashboard
+  -- get_feed: every survived post still in its 24 h window is in the list; unseen before seen; and EVERY creator's best
+  -- survived post comes before anyone's second (creator_rank), so a popular creator or one viral post cannot fill the
+  -- feed. Within that: most liked first (strangers' likes + survived_reaction_weight x video reactions; the creator's
+  -- own never count), newest survival on ties.
+  select coalesce(array_agg(x.id order by x.was_seen, x.creator_rank, x.score desc, x.survived_at desc nulls last, x.id), '{}')
+    into rest_ids
+  from (
+    select p.id, p.survived_at, e.score,
+           exists (select 1 from public.post_raw_views v where v.post_id = p.id and v.viewer_id = me) as was_seen,
+           row_number() over (partition by p.user_id order by e.score desc, p.survived_at desc nulls last, p.id) as creator_rank
+    from public.posts p
+    cross join lateral (
+      select (select count(*) from public.likes l where l.post_id = p.id and l.user_id <> p.user_id)
+             + cfg.survived_reaction_weight
+               * (select count(distinct r.user_id) from public.posts r where r.parent_post_id = p.id and r.user_id <> p.user_id)
+             as score
+    ) e
+    where p.status = 'survived' and (p.distribution_expires_at is null or p.distribution_expires_at > now())
+      and p.parent_post_id is null and p.moderation_status = 'active' and p.media_deleted_at is null
+      and (not hide_mature or not p.is_mature)
+      and not exists (select 1 from public.feed_blocked_ids() b(id) where b.id = p.user_id)
+      and not exists (select 1 from public.reports r where r.reporter_id = me and r.target_type = 'post' and r.target_id = p.id)
+      and (p.user_id = me or not public.trial_feed_hidden(p.user_id, me))   -- the creator's hide list
+      and not (p.id = any (front)) and not (p.id = any (seen))
+  ) x;
+  src_rows := coalesce(cardinality(rest_ids), 0);
 
   if use_seen then
-    avail := a_count + coalesce(cardinality(rest_ids), 0);   -- everything still undelivered
-    if rest_limit < coalesce(cardinality(rest_ids), 0) then
-      rest_ids := rest_ids[1 : greatest(rest_limit, 0)];
-    end if;
+    avail := a_count + src_rows;   -- everything still undelivered
+    rest_ids := rest_ids[1 : greatest(rest_limit, 0)];
   else
-    avail := coalesce(cardinality(take_front), 0) + src_rows;
+    rest_ids := rest_ids[rest_offset + 1 : rest_offset + greatest(rest_limit, 0)];
+    avail := coalesce(cardinality(take_front), 0) + coalesce(cardinality(rest_ids), 0);
   end if;
 
   out_ids := coalesce(take_front, '{}') || coalesce(rest_ids, '{}');
