@@ -1806,7 +1806,7 @@ export const FeedItem = memo(function FeedItem({
       <View
         style={[
           styles.actions,
-          { bottom: bottomInset + 22 },
+          { bottom: bottomInset + 14 },
         ]}
       >
         <Pressable
@@ -1834,7 +1834,7 @@ export const FeedItem = memo(function FeedItem({
             <Heart
               color={likedOptimistic ? theme.danger : "#fff"}
               fill={likedOptimistic ? theme.danger : "transparent"}
-              size={28}
+              size={25}
               strokeWidth={2}
             />
           }
@@ -1847,20 +1847,20 @@ export const FeedItem = memo(function FeedItem({
         />
         <ActionButton
           circle
-          icon={<Video color="#fff" size={18} strokeWidth={2} />}
+          icon={<Video color="#fff" size={16} strokeWidth={2} />}
           label={String(reactionCount)}
           onPress={onReactions}
         />
         <ActionButton
-          icon={<Send color="#fff" size={26} strokeWidth={2} />}
+          icon={<Send color="#fff" size={23} strokeWidth={2} />}
           onPress={handleShareWithSignal}
         />
         <ActionButton
-          icon={<MoreHorizontal color="#fff" size={26} strokeWidth={2} />}
+          icon={<MoreHorizontal color="#fff" size={23} strokeWidth={2} />}
           onPress={handleMore}
         />
         <ActionButton
-          icon={<Eye color="rgba(255,255,255,0.6)" size={22} strokeWidth={2} />}
+          icon={<Eye color="rgba(255,255,255,0.6)" size={19} strokeWidth={2} />}
           label={formatCount(viewsShown(post))}
           muted
         />
@@ -1870,7 +1870,7 @@ export const FeedItem = memo(function FeedItem({
       <View
         style={[
           styles.bottom,
-          { bottom: bottomInset + 24 },
+          { bottom: bottomInset + 14 },
         ]}
         pointerEvents="box-none"
       >
@@ -1904,7 +1904,7 @@ export const FeedItem = memo(function FeedItem({
           </UiText>
         ) : null}
         <View style={styles.musicRow}>
-          <Music color="rgba(255,255,255,0.6)" size={12} />
+          <Music color="rgba(255,255,255,0.55)" size={11} />
           <UiText style={styles.musicText}>
             Original sound
           </UiText>
@@ -1930,14 +1930,14 @@ const styles = StyleSheet.create({
   /* Right-side action rail */
   actions: {
     position: "absolute",
-    right: 12,
+    right: 10,
     alignItems: "center",
-    gap: 20,
+    gap: 15,
     zIndex: 999,
   },
   railAvatar: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     borderRadius: 999,
     borderWidth: 2,
     borderColor: "#FFFFFF",
@@ -1951,11 +1951,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "500" as const,
   },
-  actionBtn: { alignItems: "center", gap: 4 },
+  actionBtn: { alignItems: "center", gap: 3 },
   actionIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: "rgba(255,255,255,0.15)",
     alignItems: "center",
     justifyContent: "center",
@@ -1963,14 +1963,14 @@ const styles = StyleSheet.create({
   actionIconCirclePressed: { backgroundColor: "rgba(255,255,255,0.28)" },
   actionLabel: {
     color: "#fff",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "500" as const,
     textShadowColor: "rgba(0,0,0,0.6)",
     textShadowRadius: 4,
   },
   actionLabelMuted: {
     color: "rgba(255,255,255,0.6)",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "500" as const,
     textShadowColor: "rgba(0,0,0,0.6)",
     textShadowRadius: 4,
@@ -1981,10 +1981,10 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 18,
     right: 84,
-    gap: 6,
+    gap: 4,
     zIndex: 999,
   },
-  badgeSlot: { marginBottom: 4 },
+  badgeSlot: { marginBottom: 2 },
   trialNote: { marginBottom: 6, maxWidth: 260 },
   trialNoteTitle: { color: "#fff", fontSize: 11, fontWeight: "600" as const, letterSpacing: 0.6 },
   trialBar: { height: 3, borderRadius: 2, marginTop: 5, backgroundColor: "rgba(255,255,255,0.25)", overflow: "hidden" as const },
@@ -1993,19 +1993,19 @@ const styles = StyleSheet.create({
   userRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   username: {
     color: "#fff",
-    fontWeight: "500" as const,
-    fontSize: 15,
+    fontWeight: "600" as const,
+    fontSize: 14,
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowRadius: 3,
   },
   dotSep: {
     color: "rgba(255,255,255,0.65)",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "400" as const,
   },
   ago: {
     color: "rgba(255,255,255,0.65)",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "400" as const,
   },
   caption: {
@@ -2016,8 +2016,8 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowRadius: 3,
   },
-  musicRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
-  musicText: { color: "rgba(255,255,255,0.6)", fontSize: 12 },
+  musicRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 0 },
+  musicText: { color: "rgba(255,255,255,0.55)", fontSize: 11 },
 
   /* Buffering indicator */
   diagBox: {

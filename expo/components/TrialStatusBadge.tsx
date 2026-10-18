@@ -18,8 +18,8 @@ const BADGES: Partial<Record<SurvivalStatus, { label: string; color: string }>> 
 };
 
 /**
- * Status badge for survival verdicts — small pill with a 6px white dot
- * indicator, colored background matching the status. Shared by the feed's
+ * Status badge for survival verdicts — a small glass pill whose 6px dot
+ * carries the status colour. Shared by the feed's
  * bottom-left block and the profile grid; the status logic itself is unchanged.
  */
 export function TrialStatusBadge({
@@ -49,32 +49,34 @@ export function TrialStatusBadge({
   if (!found) return null;
   const badge = shown === "queued" ? { ...found, label: queuedLabel(queuePosition).toUpperCase() } : found;
   return (
-    <View style={[styles.badge, { backgroundColor: badge.color }]}>
-      <View style={styles.dot} />
+    <View style={styles.badge}>
+      <View style={[styles.dot, { backgroundColor: badge.color }]} />
       <UiText style={styles.label}>{badge.label}</UiText>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // hugs its text (never a full-width bar): a small glass pill, the status colour on the dot
   badge: {
+    alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 3,
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.38)",
   },
   dot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#FFFFFF",
   },
   label: {
     color: "#fff",
-    fontSize: 11,
-    fontWeight: "500" as const,
-    letterSpacing: 0.6,
+    fontSize: 10,
+    fontWeight: "600" as const,
+    letterSpacing: 0.7,
   },
 });

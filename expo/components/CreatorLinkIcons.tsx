@@ -9,7 +9,7 @@ import {
   type CreatorLinkSource,
 } from "@/lib/creatorLinks";
 
-const ICON_SIZE = 22;
+const ICON_SIZE = 18;
 const LABELS: Record<CreatorLinkKind, string> = {
   instagram: "Instagram",
   tiktok: "TikTok",
@@ -36,6 +36,7 @@ function CreatorLinkIcons({ profile, onBeforeOpen }: Props) {
         <Pressable
           key={l.kind}
           style={styles.btn}
+          hitSlop={6}
           accessibilityRole="link"
           accessibilityLabel={`${LABELS[l.kind]} ${l.label}`}
           onPress={() => {
@@ -62,10 +63,10 @@ function CreatorLinkIcons({ profile, onBeforeOpen }: Props) {
 
 export default memo(CreatorLinkIcons);
 
-// 44x44 touch targets; the 22px icons sit 44px apart (22px visible gap).
+// 36pt-wide targets, 32pt tall (hitSlop on the buttons keeps them easy to tap); 18px icons.
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", marginLeft: -11 },
-  btn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  row: { flexDirection: "row", alignItems: "center", marginLeft: -9 },
+  btn: { width: 36, height: 32, alignItems: "center", justifyContent: "center" },
   chip: {
     height: ICON_SIZE,
     minWidth: ICON_SIZE,
@@ -76,5 +77,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  chipText: { color: "#fff", fontSize: 10, fontWeight: "700" as const },
+  chipText: { color: "#fff", fontSize: 9, fontWeight: "700" as const },
 });
