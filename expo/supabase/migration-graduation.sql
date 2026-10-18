@@ -113,14 +113,34 @@ create trigger profiles_audit_creator_status
 
 -- ── 5. Posting enforcement ──────────────────────────────────────────────────
 -- The status of a user, readable whatever RLS says (definer). Unknown user = 'active' (the FK fails elsewhere).
+-- Graduation applies to the PERSON, not one account: an account whose saved phone number (its hash, from
+-- migration-known-connections.sql) is the same as a graduated or restricted account's takes that status too, so a
+-- second account on the same number cannot post. (Numbers are not verified: this stops the easy case only.)
+-- plpgsql, not sql: user_phone_hash is created by a later migration, so it is looked up only when it exists.
 create or replace function public.creator_status_of(uid uuid)
 returns text
-language sql
+language plpgsql
 stable
 security definer
 set search_path = public
 as $$
-  select coalesce((select creator_status from public.profiles where id = uid), 'active');
+declare
+  st text;
+  linked text;
+begin
+  st := coalesce((select creator_status from public.profiles where id = uid), 'active');
+  if st <> 'active' or to_regclass('public.user_phone_hash') is null then
+    return st;
+  end if;
+  select pr.creator_status into linked
+  from public.user_phone_hash mine
+  join public.user_phone_hash other on other.hash = mine.hash and other.user_id <> mine.user_id
+  join public.profiles pr on pr.id = other.user_id and pr.creator_status <> 'active'
+  where mine.user_id = uid
+  order by (pr.creator_status = 'graduated') desc
+  limit 1;
+  return coalesce(linked, st);
+end;
 $$;
 
 -- BEFORE INSERT on posts / group_posts: a clear, mappable message for the app. Reactions are not root posts.

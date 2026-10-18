@@ -145,6 +145,17 @@ if (!BIN) {
       eq("null leaves a link alone, '' clears it", [psql("t", "select public.admin_set_creator_links('bigbob', null, '', null)").status, psql("t", `select coalesce(tiktok_url,'-') || ' ' || instagram_url from public.profiles where id='${U(2)}'`).stdout.trim()], [0, "- https://www.instagram.com/bigbob"]);
       ok("a reason is required", psql("t", "select public.admin_set_creator_status('bigbob','graduated','  ')").status !== 0);
       ok("an unknown user is an error, not silence", psql("t", "select public.admin_set_creator_status('nobody','graduated','x')").status !== 0);
+
+      // the person, not the account: a second account on a graduated creator's phone number cannot post either
+      psql("t", "select public.admin_set_creator_status('bigbob','graduated','Reached 100k followers')");
+      ok("(no phone table yet: graduation still works on the account alone)", !asClient(U(2), post(U(2))).ok && asClient(U(4), post(U(4))).ok);
+      psql("t", `create table public.user_phone_hash (user_id uuid primary key, hash text not null); insert into public.user_phone_hash values ('${U(2)}','H-BOB'), ('${U(4)}','H-BOB'), ('${U(1)}','H-ALICE')`);
+      const dup = asClient(U(4), post(U(4)));
+      ok("an account on the SAME phone number as a graduated creator cannot post (same message)", !dup.ok && /POSTING_GRADUATED/.test(dup.error));
+      ok("...it can still react", asClient(U(4), post(U(4), `'${root}'`)).ok);
+      ok("an account with a different number posts normally", asClient(U(1), post(U(1))).ok);
+      psql("t", `update public.user_phone_hash set hash='H-NEW' where user_id='${U(4)}'`);
+      ok("a different number on that account: it can post", asClient(U(4), post(U(4))).ok);
     }
   } finally {
     run(join(BIN, "pg_ctl"), ["-D", data, "-m", "immediate", "stop"], { asPostgres: true });
