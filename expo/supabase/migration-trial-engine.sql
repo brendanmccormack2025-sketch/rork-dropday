@@ -100,6 +100,7 @@ alter table public.trial_engine_config
   add column if not exists prior_pool_fraction double precision not null default 0.25,
   add column if not exists fraud_weights_min_pool integer not null default 50,   -- new-account / like-everything / affinity weights only above this active pool
   add column if not exists exhausted_fail_ratio double precision not null default 0.67,   -- pool exhausted: ended below ratio * bar
+  add column if not exists min_exhausted_viewers integer not null default 5,   -- pool exhausted decides EARLY only with this many strangers judged; fewer: keep testing to 24 h, then the same rule
   add column if not exists known_source_follows boolean not null default false,   -- old follows count as "people you know" (off: DropDay-era follows are ignored)
   add column if not exists max_active_trials  integer not null default 2,      -- posts one creator can have in testing at once; extra posts wait as 'queued'
   add column if not exists build_in_silence    boolean not null default true;           -- people you know never see (or influence) your post while it is on trial
@@ -1109,11 +1110,16 @@ begin
 
   if n >= min_survive and p >= cfg.p_survive and active >= need_active then
     verdict := 'survived'; reason := 'confidence';
-  elsif n >= min_fail and p <= cfg.p_fail then
+  elsif n >= min_fail and p <= cfg.p_fail
+        and (n >= cfg.min_exhausted_viewers or now() >= post.checkpoint_at) then   -- never ENDED early on fewer strangers (surviving early is fine)
     verdict := 'failed'; reason := 'confidence';
-  elsif pool_total >= 1 and pool_unexposed = 0 and n >= 1 then
-    -- POOL EXHAUSTED: every eligible (non-known) viewer has seen it and nobody is left to assign, so waiting 24 h cannot
-    -- add information. Decide on the posterior mean: survive above the bar, ended well below it, otherwise incomplete.
+  elsif pool_total >= 1 and pool_unexposed = 0 and n >= 1
+        and (n >= cfg.min_exhausted_viewers or now() >= post.checkpoint_at) then
+    -- POOL EXHAUSTED: every eligible (non-known) viewer has seen it and nobody is left to assign. Decided early only once
+    -- at least min_exhausted_viewers strangers judged it (a tiny early-days pool must not settle a post after an hour on
+    -- two or three swipes): with fewer, it keeps testing so people who open the app later still get it, and at 24 h it is
+    -- decided here on the same rule instead of a blanket incomplete.
+    -- Decide on the posterior mean: survive above the bar, ended well below it, otherwise incomplete.
     reason := 'pool_exhausted';
     if active < need_active then
       verdict := 'failed';                           -- everyone available saw it and too few responded: Tryal ended

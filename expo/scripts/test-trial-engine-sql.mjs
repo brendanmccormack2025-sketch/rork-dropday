@@ -128,7 +128,7 @@ if (!BIN) {
         Q(`delete from public.trial_engine_log; delete from public.trial_post_state; delete from public.trial_assignments; delete from public.notifications;
            delete from public.post_view_stats; delete from public.post_raw_views; delete from public.post_qualified_views; delete from public.likes;
            delete from public.viewer_creator_affinity; delete from public.trial_feed_opens; delete from public.follows; delete from public.hide_from_list; delete from public.contact_hashes; delete from public.user_phone_hash; delete from public.posts; delete from public.user_blocks;
-           update public.trial_engine_config set min_active=0, min_active_fraction=0, engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000`);
+           update public.trial_engine_config set min_active=0, min_active_fraction=0, engine_mode='live', small_pool_everyone=0, fraud_weights_min_pool=0, build_in_silence=true, known_source_follows=false, max_active_trials=1000, min_exhausted_viewers=1`);
       };
       const score = (post) => Object.fromEntries(q(`select viewer_id::text || '=' || round(score::numeric,3) from public.trial_post_scores('${post}') order by 1`).split("\n").filter(Boolean).map((l) => l.split("=")));
 
@@ -672,7 +672,8 @@ if (!BIN) {
       Q(`delete from public.trial_feed_opens where user_id = '${GHOST}'`);
 
       // ── Run-through with the LIVE settings (the defaults in trial_engine_config, as on Supabase) ──
-      const live = () => Q(`update public.trial_engine_config set min_active=1, min_active_fraction=0.05, small_pool_everyone=50, fraud_weights_min_pool=50, max_active_trials=2`);
+      const live = () => Q(`update public.trial_engine_config set min_active=1, min_active_fraction=0.05, small_pool_everyone=50, fraud_weights_min_pool=50, max_active_trials=2, min_exhausted_viewers=5`);
+      const at24h = () => { Q(`update public.posts set checkpoint_at = now() - interval '1 minute' where id='${P1}'`); engine(); return [status(P1), reasonOf(P1)]; };
       const full = { watch: 12000, dur: 12000, done: true };
       const scenario = (users, plan) => {
         freshWorld(users);
@@ -702,9 +703,31 @@ if (!BIN) {
       eq("LIVE 5 users: all 4 watch, 1 likes -> survives", scenario(5, () => {
         for (let v = 2; v <= 5; v++) view(P1, U(v), { ...full, like: v === 2 });
       })[0], "survived");
-      eq("LIVE 5 users: all 4 watch, nobody responds -> ended", scenario(5, () => {
+      eq("LIVE 5 users: all 4 watch, nobody responds -> NOT settled early (4 strangers is under the 5 minimum): keeps testing", scenario(5, () => {
         for (let v = 2; v <= 5; v++) view(P1, U(v), full);
-      })[0], "archived");
+      })[0], "trial");
+      eq("...and at 24 h it is decided on the same rule: ended", at24h(), ["archived", "pool_exhausted"]);
+      // early days (the 'dock' case): 3 strangers on the app see a post within the hour
+      eq("LIVE 4 users: all 3 strangers saw it, lukewarm -> keeps testing, not settled after an hour", scenario(4, () => {
+        view(P1, U(2), { ...full, like: true }); view(P1, U(3), { watch: 1000, dur: 12000 }); view(P1, U(4), { watch: 1000, dur: 12000 });
+      })[0], "trial");
+      eq("...a newcomer who opens the app later still gets it", (() => {
+        mkUsers(30, 30);
+        Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${P0}','${U(30)}') on conflict do nothing`);
+        return viewerOf(U(30)).includes(P1);
+      })(), true);
+      eq("LIVE 4 users: all 3 strangers loved it -> at 24 h it survives (not a blanket incomplete)", (() => {
+        scenario(4, () => { for (let v = 2; v <= 4; v++) view(P1, U(v), { ...full, like: true }); });
+        return status(P1) === "survived" ? ["survived", "early"] : at24h();
+      })()[0], "survived");
+      eq("LIVE 6 users: all 5 strangers saw it -> the minimum is met, decided early as before", scenario(6, () => {
+        for (let v = 2; v <= 6; v++) view(P1, U(v), full);
+      }), ["archived", "pool_exhausted"]);
+      eq("LIVE 4 users: all 3 strangers swipe away in a second -> not ended early on 3 swipes", scenario(4, () => {
+        for (let v = 2; v <= 4; v++) view(P1, U(v), { watch: 1000, dur: 12000 });
+      })[0], "trial");
+      eq("...at 24 h, with nobody new, it is ended", at24h()[0], "archived");
+      eq("the early-decision minimum is a setting, 5 by default", q("select min_exhausted_viewers from public.trial_engine_config"), "5");
       eq("LIVE 5 users: 2 of 4 seen it, nobody responds -> still testing (others may still respond)", scenario(5, () => {
         for (let v = 2; v <= 3; v++) view(P1, U(v), full);
       })[0], "trial");
