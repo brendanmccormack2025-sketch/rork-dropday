@@ -42,7 +42,7 @@ export const MIN_WORDS_PER_SOUND_SECOND = 0.5;
 export function nonSilentMs(loud: LoudnessData | null): number {
   if (!loud || loud.windows.length === 0) return 0;
   const windowMs = loud.durationMs / loud.windows.length;
-  const threshold = detectSilences(loud.windows, windowMs, { durationMs: loud.durationMs }).thresholdDb;
+  const threshold = detectSilences(loud.windows, windowMs, { durationMs: loud.durationMs, speechGapDb: Infinity }).thresholdDb;   // sounds (laughs, ums): the sensitive floor-based level, not the pause level
   let n = 0;
   for (const v of loud.windows) if (Number.isFinite(v) && v > threshold) n++;
   return n * windowMs;

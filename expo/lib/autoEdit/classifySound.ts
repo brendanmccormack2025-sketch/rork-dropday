@@ -126,7 +126,7 @@ export type SoundContext = {
 
 /** The silence detector's threshold for these windows: below it a frame is silence. */
 export function silenceThresholdDb(windows: number[], windowMs: number, durationMs: number): number {
-  return detectSilences(windows, windowMs, { durationMs }).thresholdDb;
+  return detectSilences(windows, windowMs, { durationMs, speechGapDb: Infinity }).thresholdDb;   // sounds: floor-based, so quiet laughs are still found
 }
 
 function thresholdOf(ctx: SoundContext): number {

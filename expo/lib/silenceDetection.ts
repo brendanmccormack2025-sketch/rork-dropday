@@ -15,6 +15,16 @@
 export const NOISE_FLOOR_PERCENTILE = 0.1;
 /** How far above the noise floor (dB) a window must be to count as sound. */
 export const THRESHOLD_MARGIN_DB = 8;
+/**
+ * Pauses are also judged against the SPEECH level (the loud end of the clip, ACTIVITY_PERCENTILE): anything at least
+ * this many dB below the voice is a pause, even when it is not dead quiet (breathing, a moving phone, room sound). Without
+ * it, only stretches within THRESHOLD_MARGIN_DB of the very quietest moment counted, and most real pauses stayed in.
+ */
+export const SPEECH_GAP_DB = 27;
+/** A short sound inside a pause that is at least this far below the voice is a blip (a click, a breath), not a word. */
+export const BLIP_BELOW_SPEECH_DB = 12;
+/** ...and no longer than this: two cuts with only such a blip between them become one cut. */
+export const BLIP_MAX_MS = 600;
 /** Threshold never goes above this (dBFS): loud backgrounds are never "silence". */
 export const ABSOLUTE_CEILING_DB = -35;
 /** If even the loud end of the clip is quieter than this (dBFS), do nothing. */
@@ -68,11 +78,11 @@ export const DEFAULT_SENSITIVITY: Sensitivity = "tight";
  */
 export const SENSITIVITY_PRESETS: Record<
   Sensitivity,
-  { minSilenceMs: number; thresholdMarginDb: number }
+  { minSilenceMs: number; thresholdMarginDb: number; speechGapDb: number }
 > = {
-  gentle: { minSilenceMs: 800, thresholdMarginDb: 6 },
-  normal: { minSilenceMs: MIN_SILENCE_MS, thresholdMarginDb: THRESHOLD_MARGIN_DB },
-  tight: { minSilenceMs: 300, thresholdMarginDb: 10 },
+  gentle: { minSilenceMs: 800, thresholdMarginDb: 6, speechGapDb: 30 },
+  normal: { minSilenceMs: MIN_SILENCE_MS, thresholdMarginDb: THRESHOLD_MARGIN_DB, speechGapDb: SPEECH_GAP_DB },
+  tight: { minSilenceMs: 300, thresholdMarginDb: 10, speechGapDb: 24 },
 };
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -99,6 +109,8 @@ export type SilenceDetectionOptions = {
   durationMs?: number;
   noiseFloorPercentile?: number;
   thresholdMarginDb?: number;
+  /** A pause is anything this far below the speech level (see SPEECH_GAP_DB); Infinity turns it off. */
+  speechGapDb?: number;
   absoluteCeilingDb?: number;
   minActivityDb?: number;
   activityPercentile?: number;
@@ -212,7 +224,9 @@ export function detectSilences(
   const maxCuts = maxCutsOption ?? maxCutsFor(options.durationMs ?? windows.length * windowMs);
   const sorted = [...values].sort((a, b) => a - b);
   const noiseFloorDb = percentile(sorted, noiseFloorPercentile);
-  const thresholdDb = Math.min(absoluteCeilingDb, noiseFloorDb + thresholdMarginDb);
+  const speechDb = percentile(sorted, activityPercentile);
+  const speechGapDb = options.speechGapDb ?? SPEECH_GAP_DB;
+  const thresholdDb = Math.min(absoluteCeilingDb, Math.max(noiseFloorDb + thresholdMarginDb, speechDb - speechGapDb));
 
   if (durationMs > maxVideoMs) {
     return empty(durationMs, noiseFloorDb, thresholdDb, "too_long");
@@ -317,12 +331,40 @@ export function detectSilences(
   // 5b. Never keep a piece shorter than minKeepMs: drop the cut that created it
   //     (the shorter of its two neighbours), which merges it into the next piece.
   //     Head and tail trims make no seam, so they are never dropped by this rule.
+  //     A short piece that is only a blip (a click or a breath, far quieter than the voice) between two cuts is no
+  //     reason to keep a pause: the two cuts become one instead.
+  const peakDb = (fromMs: number, toMs: number) => {
+    let peak = -Infinity;
+    for (let w = Math.floor(fromMs / windowMs); w < Math.min(sm.length, Math.ceil(toMs / windowMs)); w++) {
+      if (Number.isFinite(sm[w]!)) peak = Math.max(peak, sm[w]!);
+    }
+    return peak;
+  };
   for (;;) {
     let dropIndex = -1;
+    let mergeIndex = -1;
     let cursorMs = 0;
     for (let i = 0; i <= chosen.length; i++) {
       const pieceEnd = i < chosen.length ? chosen[i]!.cut.startMs : durationMs;
+      if (i > 0 && i < chosen.length && pieceEnd - cursorMs < BLIP_MAX_MS && peakDb(cursorMs, pieceEnd) < speechDb - BLIP_BELOW_SPEECH_DB) {
+        mergeIndex = i;
+        break;
+      }
       if (pieceEnd - cursorMs < minKeepMs && pieceEnd > cursorMs) {
+        // A sliver left at the very end or start (a tap on the stop button) is trimmed with the pause next to it,
+        // never a reason to keep the whole pause.
+        if (i === chosen.length && i > 0 && !chosen[i - 1]!.edge) {
+          const last = chosen[i - 1]!;
+          chosen = [...chosen.slice(0, i - 1), { ...last, edge: "end", cut: range(last.cut.startMs, durationMs) }];
+          mergeIndex = -2;
+          break;
+        }
+        if (i === 0 && chosen.length > 0 && !chosen[0]!.edge) {
+          const first = chosen[0]!;
+          chosen = [{ ...first, edge: "start", cut: range(0, first.cut.endMs) }, ...chosen.slice(1)];
+          mergeIndex = -2;
+          break;
+        }
         const neighbours = [i - 1, i].filter((n) => n >= 0 && n < chosen.length && !chosen[n]!.edge);
         if (neighbours.length > 0) {
           dropIndex = neighbours.reduce((best, n) =>
@@ -332,6 +374,15 @@ export function detectSilences(
         }
       }
       if (i < chosen.length) cursorMs = chosen[i]!.cut.endMs;
+    }
+    if (mergeIndex === -2) continue;   // a sliver at an end was trimmed: look again
+    if (mergeIndex > 0) {
+      const a = chosen[mergeIndex - 1]!;
+      const b = chosen[mergeIndex]!;
+      const edge = a.edge === "start" ? "start" : b.edge === "end" ? "end" : a.edge ?? b.edge;
+      const cut = range(a.cut.startMs, b.cut.endMs);
+      chosen = [...chosen.slice(0, mergeIndex - 1), { ...a, edge, cut, silence: range(a.silence.startMs, b.silence.endMs) }, ...chosen.slice(mergeIndex + 1)];
+      continue;
     }
     if (dropIndex < 0) break;
     chosen = chosen.filter((_, i) => i !== dropIndex);
