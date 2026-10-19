@@ -3726,8 +3726,8 @@ export default function EditScreen() {
         const sounds = analyzeUnexplained(loud.windows, 20, durationMs, words, undefined, captions.removedWords);
         // Pause cuts were made from loudness alone: now that the words are known, none may clip one.
         const guarded = guardSilenceCutsAgainstWords(model.state, words);
-        if (guarded.shortened + guarded.split + guarded.dropped > 0) {
-          console.log("[wordGuard]", JSON.stringify({ shortened: guarded.shortened, split: guarded.split, dropped: guarded.dropped }));
+        if (guarded.shortened + guarded.split + guarded.dropped > 0 || guarded.distrusted) {
+          console.log("[wordGuard]", JSON.stringify({ shortened: guarded.shortened, split: guarded.split, dropped: guarded.dropped, distrusted: !!guarded.distrusted }));
         }
         const planned = editChoice.cleanup ? [...planHookTrim(words, durationMs), ...planFillerCuts(words)] : [];
         const afterMethod1 = mergePlan(guarded.state, planned, ["hookTrim", "fillerCut"]);

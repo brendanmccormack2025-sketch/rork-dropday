@@ -20,9 +20,27 @@ export const WORD_PAD_BEFORE_MS = 60;
 export const WORD_GUARD_MIN_CUT_MS = 150;
 
 type Range = { startMs: number; endMs: number };
-export type GuardWord = { startMs: number; endMs: number };
+export type GuardWord = { startMs: number; endMs: number; text?: string };
 
-export type WordGuardResult = { state: EditState; shortened: number; split: number; dropped: number };
+/** `distrusted`: the word timings would have removed most of the pause cuts, so they were not used (see below). */
+export type WordGuardResult = { state: EditState; shortened: number; split: number; dropped: number; distrusted?: boolean };
+
+/** No single spoken word lasts longer than this. */
+export const WORD_MAX_MS = 1400;
+/**
+ * If guarding would take away more than this share of the automatic pause-cut time, the word timings are not trusted
+ * and the pause cuts are kept as they were. Real word edges only trim a little off each cut; losing most of them means
+ * the timings are stretched (some speech models, Apple's newer one included, can report a word as lasting through the
+ * pause after it, which made every pause look like speech and removed every cut).
+ */
+export const WORD_GUARD_MAX_LOSS = 0.4;
+
+/** A word's spoken span: the reported times, but never longer than a word of that many letters can take to say. */
+export function spokenSpan(w: GuardWord): GuardWord {
+  const letters = (w.text ?? "").replace(/[^\p{L}\p{N}]/gu, "").length;
+  const cap = letters > 0 ? Math.min(WORD_MAX_MS, Math.max(350, 200 + 85 * letters)) : WORD_MAX_MS;
+  return { startMs: w.startMs, endMs: Math.min(w.endMs, w.startMs + cap) };
+}
 
 /** What is left of one cut range once the padded words are taken out of it. */
 export function cutPiecesAroundWords(
@@ -51,7 +69,8 @@ export function cutPiecesAroundWords(
 }
 
 /** The edit state with every automatic silence cut kept clear of the words. Unchanged state when nothing touched a word. */
-export function guardSilenceCutsAgainstWords(state: EditState, words: GuardWord[]): WordGuardResult {
+export function guardSilenceCutsAgainstWords(state: EditState, rawWords: GuardWord[]): WordGuardResult {
+  const words = rawWords.map(spokenSpan);
   let shortened = 0;
   let split = 0;
   let dropped = 0;
@@ -79,6 +98,12 @@ export function guardSilenceCutsAgainstWords(state: EditState, words: GuardWord[
     }
   }
   if (shortened + split + dropped === 0) return { state, shortened, split, dropped };
+  const autoCutMs = (ds: Decision[]) =>
+    ds.filter((d) => d.type === "silenceCut" && d.origin !== "user").reduce((sum, d) => sum + Math.max(0, d.sourceEndMs - d.sourceStartMs), 0);
+  const before = autoCutMs(state.decisions);
+  if (before > 0 && autoCutMs(out) < before * (1 - WORD_GUARD_MAX_LOSS)) {
+    return { state, shortened: 0, split: 0, dropped: 0, distrusted: true };
+  }
   // ids must stay unique (two pieces can never share a range, but a piece could equal another decision's range)
   const seen = new Set<string>();
   const unique = out.filter((d) => (seen.has(d.id) ? false : (seen.add(d.id), true)));
