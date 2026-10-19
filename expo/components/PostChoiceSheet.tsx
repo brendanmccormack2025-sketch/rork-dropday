@@ -96,12 +96,12 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
 
       const result = await launchLibraryWithRetry({
         mediaTypes: photoCompatible ? ["images"] : ["images", "videos"],
-        ...(photoCompatible
-          ? {
-              preferredAssetRepresentationMode:
-                ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-            }
-          : {}),
+        // Videos: hand over the file exactly as it is in Photos ("Current"). The default ("Automatic") lets iOS
+        // convert an iPhone's HEVC video to H.264 first, which took a long time for longer clips; the editor reads
+        // HEVC fine, like the camera's own recordings. A photo that failed to read is retried as "Compatible".
+        preferredAssetRepresentationMode: photoCompatible
+          ? ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible
+          : ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
         allowsMultipleSelection: false,
         quality: 1,
         videoMaxDuration: MAX_VIDEO_SECONDS,
