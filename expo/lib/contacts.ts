@@ -29,7 +29,7 @@ function loadModule(): ContactsModule | null {
   if (!isContactsAvailable()) return null;
   try {
     // required lazily: importing the JS module without its native module throws
-    return require("expo-contacts") as ContactsModule;
+    return require("expo-contacts/legacy") as ContactsModule;
   } catch {
     return null;
   }
