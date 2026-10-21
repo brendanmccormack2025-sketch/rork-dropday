@@ -407,6 +407,8 @@ export default function EditScreen() {
   const [captionsSheetH, setCaptionsSheetH] = useState(0);
   const [styleSheetH, setStyleSheetH] = useState(0);
   const [keyboardH, setKeyboardH] = useState(0);
+  // A caption edited right on the video (not from the Captions panel): the video lifts above the keyboard too.
+  const [captionInlineEdit, setCaptionInlineEdit] = useState(false);
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
@@ -4622,13 +4624,14 @@ export default function EditScreen() {
   });
   // With the Captions panel open the video slides up so the caption stays visible above the panel (or the keyboard).
   const screenH = Dimensions.get("window").height;
-  const previewLift = (captionsPanelOpen || styleSheetOpen) && isVideo && captions.captionsOn
+  const inlineCaptionEdit = captionInlineEdit && keyboardH > 0 && !captionsPanelOpen && !styleSheetOpen;
+  const previewLift = (captionsPanelOpen || styleSheetOpen || inlineCaptionEdit) && isVideo && captions.captionsOn
     ? captionLift({
         frameTop: (previewAreaSize.h - frameDims.h) / 2,
         frameHeight: frameDims.h,
         captionYFrac: captionStyle?.yCenter ?? defaultCaptionStyle().yCenter,
         captionHalfHeight: 44,
-        visibleBottom: screenH - keyboardH - Math.max(styleSheetOpen ? styleSheetH : captionsSheetH, keyboardH > 0 ? CAPTIONS_EDIT_BAR_HEIGHT : 0),
+        visibleBottom: inlineCaptionEdit ? screenH - keyboardH - 12 : screenH - keyboardH - Math.max(styleSheetOpen ? styleSheetH : captionsSheetH, keyboardH > 0 ? CAPTIONS_EDIT_BAR_HEIGHT : 0),
       })
     : 0;
   const selectionY = selectedOverlay ? selectedOverlay.y : (captionStyle?.yCenter ?? defaultCaptionStyle().yCenter);
@@ -4881,8 +4884,14 @@ export default function EditScreen() {
                 selected={captionSelected}
                 onSelectedChange={setCaptionSelected}
                 editRequest={captionEditRequest}
-                onEditStart={() => setIsPlaying(false)}
-                onEdit={captions.editLine}
+                onEditStart={() => {
+                  setIsPlaying(false);
+                  setCaptionInlineEdit(true);
+                }}
+                onEdit={(i, t) => {
+                  setCaptionInlineEdit(false);
+                  captions.editLine(i, t);
+                }}
                 onStyleCommit={handleCaptionStyleCommit}
                 onGestureState={handleGestureState}
               />
