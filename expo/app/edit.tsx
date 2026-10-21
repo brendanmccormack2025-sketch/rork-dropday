@@ -1,3 +1,4 @@
+import { rememberedLatency, saveLatency } from "@/lib/autoEdit/latencyMemory";
 import React, {
   useCallback,
   useEffect,
@@ -1891,7 +1892,7 @@ export default function EditScreen() {
   }, [geUri]);
   const geStandbyRef = useRef<StandbyState | null>(null);
   const geHeldSince = useRef<number | null>(null);
-  const geLatency = useRef<number>(GAPLESS_DEFAULTS.latencyMs);
+  const geLatency = useRef<number>(rememberedLatency());
   useEffect(() => {
     geOnRef.current = gaplessOn;
     if (!gaplessOn) {
@@ -1962,7 +1963,7 @@ export default function EditScreen() {
           const newSlot: 0 | 1 = aSlot === 0 ? 1 : 0;
           const start = segs[action.toIndex]!.srcStartMs;
           // late = the active player had to wait for it; early = it was already past the start
-          geLatency.current = learnLatency(geLatency.current, b - start - (geHeldSince.current === null ? 0 : now - geHeldSince.current));
+          geLatency.current = learnLatency(geLatency.current, b - start - (geHeldSince.current === null ? 0 : now - geHeldSince.current)); saveLatency(geLatency.current);
           // the picture first (opacity), then the sound: the new player is already playing, muted
           if (newSlot === 1) {
             slotB.value = 1;
