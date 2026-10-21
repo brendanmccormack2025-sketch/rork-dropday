@@ -1089,7 +1089,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
         // Second layer behind get_feed: roots only, active, allowed statuses.
         if (post.parent_post_id) continue;
         if (post.moderation_status !== "active") continue;
-        if (!FEED_STATUSES.includes(post.status ?? "")) continue;
+        if (!FEED_STATUSES.includes(post.status ?? "") && !(post.status === "expired" && post.survived_at)) continue;
         byId.set(post.id, post);
       }
       const posts = [...rows]
