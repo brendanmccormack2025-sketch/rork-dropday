@@ -61,6 +61,8 @@ import { showAlert } from "@/lib/showAlert";
 import { supabase } from "@/lib/supabase";
 import { OWNER_USER_ID, isDebugOwner, isInternalTester } from "@/constants/debug";
 import CaptionsExplainer from "@/components/CaptionsExplainer";
+import CaptionEditBar from "@/components/CaptionEditBar";
+import { changeCaptionDraft, discardCaptionDraft, finishCaptionDraft, startCaptionDraft, type CaptionDraft } from "@/lib/captionDraft";
 import CaptionPreview from "@/components/CaptionPreview";
 import FeedSafeZones from "@/components/FeedSafeZones";
 import { defaultCaptionStyle } from "@/lib/transcription/captionStyle";
@@ -407,8 +409,9 @@ export default function EditScreen() {
   const [captionsSheetH, setCaptionsSheetH] = useState(0);
   const [styleSheetH, setStyleSheetH] = useState(0);
   const [keyboardH, setKeyboardH] = useState(0);
-  // A caption edited right on the video (not from the Captions panel): the video lifts above the keyboard too.
-  const [captionInlineEdit, setCaptionInlineEdit] = useState(false);
+  // A caption being edited from the video: which line and the draft. The text field is the bar above the keyboard
+  // (CaptionEditBar), not a field on the video, so nothing the keyboard covers is needed to see what is typed.
+  const [captionDraft, setCaptionDraft] = useState<CaptionDraft | null>(null);
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
@@ -3260,6 +3263,25 @@ export default function EditScreen() {
 
   // The caption on screen (the one the toolbar's actions are about).
   const activeCaptionIndex = captions.lines.findIndex((l) => displayPosition >= l.startMs && displayPosition < l.endMs);
+  // The bar above the keyboard: Done (the button, the keyboard's Done key, a tap on the dimmed video) saves the line the same
+  // way the Captions panel does and closes the keyboard; Back discards the draft.
+  const captionDraftRef = useRef(captionDraft);
+  captionDraftRef.current = captionDraft;
+  const handleCaptionEditDone = useCallback(() => {
+    const { save } = finishCaptionDraft(captionDraftRef.current);
+    if (!save) return;
+    captionDraftRef.current = null;
+    setCaptionDraft(null);
+    Keyboard.dismiss();
+    captions.editLine(save.index, save.text);
+  }, [captions]);
+  const handleCaptionEditCancel = useCallback(() => {
+    discardCaptionDraft();
+    captionDraftRef.current = null;
+    setCaptionDraft(null);
+    Keyboard.dismiss();
+  }, []);
+
   const handleCaptionTool = useCallback(
     (id: CaptionToolId) => {
       if (id === "edit") setCaptionEditRequest((n) => n + 1);
@@ -4518,6 +4540,7 @@ export default function EditScreen() {
     const action = backAction({
       step,
       isVideo,
+      captionEditing: captionDraft !== null,
       textEditorVisible,
       styleSheetOpen,
       captionsPanelOpen,
@@ -4528,6 +4551,9 @@ export default function EditScreen() {
     });
     if (action.type === "close") {
       switch (action.what) {
+        case "captionEdit":
+          handleCaptionEditCancel();   // Back discards the draft
+          break;
         case "textEditor":
           handleTextEditorCancel();
           break;
@@ -4624,14 +4650,13 @@ export default function EditScreen() {
   });
   // With the Captions panel open the video slides up so the caption stays visible above the panel (or the keyboard).
   const screenH = Dimensions.get("window").height;
-  const inlineCaptionEdit = captionInlineEdit && keyboardH > 0 && !captionsPanelOpen && !styleSheetOpen;
-  const previewLift = (captionsPanelOpen || styleSheetOpen || inlineCaptionEdit) && isVideo && captions.captionsOn
+  const previewLift = (captionsPanelOpen || styleSheetOpen) && isVideo && captions.captionsOn
     ? captionLift({
         frameTop: (previewAreaSize.h - frameDims.h) / 2,
         frameHeight: frameDims.h,
         captionYFrac: captionStyle?.yCenter ?? defaultCaptionStyle().yCenter,
         captionHalfHeight: 44,
-        visibleBottom: inlineCaptionEdit ? screenH - keyboardH - 12 : screenH - keyboardH - Math.max(styleSheetOpen ? styleSheetH : captionsSheetH, keyboardH > 0 ? CAPTIONS_EDIT_BAR_HEIGHT : 0),
+        visibleBottom: screenH - keyboardH - Math.max(styleSheetOpen ? styleSheetH : captionsSheetH, keyboardH > 0 ? CAPTIONS_EDIT_BAR_HEIGHT : 0),
       })
     : 0;
   const selectionY = selectedOverlay ? selectedOverlay.y : (captionStyle?.yCenter ?? defaultCaptionStyle().yCenter);
@@ -4884,13 +4909,10 @@ export default function EditScreen() {
                 selected={captionSelected}
                 onSelectedChange={setCaptionSelected}
                 editRequest={captionEditRequest}
-                onEditStart={() => {
+                editing={captionDraft}
+                onEditRequest={(i, t) => {
                   setIsPlaying(false);
-                  setCaptionInlineEdit(true);
-                }}
-                onEdit={(i, t) => {
-                  setCaptionInlineEdit(false);
-                  captions.editLine(i, t);
+                  setCaptionDraft(startCaptionDraft(i, t));
                 }}
                 onStyleCommit={handleCaptionStyleCommit}
                 onGestureState={handleGestureState}
@@ -5367,6 +5389,16 @@ export default function EditScreen() {
           </View>
         )}
       </View>
+
+      {step === "edit" && captionDraft ? (
+        <CaptionEditBar
+          text={captionDraft.text}
+          onChangeText={(text) => setCaptionDraft((d) => changeCaptionDraft(d, text))}
+          onDone={handleCaptionEditDone}
+          keyboardHeight={keyboardH}
+          bottomInset={insets.bottom}
+        />
+      ) : null}
 
       <CaptionStyleSheet
         visible={styleSheetOpen}

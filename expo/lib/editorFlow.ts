@@ -29,13 +29,15 @@ export function backStep(step: EditorStep, args: { isVideo: boolean }): EditorSt
 
 /** What Back does right now: the topmost thing open closes first, then the step goes back, then the editor is left. */
 export type BackAction =
-  | { type: "close"; what: "textEditor" | "styleSheet" | "captionsPanel" | "markerSheet" | "cutsSheet" | "explainer" | "selection" }
+  | { type: "close"; what: "captionEdit" | "textEditor" | "styleSheet" | "captionsPanel" | "markerSheet" | "cutsSheet" | "explainer" | "selection" }
   | { type: "step"; to: EditorStep }
   | { type: "exit" };
 
 export type BackState = {
   step: EditorStep;
   isVideo: boolean;
+  /** A caption is being edited from the video (the bar above the keyboard is up). Optional: absent = no. */
+  captionEditing?: boolean;
   textEditorVisible: boolean;
   styleSheetOpen: boolean;
   captionsPanelOpen: boolean;
@@ -53,6 +55,7 @@ export type BackState = {
  * selection is dropped (full-screen editor only), then the step goes back (Post -> editor -> Cuts), then the editor is left.
  */
 export function backAction(s: BackState): BackAction {
+  if (s.captionEditing) return { type: "close", what: "captionEdit" };
   if (s.textEditorVisible) return { type: "close", what: "textEditor" };
   if (s.styleSheetOpen) return { type: "close", what: "styleSheet" };
   if (s.captionsPanelOpen) return { type: "close", what: "captionsPanel" };

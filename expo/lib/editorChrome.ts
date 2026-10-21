@@ -149,3 +149,16 @@ export function captionLift(args: { frameTop: number; frameHeight: number; capti
 /** The Captions panel is a half-height bottom sheet at most; while a line is edited it is a compact bar above the keyboard. */
 export const CAPTIONS_SHEET_MAX_FRACTION = 0.45;
 export const CAPTIONS_EDIT_BAR_HEIGHT = 72;
+
+// ── Editing a caption from the video: a bar docked above the keyboard ──
+/** The bar's height (the field and Done). */
+export const CAPTION_BAR = { height: 64, dim: 0.45 };
+
+/**
+ * Distance of the caption editing bar from the bottom of the screen: the keyboard's height (it already includes the home
+ * indicator), or the safe-area inset while no keyboard is up (a hardware keyboard, or the instant before the soft one shows).
+ */
+export function captionBarBottom(keyboardHeight: number, bottomInset: number): number {
+  const kb = Number.isFinite(keyboardHeight) && keyboardHeight > 0 ? keyboardHeight : 0;
+  return kb > 0 ? kb : Math.max(0, Number.isFinite(bottomInset) ? bottomInset : 0);
+}

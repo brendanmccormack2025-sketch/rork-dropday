@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
+import { Platform, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import type { CaptionStyle } from "@/lib/editModel";
@@ -48,8 +48,13 @@ type Props = {
   onSelectedChange: (selected: boolean) => void;
   /** Bump to start editing the text of the caption on screen (the toolbar's Edit). */
   editRequest?: number;
-  onEditStart: () => void;
-  onEdit: (lineIndex: number, text: string) => void;
+  /**
+   * The caption is being edited in the bar above the keyboard (owned by the editor, see CaptionEditBar): which line and
+   * the draft so far. The caption on the video shows the draft live; there is no text field on the video itself.
+   */
+  editing?: { index: number; text: string } | null;
+  /** The person asked to edit this line (double tap, or the toolbar's Edit): the editor opens its bar. */
+  onEditRequest: (lineIndex: number, text: string) => void;
   /** A drag or pinch ended: the new clip-wide box (one undo step). */
   onStyleCommit?: (style: CaptionStyle) => void;
   /** A drag or pinch is in progress (and whether the caption is centred): drives the safe-zone guides. */
@@ -96,8 +101,8 @@ export default function CaptionPreview({
   selected,
   onSelectedChange,
   editRequest,
-  onEditStart,
-  onEdit,
+  editing: editingDraft,
+  onEditRequest,
   onStyleCommit,
   onGestureState,
 }: Props) {
@@ -106,22 +111,19 @@ export default function CaptionPreview({
   const [snapped, setSnapped] = useState(false);
   // While the fingers are down a pinch only scales the drawn box (cheap and smooth); the size is committed at the end.
   const [pinchLive, setPinchLive] = useState(1);
-  const [editing, setEditing] = useState<number | null>(null);
-  const [draft, setDraft] = useState("");
   const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
-  const inputRef = useRef<TextInput>(null);
   const shown = live ?? stored;
   const spec = useMemo(() => withTextBox(styledSpec(shown, RENDER_CAPS), supportsTextBox, supportsLineBackgrounds), [shown]);
   const px = frameW / 1080;
 
   const activeIndex = lines.findIndex((l) => positionMs >= l.startMs && positionMs < l.endMs);
-  const index = editing ?? activeIndex;
+  const editing = editingDraft ?? null;
+  const index = editing ? editing.index : activeIndex;
   const line = index >= 0 ? lines[index] : undefined;
-  const shownText = line ? (spec.uppercase ? line.text.toUpperCase() : line.text) : "";
+  // While the line is edited the video shows the draft as it is typed.
+  const sourceText = editing && line ? editing.text : line?.text ?? "";
+  const shownText = line ? (spec.uppercase ? sourceText.toUpperCase() : sourceText) : "";
 
-  useEffect(() => {
-    if (editing !== null) inputRef.current?.focus();
-  }, [editing]);
   useEffect(() => {
     if (isPlaying) onSelectedChange(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -139,15 +141,13 @@ export default function CaptionPreview({
     setMeasured(null);
   }, [shownText, shown.scale, frameW]);
 
-  const latest = useRef({ stored, frameW, frameH, onStyleCommit, onEditStart, index, line, selected, onSelectedChange, onGestureState });
-  latest.current = { stored, frameW, frameH, onStyleCommit, onEditStart, index, line, selected, onSelectedChange, onGestureState };
+  const latest = useRef({ stored, frameW, frameH, onStyleCommit, onEditRequest, index, line, selected, onSelectedChange, onGestureState });
+  latest.current = { stored, frameW, frameH, onStyleCommit, onEditRequest, index, line, selected, onSelectedChange, onGestureState };
 
   const startEditing = useCallback(() => {
     const cur = latest.current;
     if (!cur.line) return;
-    cur.onEditStart();
-    setDraft(cur.line.text);
-    setEditing(cur.index);
+    cur.onEditRequest(cur.index, cur.line.text);
   }, []);
   const startEditingRef = useRef(startEditing);
   startEditingRef.current = startEditing;
@@ -289,17 +289,8 @@ export default function CaptionPreview({
       mode={supportsLineBackgrounds ? "lines" : "box"}
     />
   );
-  // The edit field keeps a plain box.
-  const boxStyle = {
-    backgroundColor: spec.backgroundColor,
-    paddingHorizontal: padX,
-    paddingVertical: padY,
-    maxWidth: maxBox,
-    borderRadius: radiusPx,
-  };
-
   // Placement comes from the measured box (an estimate for the very first frame).
-  const size = measured ?? estimateBoxSize(line.text, shown, frameW);
+  const size = measured ?? estimateBoxSize(sourceText, shown, frameW);
   const rect = captionBoxRect({ w: frameW, h: frameH }, { ...shown, xCenter: spec.xCenter ?? shown.xCenter }, size);
   const base = touchRect(rect);
   // Two fingers must land on the caption to pinch it: the target reaches TOUCH_PAD beyond the box on every side.
@@ -316,33 +307,9 @@ export default function CaptionPreview({
         {caption(true, onMeasure)}
       </View>
 
-      {drawn && editing === null && (
+      {drawn && (
         <View pointerEvents="none" style={[styles.abs, styles.fill, { left: rect.left, top: rect.top, width: rect.width, height: rect.height, transform: [{ scale: pinchLive }] }]}>
           {caption(false)}
-        </View>
-      )}
-
-      {editing !== null && (
-        <View style={[styles.abs, { left: rect.left, top: rect.top, minWidth: rect.width, minHeight: rect.height }]}>
-          <View style={[boxStyle, styles.fill]}>
-            <TextInput
-              ref={inputRef}
-              value={draft}
-              onChangeText={setDraft}
-              onBlur={() => {
-                if (editing !== null) onEdit(editing, draft);
-                setEditing(null);
-              }}
-              onSubmitEditing={() => {
-                if (editing !== null) onEdit(editing, draft);
-                setEditing(null);
-              }}
-              autoCapitalize="sentences"
-              autoCorrect={false}
-              returnKeyType="done"
-              style={[textStyle, styles.input]}
-            />
-          </View>
         </View>
       )}
 
@@ -369,6 +336,5 @@ const styles = StyleSheet.create({
   abs: { position: "absolute" },
   fill: { flex: 1, alignItems: "center", justifyContent: "center" },
   measure: { position: "absolute", left: 0, top: 0, opacity: 0, alignSelf: "flex-start" },
-  input: { minWidth: 80, padding: 0 },
   outline: { borderWidth: 1.5, borderColor: "#FFFFFF", borderStyle: "dashed", borderRadius: 2 },
 });
