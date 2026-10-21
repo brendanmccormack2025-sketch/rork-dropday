@@ -41,7 +41,7 @@ function resolveWeight(style: TextProps["style"]): FontWeight | null {
   if (!style) return null;
   if (Array.isArray(style)) {
     for (let i = style.length - 1; i >= 0; i--) {
-      const w = resolveWeight(style[i]);
+      const w = resolveWeight(style[i] as TextProps["style"]);
       if (w !== null) return w;
     }
     return null;
