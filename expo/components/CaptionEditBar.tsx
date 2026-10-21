@@ -7,24 +7,20 @@ import { CAPTION_BAR, captionBarBottom } from "@/lib/editorChrome";
 
 /**
  * Editing a caption from the video, TikTok / Instagram style: the video dims, and a bar sits right above the keyboard with
- * the caption's text in a field (focused at once), Cancel on the left and Done on the right. The caption on the video shows the draft as it is typed.
- * Done, the keyboard's Done key and a tap on the dimmed video all save (the editor calls captions.editLine); Cancel and the
- * editor's Back discard (the caption keeps its original text). The bar follows the keyboard's height; it waits a moment for the keyboard so it never flashes at the bottom.
+ * the caption's text in a field (focused at once) and a Done button. The caption on the video shows the draft as it is typed.
+ * Done, the keyboard's Done key and a tap on the dimmed video all save (the editor calls captions.editLine); the editor's
+ * Back discards. The bar follows the keyboard's height; it waits a moment for the keyboard so it never flashes at the bottom.
  */
 export default function CaptionEditBar({
   text,
   onChangeText,
   onDone,
-  onCancel,
   keyboardHeight,
   bottomInset,
 }: {
   text: string;
   onChangeText: (text: string) => void;
-  /** Saves the draft and closes. */
   onDone: () => void;
-  /** Discards the draft and closes: the caption keeps its original text. */
-  onCancel: () => void;
   keyboardHeight: number;
   bottomInset: number;
 }) {
@@ -40,9 +36,6 @@ export default function CaptionEditBar({
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none" testID="caption-edit-bar">
       <Pressable style={styles.dim} onPress={onDone} accessibilityLabel="Done editing caption" accessibilityRole="button" />
       <View style={[styles.bar, { bottom: captionBarBottom(keyboardHeight, bottomInset), opacity: ready ? 1 : 0 }]}>
-        <Pressable onPress={onCancel} style={styles.cancel} hitSlop={6} accessibilityRole="button" accessibilityLabel="Cancel">
-          <UiText style={styles.cancelText}>Cancel</UiText>
-        </Pressable>
         <TextInput
           value={text}
           onChangeText={onChangeText}
@@ -83,8 +76,6 @@ const styles = StyleSheet.create({
     borderTopColor: theme.border,
   },
   input: { flex: 1, height: 44, borderRadius: 22, paddingHorizontal: 16, backgroundColor: theme.card, color: theme.text, fontSize: 17 },
-  cancel: { height: 44, paddingHorizontal: 4, alignItems: "center", justifyContent: "center" },
-  cancelText: { color: theme.textMuted, fontSize: 15, fontWeight: "700" },
   done: { height: 44, paddingHorizontal: 18, borderRadius: 22, backgroundColor: theme.accent, alignItems: "center", justifyContent: "center" },
   doneText: { color: "#fff", fontSize: 15, fontWeight: "800" },
 });

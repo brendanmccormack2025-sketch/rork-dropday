@@ -5395,7 +5395,6 @@ export default function EditScreen() {
           text={captionDraft.text}
           onChangeText={(text) => setCaptionDraft((d) => changeCaptionDraft(d, text))}
           onDone={handleCaptionEditDone}
-          onCancel={handleCaptionEditCancel}
           keyboardHeight={keyboardH}
           bottomInset={insets.bottom}
         />

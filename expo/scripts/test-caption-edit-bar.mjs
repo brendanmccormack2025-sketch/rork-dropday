@@ -33,7 +33,6 @@ ok("the video is dimmed, only slightly", CAPTION_BAR.dim > 0 && CAPTION_BAR.dim 
   eq("Done saves that line with the typed text and closes the draft", finishCaptionDraft(typed), { draft: null, save: { index: 3, text: "My eye is twitching" } });
   eq("pressing Done twice (the button, then the keyboard's Done key) saves once", [finishCaptionDraft(finishCaptionDraft(typed).draft).save], [null]);
   eq("Back discards: nothing is saved", discardCaptionDraft(), { draft: null, save: null });
-  eq("Cancel after typing: the draft closes, nothing is saved, so the line keeps its original text", [discardCaptionDraft().save, d.text], [null, "My eye is"]);
   eq("typing with no draft open does nothing", changeCaptionDraft(null, "x"), null);
   eq("an emptied line is saved as the person left it (the same path as today)", finishCaptionDraft(changeCaptionDraft(d, "")).save, { index: 3, text: "" });
 }
@@ -52,8 +51,6 @@ ok("the video is dimmed, only slightly", CAPTION_BAR.dim > 0 && CAPTION_BAR.dim 
   ok("the bar has a text field, focused at once, with a Done return key", /<TextInput[\s\S]{0,400}autoFocus/.test(bar) && /returnKeyType="done"/.test(bar));
   ok("the text field shows the caption's text (value = the draft) and reports every change", /value=\{text\}/.test(bar) && /onChangeText=\{onChangeText\}/.test(bar));
   ok("the keyboard's Done key, the Done button and a tap on the dimmed video all call onDone", /onSubmitEditing=\{onDone\}/.test(bar) && /<Pressable onPress=\{onDone\} style=\{styles\.done\}/.test(bar) && /<Pressable style=\{styles\.dim\} onPress=\{onDone\}/.test(bar));
-  ok("Cancel is a button on the LEFT of the field (before it in the row), Done on the right (after it); Cancel calls onCancel, Done calls onDone", bar.indexOf('accessibilityLabel="Cancel"') < bar.indexOf("<TextInput") && bar.indexOf("<TextInput") < bar.indexOf('accessibilityLabel="Done"') && /<Pressable onPress=\{onCancel\} style=\{styles\.cancel\}/.test(bar) && /<Pressable onPress=\{onDone\} style=\{styles\.done\}/.test(bar));
-  ok("tapping the dimmed video still SAVES (it is Done, not Cancel)", /<Pressable style=\{styles\.dim\} onPress=\{onDone\}/.test(bar) && !/styles\.dim\} onPress=\{onCancel\}/.test(bar));
   ok("it sits at the keyboard's height (captionBarBottom of keyboardHeight), full width", /bottom: captionBarBottom\(keyboardHeight, bottomInset\)/.test(bar) && /left: 0,\s*right: 0/.test(bar));
   ok("it does not flash at the bottom before the keyboard height is known", /keyboardHeight > 0 \|\| waited/.test(bar) && /opacity: ready \? 1 : 0/.test(bar));
   ok("it adds no dependency (no keyboard library)", !/react-native-keyboard-controller/.test(bar + read("../package.json")));
@@ -76,7 +73,6 @@ ok("the video is dimmed, only slightly", CAPTION_BAR.dim > 0 && CAPTION_BAR.dim 
   const done = edit.slice(edit.indexOf("const handleCaptionEditDone"), edit.indexOf("const handleCaptionEditCancel"));
   ok("Done saves through captions.editLine (the same path as before), closes the keyboard and removes the bar", /captions\.editLine\(save\.index, save\.text\)/.test(done) && /Keyboard\.dismiss\(\)/.test(done) && /setCaptionDraft\(null\)/.test(done));
   const cancel = edit.slice(edit.indexOf("const handleCaptionEditCancel"), edit.indexOf("const handleCaptionTool"));
-  ok("the editor wires Cancel to the same discard as Back", /onDone=\{handleCaptionEditDone\}\s*onCancel=\{handleCaptionEditCancel\}/.test(edit));
   ok("Back discards: no editLine, keyboard closed, bar removed", !/editLine/.test(cancel) && /Keyboard\.dismiss\(\)/.test(cancel) && /setCaptionDraft\(null\)/.test(cancel));
   ok("Back (the button and Android's) closes the bar first and discards", /captionEditing: captionDraft !== null/.test(edit) && /case "captionEdit":\s*handleCaptionEditCancel\(\)/.test(edit));
   ok("the lift of the video for inline editing is gone; the Captions panel and the style sheet keep theirs", !/captionInlineEdit|inlineCaptionEdit/.test(edit) && /\(captionsPanelOpen \|\| styleSheetOpen\) && isVideo/.test(edit));

@@ -111,7 +111,7 @@ export type StorageReport = Record<Area, { files: number; bytes: number }> & { t
 
 export function summarize(files: FileEntry[]): StorageReport {
   const areas: Area[] = ["drafts", "uploads", "thumbnails", "camera", "picker", "renders", "tmp", "otherCache", "otherDocs"];
-  const r = Object.fromEntries(areas.map((a) => [a, { files: 0, bytes: 0 }])) as unknown as StorageReport;
+  const r = Object.fromEntries(areas.map((a) => [a, { files: 0, bytes: 0 }])) as StorageReport;
   r.totalBytes = 0;
   for (const f of files) {
     const a = r[areaOf(f)];
