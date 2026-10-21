@@ -89,7 +89,8 @@ const column = { x: 320, y: 120, w: 56, h: 200 };
   ok("the editor never plays a file with burned-in captions (the preview render has none)", /new RenderAhead\(\{ includeCaptions: false \}\)/.test(edit));
   const sheet = read("../components/CaptionStyleSheet.tsx");
   ok("the caption style sheet does not dim the video and reports its height", /backdrop: \{[^}]*backgroundColor: "transparent"/.test(sheet) && /onHeight\?\.\(e\.nativeEvent\.layout\.height\)/.test(sheet));
-  ok("the video lifts clear of the style sheet so the caption stays visible while styling", /\(captionsPanelOpen \|\| styleSheetOpen\) && isVideo/.test(edit) && /styleSheetOpen \? styleSheetH : captionsSheetH/.test(edit));
+  ok("the video lifts clear of the style sheet so the caption stays visible while styling", /\(captionsPanelOpen \|\| styleSheetOpen(?: \|\| inlineCaptionEdit)?\) && isVideo/.test(edit) && /styleSheetOpen \? styleSheetH : captionsSheetH/.test(edit));
+  ok("a caption edited on the video lifts the video above the keyboard, and drops back when done", /inlineCaptionEdit = captionInlineEdit && keyboardH > 0/.test(edit) && /setCaptionInlineEdit\(true\)/.test(edit) && /setCaptionInlineEdit\(false\)/.test(edit) && /visibleBottom: inlineCaptionEdit \?/.test(edit));
 }
 
 // ── 4. Back from every state ──
