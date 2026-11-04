@@ -29,7 +29,7 @@ eq("contacts: only phone numbers are collected, normalised and de-duplicated; na
 eq("re-sync at most once a week", [shouldResync(null, 1e12), shouldResync(1e12, 1e12 + CONTACTS_RESYNC_MS - 1), shouldResync(1e12, 1e12 + CONTACTS_RESYNC_MS)], [true, false, true]);
 
 const contacts = read("../lib/contacts.ts"), settings = read("../app/settings.tsx"), layout = read("../app/_layout.tsx"), auth = read("../providers/AuthProvider.tsx");
-eq("native module detected at runtime and required lazily (no import of expo-contacts at the top)", [/requireOptionalNativeModule\("ExpoContacts"\)/.test(contacts), /require\("expo-contacts"\)/.test(contacts), /^import .*expo-contacts/m.test(contacts)], [true, true, false]);
+eq("native module detected at runtime and required lazily (no import of expo-contacts at the top)", [/requireOptionalNativeModule\("ExpoContacts"\)/.test(contacts), /require\("expo-contacts(\/legacy)?"\)/.test(contacts), /^import .*expo-contacts/m.test(contacts)], [true, true, false]);
 const syncPart = contacts.slice(0, contacts.indexOf("export type InviteContact"));
 eq("the contacts SYNC (hashing, for build in silence) reads phone numbers only", [/Fields\.PhoneNumbers/.test(syncPart), /Fields\.(Name|Emails|Image)/.test(syncPart)], [true, false]);
 eq("the invite list is the only place that reads names (on the phone, never uploaded; see test-friends.mjs)", /Fields\.Name/.test(contacts.slice(contacts.indexOf("export type InviteContact"))), true);

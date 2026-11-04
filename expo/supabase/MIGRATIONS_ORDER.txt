@@ -6,6 +6,11 @@
 # created by the files before it, so it has to see all of them; it also adds the friends branch to the known_connections
 # view, so migration-friends-messages.sql comes right before it).
 #
+# migration-live-snapshot.sql (written by scripts/dump-live-definitions.mjs from the LIVE database, then listed here right before
+# migration-known-connections.sql) is the record of what was applied by hand: get_feed_engine, expire_posts, chat_can_send_post,
+# chat_post_available and the compat views conversations / messages. It is applied AFTER the older files that define earlier versions
+# of the same objects, so a release can never put an older version back. Change those objects only in a NEWER migration ordered after it.
+#
 # Keep this file up to date whenever a migration is added or changed.
 
 migration-age-gating.sql
