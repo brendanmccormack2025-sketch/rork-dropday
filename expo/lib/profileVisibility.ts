@@ -21,11 +21,11 @@ export function isOnOtherProfile(p: ProfilePost): boolean {
 }
 
 /**
- * The creator's own profile: queued and testing posts, and survived posts for good. Posts that ended or stayed incomplete
+ * The creator's own profile: queued and testing posts, posts that could not be judged ("unjudged", only the creator sees them), and survived posts for good. Posts that ended or stayed incomplete
  * are gone for everyone, the creator included (their media is deleted, nobody is told).
  */
 export function isOnOwnProfilePost(p: ProfilePost): boolean {
-  if (p.status === "queued" || p.status === "trial") return true;
+  if (p.status === "queued" || p.status === "trial" || p.status === "unjudged") return true;
   if (hasSurvived(p)) return !p.media_deleted_at;
   return false;
 }

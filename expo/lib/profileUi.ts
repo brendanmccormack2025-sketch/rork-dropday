@@ -36,10 +36,10 @@ export const OWN_TABS: Array<{ key: OwnTab; label: string }> = [
 
 type TabPost = { status?: string | null; survived_at?: string | null; media_deleted_at?: string | null };
 
-/** Own profile, per tab: Survived (forever), On Trial (testing + queued). Drafts are not posts. */
+/** Own profile, per tab: Survived (forever), On Trial (testing + queued + unjudged, the last with its own badge). Drafts are not posts. */
 export function postsForTab<T extends TabPost>(posts: T[], tab: OwnTab): T[] {
   if (tab === "survived") return posts.filter((p) => hasSurvived(p) && !p.media_deleted_at);
-  if (tab === "trial") return posts.filter((p) => p.status === "trial" || p.status === "queued");
+  if (tab === "trial") return posts.filter((p) => p.status === "trial" || p.status === "queued" || p.status === "unjudged");
   return [];
 }
 

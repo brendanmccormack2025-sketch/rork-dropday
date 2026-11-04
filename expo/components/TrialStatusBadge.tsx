@@ -15,6 +15,7 @@ const BADGES: Partial<Record<SurvivalStatus, { label: string; color: string }>> 
   trial: { label: "ON TRYAL", color: theme.accent },
   survived: { label: "SURVIVED", color: theme.success },
   queued: { label: "QUEUED", color: theme.textMuted },
+  unjudged: { label: "NOT ENOUGH VIEWS", color: theme.textMuted },
 };
 
 /**

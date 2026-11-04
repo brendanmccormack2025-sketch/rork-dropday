@@ -41,6 +41,7 @@ async function loadPreview(postId: string): Promise<Preview> {
     row.status === "archived" ||
     row.status === "expired" ||
     row.status === "incomplete" ||
+    row.status === "unjudged" ||
     (row.status === "survived" && row.distribution_expires_at && new Date(row.distribution_expires_at).getTime() < Date.now());
   const cover = row ? resolveStorageUrl(row.thumbnail_url) ?? (row.media_type === "image" ? resolveStorageUrl(row.media_url) : null) : null;
   const p: Preview = { cover: ended ? null : cover, username: profile?.username ?? null, avatar_url: profile?.avatar_url ?? null, available: !ended };

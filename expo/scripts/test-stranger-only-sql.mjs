@@ -300,7 +300,7 @@ if (!BIN) {
         return q(`select count(*) from public.post_view_stats where viewer_id='${U(2)}'`) === "0";
       })());
 
-      // ── 7. the trial: cap, no 'incomplete', failed posts deleted ──
+      // ── 7. the trial: cap, 'unjudged', failed posts deleted ──
       setup();
       mkTrial(1, 1);
       eq("a new post's trial ends 72 h after it starts (trial cap, a config value)", q(`select round(extract(epoch from (checkpoint_at - testing_started_at)) / 3600) from public.posts where id='${P(1)}'`), "72");
@@ -322,20 +322,35 @@ if (!BIN) {
       ok("...and it is still assigned to strangers (the cap, not 24 h, ends distribution)", q(`select count(*) from public.trial_assignments where post_id='${P(1)}' and released_at is null`) !== "0");
       // at the cap: survives when it meets the bar
       setup(); mkTrial(1, 1);
-      for (const n of [6, 7, 9]) { Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${P(1)}','${U(n)}')`); Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms, completed) values ('${P(1)}','${U(n)}', 9000, 12000, true)`); Q(`insert into public.likes (user_id, post_id) values ('${U(n)}','${P(1)}')`); }
+      for (const n of [6, 7, 9, 10, 11]) { Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${P(1)}','${U(n)}')`); Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms, completed) values ('${P(1)}','${U(n)}', 9000, 12000, true)`); Q(`insert into public.likes (user_id, post_id) values ('${U(n)}','${P(1)}')`); }
       pastCap(1);
       eq("at the cap, loved by the strangers who saw it: it survives (and is not deleted)", [evalPost(1), status(1)], ["survived", "survived"]);
       eq("a survived post is never deleted, whatever is asked", (() => { Q(`select public.trial_delete_failed_post('${P(1)}')`); return status(1); })(), "survived");
-      // at the cap: nobody saw it -> deleted
+      // at the cap: too few strangers to judge it -> 'unjudged': kept (only the creator sees it), not distributed, creator told
       setup(); mkTrial(1, 1);
       Q(`insert into public.posts (id, user_id, media_url, media_type, parent_post_id) values ('${P(11)}','${U(6)}','https://x.supabase.co/storage/v1/object/public/drops/r11.mp4','video','${P(1)}')`);
-      Q(`insert into public.notifications (recipient_id, actor_id, type, post_id) values ('${U(1)}','${U(6)}','reaction','${P(1)}')`);
       Q(`insert into public.likes (user_id, post_id) values ('${U(7)}','${P(1)}')`);
+      Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${P(1)}','${U(7)}')`);
+      Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms) values ('${P(1)}','${U(7)}', 100, 12000)`);
       pastCap(1);
-      eq("at the cap with nobody who responded: the verdict is 'failed' and the post is DELETED", [evalPost(1), status(1)], ["failed", "DELETED"]);
-      eq("...its reaction, likes, assignments and notifications are gone", [status(11), q(`select count(*) from public.likes where post_id='${P(1)}'`), q(`select count(*) from public.trial_assignments where post_id='${P(1)}'`), q(`select count(*) from public.notifications where post_id='${P(1)}'`)], ["DELETED", "0", "0", "0"]);
-      eq("...its media (and its reaction's) is queued for the delete-media job", q(`select string_agg(path, ',' order by path) from public.trial_media_delete_queue`), "p1.mp4,r11.mp4");
-      eq("...and the anonymous number behind the moving bar is kept (no post, no person)", [q(`select count(*) from public.trial_bar_samples where decision='failed'`), q(`select count(*) from information_schema.columns where table_name='trial_bar_samples' and column_name in ('post_id','user_id')`)], ["1", "0"]);
+      eq("at the cap with too few strangers to judge it (1 saw it): the verdict is 'unjudged', the post is KEPT", [evalPost(1), status(1), decision(1)], ["unjudged", "unjudged", "unjudged"]);
+      eq("...nothing deleted: media not queued, likes and reactions stay, no bar sample", [q(`select count(*) from public.trial_media_delete_queue`), status(11), q(`select count(*) from public.likes where post_id='${P(1)}'`), q(`select count(*) from public.trial_bar_samples`)], ["0", "trial", "1", "0"]);
+      eq("...the creator is told once ('verdict_unjudged'), nobody else", [q(`select count(*) from public.notifications where post_id='${P(1)}' and type='verdict_unjudged' and recipient_id='${U(1)}'`), q(`select count(*) from public.notifications where post_id='${P(1)}' and type='verdict_unjudged'`)], ["1", "1"]);
+      eq("...the creator still has it on their profile; nobody else sees it there, or by reading the table", [as(U(1), `select count(*) from public.profile_posts('${U(1)}')`).out, as(U(6), `select count(*) from public.profile_posts('${U(1)}')`).out, as(U(2), `select count(*) from public.profile_posts('${U(1)}')`).out, as(U(1), `select count(*) from public.posts where id='${P(1)}'`).out, as(U(6), `select count(*) from public.posts where id='${P(1)}'`).out], ["1", "0", "0", "1", "0"]);
+      eq("...it is no longer distributed: not in any stranger's feed, not in Explore", [as(U(9), `select count(*) from public.get_feed_engine(20, 0) where post_id='${P(1)}'`).out, as(U(9), `select count(*) from public.get_explore_creators()`).out], ["0", "0"]);
+      eq("...and it cannot be shared in a message", q(`select public.chat_can_send_post('${P(1)}', '${U(1)}', '${U(3)}')`), "f");
+      eq("...running the engine again changes nothing", [evalPost(1), status(1)], ["testing", "unjudged"]);
+      ok("a judged failure is still deleted at the cap: 5 strangers saw it, did not respond, borderline watch -> failed, DELETED", (() => {
+        setup(); mkTrial(1, 1);
+        for (const [i, n] of [6, 7, 9, 10, 11].entries()) { Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${P(1)}','${U(n)}')`); Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms) values ('${P(1)}','${U(n)}', ${i < 3 ? 9000 : 100}, 12000)`); }
+        pastCap(1);
+        return evalPost(1) === "failed" && status(1) === "DELETED" && q(`select string_agg(path, ',') from public.trial_media_delete_queue`) === "p1.mp4" && q(`select count(*) from public.trial_bar_samples where decision='failed'`) === "1";
+      })());
+      ok("...a media queue entry exists for it, and a survived/unjudged post is never touched by trial_delete_failed_post", (() => {
+        setup(); mkTrial(1, 1); Q(`update public.posts set status='unjudged' where id='${P(1)}'`);
+        Q(`select public.trial_delete_failed_post('${P(1)}')`);
+        return status(1) === "unjudged";
+      })());
       // a failed-by-confidence post is deleted too
       setup(); mkTrial(1, 1);
       for (const n of [6, 7, 9, 10, 11]) { Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${P(1)}','${U(n)}')`); Q(`insert into public.post_view_stats (post_id, viewer_id, watch_ms, duration_ms) values ('${P(1)}','${U(n)}', 300, 12000)`); }
@@ -359,6 +374,9 @@ if (!BIN) {
       ok("no verdict path produces 'incomplete' any more", !/verdict := 'incomplete'|decision = 'incomplete'.*trial_apply/.test(readFileSync(so, "utf8").replace(/--.*$/gm, "").replace(/elsif p_decision = 'incomplete'[\s\S]*?end if;/, "")));
 
       // ── 8. nothing else can bypass: the old feed function and the client fallback ──
+      Q(`create or replace function public.get_feed(p_limit integer default 20, p_offset integer default 0) returns table (post_id uuid) language sql as $$ select id from public.posts $$; grant execute on function public.get_feed(integer, integer) to authenticated, anon`);
+      psqlFile("t", so);   // the migration runs again (as on every release): the legacy feed function is closed to apps
+      eq("the dashboard get_feed (old builds' fallback) cannot be executed by apps any more", [as(U(6), `select count(*) from public.get_feed(5, 0)`).out, q(`select has_function_privilege('authenticated', 'public.get_feed(integer, integer)', 'execute') or has_function_privilege('anon', 'public.get_feed(integer, integer)', 'execute')`)], ["", "f"]);
       eq("get_feed_engine has no legacy path and no reference to the dashboard get_feed", q(`select prosrc like '%get_feed(%' or prosrc like '%engine_mode%' from pg_proc where proname='get_feed_engine'`), "f");
       eq("not signed in: nothing", psql("t", "set role anon; select * from public.get_feed_engine(10, 0)", ["-v", "ON_ERROR_STOP=1"]).stdout.trim().split("\n").filter((l) => l && l !== "SET").length, 0);
       ok("the internals are not callable by apps", ["trial_creators_who_know(gen_random_uuid())", "stranger_creator_ids()", "trial_delete_failed_post(gen_random_uuid())", "chat_can_send_post(gen_random_uuid(), gen_random_uuid(), gen_random_uuid())", "trial_is_silenced(gen_random_uuid(), gen_random_uuid())"].every((f) => !as(U(6), `select public.${f}`).ok));

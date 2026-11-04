@@ -13,7 +13,9 @@
 --     known person of that post's creator (chat_can_send_post / chat_post_available).
 --  4. Trial rules for NEW posts: "incomplete" is not a failure. A post nobody could judge yet (too few strangers, or borderline)
 --     stays on trial and keeps being shown to strangers until the cap (trial_engine_config.max_test_hours, default 72 h from the
---     trial start). At the cap it survives if it meets the bar, otherwise it fails. A post that fails is DELETED: media queued for
+--     trial start). At the cap: fewer than min_exhausted_viewers strangers saw it -> status 'unjudged' (kept on the creator's profile,
+--     visible only to them, no longer distributed, creator notified 'verdict_unjudged', never deleted); otherwise it survives if it
+--     meets the bar and fails if not. A post that was JUDGED and failed is DELETED: media queued for
 --     the delete-media job first, then the post, its reactions and everything hanging on it. Survived posts are never deleted.
 --     Existing archived / incomplete rows are left alone. The anonymous numbers behind the moving bar are kept (trial_bar_samples:
 --     a score and a time, no post, no person).
@@ -60,7 +62,35 @@ drop function if exists public.set_friend_can_test(uuid, boolean);
 drop function if exists public.friend_can_test(uuid);
 drop table if exists public.friend_test_optin;
 
--- ── 4. the trial: cap, no 'incomplete', deletion of failed posts ────────────────────────
+-- ── 4. the trial: cap, 'unjudged', deletion of failed posts ─────────────────────────────
+-- 4-0. a post that reaches the cap without enough strangers to judge it is 'unjudged': not survived, not failed, not deleted. It
+-- stays on the creator's profile (only theirs), is no longer distributed, and the creator is told. Only posts that were
+-- judged and failed are deleted.
+do $$
+declare c record;
+begin
+  for c in select conname from pg_constraint where conrelid = 'public.posts'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%status%trial%'
+  loop
+    execute format('alter table public.posts drop constraint %I', c.conname);
+  end loop;
+  alter table public.posts add constraint posts_status_check
+    check (status in ('trial', 'incomplete', 'survived', 'archived', 'expired', 'queued', 'unjudged'));
+  for c in select conname from pg_constraint where conrelid = 'public.notifications'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%verdict_survived%'
+  loop
+    execute format('alter table public.notifications drop constraint %I', c.conname);
+  end loop;
+  alter table public.notifications add constraint notifications_type_check
+    check (type in ('like', 'reaction', 'follow', 'follow_request', 'follow_accept',
+                    'verdict_survived', 'verdict_archived', 'verdict_incomplete', 'verdict_unjudged', 'followed_post_survived',
+                    'friend_request', 'friend_accept', 'message'));
+end $$;
+
+-- nobody but the creator can read an unjudged post (no feed, no profile, no direct read, no share)
+drop policy if exists posts_unjudged_owner_only on public.posts;
+create policy posts_unjudged_owner_only on public.posts
+  as restrictive for select to anon, authenticated
+  using (status <> 'unjudged' or user_id = auth.uid());
+
 -- 4a. anonymous numbers behind the moving bar survive the deletion of a failed post
 create table if not exists public.trial_bar_samples (
   id             bigint generated always as identity primary key,
@@ -167,6 +197,12 @@ begin
       insert into public.trial_bar_samples (decision, posterior_mean) values ('failed', mean);
     end if;
     perform public.trial_delete_failed_post(p_post_id);
+  elsif p_decision = 'unjudged' then
+    -- the cap came with too few strangers to judge it: no verdict, no bar sample, nothing deleted; only the creator keeps it
+    update public.posts set status = 'unjudged' where id = p_post_id and status = 'trial';
+    if found then
+      insert into public.notifications (recipient_id, actor_id, type, post_id) values (creator, creator, 'verdict_unjudged', p_post_id);
+    end if;
   elsif p_decision = 'incomplete' then
     -- not produced by the engine any more (a borderline post stays on trial until the cap); kept for old callers
     update public.posts set status = 'incomplete' where id = p_post_id and status = 'trial';
@@ -241,10 +277,10 @@ begin
   if n >= min_survive and p >= cfg.p_survive and active >= need_active then
     verdict := 'survived'; reason := 'confidence';
   elsif n >= min_fail and p <= cfg.p_fail
-        and (n >= cfg.min_exhausted_viewers or now() >= post.checkpoint_at) then   -- never ENDED early on fewer strangers (surviving early is fine)
+        and n >= cfg.min_exhausted_viewers then   -- never ended on fewer strangers than that (surviving early is fine)
     verdict := 'failed'; reason := 'confidence';
   elsif pool_total >= 1 and pool_unexposed = 0 and n >= 1
-        and (n >= cfg.min_exhausted_viewers or now() >= post.checkpoint_at) then
+        and n >= cfg.min_exhausted_viewers then
     -- POOL EXHAUSTED: every eligible (non-known) viewer has seen it and nobody is left to assign. Decided early only once
     -- at least min_exhausted_viewers strangers judged it (a tiny early-days pool must not settle a post after an hour on
     -- two or three swipes): with fewer, it keeps testing so people who open the app later still get it, and at 24 h it is
@@ -277,20 +313,23 @@ begin
 
   -- THE CAP (checkpoint_at = trial start + max_test_hours, see the trigger below): a post that could not be judged yet (too
   -- few strangers saw it, or it is borderline) is NOT a failure: it stays on trial and keeps being shown to strangers. At
-  -- the cap it survives if it meets the bar (and enough strangers responded), otherwise it fails and is deleted.
+  -- the cap: fewer than min_exhausted_viewers strangers saw it -> 'unjudged' (kept, never deleted, not distributed); otherwise it
+  -- survives if it meets the bar (and enough strangers responded) and fails (deleted) if not.
   if verdict = 'testing' and now() >= post.checkpoint_at then
     reason := 'checkpoint_cap';
-    if n >= 1 and active >= need_active and alpha / (alpha + beta) >= p_bar - 1e-9 then
+    if n < cfg.min_exhausted_viewers then
+      verdict := 'unjudged'; reason := 'not_enough_viewers';   -- too few strangers saw it to judge: kept, not distributed, creator told
+    elsif active >= need_active and alpha / (alpha + beta) >= p_bar - 1e-9 then
       verdict := 'survived';
     else
-      verdict := 'failed';
+      verdict := 'failed';                  -- judged by enough strangers and did not make it: deleted
     end if;
   end if;
 
   if verdict = 'expand' then
     update public.trial_post_state set stage = st.stage + 1, stage_started_at = now() where post_id = p_post_id;
     perform public.trial_assign_cohort(p_post_id, st.stage + 1);
-  elsif verdict in ('survived', 'failed', 'incomplete') then
+  elsif verdict in ('survived', 'failed', 'incomplete', 'unjudged') then
     update public.trial_post_state
        set decision = verdict, decided_at = now(), posterior_mean = alpha / (alpha + beta)
      where post_id = p_post_id;
@@ -461,6 +500,17 @@ begin
 end;
 $function$;
 
+-- 5b. the dashboard-made legacy feed function get_feed (not in the repo) does not know about known connections. The app no longer
+-- calls it (older builds only did, as a fallback when get_feed_engine failed): nobody may execute it any more.
+do $$
+declare f record;
+begin
+  for f in select p.oid::regprocedure as sig from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = 'get_feed' and p.prokind = 'f'
+  loop
+    execute format('revoke all on function %s from public, anon, authenticated', f.sig);
+  end loop;
+end $$;
+
 -- ── 6. sharing posts in messages ───────────────────────────────────────────────────
 -- The creator may send their OWN posts (trial or survived) to their friends. Nobody may send someone else's post to a known
 -- person of its creator (or to the creator). Someone else's trial post only if the sender has seen it themselves.
@@ -606,3 +656,51 @@ as $$
 $$;
 revoke all on function public.search_creators(text, integer) from public, anon;
 grant execute on function public.search_creators(text, integer) to authenticated;
+
+-- ── 8. profiles: the creator also keeps their 'unjudged' posts (only they can see them) ─────────────────
+create or replace function public.profile_posts(p_user_id uuid, p_limit integer default 100)
+returns table (post_id uuid)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+  hide_mature boolean := false;
+  lim integer := least(greatest(coalesce(p_limit, 100), 1), 300);
+begin
+  if me is null or p_user_id is null then return; end if;
+  if p_user_id = me then
+    return query
+    select p.id
+    from public.posts p
+    where p.user_id = me and p.parent_post_id is null and p.moderation_status = 'active'
+      and (
+        p.status in ('queued', 'trial', 'unjudged')
+        or (p.survived_at is not null and p.status in ('survived', 'expired') and p.media_deleted_at is null)
+      )
+    order by p.created_at desc, p.id
+    limit lim;
+    return;
+  end if;
+  select coalesce(public.age_tier(pr.birthdate) in ('under_13', 'teen'), false) into hide_mature
+  from public.profiles pr where pr.id = me;
+  hide_mature := coalesce(hide_mature, false);
+  -- other people's profiles: survived posts only (a known connection who opens a profile directly sees them too)
+  return query
+  select p.id
+  from public.posts p
+  where p.user_id = p_user_id and p.parent_post_id is null and p.moderation_status = 'active'
+    and p.survived_at is not null and p.status in ('survived', 'expired')
+    and p.media_deleted_at is null
+    and (not hide_mature or not p.is_mature)
+    and not exists (
+      select 1 from public.user_blocks b
+      where (b.blocker_id = me and b.blocked_id = p.user_id) or (b.blocker_id = p.user_id and b.blocked_id = me)
+    )
+  order by p.created_at desc, p.id
+  limit lim;
+end;
+$$;
+grant execute on function public.profile_posts(uuid, integer) to authenticated;

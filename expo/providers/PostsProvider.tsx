@@ -74,7 +74,7 @@ export type Post = {
   /** Moderation status: 'active' (visible), 'hidden' (auto/flagged), 'removed' (confirmed violation). */
   moderation_status?: string;
   /** Survival status: 'trial' (live, awaiting verdict), 'incomplete' (awaiting enough exposure to judge), 'survived', 'archived' (hidden from public surfaces), 'expired' (distribution window over). */
-  status?: "trial" | "incomplete" | "survived" | "archived" | "expired" | "queued";
+  status?: "trial" | "incomplete" | "survived" | "archived" | "expired" | "queued" | "unjudged";
   /** Lifecycle timestamps (set server-side). */
   survived_at?: string | null;
   distribution_started_at?: string | null;

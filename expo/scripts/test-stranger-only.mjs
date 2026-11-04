@@ -24,6 +24,8 @@ eq("no friend opt-in in the app (lib and chat menu)", [/friendCanTest|setFriendC
 eq("contacts sync uploads phones and emails and sets the account email hash", [/sync_my_contacts"/.test(contacts), /sync_my_contact_emails/.test(contacts), /set_my_email_hash/.test(contacts)], [true, true, true]);
 eq("collectEmails: lower-cased, de-duplicated, junk dropped", collectEmails([{ emails: [{ email: " Ann@Example.com " }, { email: "ann@example.com" }, { email: "junk" }] }, {}, { emails: null }]), ["ann@example.com"]);
 eq("privacy texts say emails are read and never promise friends/contacts see posts later", [/email/.test(CONTACTS_EXPLAINER_BODY), /email/.test(CONTACTS_ONBOARDING_BODY), /only see your posts after they survive/.test(CONTACTS_EXPLAINER_BODY)], [true, true, false]);
+const notif = read("../components/NotificationItem.tsx"), vis = read("../lib/profileVisibility.ts"), badge = read("../components/TrialStatusBadge.tsx");
+eq("client knows 'unjudged': own profile keeps it, badge, notification text; other profiles never show it", [/unjudged/.test(vis), /unjudged/.test(badge), /Not enough people saw this yet\./.test(notif), /verdict_unjudged/.test(read("../providers/NotificationsProvider.tsx"))], [true, true, true, true]);
 const order = read("../supabase/MIGRATIONS_ORDER.txt").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
 eq("migration order ends: snapshot, known-connections, stranger-only", order.slice(-3), ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql"]);
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
