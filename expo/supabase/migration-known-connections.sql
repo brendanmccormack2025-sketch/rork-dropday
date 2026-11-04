@@ -1,17 +1,23 @@
--- Build in silence: people the creator knows never see (or influence) a post while it is on trial (idempotent).
+-- Known people (idempotent): who the creator knows, in ONE view. Since migration-stranger-only.sql they never get the creator's posts
+-- anywhere (feed, Explore, suggestions), testing or survived, and never count toward a verdict; a direct visit to the creator's
+-- profile still shows their survived posts.
 -- Run AFTER migration-trial-engine.sql. Run manually in the Supabase SQL editor.
 --
 -- known_connections(user_id = creator, other_id = viewer) is the ONE place that says who knows whom. Sources today:
 --   follow     a follow in either direction
 --   contact    the creator's contacts contain the viewer's phone, or the viewer's contacts contain the creator's
---   hide_list  the creator's "Hide my trials from..." list (one direction: creator -> hidden person)
---   friend     (added by migration-friends-messages.sql, which runs after this file and replaces the view with its extra branch)
--- The engine and the feed only call trial_is_silenced() and never change when a source is added.
+--   email      the same with email addresses (the viewer's own account email against the creator's contacts, and back)
+--   hide_list  the creator's "Hide my posts from..." list (one direction: creator -> hidden person)
+--   friend     a friendship (migration-friends-messages.sql), always: there is no per-friend exception and no switch
+-- The engine and the feed only call trial_is_silenced() and never change when a source is added. New matches appear by
+-- themselves: the view is computed from the stored hashes, so the moment a person signs up or adds a number / email that
+-- someone's contacts already hold, they are known.
 --
--- PRIVACY: phone numbers are UNVERIFIED and are used ONLY for this invisible exclusion. They are never shown to anyone,
--- never used for "your contact X is on Trial" or friend suggestions. Only HMAC-SHA256 hashes are stored (numbers are
--- hashed in the RPCs below with a secret pepper kept in Supabase Vault); the raw number is never stored or put in an
--- error message. Duplicate hashes are allowed (an unverified number can be claimed by several accounts).
+-- PRIVACY: phone numbers and emails from contacts are UNVERIFIED and are used ONLY for this invisible exclusion. They are never
+-- shown to anyone, never used for "your contact X is on Tryal" or friend suggestions. Only HMAC-SHA256 hashes are stored (hashed
+-- in the RPCs below with a secret pepper kept in Supabase Vault); the raw number or address is never stored or put in an error
+-- message, and an address book is never stored. What is stored: per user one hash of their own phone (optional) and of their
+-- account email, and per contact owner the hashes of the numbers and emails in their contacts. Duplicate hashes are allowed.
 --
 -- SETUP (once): store the pepper in Vault, e.g. in the SQL editor
 --   select vault.create_secret('<64+ random characters>', 'trial_contact_pepper');
@@ -21,13 +27,7 @@ create extension if not exists pgcrypto with schema extensions;
 
 -- Old follows (DropDay era) are ignored unless this is turned on; users cannot see or manage them in Trial.
 alter table public.trial_engine_config add column if not exists known_source_follows boolean not null default false;
--- Friends count as known (hidden from testing posts, never in their verdict) unless this is turned off. They still get
--- survived posts in their feed. Off = friendship alone changes nothing; the hide list and contacts still apply.
-alter table public.trial_engine_config add column if not exists known_source_friends boolean not null default true;
--- Once: friends are known again by default (it was switched off while the rule was being decided); each creator lets
--- particular friends test their posts instead (friend_test_optin). A later manual change of the switch is kept.
-alter table public.trial_engine_config add column if not exists friends_default_v2 boolean not null default false;
-update public.trial_engine_config set known_source_friends = true, friends_default_v2 = true where not friends_default_v2;
+-- (The old known_source_friends / friends_default_v2 columns are no longer used: friends are always known.)
 
 -- ── hashing ──────────────────────────────────────────────────────────────────
 create or replace function public.trial_hash_phone(p_e164 text)
@@ -48,6 +48,29 @@ begin
     raise exception 'contact pepper is not configured' using errcode = '55000';
   end if;
   return encode(hmac(p_e164, pepper, 'sha256'), 'hex');
+end;
+$$;
+
+-- ── email hashing: same pepper, a separate domain so a phone hash and an email hash can never collide ──
+create or replace function public.trial_hash_email(p_email text)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = public, extensions, vault
+as $$
+declare
+  pepper text;
+  norm text := lower(btrim(coalesce(p_email, '')));
+begin
+  if length(norm) > 254 or norm !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then
+    raise exception 'invalid email' using errcode = '22023';   -- never echoes the value
+  end if;
+  select decrypted_secret into pepper from vault.decrypted_secrets where name = 'trial_contact_pepper' limit 1;
+  if pepper is null or length(pepper) < 16 then
+    raise exception 'contact pepper is not configured' using errcode = '55000';
+  end if;
+  return encode(hmac('email:' || norm, pepper, 'sha256'), 'hex');
 end;
 $$;
 
@@ -79,6 +102,25 @@ create table if not exists public.hide_from_list (
   primary key (owner_id, hidden_user_id),
   check (owner_id <> hidden_user_id)
 );
+
+-- the same two tables for email addresses: one hash of each account's own email, and the hashes of the emails in a person's contacts
+create table if not exists public.user_email_hash (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  hash       text not null,
+  updated_at timestamptz not null default now()
+);
+create index if not exists user_email_hash_hash_idx on public.user_email_hash (hash);   -- NOT unique
+
+create table if not exists public.contact_email_hashes (
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  hash     text not null,
+  primary key (owner_id, hash)
+);
+create index if not exists contact_email_hashes_hash_idx on public.contact_email_hashes (hash);
+
+alter table public.user_email_hash enable row level security;
+alter table public.contact_email_hashes enable row level security;
+revoke all on table public.user_email_hash, public.contact_email_hashes from anon, authenticated;
 
 alter table public.user_phone_hash enable row level security;
 alter table public.contact_hashes enable row level security;
@@ -148,9 +190,90 @@ set search_path = public
 as $$
 begin
   delete from public.contact_hashes where owner_id = auth.uid();
+  delete from public.contact_email_hashes where owner_id = auth.uid();
   delete from public.contact_sync_state where owner_id = auth.uid();
 end;
 $$;
+
+-- Replaces the caller's contact EMAIL hashes with the ones for these addresses (invalid entries are skipped, at most 10000).
+create or replace function public.sync_my_contact_emails(p_emails text[])
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n integer;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  delete from public.contact_email_hashes where owner_id = auth.uid();
+  insert into public.contact_email_hashes (owner_id, hash)
+  select distinct auth.uid(), public.trial_hash_email(x.addr)
+  from (select addr from unnest(p_emails[1:10000]) as addr
+         where length(addr) <= 254 and lower(btrim(addr)) ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$') x
+  on conflict do nothing;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- The hash of the caller's own account email (the trigger below keeps it current; this is the app's safety net at sign-in).
+create or replace function public.set_my_email_hash()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  addr text := nullif(btrim(coalesce(auth.jwt() ->> 'email', '')), '');
+begin
+  if auth.uid() is null or addr is null then return; end if;
+  insert into public.user_email_hash (user_id, hash) values (auth.uid(), public.trial_hash_email(addr))
+  on conflict (user_id) do update set hash = excluded.hash, updated_at = now();
+exception when others then
+  null;   -- a pepper or format problem never breaks sign-in
+end;
+$$;
+
+-- Keeps each account's email hash current when the account is created or its email changes. Never blocks sign-up or sign-in.
+create or replace function public.trial_sync_user_email_hash()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions, vault
+as $$
+begin
+  if new.email is null or btrim(new.email) = '' then
+    delete from public.user_email_hash where user_id = new.id;
+  else
+    insert into public.user_email_hash (user_id, hash) values (new.id, public.trial_hash_email(new.email))
+    on conflict (user_id) do update set hash = excluded.hash, updated_at = now();
+  end if;
+  return new;
+exception when others then
+  return new;
+end;
+$$;
+
+do $$
+begin
+  drop trigger if exists trial_user_email_hash on auth.users;
+  create trigger trial_user_email_hash after insert or update of email on auth.users
+    for each row execute function public.trial_sync_user_email_hash();
+exception when others then
+  raise notice 'could not create the email-hash trigger on auth.users (%): the app calls set_my_email_hash() at sign-in instead', sqlerrm;
+end $$;
+
+-- Once, for the accounts that already exist (needs the pepper; skipped with a notice if it is not set yet).
+do $$
+begin
+  insert into public.user_email_hash (user_id, hash)
+  select u.id, public.trial_hash_email(u.email) from auth.users u
+   where u.email is not null and btrim(u.email) <> '' and u.email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
+  on conflict (user_id) do nothing;
+exception when others then
+  raise notice 'email hashes were not backfilled (%)', sqlerrm;
+end $$;
 
 -- Deletes everything this feature stores about the caller (also happens through the auth.users cascade on account deletion).
 create or replace function public.delete_my_privacy_data()
@@ -161,7 +284,9 @@ set search_path = public
 as $$
 begin
   delete from public.user_phone_hash where user_id = auth.uid();
+  delete from public.user_email_hash where user_id = auth.uid();
   delete from public.contact_hashes where owner_id = auth.uid();
+  delete from public.contact_email_hashes where owner_id = auth.uid();
   delete from public.contact_sync_state where owner_id = auth.uid();
   delete from public.hide_from_list where owner_id = auth.uid();
 end;
@@ -180,9 +305,11 @@ as $$
 $$;
 
 revoke all on function public.set_my_phone(text), public.clear_my_phone(), public.sync_my_contacts(text[]),
-  public.remove_my_contacts(), public.delete_my_privacy_data(), public.my_privacy_status() from public, anon;
+  public.remove_my_contacts(), public.delete_my_privacy_data(), public.my_privacy_status(),
+  public.sync_my_contact_emails(text[]), public.set_my_email_hash() from public, anon;
 grant execute on function public.set_my_phone(text), public.clear_my_phone(), public.sync_my_contacts(text[]),
-  public.remove_my_contacts(), public.delete_my_privacy_data(), public.my_privacy_status() to authenticated;
+  public.remove_my_contacts(), public.delete_my_privacy_data(), public.my_privacy_status(),
+  public.sync_my_contact_emails(text[]), public.set_my_email_hash() to authenticated;
 
 -- ── known_connections: one view, one UNION branch per source ─────────────────
 -- The view is built in a DO block so the friends branch is only added when the friends table exists (migration-friends-messages.sql
@@ -190,23 +317,29 @@ grant execute on function public.set_my_phone(text), public.clear_my_phone(), pu
 do $kc$
 declare
   friend_branch text := '';
+  email_branch text := '';
 begin
-  if to_regclass('public.friendships') is not null and to_regclass('public.friend_test_optin') is not null then
+  -- friends: always known, either direction (no switch, no per-friend exception)
+  if to_regclass('public.friendships') is not null then
     friend_branch := $fb$
   union all
-  -- friends (migration-friends-messages.sql), either direction
-  -- (a friend the creator let in to test, friend_test_optin, is not known)
   select f.user_a, f.user_b, 'friend'::text from public.friendships f
-   where (select known_source_friends from public.trial_engine_config where id)
-     and not exists (select 1 from public.friend_test_optin o where o.owner_id = f.user_a and o.friend_id = f.user_b)
   union all
-  select f.user_b, f.user_a, 'friend'::text from public.friendships f
-   where (select known_source_friends from public.trial_engine_config where id)
-     and not exists (select 1 from public.friend_test_optin o where o.owner_id = f.user_b and o.friend_id = f.user_a)$fb$;
+  select f.user_b, f.user_a, 'friend'::text from public.friendships f$fb$;
+  end if;
+  -- email addresses, either direction: the owner's contacts contain the other person's account email
+  if to_regclass('public.contact_email_hashes') is not null and to_regclass('public.user_email_hash') is not null then
+    email_branch := $eb$
+  union all
+  select c.owner_id, u.user_id, 'email'::text
+    from public.contact_email_hashes c join public.user_email_hash u on u.hash = c.hash and u.user_id <> c.owner_id
+  union all
+  select u.user_id, c.owner_id, 'email'::text
+    from public.contact_email_hashes c join public.user_email_hash u on u.hash = c.hash and u.user_id <> c.owner_id$eb$;
   end if;
   execute $v$
 create or replace view public.known_connections as
-  -- follows, either direction
+  -- follows, either direction (off unless the config switch is on; DropDay era)
   select f.follower_id as user_id, f.followee_id as other_id, 'follow'::text as source from public.follows f
    where (select known_source_follows from public.trial_engine_config where id)
   union all
@@ -220,9 +353,16 @@ create or replace view public.known_connections as
   select p.user_id, c.owner_id, 'contact'::text
     from public.contact_hashes c join public.user_phone_hash p on p.hash = c.hash and p.user_id <> c.owner_id
   union all
-  -- the creator's own "hide my trials from" list (creator -> hidden person)
-  select h.owner_id, h.hidden_user_id, 'hide_list'::text from public.hide_from_list h$v$ || friend_branch;
+  -- the creator's own "hide my posts from" list (creator -> hidden person)
+  select h.owner_id, h.hidden_user_id, 'hide_list'::text from public.hide_from_list h$v$ || friend_branch || email_branch;
 end $kc$;
+
+-- The per-friend exception to "friends are known" is gone (the view above no longer reads it): drop what is left of it.
+drop trigger if exists friend_test_optin_cleanup on public.friendships;
+drop function if exists public.friend_test_optin_cleanup();
+drop function if exists public.set_friend_can_test(uuid, boolean);
+drop function if exists public.friend_can_test(uuid);
+drop table if exists public.friend_test_optin;
 revoke all on public.known_connections from anon, authenticated;
 
 -- ── the hide list is stronger than "known": never in that person's feed, testing OR survived ─

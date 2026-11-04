@@ -89,11 +89,8 @@ export default function ExploreScreen() {
       }
       setSearchLoading(true);
       try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("id, username, display_name, avatar_url")
-          .ilike("username", `%${text.trim()}%`)
-          .limit(20);
+        // Strangers only (the database leaves out people who know the viewer, the viewer, and blocks).
+        const { data, error } = await supabase.rpc("search_creators", { p_query: text.trim(), p_limit: 20 });
         if (error) {
           console.warn("[explore:search] error", error.message);
           setSearchResults([]);

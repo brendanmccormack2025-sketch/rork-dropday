@@ -2,11 +2,12 @@
 # One file per line (paths relative to expo/supabase/). Blank lines and # comments are ignored.
 #
 # Every file below is IDEMPOTENT (safe to run again and again) and none of them defines an older version of something a
-# later file defines. migration-known-connections.sql must stay LAST (it revokes client access to the trial_* functions
-# created by the files before it, so it has to see all of them; it also adds the friends branch to the known_connections
-# view, so migration-friends-messages.sql comes right before it).
+# later file defines. migration-known-connections.sql comes after every file that creates trial_* functions (it revokes client
+# access to them) and builds the known_connections view (phone, email, friends, hide list); migration-friends-messages.sql comes
+# before it. migration-stranger-only.sql is the LAST file: it redefines the feed, the trial rules and sharing on top of all of them
+# and revokes its own internals itself.
 #
-# migration-live-snapshot.sql (written by scripts/dump-live-definitions.mjs from the LIVE database, then listed here right before
+# migration-live-snapshot.sql (written by scripts/dump-live-definitions.mjs from the LIVE database, listed here right before
 # migration-known-connections.sql) is the record of what was applied by hand: get_feed_engine, expire_posts, chat_can_send_post,
 # chat_post_available and the compat views conversations / messages. It is applied AFTER the older files that define earlier versions
 # of the same objects, so a release can never put an older version back. Change those objects only in a NEWER migration ordered after it.
@@ -25,6 +26,7 @@ migration-friends-messages.sql
 migration-push.sql
 migration-live-snapshot.sql
 migration-known-connections.sql
+migration-stranger-only.sql
 
 # ── NOT run by ship.sh, on purpose ───────────────────────────────────────────────────────────────────────────────
 # Baseline, applied once when the database was created. Re-running them would put OLDER definitions back over newer

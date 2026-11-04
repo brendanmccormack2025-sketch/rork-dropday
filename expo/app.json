@@ -21,7 +21,7 @@
         "NSMicrophoneUsageDescription": "Tryal uses your microphone to record sound with your videos.",
         "NSPhotoLibraryUsageDescription": "Tryal needs access to your photo library so you can choose videos to put on Tryal.",
         "NSPhotoLibraryAddUsageDescription": "Tryal saves the videos you record to your photo library.",
-        "NSContactsUsageDescription": "Tryal checks your contacts so friends and family only see your posts after they survive Tryal. Contacts are never shared."
+        "NSContactsUsageDescription": "Tryal checks your contacts (phone numbers and email addresses, never names) so people you know never see your posts in their feed. Contacts are never shared."
       },
       "usesAppleSignIn": true,
       "associatedDomains": [

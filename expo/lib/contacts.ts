@@ -1,24 +1,24 @@
 /**
  * Contacts matching (build in silence). The native module (expo-contacts) ships in build 1.0.5; builds before that
  * have no ExpoContacts module, so everything here checks for it at runtime and quietly does nothing without it.
- * Only phone numbers are read, normalised on the phone, and sent over TLS to an RPC that hashes them (HMAC with a
- * server-side pepper). Raw numbers are never stored or logged. The app works fully if contacts are denied.
+ * Only phone numbers and email addresses are read (no names), normalised on the phone, and sent over TLS to RPCs that
+ * hash them (HMAC with a server-side pepper). Raw numbers and addresses are never stored or logged. The app works fully if contacts are denied.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { requireOptionalNativeModule } from "expo";
 
 import { supabase } from "@/lib/supabase";
-import { collectNumbers, contactsAvailable, shouldResync } from "@/lib/contactsSync";
+import { collectEmails, collectNumbers, contactsAvailable, shouldResync } from "@/lib/contactsSync";
 import { regionFromLocale } from "@/lib/phone";
 
 type ContactsModule = {
   requestPermissionsAsync: () => Promise<{ granted: boolean }>;
   getPermissionsAsync: () => Promise<{ granted: boolean }>;
   getContactsAsync: (o: { fields: string[]; pageSize: number; pageOffset: number }) => Promise<{
-    data: Array<{ id?: string; name?: string; phoneNumbers?: Array<{ number?: string; digits?: string }> }>;
+    data: Array<{ id?: string; name?: string; phoneNumbers?: Array<{ number?: string; digits?: string }>; emails?: Array<{ email?: string }> }>;
     hasNextPage: boolean;
   }>;
-  Fields: { PhoneNumbers: string; Name?: string };
+  Fields: { PhoneNumbers: string; Emails?: string; Name?: string };
 };
 
 export function isContactsAvailable(): boolean {
@@ -46,23 +46,28 @@ export function deviceRegion(): string | null {
 const keyOf = (userId: string) => `contacts_synced_at:${userId}`;
 const enabledKey = (userId: string) => `contacts_enabled:${userId}`;
 
-async function readAllNumbers(mod: ContactsModule): Promise<string[]> {
+async function readAllNumbers(mod: ContactsModule): Promise<{ numbers: string[]; emails: string[] }> {
   const region = deviceRegion();
   const all = new Set<string>();
+  const mails = new Set<string>();
   let offset = 0;
   for (let page = 0; page < 200; page++) {
-    const res = await mod.getContactsAsync({ fields: [mod.Fields.PhoneNumbers], pageSize: 500, pageOffset: offset });
+    const res = await mod.getContactsAsync({ fields: [mod.Fields.PhoneNumbers, mod.Fields.Emails ?? "emails"], pageSize: 500, pageOffset: offset });
     for (const n of collectNumbers(res.data, region)) all.add(n);
+    for (const e of collectEmails(res.data)) mails.add(e);
     if (!res.hasNextPage) break;
     offset += 500;
   }
-  return [...all];
+  return { numbers: [...all], emails: [...mails] };
 }
 
 async function upload(userId: string, mod: ContactsModule): Promise<boolean> {
-  const numbers = await readAllNumbers(mod);
+  const { numbers, emails } = await readAllNumbers(mod);
   const { error } = await supabase.rpc("sync_my_contacts", { p_numbers: numbers });
   if (error) return false;
+  // email matching is best effort: a server without it yet must not break the phone-number sync
+  await supabase.rpc("sync_my_contact_emails", { p_emails: emails });
+  await supabase.rpc("set_my_email_hash");
   await AsyncStorage.setItem(keyOf(userId), String(Date.now()));
   return true;
 }

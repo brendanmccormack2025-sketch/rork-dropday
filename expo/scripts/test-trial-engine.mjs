@@ -25,7 +25,7 @@ eq("old get_feed rows (no page_rows) count as they are", readFeedRows([{ post_id
 eq("creator sees ON TRYAL for a testing post and nothing for finished, ended or incomplete ones", [creatorTrialNote("trial"), creatorTrialNote("incomplete"), creatorTrialNote("survived"), creatorTrialNote("archived")], [{ title: "YOUR VIDEO IS ON TRYAL", body: null }, null, null, null]);
 
 const feed = read("../components/FeedItem.tsx"), prov = read("../providers/PostsProvider.tsx"), notif = read("../components/NotificationItem.tsx"), badge = read("../components/TrialStatusBadge.tsx");
-eq("feed uses get_feed_engine and falls back to get_feed", [/rpc\("get_feed_engine"/.test(prov), /rpc\("get_feed", \{ p_limit/.test(prov), /readFeedRows/.test(prov)], [true, true, true]);
+eq("feed uses get_feed_engine only (no get_feed fallback that could bypass the stranger-only checks)", [/rpc\("get_feed_engine"/.test(prov), /rpc\("get_feed", \{ p_limit/.test(prov), /readFeedRows/.test(prov)], [true, false, true]);
 eq("FeedItem reports watch time and shares, and shows the progress indicator with no numbers", [/sendViewProgress/.test(feed) && /record_view_progress/.test(read("../lib/viewProgress.ts")), /record_post_share/.test(feed), /trial_post_progress/.test(feed), /trialNote\.title/.test(feed)], [true, true, true, true]);
 eq("the owner's own views are not reported", /isOwner\s*\?\s*null/.test(feed), true);
 eq("no ended / incomplete notifications or wording in the app (survived keeps its celebration)", [/verdict_incomplete/.test(notif), /verdict_archived/.test(notif), /verdict_survived/.test(notif), /Trial ended|Trial incomplete|didn't earn/.test(notif)], [false, false, true, false]);

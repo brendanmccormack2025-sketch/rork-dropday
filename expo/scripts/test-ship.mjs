@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** The release script and its lists: every listed file exists, known-connections is last, no old migration that would overwrite newer ones. */
+/** The release script and its lists: every listed file exists, stranger-only is last, no old migration that would overwrite newer ones. */
 import { readFileSync, existsSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 
@@ -15,7 +15,7 @@ const migrations = entries("supabase/MIGRATIONS_ORDER.txt");
 const functions = entries("supabase/FUNCTIONS.txt");
 
 eq("every listed migration exists", migrations.filter((f) => !existsSync(root + "supabase/" + f)), []);
-eq("migration-known-connections.sql is last", migrations[migrations.length - 1], "migration-known-connections.sql");
+eq("migration-stranger-only.sql is last, known-connections right before it", migrations.slice(-2), ["migration-known-connections.sql", "migration-stranger-only.sql"]);
 eq("no duplicates", new Set(migrations).size, migrations.length);
 const defines = (f) => /create or replace function public\.run_survival_checkpoint\(\)/i.test(readFileSync(root + "supabase/" + f, "utf8"));
 eq("the only listed file that defines run_survival_checkpoint() is the engine (older definitions are excluded)", migrations.filter(defines), ["migration-trial-engine.sql"]);

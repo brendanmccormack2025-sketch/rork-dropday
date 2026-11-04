@@ -699,8 +699,8 @@ function isParentUnavailableError(message: string | null | undefined): boolean {
 export const FEED_POST_SELECT =
   "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, qualified_view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)";
 
-/** true: For You comes from get_feed (server order). false: the old on-device query + rankFeed. */
-const USE_SERVER_FEED = true;
+// The feed has ONE source: the get_feed_engine database function (every stranger-only rule is applied there, before any
+// content is returned). There is no on-device query and no ranking here, and no fallback if it fails.
 
 const FEED_PAGE_SIZE = 20;
 
@@ -748,72 +748,6 @@ export function mapFeedRow(row: Record<string, unknown>): Post {
     profile: (row.profiles as Post["profile"]) ?? null,
     follower_visibility: (row.follower_visibility as boolean | null) ?? true,
   };
-}
-
-function rankFeed(posts: Post[], followingIds: string[], currentUserId?: string): Post[] {
-  if (posts.length === 0) return posts;
-  const follows = new Set(followingIds);
-  const now = Date.now();
-
-  const scored = posts.map((p) => {
-    const ageMs = now - new Date(p.created_at).getTime();
-    const ageHours = Math.max(0, ageMs / 3.6e6);
-    const freshness = Math.exp(-ageHours / 12);
-    const engagement = Math.log1p((p.like_count ?? 0) + 2 * (p.comment_count ?? 0));
-    const followBoost = follows.has(p.user_id) ? 3.5 : 0;
-    const jitter = Math.random() * 0.15;
-    // Brief self-boost: guarantee the user's own just-posted drop stays at
-    // the top for ~90s, then normal ranking resumes. Uses ageMs (ms) vs
-    // 90_000 ms — NOT ageHours, which is in HOURS.
-    const isOwn = currentUserId != null && p.user_id === currentUserId;
-    const selfBoost = isOwn && ageMs < 90_000 ? 10 : 0;
-    const score = followBoost + engagement * 1.2 + freshness * 2.5 + jitter + selfBoost;
-    return { p, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-
-  const out: Post[] = [];
-  const remaining = [...scored];
-  let lastUser: string | null = null;
-  while (remaining.length > 0) {
-    const idx = remaining.findIndex((s) => s.p.user_id !== lastUser);
-    const pick = idx >= 0 ? idx : 0;
-    const [chosen] = remaining.splice(pick, 1);
-    out.push(chosen.p);
-    lastUser = chosen.p.user_id;
-  }
-  return out;
-}
-
-/**
- * Rank the "Following" feed: chronological (newest first) with a
- * brief self-boost so the user's own just-posted drop stays at the top.
- *
- * Tiers (highest surfaces first):
- *   2 — own post created < 90s ago (self-boost)
- *   0 — everything else
- * Within each tier, posts are ordered by created_at descending.
- */
-function rankFollowingFeed(posts: Post[], currentUserId?: string): Post[] {
-  if (posts.length === 0) return posts;
-  const now = Date.now();
-
-  const annotated = posts.map((p) => {
-    const created = new Date(p.created_at);
-    const ageMs = now - created.getTime();
-    const isOwn = currentUserId != null && p.user_id === currentUserId;
-    const selfBoost = isOwn && ageMs < 90_000;
-    const tier = selfBoost ? 2 : 0;
-    return { p, tier, createdMs: created.getTime() };
-  });
-
-  annotated.sort((a, b) => {
-    if (b.tier !== a.tier) return b.tier - a.tier;
-    return b.createdMs - a.createdMs;
-  });
-
-  return annotated.map((a) => a.p);
 }
 
 export const [PostsProvider, usePosts] = createContextHook(() => {
@@ -985,69 +919,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     return set;
   }, [myReportsQuery.data]);
 
-  const feedQuery = useQuery({
-    queryKey: ["posts", "fyp", user?.id],
-    enabled: !USE_SERVER_FEED,
-    retry: 1,
-    staleTime: 30_000,
-    queryFn: async (): Promise<Post[]> => {
-      // Server-side mature-content filtering: teen viewers never receive
-      // is_mature posts. Adult/unknown tiers see everything. (Under-13
-      // users can't sign up, but we treat unknown conservatively as
-      // adult here so existing users without a birthdate aren't locked
-      // out — they simply see everything until they set a birthdate.)
-      let viewerTier: AgeTier = "unknown";
-      if (user?.id) {
-        try {
-          const { data: prof } = await supabase
-            .from("profiles")
-            .select("birthdate")
-            .eq("id", user.id)
-            .maybeSingle();
-          viewerTier = computeAgeTier(prof?.birthdate as string | null);
-        } catch {
-          // keep "unknown" — fail open so users can still see content
-        }
-      }
-      const hideMature = viewerTier === "teen";
-      let data: unknown[] | null = null;
-      try {
-        let q = supabase
-          .from("posts")
-          .select(
-            FEED_POST_SELECT
-          )
-          .is("parent_post_id", null)
-          .eq("moderation_status", "active")
-          .in("status", ["trial", "incomplete", "survived"])
-          .order("created_at", { ascending: false })
-          .limit(300);
-        if (hideMature) {
-          q = q.neq("is_mature", true);
-        }
-        const res = await q;
-        if (res.error) {
-          logQueryError("feed", res.error);
-          return [];
-        }
-        data = res.data as unknown[] | null;
-      } catch (e) {
-        logQueryError("feed", e);
-        return [];
-      }
-      const raw: Post[] = ((data ?? []) as Record<string, unknown>[]).map(mapFeedRow);
-      // ── Follower-visibility eligibility ──────────────────────────────
-      // The viewer's own posts and posts from creators they do NOT follow
-      // always pass (the "outside audience"). Posts from followed creators
-      // are eligible only when the post has survived Trial AND the creator
-      // allowed follower visibility — followers never see trial/incomplete
-      // posts, and never see follower_visibility = false posts.
-      const followingIds = followingQuery.data ?? [];
-      const eligible = raw.filter((p) => isFollowerEligible(p, user?.id, followingIds));
-      return rankFeed(eligible, followingIds, user?.id);
-    },
-  });
-
   // ── Server feed: get_feed(p_limit, p_offset) returns the ordered post ids ──
   // The client does not rank. Each page fetches its posts by id and returns
   // them in the order of the returned positions.
@@ -1060,22 +931,14 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     initialPageParam: 0,
     queryFn: async ({ pageParam }): Promise<FeedPage> => {
       const offset = pageParam as number;
-      const rpc = await (supabase as unknown as {
+      // The ONLY source of the feed: the database function, which applies every stranger-only rule before anything is returned.
+      // There is no fallback to a direct query (a failure is an error state, never an unfiltered feed).
+      const feedRpc = await (supabase as unknown as {
         rpc: (
           fn: string,
           args: Record<string, unknown>,
         ) => Promise<{ data: unknown; error: { message: string } | null }>;
       }).rpc("get_feed_engine", { p_limit: FEED_PAGE_SIZE, p_offset: offset, p_seen: offset > 0 ? loadedFeedIds(qc.getQueryData<InfiniteData<FeedPage, number>>(serverFeedKey)) : [] });
-      let feedRpc = rpc;
-      if (rpc.error) {
-        // The engine migration has not been run yet: fall back to the plain server feed.
-        feedRpc = await (supabase as unknown as {
-          rpc: (
-            fn: string,
-            args: Record<string, unknown>,
-          ) => Promise<{ data: unknown; error: { message: string } | null }>;
-        }).rpc("get_feed", { p_limit: FEED_PAGE_SIZE, p_offset: offset });
-      }
       if (feedRpc.error) {
         logQueryError("feed", feedRpc.error);
         throw new Error(feedRpc.error.message);
@@ -1136,10 +999,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
   /** Apply a Post[] cache patch (like counts, optimistic posts) to the feed cache in use. */
   const patchFyp = useCallback(
     (updater: (old: Post[] | undefined) => Post[] | undefined) => {
-      if (!USE_SERVER_FEED) {
-        qc.setQueryData<Post[]>(["posts", "fyp", user?.id], updater);
-        return;
-      }
       qc.setQueryData<InfiniteData<FeedPage, number>>(serverFeedKey, (data) => {
         if (!data) return data;
         const flat = data.pages.flatMap((pg) => pg.posts);
@@ -1167,92 +1026,6 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     [qc, serverFeedKey, user?.id],
   );
 
-  // ── Following feed: chronological with live-window sort override ──
-  // Fetches posts only from users the current user follows, ordered by
-  // created_at descending. rankFollowingFeed applies a live-window tier
-  // boost (posts in tonight's drop window surface to the top) and a brief
-  // 90-second self-boost so the user's own just-posted drop stays #1.
-  const followingFeedQuery = useQuery({
-    queryKey: ["posts", "following-feed", user?.id],
-    enabled: !!user?.id,
-    retry: 1,
-    staleTime: 30_000,
-    queryFn: async (): Promise<Post[]> => {
-      const followingIds = followingQuery.data ?? [];
-      if (!user?.id || followingIds.length === 0) return [];
-      let viewerTier: AgeTier = "unknown";
-      try {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("birthdate")
-          .eq("id", user.id)
-          .maybeSingle();
-        viewerTier = computeAgeTier(prof?.birthdate as string | null);
-      } catch {
-        // keep "unknown" — fail open
-      }
-      const hideMature = viewerTier === "teen";
-      try {
-        let q = supabase
-          .from("posts")
-          .select(
-            "id, user_id, media_url, media_type, caption, parent_post_id, segments, audio_url, trim_data, text_overlays, thumbnail_url, view_count, qualified_view_count, is_mature, moderation_status, status, follower_visibility, created_at, survived_at, distribution_started_at, distribution_expires_at, expired_at, media_deleted_at, likes(count), comment_count, reaction_count, profiles!posts_user_id_fkey(username, display_name, avatar_url, instagram_handle, tiktok_handle, youtube_url, website)"
-          )
-          .is("parent_post_id", null)
-          .eq("moderation_status", "active")
-          .in("status", ["trial", "incomplete", "survived"])
-          .in("user_id", followingIds)
-          .order("created_at", { ascending: false })
-          .limit(200);
-        if (hideMature) {
-          q = q.neq("is_mature", true);
-        }
-        const res = await q;
-        if (res.error) {
-          logQueryError("following-feed", res.error);
-          return [];
-        }
-        const raw: Post[] = ((res.data ?? []) as Record<string, unknown>[]).map((row) => ({
-          id: row.id as string,
-          user_id: row.user_id as string,
-          media_url: row.media_url as string,
-          media_type: row.media_type as "image" | "video",
-          caption: (row.caption as string | null) ?? null,
-          parent_post_id: (row.parent_post_id as string | null) ?? null,
-          segments: (row.segments as string[] | null) ?? null,
-          audio_url: (row.audio_url as string | null) ?? null,
-          trim_data: (row.trim_data as Post["trim_data"]) ?? null,
-          text_overlays: (row.text_overlays as Post["text_overlays"]) ?? null,
-          thumbnail_url: (row.thumbnail_url as string | null) ?? null,
-          is_mature: (row.is_mature as boolean | null) ?? false,
-          moderation_status: (row.moderation_status as string | undefined) ?? "active",
-          status: (row.status as Post["status"]) ?? "trial",
-          survived_at: (row.survived_at as string | null) ?? null,
-          distribution_started_at: (row.distribution_started_at as string | null) ?? null,
-          distribution_expires_at: (row.distribution_expires_at as string | null) ?? null,
-          expired_at: (row.expired_at as string | null) ?? null,
-          media_deleted_at: (row.media_deleted_at as string | null) ?? null,
-          created_at: row.created_at as string,
-          view_count: (row.view_count as number | undefined) ?? 0,
-          qualified_view_count: (row.qualified_view_count as number | undefined) ?? 0,
-          like_count: (row.likes as Array<{ count: number }> | undefined)?.[0]?.count ?? 0,
-          comment_count: (row.comment_count as number | undefined) ?? 0,
-          reaction_count: (row.reaction_count as number | undefined) ?? 0,
-          profile: (row.profiles as Post["profile"]) ?? null,
-          follower_visibility: (row.follower_visibility as boolean | null) ?? true,
-        }));
-        // Same shared eligibility rule as the fyp feed. Everything in this
-        // query is from a followed creator (so only survived + follower-allowed
-        // posts pass); the viewer's own optimistic posts also pass via the
-        // self-check inside isFollowerEligible.
-        const eligible = raw.filter((p) => isFollowerEligible(p, user.id, followingIds));
-        return rankFollowingFeed(eligible, user.id);
-      } catch (e) {
-        logQueryError("following-feed", e);
-        return [];
-      }
-    },
-  });
 
   const myPostsQuery = useQuery({
     queryKey: ["posts", "mine", user?.id],
@@ -1383,9 +1156,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
     onMutate: async ({ postId, liked }) => {
       // Snapshot current feed caches for rollback on error
-      const prevFyp = USE_SERVER_FEED
-        ? qc.getQueryData<InfiniteData<FeedPage, number>>(serverFeedKey)?.pages.flatMap((pg) => pg.posts)
-        : qc.getQueryData<Post[]>(["posts", "fyp", user?.id]);
+      const prevFyp = qc.getQueryData<InfiniteData<FeedPage, number>>(serverFeedKey)?.pages.flatMap((pg) => pg.posts);
       const prevFollowing = qc.getQueryData<Post[]>(["posts", "following-feed", user?.id]);
       const prevMine = qc.getQueryData<Post[]>(["posts", "mine", user?.id]);
 
@@ -1543,12 +1314,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       if (!user?.id) return [];
       const following = followingQuery.data ?? [];
       try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("id, username, display_name, avatar_url")
-          .neq("id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(50);
+        // Strangers with a survived post only: the database leaves out the viewer, people who know them, and blocks.
+        const { data, error } = await supabase.rpc("suggested_creators", { p_limit: 50 });
         if (error) {
           console.warn("[suggested] error", error.message);
           return [];
@@ -1566,7 +1333,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
 
   // ── Explore tab: suggested creators ranked by engagement ──────────
   const exploreCreatorsQuery = useQuery({
-    queryKey: ["explore", "creators"],
+    queryKey: ["explore", "creators", user?.id],
+    enabled: !!user?.id,
     retry: 1,
     staleTime: 120_000,
     queryFn: async (): Promise<ExploreCreator[]> => {
@@ -3108,23 +2876,20 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       ),
       exploreCreatorsLoading: exploreCreatorsQuery.isLoading,
       refetchExploreCreators: exploreCreatorsQuery.refetch,
-      feed: filterBlocked(USE_SERVER_FEED ? serverFeedPosts : (feedQuery.data ?? [])),
-      feedLoading: USE_SERVER_FEED ? serverFeedQuery.isLoading : feedQuery.isLoading,
+      feed: filterBlocked(serverFeedPosts),
+      feedLoading: serverFeedQuery.isLoading,
       postedBannerAt,
-      feedError: USE_SERVER_FEED ? serverFeedQuery.isError && serverFeedPosts.length === 0 : false,
-      feedHasMore: USE_SERVER_FEED ? !!serverFeedQuery.hasNextPage : false,
-      feedLoadingMore: USE_SERVER_FEED ? serverFeedQuery.isFetchingNextPage : false,
+      feedError: serverFeedQuery.isError && serverFeedPosts.length === 0,
+      feedHasMore: !!serverFeedQuery.hasNextPage,
+      feedLoadingMore: serverFeedQuery.isFetchingNextPage,
       fetchMoreFeed: () => {
-        if (USE_SERVER_FEED && serverFeedQuery.hasNextPage && !serverFeedQuery.isFetchingNextPage) {
+        if (serverFeedQuery.hasNextPage && !serverFeedQuery.isFetchingNextPage) {
           void serverFeedQuery.fetchNextPage();
         }
       },
-      refetchFeed: USE_SERVER_FEED ? serverFeedQuery.refetch : feedQuery.refetch,
+      refetchFeed: serverFeedQuery.refetch,
       // Pull to refresh / Retry: start over from page 0.
-      refreshFeed: USE_SERVER_FEED ? refetchServerFeed : feedQuery.refetch,
-      followingFeed: filterBlocked(followingFeedQuery.data ?? []),
-      followingFeedLoading: followingFeedQuery.isLoading,
-      refetchFollowingFeed: followingFeedQuery.refetch,
+      refreshFeed: refetchServerFeed,
       myPosts: myPostsQuery.data ?? [],
       refetchMyPosts: myPostsQuery.refetch,
       myProfile: myProfileQuery.data ?? null,
@@ -3174,12 +2939,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
     },
     [
       exploreCreatorsQuery,
-      feedQuery,
       postedBannerAt,
       serverFeedQuery,
       serverFeedPosts,
       refetchServerFeed,
-      followingFeedQuery,
       myPostsQuery,
       myProfileQuery,
       updateProfile,

@@ -112,7 +112,7 @@ if (!BIN) {
       const kcPath = join(sqlDir, "migration-known-connections.sql");
       const kc1 = psqlFile("t", kcPath), kc2 = psqlFile("t", kcPath);
       eq("known-connections after friends applies cleanly, and again", [/ERROR/.test(kc1.stderr), /ERROR/.test(kc2.stderr)], [false, false]);
-      eq("MIGRATIONS_ORDER.txt: friends, then push, then known-connections, which stays last", (() => { const o = readFileSync(join(sqlDir, "MIGRATIONS_ORDER.txt"), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")); return o.slice(-3); })(), ["migration-friends-messages.sql", "migration-push.sql", "migration-known-connections.sql"]);
+      eq("MIGRATIONS_ORDER.txt: friends, push, the live snapshot, known-connections, then stranger-only last", (() => { const o = readFileSync(join(sqlDir, "MIGRATIONS_ORDER.txt"), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")); return o.slice(-5); })(), ["migration-friends-messages.sql", "migration-push.sql", "migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql"]);
 
       const U = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
       const asUser = (uid, sql) => psql("t", `set role authenticated; set request.jwt.claim.sub='${uid}'; ${sql}`, ["-v", "ON_ERROR_STOP=1"]);
@@ -272,21 +272,8 @@ if (!BIN) {
       eq("a friend cannot read the creator's testing post directly; a stranger can", [readsP(U(2)), readsP(U(9))], ["0", "1"]);
       ok("(setup) the creator sends it to that friend", as(U(1), `select public.send_post_to_friend('${U(2)}', '${P(11)}')`).ok);
       eq("...now the friend can open it", readsP(U(2)), "1");
-      // a friend the creator lets in to test: not known any more (only that pair, only that direction), private, undone by unfriending
-      ok("only the creator decides, and only for a friend", !as(U(1), `select public.set_friend_can_test('${U(9)}', true)`).ok && as(U(1), `select public.set_friend_can_test('${U(2)}', true)`).ok);
-      eq("let in: the friend is not silenced for the creator's testing posts; the other direction still is", [q(`select public.trial_is_silenced('${U(1)}','${U(2)}')`), q(`select public.trial_is_silenced('${U(2)}','${U(1)}')`)], ["f", "t"]);
-      eq("the creator sees the setting; the friend cannot read it", [as(U(1), `select public.friend_can_test('${U(2)}')`).out, as(U(2), `select count(*) from public.friend_test_optin`).ok], ["t", false]);
-      as(U(1), `select public.set_friend_can_test('${U(2)}', false)`);
-      eq("switched back: silenced again", q(`select public.trial_is_silenced('${U(1)}','${U(2)}')`), "t");
-      as(U(1), `select public.set_friend_can_test('${U(2)}', true)`);
-      Q(`delete from public.friendships where user_a='${U(1)}' and user_b='${U(2)}'`);
-      eq("unfriending removes the exception", q(`select count(*) from public.friend_test_optin`), "0");
-      Q(`insert into public.friendships (user_a, user_b) values ('${U(1)}','${U(2)}')`);
-      // the friends switch
-      Q(`update public.trial_engine_config set known_source_friends=false`);
-      eq("switch off: friendship alone is not 'known' any more", [q(`select count(*) from public.known_connections where source='friend'`), q(`select public.trial_is_silenced('${U(1)}','${U(2)}')`)], ["0", "f"]);
-      Q(`update public.trial_engine_config set known_source_friends=true`);
-      eq("switch on (default): friends are known again", q(`select count(*) from public.known_connections where source='friend'`), "2");
+      // there is no per-friend exception any more, and no switch: friends are always known (migration-stranger-only.sql)
+      eq("no exception table, no switch: friends are always known", [q("select to_regclass('public.friend_test_optin') is null"), q("select count(*) from information_schema.columns where table_name='trial_engine_config' and column_name='known_source_friends'")], ["t", "0"]);
 
       // ── 6. views that came from a message never count ──
       wipe();
