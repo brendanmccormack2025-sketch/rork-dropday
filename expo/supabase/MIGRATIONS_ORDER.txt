@@ -23,6 +23,7 @@ migration-hide-ended.sql
 migration-views-exclude-author.sql
 migration-friends-messages.sql
 migration-push.sql
+migration-live-snapshot.sql
 migration-known-connections.sql
 
 # ── NOT run by ship.sh, on purpose ───────────────────────────────────────────────────────────────────────────────
