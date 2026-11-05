@@ -65,7 +65,7 @@ const camera = read("../app/camera.tsx");
 const feedItem = read("../components/FeedItem.tsx");
 const tree = read("../app/post/[id]/reaction-tree.tsx");
 const provider = read("../providers/PostsProvider.tsx");
-ok("camera: the check button posts a reaction directly (the editor only for new posts)", /onPress=\{isReaction \? \(\) => void postReaction\(\) : goToEdit\}/.test(camera) && /const isReaction = !!\(reactingTo \|\| rootDropId\);/.test(camera));
+ok("camera: the check button posts a reaction directly (the editor only for new posts)", /onPress=\{isReaction \? \(\) => void postReaction\(\) : \(\) => void goToEdit\(\)\}/.test(camera) && /const isReaction = !!\(reactingTo \|\| rootDropId\);/.test(camera));
 ok("camera: one post at a time, spinner while posting", /postingReactionRef\.current\) return;/.test(camera) && /postingReaction \? <ActivityIndicator/.test(camera));
 ok("camera: after posting, the reactions of the post open", /router\.replace\(`\/post\/\$\{rootDropId \|\| reactingTo\}\/reaction-tree` as never\);/.test(camera));
 ok("camera: a failure keeps the recording and says so", /Alert\.alert\(result\.message/.test(camera));

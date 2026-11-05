@@ -9,6 +9,8 @@
  * Pure; erasable TypeScript only so the Node tests can run it.
  */
 
+import { boundedEnd, sanitizeClips } from "./clipBounds.ts";
+
 export type EditRange = { uri: string; trimStartMs: number; trimEndMs: number };
 
 /** Pieces closer than this are the same footage (a split leaves none). */
@@ -22,7 +24,7 @@ export type ClipLike = { uri: string; trimStartMs?: number; trimEndMs?: number; 
 
 /** A clip's range: trimEnd 0 / missing means "to the end of the file". */
 export function rangeOf(c: ClipLike): EditRange {
-  return { uri: c.uri, trimStartMs: c.trimStartMs ?? 0, trimEndMs: c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0) };
+  return { uri: c.uri, trimStartMs: c.trimStartMs ?? 0, trimEndMs: boundedEnd(c) };
 }
 
 /** Merge ranges that continue where the previous one ended (same file). The input order is the playing order. */
@@ -59,8 +61,10 @@ export function validateEdit(edit: EditRange[], fileLengthMs?: (uri: string) => 
 
 /** The clips as a validated, coalesced render edit. */
 export function renderEditOf(clips: ClipLike[]): { edit: EditRange[]; editMs: number; problem: EditProblem | null } {
-  const edit = coalesceEdit(clips.map(rangeOf));
+  // a clip beyond the end of its file is clamped, and one that becomes empty is dropped: one bad clip never blocks the render
+  const safe = sanitizeClips(clips);
+  const edit = coalesceEdit(safe.map(rangeOf));
   const lengths = new Map<string, number>();
-  for (const c of clips) if (c.durationMs && c.durationMs > 0) lengths.set(c.uri, Math.max(lengths.get(c.uri) ?? 0, c.durationMs));
+  for (const c of safe) if (c.durationMs && c.durationMs > 0) lengths.set(c.uri, Math.max(lengths.get(c.uri) ?? 0, c.durationMs));
   return { edit, editMs: editLengthMs(edit), problem: validateEdit(edit, (uri) => lengths.get(uri)) };
 }

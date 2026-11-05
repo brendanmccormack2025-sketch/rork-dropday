@@ -10,6 +10,7 @@
  */
 import { documentDirectory, cacheDirectory, copyAsync, deleteAsync, downloadAsync } from "@/lib/fileSystemCompat";
 import { recordClientError } from "@/lib/clientErrors";
+import { measureClips } from "@/lib/clipMeasure";
 import type { EditOverlay } from "@/lib/editModel";
 import { getLegacyMediaLibrary, saveToLibraryAsync } from "@/lib/mediaLibraryCompat";
 import { isDebugOwner } from "@/constants/debug";
@@ -41,7 +42,9 @@ async function ensureAddPermission(): Promise<boolean> {
 }
 
 /** Render `clips` with the overlays burned in. Throws on any problem (the caller reports it). */
-async function renderExport(clips: DraftClip[], overlays: EditOverlay[]): Promise<{ uri: string }> {
+async function renderExport(rawClips: DraftClip[], overlays: EditOverlay[]): Promise<{ uri: string }> {
+  // measured and clamped to the real end of each file (a clip that becomes empty is dropped): saving never fails on one bad clip
+  const clips = await measureClips(rawClips);
   const { edit, editMs, problem } = buildRenderEdit(clips);
   if (editMs <= 0) throw new Error("export: nothing to render");
   if (problem) throw new Error(`export: invalid edit (${problem})`);

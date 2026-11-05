@@ -81,7 +81,7 @@ const seg = (id, runId, ms, type = "video") => ({ id, uri: `file:///${id}.mov`, 
 {
   eq("Next needs at least 1 s", [canProceed([seg("a", "r1", 900)]), canProceed([seg("a", "r1", 1000)]), canProceed([])], [false, true, false]);
   const cam = read("../app/camera.tsx");
-  ok("Next appears from 1 s and the editor never gets the recorder's timing", /showNext = canProceed\(clips\)/.test(cam) && /measuredMs: _m/.test(cam) && /if \(!canProceed\(clips\) \|\| isRecording\) return;/.test(cam));
+  ok("Next appears from 1 s and the editor never gets the recorder's timing", /showNext = canProceed\(clips\)/.test(cam) && /measuredMs: _m/.test(cam) && /if \(!canProceed\(clips\) \|\| isRecording \|\| goingToEditRef\.current\) return;/.test(cam) && /measureClips\(raw\)/.test(cam));
   ok("no per-segment camera-roll saves", !/saveToLibraryAsync|saveToGallery/.test(read("../hooks/useCameraRecorder.ts")));
 
   // What the editor does with three runs (clips arrive without durations, as the camera sends them).

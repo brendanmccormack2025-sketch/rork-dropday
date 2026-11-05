@@ -74,6 +74,8 @@ import { captionLookKey, drawCaptionsLive, lookSignature } from "@/lib/previewFr
 import { backAction, initialStep, nextStep, selectionBarSide, stepLayout, videoTapAction, type EditorStep } from "@/lib/editorFlow";
 import { DEFAULT_TEXT_OVERLAY_POS, TEXT_MAX_WIDTH, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame, frameToFrac } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
+import { fileLengthMs, setFileLengthMs } from "@/lib/clipBounds";
+import { measureClips, probeFileLengthMs } from "@/lib/clipMeasure";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { formatRenderStats, recordRenderStats, reportRender } from "@/lib/renderReport";
 import type { CaptionStyle } from "@/lib/editModel";
@@ -845,6 +847,12 @@ export default function EditScreen() {
           clipsToProbe.map(async (clip) => {
             let player: VideoPlayer | null = null;
             try {
+              // the file's real length first (native track timing); the player's own report only when that is not available
+              const real = await probeFileLengthMs(clip.uri);
+              if (real && real > 0) {
+                setFileLengthMs(clip.uri, real);
+                return { id: clip.id, durationMs: real };
+              }
               player = createVideoPlayer({ uri: clip.uri });
               const status = await new Promise<"readyToPlay" | "error" | "timeout">((resolve) => {
                 const timeout = setTimeout(() => {
@@ -885,7 +893,7 @@ export default function EditScreen() {
               ...c,
               durationMs: probed.durationMs,
               trimEndMs: c.trimEndMs !== undefined && c.trimEndMs > 0
-                ? c.trimEndMs
+                ? Math.min(c.trimEndMs, probed.durationMs)
                 : probed.durationMs,
             };
           });
@@ -1309,20 +1317,24 @@ export default function EditScreen() {
       const idx = activeIndexRef.current;
       const currentClips = clipsRef.current;
       const clip = currentClips[idx];
+      // never longer than the measured file; a trim end that is past the real end comes back with it
+      const knownLen = clip ? fileLengthMs(clip.uri) : undefined;
+      const realDur = knownLen !== undefined ? Math.min(sourceDur, knownLen) : sourceDur;
       if (
         clip &&
         clip.type === "video" &&
         (clip.durationMs === undefined ||
           clip.durationMs === 0 ||
-          Math.abs(clip.durationMs - sourceDur) > 100)
+          Math.abs(clip.durationMs - realDur) > 100 ||
+          (clip.trimEndMs ?? 0) > realDur + 100)
       ) {
         const updated = [...currentClips];
         updated[idx] = {
           ...clip,
-          durationMs: sourceDur,
+          durationMs: realDur,
           trimEndMs: clip.trimEndMs !== undefined && clip.trimEndMs > 0
-            ? clip.trimEndMs
-            : sourceDur,
+            ? Math.min(clip.trimEndMs, realDur)
+            : realDur,
         };
         setClips(updated);
       }
@@ -4000,6 +4012,9 @@ export default function EditScreen() {
 
   const executePost = useCallback(async () => {
     try {
+      // Every clip is measured and clamped to the real end of its file (a clip that holds nothing is dropped) before the
+      // render AND before the raw fallback, so broken trim data is never rendered or uploaded.
+      const clips = await measureClips(clipsRef.current);
       if (clips.length === 0) {
         console.error("[edit] executePost: clips array is empty — cannot post");
         setError("Nothing to post. Please record or select media first.");
@@ -4132,6 +4147,15 @@ export default function EditScreen() {
         rendered = result.value;
         renderNote = result.note;
         if (captionOverlaysForPost.length > 0 && !result.withCaptions) skipCaptionsForPostRef.current = true;
+        // Several recordings that could not be rendered into one video are NOT posted as raw pieces with trim data (they
+        // play once and freeze): stay in the editor and say so.
+        if (!rendered && clips.length > 1) {
+          void recordClientError(new Error(`post: multi-clip render failed (${renderNote})`), { kind: "post", stage: "render" });
+          resumeRenders();
+          setUploading(false);
+          setError("Couldn't prepare your video. Please try again.");
+          return;
+        }
       } else if (captionsSeen && !skipCaptionsForPostRef.current) {
         // Captions cannot be burned in on this device/build: ask before posting without.
         if (!(await askPostWithoutCaptions())) {

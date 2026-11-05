@@ -5,6 +5,7 @@
  *
  * No network, no paid API: the native VideoRender module (iOS) does the work.
  */
+import { measureClips } from "@/lib/clipMeasure";
 import { requireOptionalNativeModule } from "expo";
 import { Platform } from "react-native";
 
@@ -153,10 +154,12 @@ export function checkRenderResult(
  * empty or short output); the caller then posts the old way. Never throws.
  */
 export async function renderForPost(
-  clips: DraftClip[],
+  rawClips: DraftClip[],
   onProgress: (progress: number) => void,
   overlays: EditOverlay[] = [],
 ): Promise<RenderOutcome> {
+  // every clip is measured and clamped to the real end of its file first: one bad clip never blocks the render
+  const clips = await measureClips(rawClips);
   let subscription: { remove(): void } | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let timedOut = false;

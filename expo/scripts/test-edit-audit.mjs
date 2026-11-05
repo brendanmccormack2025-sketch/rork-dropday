@@ -173,7 +173,8 @@ const TIGHT = SENSITIVITY_PRESETS.tight;
   eq("a valid edit has no problem and a length", [validateEdit(coalesceEdit(ok1)), editLengthMs(coalesceEdit(ok1))], [null, 3000]);
   const bad = (r) => validateEdit([r]);
   eq("invalid intervals are caught before anything is exported", [validateEdit([]), bad({ uri: "u", trimStartMs: 500, trimEndMs: 500 }), bad({ uri: "u", trimStartMs: 800, trimEndMs: 300 }), bad({ uri: "u", trimStartMs: NaN, trimEndMs: 300 }), bad({ uri: "u", trimStartMs: -5, trimEndMs: 300 }), bad({ uri: "u", trimStartMs: 0, trimEndMs: 10 })], ["empty edit", "invalid clip range", "invalid clip range", "invalid clip range", "invalid clip range", "clip too short"]);
-  eq("a range past the end of its file is caught (clips carry the file's length)", renderEditOf([{ uri: "u", trimStartMs: 0, trimEndMs: 9000, durationMs: 5000 }]).problem, "clip beyond the end of its file");
+  eq("a range past the end of its file is caught when validated directly", validateEdit([{ uri: "u", trimStartMs: 0, trimEndMs: 9000 }], () => 5000), "clip beyond the end of its file");
+  eq("...and in a clip list it is clamped to the file's length instead (no problem, the render keeps what exists)", (() => { const r = renderEditOf([{ uri: "u", trimStartMs: 0, trimEndMs: 9000, durationMs: 5000 }]); return [r.problem, r.edit, r.editMs]; })(), [null, [{ uri: "u", trimStartMs: 0, trimEndMs: 5000 }], 5000]);
   eq("a trimEnd of 0 means to the end of the file", rangeOf({ uri: "u", trimStartMs: 100, trimEndMs: 0, durationMs: 900 }), { uri: "u", trimStartMs: 100, trimEndMs: 900 });
 }
 

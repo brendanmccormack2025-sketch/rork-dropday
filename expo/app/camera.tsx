@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import UiText from "@/components/UiText";
 import { wantsEditChoice } from "@/lib/editChoice";
+import { measureClips } from "@/lib/clipMeasure";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
@@ -355,10 +356,16 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
     router.replace(`/post/${rootDropId || reactingTo}/reaction-tree` as never);
   }, [clips, isRecording, reactingTo, rootDropId, addOptimisticPost, createPost, updateOptimisticProgress, teardown, router, navigation]);
 
-  const goToEdit = useCallback(() => {
-    if (!canProceed(clips) || isRecording) return;
-    // The recorder's own timing is only for the bar; the editor measures the real lengths.
-    const forEditor = usableSegments(clips).map(({ measuredMs: _m, ...clip }) => clip);
+  const goingToEditRef = useRef(false);
+  const goToEdit = useCallback(async () => {
+    if (!canProceed(clips) || isRecording || goingToEditRef.current) return;
+    goingToEditRef.current = true;
+    // The recorder's own timing is only for the bar. Each file's REAL length is measured here (the recorder can report more
+    // than a flip-ended file holds), so the editor opens with true durations; a clip that holds no video is dropped.
+    const raw = usableSegments(clips).map(({ measuredMs: _m, ...clip }) => clip);
+    const measured = await measureClips(raw).catch(() => raw);
+    const forEditor = measured.length > 0 ? measured : raw;
+    goingToEditRef.current = false;
     const params: Record<string, string> = { clips: JSON.stringify(forEditor) };
     if (reactingTo) params.reactingTo = reactingTo;
     if (rootDropId) params.rootDropId = rootDropId;
@@ -575,7 +582,7 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
         <View style={styles.sideSlot}>
           {showNext && (
             <Pressable
-              onPress={isReaction ? () => void postReaction() : goToEdit}
+              onPress={isReaction ? () => void postReaction() : () => void goToEdit()}
               disabled={isRecording || postingReaction}
               style={[styles.sideBtn, styles.nextBtn, (isRecording || postingReaction) && styles.sideBtnDisabled]}
               accessibilityRole="button"

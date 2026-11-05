@@ -10,6 +10,8 @@
  * Pure; erasable TypeScript only so the Node tests can run it.
  */
 
+import { boundedEnd, isEmptyAfterClamp } from "../clipBounds.ts";
+
 export type ClipLike = { id?: string; uri?: string; trimStartMs?: number; trimEndMs?: number; durationMs?: number };
 
 /** One kept range of the source and where it sits on the edited timeline. */
@@ -25,7 +27,7 @@ export type Segment = {
 /** A clip's source range: trimEnd 0 / missing means "to the end of the file". */
 export function clipRange(c: ClipLike): { start: number; end: number } {
   const start = c.trimStartMs ?? 0;
-  const end = c.trimEndMs && c.trimEndMs > 0 ? c.trimEndMs : (c.durationMs ?? 0);
+  const end = boundedEnd(c);   // never past the real end of the file
   return { start, end: Number.isFinite(end) ? end : start };
 }
 
@@ -36,7 +38,7 @@ export function buildSegments(clips: ClipLike[]): Segment[] {
   clips.forEach((c, i) => {
     const { start, end } = clipRange(c);
     const dur = end - start;
-    if (!(dur > 0)) return;
+    if (!(dur > 0) || isEmptyAfterClamp(c)) return;   // a clip that holds nothing of its file has no piece (indices stay)
     out.push({ index: i, id: c.id ?? String(i), srcStartMs: start, srcEndMs: end, outStartMs: t, outEndMs: t + dur });
     t += dur;
   });

@@ -13,6 +13,7 @@ import {
   type EditorCaptionLine,
   type WordEdits,
 } from "@/lib/transcription/captionLines";
+import { sanitizeClips } from "@/lib/clipBounds";
 import type { DraftClip } from "@/providers/PostsProvider";
 
 const EXPLAINED_KEY = "trial:captionsExplained";
@@ -39,7 +40,7 @@ export type CaptionsOptions = {
  */
 export function useCaptions(
   enabled: boolean,
-  clips: DraftClip[],
+  rawClips: DraftClip[],
   ready: boolean,
   captionStyle?: CaptionStyle | null,
   options?: CaptionsOptions,
@@ -63,6 +64,8 @@ export function useCaptions(
   const startedUriRef = useRef<string[] | null>(null);
 
   // Every clip must be a local video; the sources are its distinct files.
+  // ranges past the end of a file are clamped (and empty clips dropped) so one bad clip cannot fail the captions
+  const clips = useMemo(() => sanitizeClips(rawClips), [rawClips]);
   const captionable = clips.length > 0 && clips.every((c) => c.type === "video" && !c.uri.startsWith("http"));
   const sources = useMemo(() => (captionable ? distinctSources(clips) : []), [captionable, clips]);
   const sourcesKey = sources.join("|");
