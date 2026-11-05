@@ -9,6 +9,7 @@
  * time, so a change mid-render cancels it and waits for it to finish before the
  * next render starts.
  */
+import { createNativeLock } from "@/lib/deadline";
 import { AppState, type AppStateStatus } from "react-native";
 
 import { deleteAsync } from "@/lib/fileSystemCompat";
@@ -48,15 +49,10 @@ export type RenderAheadOptions = {
  * Native rendering is one at a time, and the preview and the final render share it: whoever asks second waits
  * for the first to finish (or be cancelled).
  */
-let nativeChain: Promise<void> = Promise.resolve();
-export function acquireNative(): Promise<() => void> {
-  let release: () => void = () => {};
-  const prev = nativeChain;
-  nativeChain = new Promise<void>((r) => {
-    release = r;
-  });
-  return prev.then(() => release);
-}
+const nativeLock = createNativeLock();
+export const acquireNative = nativeLock.acquire;
+/** Like acquireNative, but gives up with a DeadlineError after `ms` (the merge must never wait forever). */
+export const acquireNativeWithin = nativeLock.acquireWithin;
 /** Longest timeline rendered ahead. */
 export const RENDER_AHEAD_MAX_EDIT_MS = 180_000;
 /** Failures in one editor session before it stops trying. */

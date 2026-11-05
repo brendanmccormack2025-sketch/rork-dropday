@@ -68,7 +68,7 @@ import FeedSafeZones from "@/components/FeedSafeZones";
 import { defaultCaptionStyle } from "@/lib/transcription/captionStyle";
 import { guidesVisible } from "@/lib/guides";
 import { cancelTextEdit, textOverlaysForSave } from "@/lib/textOverlayStyle";
-import { MERGE_FAILED_TEXT, MERGE_PREPARING_TEXT, mergeVideoClips, shouldMerge } from "@/lib/mergeClips";
+import { MERGE_FAILED_TEXT, MERGE_PREPARING_TEXT, MERGE_TRY_AGAIN_TEXT, mergeVideoClips, shouldMerge } from "@/lib/mergeClips";
 import { renderMerge } from "@/lib/mergeNative";
 import { captionLookKey, drawCaptionsLive, lookSignature } from "@/lib/previewFreshness";
 import { backAction, initialStep, nextStep, selectionBarSide, stepLayout, videoTapAction, type EditorStep } from "@/lib/editorFlow";
@@ -2649,6 +2649,8 @@ export default function EditScreen() {
     const result = await mergeVideoClips({
       clips: originalClipsRef.current,
       render: renderMerge,
+      // the time limit is hit: the native render is told to stop (the spinner below is closed either way)
+      onTimeout: () => void import("@/modules/video-render").then((m) => m.cancelRender()).catch(() => {}),
       newId: newClipId,
       onProgress: (p) => {
         if (mountedRef.current) setMergeUi((prev) => (prev.kind === "merging" ? { kind: "merging", progress: p } : prev));
@@ -2685,8 +2687,16 @@ export default function EditScreen() {
           .catch(() => {});
       }
     } else {
-      void recordClientError(new Error(result.message), { kind: "mergeClips", clipCount: originalClipsRef.current.length });
-      setMergeUi({ kind: "failed", message: result.message });
+      // Never a spinner without a way out: the overlay closes, the clips stay separate and editable (no AI edit), and the
+      // creator is told. The stage that failed and each clip's numbers go to client_errors.
+      void recordClientError(new Error(result.message), {
+        kind: "mergeClips",
+        stage: result.stage ?? null,
+        clipCount: originalClipsRef.current.length,
+        clips: originalClipsRef.current.map((c, i) => ({ i, uri: c.uri.slice(-24), durationMs: (c as { durationMs?: number }).durationMs ?? null, trimEndMs: (c as { trimEndMs?: number }).trimEndMs ?? null, fileMs: fileLengthMs(c.uri) ?? null })),
+      });
+      setMergeUi({ kind: "idle" });
+      setError(MERGE_TRY_AGAIN_TEXT);
     }
   }, [replaceClips]);
   useEffect(() => {

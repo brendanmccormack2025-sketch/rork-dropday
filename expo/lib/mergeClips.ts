@@ -6,6 +6,8 @@
  * Pure apart from the injected `render`; erasable TypeScript only so the Node tests can run it.
  */
 
+import { DeadlineError, deadline } from "./deadline.ts";
+
 export type MergeInput = { id?: string; uri: string; type: "image" | "video" };
 
 /** The single clip that replaces the parts. */
@@ -20,10 +22,14 @@ export type MergedClip = {
 
 export type MergeResult =
   | { ok: true; clip: MergedClip; mergedFrom: string[]; timing?: unknown }
-  | { ok: false; message: string };
+  | { ok: false; message: string; stage?: string };
 
 export const MERGE_FAILED_TEXT = "Couldn't prepare your video.";
 export const MERGE_PREPARING_TEXT = "Preparing your video…";
+/** What the creator is told when the merge fails or times out (the editor stays usable). */
+export const MERGE_TRY_AGAIN_TEXT = "Couldn't prepare your video. Please try again.";
+/** The whole merge (every native step included) gives up after this: there is always a way out of the spinner. */
+export const MERGE_TOTAL_TIMEOUT_MS = 150_000;
 
 /** Several clips, all video, and not a saved draft (a draft was merged when it was made). */
 export function shouldMerge(clips: ReadonlyArray<Pick<MergeInput, "type">>, opts: { isDraft: boolean }): boolean {
@@ -37,20 +43,37 @@ export function shouldMerge(clips: ReadonlyArray<Pick<MergeInput, "type">>, opts
 export async function mergeVideoClips(args: {
   clips: ReadonlyArray<MergeInput>;
   /** Renders the uris in order into one file; progress is 0..1. */
-  render: (uris: string[], onProgress: (p: number) => void) => Promise<{ uri: string; durationMs: number; timing?: unknown }>;
+  render: (uris: string[], onProgress: (p: number) => void, onStage: (stage: string) => void) => Promise<{ uri: string; durationMs: number; timing?: unknown }>;
   onProgress?: (p: number) => void;
   newId: () => string;
+  /** Total time limit (ms). */
+  timeoutMs?: number;
+  /** Called when the limit is hit, to cancel the native work. */
+  onTimeout?: () => void;
 }): Promise<MergeResult> {
   const uris = args.clips.map((c) => c.uri);
   if (uris.length < 2) return { ok: false, message: "Nothing to merge." };
+  let stage = "starting";
   try {
-    const out = await args.render(uris, (p) => {
-      try {
-        args.onProgress?.(Math.max(0, Math.min(1, p)));
-      } catch {
-        // progress is cosmetic
-      }
-    });
+    const out = await deadline(
+      Promise.resolve().then(() =>
+        args.render(
+          uris,
+          (p) => {
+            try {
+              args.onProgress?.(Math.max(0, Math.min(1, p)));
+            } catch {
+              // progress is cosmetic
+            }
+          },
+          (s) => {
+            stage = s;
+          },
+        ),
+      ),
+      args.timeoutMs ?? MERGE_TOTAL_TIMEOUT_MS,
+      () => stage,
+    );
     if (!out || !out.uri || !(out.durationMs > 0)) return { ok: false, message: "The merged video was empty." };
     return {
       ok: true,
@@ -60,6 +83,14 @@ export async function mergeVideoClips(args: {
     };
   } catch (e) {
     const message = String((e as { message?: unknown } | null)?.message ?? e ?? "unknown error").slice(0, 300);
-    return { ok: false, message };
+    const failedStage = e instanceof DeadlineError ? e.stage : ((e as { stage?: unknown } | null)?.stage as string | undefined) ?? stage;
+    if (e instanceof DeadlineError) {
+      try {
+        args.onTimeout?.();
+      } catch {
+        // best effort
+      }
+    }
+    return { ok: false, message, stage: failedStage };
   }
 }

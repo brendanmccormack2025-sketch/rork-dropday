@@ -61,12 +61,12 @@ const newId = () => `m${++idSeq}`;
   eq("the message shown", MERGE_FAILED_TEXT, "Couldn't prepare your video.");
 
   ok("the editor shows Preparing your video… with progress, and Retry on a failure", /MERGE_PREPARING_TEXT/.test(edit) && /accessibilityLabel="Retry"/.test(edit) && /handleMergeRetry/.test(edit));
-  ok("a failure is recorded and never throws out of the screen", /recordClientError\(new Error\(result\.message\), \{ kind: "mergeClips"/.test(edit));
+  ok("a failure is recorded and never throws out of the screen", /recordClientError\(new Error\(result\.message\), \{\s*kind: "mergeClips"/.test(edit));
   ok("captions and the render-ahead wait for the merge", /transcriptionGate\(\{ merge: mergeUi\.kind/.test(edit) && /hold: captionsBusy \|\| mergeUi\.kind !== "idle"/.test(edit));
   ok("a draft is not merged again", /shouldMerge\(initialClips, \{ isDraft: !!draftId \}\)/.test(edit));
   ok("the originals are kept: the merge never deletes a source", !/deleteAsync\(originalClipsRef/.test(edit) && /originalClipsRef/.test(edit));
   const nat = read("../lib/mergeNative.ts");
-  ok("the merge is the existing native render with no cuts and no overlays, one render at a time", /renderAsync\(/.test(nat) && /overlays: \[\]/.test(nat) && /acquireNative\(\)/.test(nat) && /trimStartMs: 0, trimEndMs: WHOLE_FILE_MS/.test(nat));
+  ok("the merge is the existing native render with no cuts and no overlays, one render at a time", /renderAsync\(/.test(nat) && /overlays: \[\]/.test(nat) && /acquireNativeWithin\(/.test(nat) && /trimStartMs: 0, trimEndMs: WHOLE_FILE_MS/.test(nat));
   ok("a hung render is cancelled", /cancelRender\(\)/.test(nat) && /MERGE_TIMEOUT_MS/.test(nat));
   ok("a merged project saves as a single-source draft (the draft code takes the one clip)", /permanentClips\.every\(\(c\) => c\.uri === sourceUri\)/.test(edit));
 }

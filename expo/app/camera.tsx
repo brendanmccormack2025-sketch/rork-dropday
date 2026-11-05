@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import UiText from "@/components/UiText";
 import { wantsEditChoice } from "@/lib/editChoice";
-import { measureClips } from "@/lib/clipMeasure";
+import { measureClips, warmFileLengths } from "@/lib/clipMeasure";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
@@ -159,6 +159,10 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
 
   const clipsRef = useRef(clips);
   clipsRef.current = clips;
+  // each take is measured in the background as soon as it ends, so "Next" finds every length already known
+  useEffect(() => {
+    warmFileLengths(clips);
+  }, [clips]);
   /** Length of the segment in progress (ms), for the bar and the timer. */
   const [liveMs, setLiveMs] = useState(0);
 

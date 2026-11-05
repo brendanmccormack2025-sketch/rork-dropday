@@ -93,7 +93,7 @@ export function isEmptyAfterClamp(c: BoundedClip): boolean {
 export type LengthProbe = (uri: string) => Promise<number | null>;
 
 /** Measure every distinct video file of `clips` (a failed or slow probe just leaves that file unmeasured). */
-export async function measureFiles(clips: BoundedClip[], probe: LengthProbe, timeoutMs: number = 4000): Promise<void> {
+export async function measureFiles(clips: BoundedClip[], probe: LengthProbe, timeoutMs: number = 2500): Promise<void> {
   const uris = [...new Set(clips.filter((c) => c.type !== "image" && c.uri && fileLengthMs(c.uri) === undefined).map((c) => c.uri as string))];
   await Promise.all(
     uris.map(async (uri) => {

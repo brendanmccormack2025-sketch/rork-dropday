@@ -52,7 +52,7 @@ const clipsOf = (state) => renderClipsOf(state, DUR).map((c, i) => ({ id: `k${i}
   const edit = read("../app/edit.tsx");
   ok("replaceClips enforces it (and logs segmentInTimeline)", /enforceMergedSource\(\s*requested,\s*mergedRef\.current,\s*originalClipsRef\.current\.map/.test(edit) && /kind: "segmentInTimeline"/.test(edit));
   ok("Keep original logs which files the player loads (dev)", /\[keepOriginal\] player loads/.test(edit) && /playerUris\(clipsRef\.current\)/.test(edit));
-  ok("the pre-merge segments are only used to build the merge", (edit.match(/originalClipsRef\.current/g) ?? []).length <= 5);
+  ok("the pre-merge segments are only used to build the merge", (edit.match(/originalClipsRef\.current/g) ?? []).length <= 6);   // 6: the failure log lists the parts
 }
 
 // ── the merged file plays straight through its joins ──
