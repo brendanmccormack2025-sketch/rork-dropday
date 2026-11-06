@@ -32,15 +32,120 @@ export function resetFileLengths(): void {
   lengths.clear();
 }
 
-export type TrackTimingLike = { durationMs?: number; videoStartMs?: number; videoDurationMs?: number } | null | undefined;
+export type TrackTimingLike = { durationMs?: number; videoStartMs?: number; videoDurationMs?: number; audioStartMs?: number; audioDurationMs?: number } | null | undefined;
 
-/** The playable length from a native timing probe: the end of the video track, else the asset's duration; null if unknown. */
+const isPos = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
+
+/** Everything known about how long one file really is (any of it may be missing or wrong). */
+export type LengthEvidence = {
+  /** The asset's own duration (the container). */
+  containerMs?: number | null;
+  /** The first video sample's time and the video track's duration, in movie time (the track need not start at 0). */
+  videoStartMs?: number | null;
+  videoDurationMs?: number | null;
+  /** What the recorder measured while the take ran (wall clock). */
+  recorderMs?: number | null;
+  /** What a player reports for the file. */
+  playerMs?: number | null;
+};
+
+export type LengthDecision = {
+  /** The length to trust (ms); null when nothing reliable is known (the clip keeps its own numbers). */
+  lengthMs: number | null;
+  /** The FILE holds nothing: every measure that exists is under MIN_BOUNDED_CLIP_MS. Only then is the clip dropped. */
+  empty: boolean;
+  /** The measures contradict each other by a lot (worth a client error). */
+  disagree: boolean;
+  /** Where the video track ends (start + duration), if known. */
+  videoEndMs: number | null;
+};
+
+/**
+ * The length of a file from all the evidence. The end of the video track (its START plus its duration: a track may begin
+ * after 0) is used when it agrees with the container; when it is tiny or far from the container / player (a bad probe) the
+ * safest real value is used instead: min(container, player). A file is "empty" only if every measure says so.
+ */
+export function decideLength(e: LengthEvidence): LengthDecision {
+  const container = isPos(e.containerMs) ? Math.round(e.containerMs) : null;
+  const player = isPos(e.playerMs) ? Math.round(e.playerMs) : null;
+  const recorder = isPos(e.recorderMs) ? Math.round(e.recorderMs) : null;
+  const videoEnd = isPos(e.videoDurationMs) ? Math.round(Math.max(0, e.videoStartMs ?? 0) + e.videoDurationMs) : null;
+  const all = [container, player, recorder, videoEnd].filter((v): v is number => v !== null);
+  if (all.length === 0) return { lengthMs: null, empty: false, disagree: false, videoEndMs: null };
+  if (all.every((v) => v < MIN_BOUNDED_CLIP_MS)) return { lengthMs: Math.max(...all), empty: true, disagree: false, videoEndMs: videoEnd };
+
+  const playable = [container, player].filter((v): v is number => v !== null && v >= MIN_BOUNDED_CLIP_MS);
+  const far = (a: number, b: number) => Math.abs(a - b) > Math.max(500, 0.3 * Math.max(a, b));
+  const videoOk = videoEnd !== null && videoEnd >= MIN_BOUNDED_CLIP_MS;
+  const minPlayable = playable.length > 0 ? Math.min(...playable) : null;
+  // the video track is distrusted when it is tiny, or under half of what the container / player say (a bad probe);
+  // a track that is merely shorter than the audio is real and is used
+  const videoBad = videoEnd !== null && (!videoOk || (isPos(e.videoDurationMs) && e.videoDurationMs < MIN_BOUNDED_CLIP_MS) || (minPlayable !== null && videoEnd < 0.5 * minPlayable));
+  const videoFar = videoEnd !== null && minPlayable !== null && far(videoEnd, minPlayable);
+  const recorderFar = recorder !== null && minPlayable !== null && far(recorder, minPlayable);
+  const disagree = videoBad || videoFar || (container !== null && player !== null && far(container, player)) || recorderFar || (videoBad && recorder !== null);
+
+  let lengthMs: number | null;
+  if (videoOk && !videoBad) {
+    // the video track ends where it ends (audio may run longer); never past the container
+    lengthMs = container !== null && container < videoEnd! ? container : videoEnd!;
+  } else if (playable.length > 0) {
+    lengthMs = Math.min(...playable);   // the safest real value, never the bogus tiny one
+  } else {
+    lengthMs = null;                     // only the recorder's clock is long: nothing reliable to clamp to
+  }
+  return { lengthMs, empty: false, disagree, videoEndMs: videoEnd };
+}
+
+/** The playable length from a native timing probe alone (see decideLength for the cross-checks); null if unknown. */
 export function realLengthFromTiming(t: TrackTimingLike): number | null {
   if (!t) return null;
-  const vd = t.videoDurationMs ?? -1;
-  if (vd > 0) return Math.round(Math.max(0, t.videoStartMs ?? 0) + vd);
-  const d = t.durationMs ?? -1;
-  return d > 0 ? Math.round(d) : null;
+  const d = decideLength({ containerMs: t.durationMs, videoStartMs: t.videoStartMs, videoDurationMs: t.videoDurationMs });
+  return d.lengthMs;
+}
+
+/** What `resolveLength` needs from the phone (all optional; each may fail or hang without harm). */
+export type LengthIO = {
+  timing: (uri: string) => Promise<TrackTimingLike>;
+  playerMs?: (uri: string) => Promise<number | null>;
+  fileSize?: (uri: string) => Promise<number | null>;
+  recorderMs?: (uri: string) => number | null | undefined;
+  /** Called when the measures disagree: everything we know, for the client error. */
+  report?: (info: Record<string, unknown>) => void;
+};
+
+/**
+ * One file's length: the native track timing first; when it disagrees with the other measures (or says the file is tiny while
+ * the recorder / player say it is long) the player is asked too, both values are reported, and the safest real value is used.
+ * A tiny result is returned as is only when the file is empty by every measure (then the clip is dropped).
+ */
+export async function resolveLength(uri: string, io: LengthIO): Promise<number | null> {
+  const t = await io.timing(uri).catch(() => null);
+  const ev: LengthEvidence = {
+    containerMs: t?.durationMs,
+    videoStartMs: t?.videoStartMs,
+    videoDurationMs: t?.videoDurationMs,
+    recorderMs: io.recorderMs?.(uri) ?? null,
+  };
+  let d = decideLength(ev);
+  if (d.disagree && io.playerMs) {
+    ev.playerMs = await io.playerMs(uri).catch(() => null);
+    d = decideLength(ev);
+  }
+  if (d.disagree) {
+    let fileSize: number | null = null;
+    try {
+      fileSize = (await io.fileSize?.(uri)) ?? null;
+    } catch {
+      fileSize = null;
+    }
+    try {
+      io.report?.({ uri, fileSize, containerMs: ev.containerMs ?? null, videoStartMs: ev.videoStartMs ?? null, videoDurationMs: ev.videoDurationMs ?? null, videoEndMs: d.videoEndMs, audioDurationMs: t?.audioDurationMs ?? null, recorderMs: ev.recorderMs ?? null, playerMs: ev.playerMs ?? null, usedMs: d.lengthMs });
+    } catch {
+      // reporting never matters
+    }
+  }
+  return d.lengthMs;
 }
 
 /** What a clip may not go beyond: the measured length of its file, else its own durationMs; undefined when neither is known. */

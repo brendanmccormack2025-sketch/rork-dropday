@@ -366,9 +366,11 @@ function CameraScreen({ onFailure }: { onFailure: (reason: string) => void }) {
     goingToEditRef.current = true;
     // The recorder's own timing is only for the bar. Each file's REAL length is measured here (the recorder can report more
     // than a flip-ended file holds), so the editor opens with true durations; a clip that holds no video is dropped.
-    const raw = usableSegments(clips).map(({ measuredMs: _m, ...clip }) => clip);
-    const measured = await measureClips(raw).catch(() => raw);
-    const forEditor = measured.length > 0 ? measured : raw;
+    // (the recorder's timing goes to the measurement as a cross-check only; the editor never gets it)
+    const raw = usableSegments(clips);
+    const stripped = raw.map(({ measuredMs: _m, ...clip }) => clip);
+    const measured = (await measureClips(raw).catch(() => raw)).map(({ measuredMs: _m, ...clip }) => clip);
+    const forEditor = measured.length > 0 ? measured : stripped;
     goingToEditRef.current = false;
     const params: Record<string, string> = { clips: JSON.stringify(forEditor) };
     if (reactingTo) params.reactingTo = reactingTo;
