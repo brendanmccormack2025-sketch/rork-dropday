@@ -216,7 +216,7 @@ export default function SignUpScreen() {
                       >
                         Privacy Policy
                       </UiText>
-                      .
+                      . Tryal has zero tolerance for objectionable content and abusive users.
                     </>,
                   )}
                 </View>

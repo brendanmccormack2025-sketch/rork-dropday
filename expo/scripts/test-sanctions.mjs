@@ -10,6 +10,7 @@ import { sanctionError, sanctionMessage, sanctionTitle } from "../lib/sanctionTe
 import { safetyError } from "../lib/safetyText.ts";
 import { friendlyError } from "../lib/friendsCore.ts";
 import { routeFromPushData } from "../lib/pushCore.ts";
+import { PRIVACY_POLICY, TERMS_OF_USE } from "../constants/legal.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -39,6 +40,14 @@ eq("the report alert is wired: notification type, text, tap, push route (allowed
 
 eq("enforced on every write path by triggers: posts (and reactions), likes, messages", [/before insert on public\.posts for each row execute function public\.sanction_guard/.test(sql), /before insert on public\.likes for each row execute function public\.sanction_guard/.test(sql), /before insert on public\.chat_messages for each row execute function public\.sanction_guard/.test(sql)], [true, true, true]);
 eq("the migration is last in the order and in the apply script; no payments", [read("../supabase/MIGRATIONS_ORDER.txt").split("\n").filter((l) => l.trim() && !l.startsWith("#")).pop(), /"migration-sanctions\.sql"\]/.test(read("../scripts/apply-migrations.mjs")), /payment|purchase|stripe/i.test(code(sql))], ["migration-sanctions.sql", true, false]);
+
+const allText = (d) => d.sections.flatMap((x) => [x.heading, ...x.paragraphs]).join("\n");
+const terms = allText(TERMS_OF_USE), privacy = allText(PRIVACY_POLICY);
+eq("Terms: zero tolerance for objectionable content AND abusive users, removal and suspension / ban, reports reviewed within 24 hours, the added bullet", [/zero tolerance for objectionable content and abusive users/.test(terms), /suspended or permanently banned/.test(terms), /review every report within 24 hours/.test(terms), /Is otherwise objectionable or abusive/.test(terms), /contacting someone who has blocked you/.test(terms), /suspend \(temporarily\) or ban \(permanently\)/.test(terms)], [true, true, true, true, true, true]);
+eq("Terms: the rest is as it was (14 sections, section 4 renamed)", [TERMS_OF_USE.sections.length, TERMS_OF_USE.sections[3].heading, TERMS_OF_USE.sections[13].heading], [14, "4. Acceptable Use and Zero Tolerance", "14. Contact Us"]);
+eq("Privacy: contacts phone numbers AND emails (hashed, never names), people who know you never get your posts, messages, moderation records, Spotlight, failed vs unjudged posts", [/phone numbers and email addresses in your contacts \(not names\)/.test(privacy), /never get your posts in their feed/.test(privacy), /messages you send to friends/.test(privacy), /suspensions and bans/.test(privacy), /Spotlight, only if you say yes/.test(privacy), /too few people saw to be judged/.test(privacy), /not names or emails/.test(privacy)], [true, true, true, true, true, true, false]);
+const signup = read("../app/(auth)/sign-up.tsx");
+eq("sign-up: the acceptance text carries the zero-tolerance sentence next to the Terms and Privacy links, and the box is still required", [/Tryal has zero tolerance for objectionable content and abusive users\./.test(signup), /Terms of Use/.test(signup) && /Privacy Policy/.test(signup), /disabled=\{!agreedToTerms/.test(signup)], [true, true, true]);
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

@@ -28,7 +28,7 @@ export interface LegalDocument {
 
 export const TERMS_OF_USE: LegalDocument = {
   title: "Terms of Use",
-  lastUpdated: "September 24, 2026",
+  lastUpdated: "November 7, 2026",
   intro:
     "Welcome to Tryal. These Terms of Use (\"Terms\") govern your access to and use of the Tryal mobile application (the \"App\"), operated by Brendan McCormack (\"Tryal\", \"we,\" \"us,\" or \"our\"). By creating an account or using the App, you agree to these Terms.",
   sections: [
@@ -51,27 +51,30 @@ export const TERMS_OF_USE: LegalDocument = {
       ],
     },
     {
-      heading: "4. Acceptable Use",
+      heading: "4. Acceptable Use and Zero Tolerance",
       paragraphs: [
-        "You agree not to post content that:",
+        "Tryal has zero tolerance for objectionable content and abusive users. Content that breaks these rules is removed, and the accounts responsible are suspended or permanently banned.",
+        "You agree not to post, send or share content that:",
         "• Is illegal, harassing, hateful, or threatens violence",
         "• Sexually exploits or endangers minors in any way",
         "• Infringes on another person's intellectual property or privacy rights",
         "• Impersonates another person or entity",
         "• Is spam or intended to deceive other users",
-        "We reserve the right to remove any content that violates these Terms and to suspend or terminate accounts that repeatedly or seriously violate them.",
+        "• Is otherwise objectionable or abusive",
+        "You also agree not to abuse other users, including through reactions, captions or direct messages: no harassment, bullying, threats, hate, repeated unwanted contact, or contacting someone who has blocked you.",
+        "We remove content that violates these Terms and suspend or permanently ban accounts that violate them. Serious violations lead to an immediate ban, without warning.",
       ],
     },
     {
       heading: "5. Reporting and Moderation",
       paragraphs: [
-        "Tryal provides tools for users to report content or block other users. We review reports and may remove content or restrict accounts found to violate these Terms. Content that receives multiple reports may be automatically hidden pending review.",
+        "Tryal provides tools for users to report content or block other users, and filters some words and phrases in messages and captions. We review every report within 24 hours. We remove content found to violate these Terms and suspend or ban the accounts responsible. Content that receives multiple reports may be automatically hidden pending review.",
       ],
     },
     {
       heading: "6. Account Termination",
       paragraphs: [
-        "You may delete your account at any time. We may suspend or terminate your account if you violate these Terms, engage in harmful conduct, or if required by law.",
+        "You may delete your account at any time. We may suspend (temporarily) or ban (permanently) your account if you violate these Terms, engage in harmful or abusive conduct, or if required by law. While an account is suspended or banned it cannot post, react, like or message, and its posts and reactions are hidden from other users. You will see a message explaining this when you sign in.",
       ],
     },
     {
@@ -127,20 +130,20 @@ export const TERMS_OF_USE: LegalDocument = {
 
 export const PRIVACY_POLICY: LegalDocument = {
   title: "Privacy Policy",
-  lastUpdated: "October 14, 2026",
+  lastUpdated: "November 7, 2026",
   intro:
     "Brendan McCormack (\"Tryal\", \"we,\" \"us,\" or \"our\") operates the Tryal mobile application (the \"App\"). This Privacy Policy explains what information we collect, how we use it, and your rights regarding that information.",
   sections: [
     {
       heading: "1. Information We Collect",
       paragraphs: [
-        "• Account information: email address, date of birth (used only to verify age eligibility), and username.",
-        "• Content you create: videos, images, captions, and reactions you post to the App.",
+        "• Account information: email address (and a one-way hash of it, used only to match contact lists), date of birth (used only to verify age eligibility), and username.",
+        "• Content you create: videos, images, captions, reactions you post to the App, and messages you send to friends.",
         "• Viewing and engagement data: which posts are shown to you, how long you watch them, and your likes, reactions and shares. We use this to run Tryal's testing system (deciding which posts survive) and to build your feed.",
         "• Camera, microphone and photo library: used only when you choose to record, import, or save a video. We receive only the videos you post.",
         "• Captions and editing: the AI editor analyzes your video's audio and speech on your device using Apple's on-device speech recognition to create captions and cuts. Your audio is not uploaded for this.",
         "• Phone number (optional): if you add it, we store only a one-way cryptographic hash of it, never the number itself. Your number is not verified.",
-        "• Contacts (optional): if you allow access, we read only the phone numbers in your contacts (not names or emails) and store only one-way hashes of them, never the numbers themselves.",
+        "• Contacts (optional): if you allow access, we read only the phone numbers and email addresses in your contacts (not names) and store only one-way hashes of them, never the numbers or addresses themselves.",
         "• Device and error information: device model, app version, and error reports, used to fix crashes and problems.",
         "We do not collect more personal information than is necessary to operate Tryal's core features.",
       ],
@@ -151,8 +154,9 @@ export const PRIVACY_POLICY: LegalDocument = {
         "• To create and maintain your account",
         "• To operate core app features (feed, reactions, notifications)",
         "• To test your posts with viewers and decide whether they survive",
-        "• To keep your posts away from people you know while they are being tested. We use your phone number and contacts (if you provide them) and your \"Hide my posts from\" list only for this. We never show your number or contacts to anyone, never use them to suggest friends or tell you which contacts use Tryal, and never use them for advertising.",
-        "• To enforce our age requirements and content moderation policies",
+        "• To show your posts only to people who don't already know you: people who have you in their contacts, your friends and anyone on your \"Hide my posts from\" list never get your posts in their feed (your profile stays visible to anyone who opens it). We use your phone number and email hash, your contacts (if you provide them), your friends and that list only for this. We never show your number or contacts to anyone, never use them to suggest friends or tell you which contacts use Tryal, and never use them for advertising.",
+        "• To enforce our age requirements and content moderation policies. Reports, blocks, moderation actions (including suspensions and bans) and safety checks on messages and captions (a word filter and detection of repeated unwanted contact) are kept only as long as needed to enforce our Terms.",
+        "• To feature a post in Spotlight, only if you say yes",
         "• To respond to support requests",
         "• To comply with legal obligations",
         "We do not sell your personal information to third parties.",
@@ -179,7 +183,7 @@ export const PRIVACY_POLICY: LegalDocument = {
     {
       heading: "5. Data Retention and Deletion",
       paragraphs: [
-        "Posts that do not survive testing are removed from the App and their video files are deleted. Posts that survive stay on your profile until you delete them.",
+        "Posts that were judged and did not survive testing are removed from the App and their video files are deleted. A post that too few people saw to be judged stays on your profile, visible only to you. Posts that survive stay on your profile until you delete them.",
         "You can remove your phone number and contacts data at any time in Settings.",
         "You may permanently delete your account at any time from Settings → Delete Account. When you do:",
         "• Your profile, posts, reactions, likes, phone number hash, and contact hashes are permanently deleted from our database immediately.",
