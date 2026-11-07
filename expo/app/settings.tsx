@@ -195,7 +195,7 @@ export default function SettingsScreen() {
               ))}
           </View>
 
-          {/* Owner only: Spotlight (the database checks the admin list again on every call) */}
+          {/* Owner only: Spotlight and moderation (the database checks the admin list again on every call) */}
           {isDebugOwner(user?.id) && (
             <>
               <UiText style={styles.sectionLabel}>Admin</UiText>
@@ -204,6 +204,10 @@ export default function SettingsScreen() {
                   <Star color={theme.textMuted} size={18} strokeWidth={2} />
                   <UiText style={styles.rowText}>Spotlight</UiText>
                 </Pressable>
+                <Pressable onPress={() => router.push("/moderation-admin" as never)} style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
+                  <Shield color={theme.textMuted} size={18} strokeWidth={2} />
+                  <UiText style={styles.rowText}>Moderation</UiText>
+                </Pressable>
               </View>
             </>
           )}
@@ -211,6 +215,13 @@ export default function SettingsScreen() {
           {/* Safety section */}
           <UiText style={styles.sectionLabel}>Safety</UiText>
           <View style={styles.sectionCard}>
+            <Pressable
+              onPress={() => router.push("/settings/who-can-message" as never)}
+              style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
+            >
+              <Users color={theme.textMuted} size={18} strokeWidth={2} />
+              <UiText style={styles.rowText}>Who can message me</UiText>
+            </Pressable>
             <Pressable
               onPress={() => router.push("/settings/blocked-accounts")}
               // Hidden: long-press opens the render debug screen, owner only.

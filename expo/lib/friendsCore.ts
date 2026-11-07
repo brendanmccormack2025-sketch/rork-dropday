@@ -4,6 +4,8 @@
  * database (supabase/migration-friends-messages.sql); nothing here decides them.
  */
 
+import { safetyError } from "./safetyText.ts";
+
 export type Relation = "friend" | "requested" | "incoming" | "none";
 
 export type Person = { id: string; username: string; display_name: string | null; avatar_url: string | null };
@@ -110,6 +112,8 @@ export const DELETED_MESSAGE_TEXT = "Message deleted";
 
 /** The server's reasons, in words a person can read. */
 export function friendlyError(e: unknown): string {
+  const safe = safetyError(e);
+  if (safe) return safe;
   const m = String((e as { message?: unknown } | null)?.message ?? e ?? "").toLowerCase();
   if (m.includes("only message friends")) return "You can only message friends.";
   if (m.includes("cannot message this person") || m.includes("cannot send a request")) return "You can't do that with this person.";

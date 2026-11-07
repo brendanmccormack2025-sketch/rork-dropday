@@ -33,6 +33,8 @@ import { useVideoStallDetection, type VideoEvent } from "@/hooks/useVideoStallDe
 import { usePosts, isFollowerEligible, isReactionVisible, type Post } from "@/providers/PostsProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { useReportContent } from "@/hooks/useReportContent";
+import { removeReactionOnMyPost } from "@/lib/safety";
+import { REMOVE_REACTION_BODY, REMOVE_REACTION_TITLE } from "@/lib/safetyText";
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
@@ -503,6 +505,23 @@ function ReactionItem({
     );
   }, [deleteReaction, post.id]);
 
+  // The creator of the post removes someone else's reaction (and the replies under it). The database checks who is asking.
+  const qcRemove = useQueryClient();
+  const handleRemoveReaction = useCallback(() => {
+    Alert.alert(REMOVE_REACTION_TITLE, REMOVE_REACTION_BODY, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => {
+          removeReactionOnMyPost(post.id)
+            .then(() => qcRemove.invalidateQueries({ queryKey: ["reactions"] }))
+            .catch((e) => Alert.alert("Couldn't remove it", e instanceof Error ? e.message : undefined));
+        },
+      },
+    ]);
+  }, [post.id, qcRemove]);
+
   // Video error state for retry UI
   const [videoError, setVideoError] = useState<string | null>(null);
   const errorCountRef = useRef<number>(0);
@@ -739,6 +758,12 @@ function ReactionItem({
           <Pressable onPress={handleDeleteReaction} style={styles.actionBtn} hitSlop={8}>
             <Trash2 color="rgba(255,255,255,0.85)" size={24} strokeWidth={2} />
             <UiText style={styles.actionLabel}>Delete</UiText>
+          </Pressable>
+        )}
+        {isCreator && !isOwner && !isPending && (
+          <Pressable onPress={handleRemoveReaction} style={styles.actionBtn} hitSlop={8}>
+            <Trash2 color="rgba(255,255,255,0.85)" size={24} strokeWidth={2} />
+            <UiText style={styles.actionLabel}>Remove</UiText>
           </Pressable>
         )}
         {!isOwner && !isPending && (

@@ -37,6 +37,8 @@ import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoSt
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { TrialStatusBadge } from "@/components/TrialStatusBadge";
 import { spotlightLabel } from "@/lib/spotlightText";
+import { setPostInteractions } from "@/lib/safety";
+import { INTERACTION_MODES, LIMIT_INTERACTIONS_BODY, LIMIT_INTERACTIONS_TITLE } from "@/lib/safetyText";
 import { formatCount, shouldDimPost, viewsShown } from "@/lib/postDisplay";
 import CreatorLinkIcons from "@/components/CreatorLinkIcons";
 import { theme } from "@/constants/theme";
@@ -1344,6 +1346,19 @@ export const FeedItem = memo(function FeedItem({
     );
   }, [deletePost, post.id]);
 
+  // ── Limit interactions on this post (owner): who can like or react from now on; the database enforces it ──
+  const handleLimit = useCallback(() => {
+    Alert.alert(LIMIT_INTERACTIONS_TITLE, LIMIT_INTERACTIONS_BODY, [
+      ...INTERACTION_MODES.map((m) => ({
+        text: m.title,
+        onPress: () => {
+          setPostInteractions(post.id, m.key).catch((e) => Alert.alert("Couldn't save", e instanceof Error ? e.message : undefined));
+        },
+      })),
+      { text: "Cancel", style: "cancel" as const },
+    ]);
+  }, [post.id]);
+
   // ── More menu: owner Delete / non-owner Report (same actions, same
   // owner-only permissions as the previous dedicated rail buttons) ──
   const handleMore = useCallback(() => {
@@ -1352,6 +1367,7 @@ export const FeedItem = memo(function FeedItem({
         ...(post._optimistic || post.media_type !== "video"
           ? []
           : [{ text: "Save to camera roll", onPress: () => void savePostToRoll(post, user?.id) }]),
+        ...(post._optimistic || post.parent_post_id ? [] : [{ text: LIMIT_INTERACTIONS_TITLE, onPress: handleLimit }]),
         { text: "Delete", style: "destructive", onPress: handleDelete },
         { text: "Cancel", style: "cancel" },
       ]);
@@ -1365,7 +1381,7 @@ export const FeedItem = memo(function FeedItem({
         { text: "Cancel", style: "cancel" },
       ]);
     }
-  }, [isOwner, handleDelete, reportContent, post]);
+  }, [isOwner, handleDelete, handleLimit, reportContent, post]);
 
   // ── Per-slot callbacks for dual-player ─────────────────────────────
   // Only the active slot runs the full playback/stall logic; the inactive

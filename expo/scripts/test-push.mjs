@@ -130,7 +130,7 @@ ok("Expo token shape", EXPO_TOKEN_RE.test("ExponentPushToken[abc_DEF-123]") && E
   ok("only a service-level key may call it; a plain call is a dry run", /return new Response\("forbidden", \{ status: 403 \}\)/.test(fn) && /dryRun: true/.test(fn));
   ok("it retries, removes dead tokens (tickets and receipts) and records each result", /push_mark_retry/.test(fn) && /push_remove_tokens/.test(fn) && /push_due_tickets/.test(fn) && /getReceipts/.test(fn) && /push_mark_sent/.test(fn) && /chunk\(messages, 100\)/.test(fn));
   const order = read("../supabase/MIGRATIONS_ORDER.txt").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
-  eq("migration-push.sql runs after friends and before the snapshot, known-connections and stranger-only (which stays last)", order.slice(-6), ["migration-friends-messages.sql", "migration-push.sql", "migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql"]);
+  eq("migration-push.sql runs after friends and before the snapshot, known-connections and stranger-only (which stays last)", order.slice(-7), ["migration-friends-messages.sql", "migration-push.sql", "migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql"]);
 }
 
 console.log(failed === 0 ? "\nall passed" : `\n${failed} FAILED`);
