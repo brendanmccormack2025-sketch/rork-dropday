@@ -24,15 +24,15 @@ export function worthReporting(watchedMs: number): boolean {
   return watchedMs >= 250;
 }
 
-export type EngineFeedRow = { post_id: string | null; position: number; page_rows?: number | null };
+export type EngineFeedRow = { post_id: string | null; position: number; page_rows?: number | null; spotlight_category?: string | null };
 
 /**
  * get_feed_engine returns `page_rows` (the source rows of the page, before testing posts the viewer is not assigned
  * to were filtered out) and one sentinel row with a null post_id when the page is empty. The old get_feed returns
  * plain rows. Returns the posts' ids in order plus the row count to use for end-of-feed detection.
  */
-export function readFeedRows(rows: EngineFeedRow[]): { ids: { post_id: string; position: number }[]; rowCount: number } {
-  const ids = rows.filter((r): r is { post_id: string; position: number } => !!r.post_id).map((r) => ({ post_id: r.post_id, position: r.position }));
+export function readFeedRows(rows: EngineFeedRow[]): { ids: { post_id: string; position: number; spotlight_category: string | null }[]; rowCount: number } {
+  const ids = rows.filter((r): r is EngineFeedRow & { post_id: string } => !!r.post_id).map((r) => ({ post_id: r.post_id, position: r.position, spotlight_category: r.spotlight_category ?? null }));
   const counts = rows.map((r) => r.page_rows).filter((n): n is number => typeof n === "number");
   return { ids, rowCount: counts.length > 0 ? Math.max(...counts) : rows.length };
 }

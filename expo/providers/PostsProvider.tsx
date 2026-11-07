@@ -75,6 +75,8 @@ export type Post = {
   moderation_status?: string;
   /** Survival status: 'trial' (live, awaiting verdict), 'incomplete' (awaiting enough exposure to judge), 'survived', 'archived' (hidden from public surfaces), 'expired' (distribution window over). */
   status?: "trial" | "incomplete" | "survived" | "archived" | "expired" | "queued" | "unjudged";
+  /** Set by get_feed_engine on a Spotlight post the viewer is eligible for (the label is "Spotlight · <category>"); never stored. */
+  spotlight_category?: string | null;
   /** Lifecycle timestamps (set server-side). */
   survived_at?: string | null;
   distribution_started_at?: string | null;
@@ -966,7 +968,10 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       }
       const posts = [...rows]
         .sort((a, b) => a.position - b.position)
-        .map((r) => byId.get(r.post_id))
+        .map((r) => {
+          const post = byId.get(r.post_id);
+          return post && r.spotlight_category ? { ...post, spotlight_category: r.spotlight_category } : post;
+        })
         .filter((p): p is Post => !!p);
       return { posts, offset, rows: read.rowCount };
     },

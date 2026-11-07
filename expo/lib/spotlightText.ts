@@ -28,7 +28,6 @@ export const SPOTLIGHT_CHOICES: ReadonlyArray<{ key: SpotlightChoice; title: str
 
 export const SPOTLIGHT_OFFER_TITLE = "You've been picked for Spotlight";
 export const SPOTLIGHT_NO_OFFER_TEXT = "No Spotlight offers right now.";
-export const SPOTLIGHT_SECTION_TITLE = "Spotlight";
 export const SPOTLIGHT_NOTIFICATION_TEXT = "You've been picked for Spotlight. Choose how it's shown.";
 export const SPOTLIGHT_ANSWERED_TEXT: Record<SpotlightChoice, string> = {
   full: "Your Spotlight is live for everyone.",
@@ -39,4 +38,9 @@ export const SPOTLIGHT_ANSWERED_TEXT: Record<SpotlightChoice, string> = {
 /** The little text on a profile badge. */
 export function badgeText(category: string | null | undefined, active: boolean): string {
   return active ? categoryLabel(category) : `${categoryLabel(category)} · featured`;
+}
+
+/** The small label on a Spotlight post in the feed, e.g. "Spotlight · Most Creative". */
+export function spotlightLabel(category: string | null | undefined): string {
+  return `Spotlight · ${categoryLabel(category)}`;
 }

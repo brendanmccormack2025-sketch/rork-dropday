@@ -5,15 +5,16 @@
 --   * strangers-only       only people who do not know the creator (the Phase 1 known-connections rule),
 --   * decline.
 -- NOTHING is shown to anyone before the creator says yes, and nothing reaches a known connection without a FULL yes. The
--- exposure rule lives in ONE function (spotlight_eligible) used by the feed boost, the Spotlight section and the profile
+-- exposure rule lives in ONE function (spotlight_eligible) used by the feed boost and the profile
 -- badge. A Spotlight is a temporary boost (spotlight_hours); the badge shows for badge_days; the same creator cannot be
 -- offered a Spotlight again within rotation_days (a declined offer counts: nobody is pestered). No payments.
 --
 --   spotlight_admins / spotlight_config / spotlight_picks   tables (closed to apps; everything goes through the RPCs below)
 --   admin_spotlight_creators / _posts / _offer / _list / _withdraw   admin only (spotlight_admins)
 --   my_spotlight_offers / respond_spotlight_offer            the creator
---   get_spotlight / profile_spotlight                        any signed-in user (eligibility enforced here)
---   get_feed_engine                                          redefined: the Spotlight boost (copy of the stranger-only one)
+--   profile_spotlight                                        the badge (eligibility enforced here)
+--   get_feed_engine                                          redefined: Spotlight posts lead the feed (copy of the stranger-only one, plus
+--                                                            a spotlight_category column for the label)
 
 -- ── 1. configuration, admins, picks ─────────────────────────────────────────────────────
 create table if not exists public.spotlight_config (
@@ -271,34 +272,9 @@ begin
 end;
 $$;
 
--- ── 5. what viewers see: the Spotlight section and the profile badge (eligibility enforced HERE) ──────────
-create or replace function public.get_spotlight(p_limit integer default 10)
-returns table (pick_id uuid, category text, creator_id uuid, username text, display_name text, avatar_url text, post_id uuid, thumbnail_url text, ends_at timestamptz)
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  me uuid := auth.uid();
-  hide_mature boolean := false;
-begin
-  if me is null then return; end if;
-  select coalesce(public.age_tier(pr.birthdate) in ('under_13', 'teen'), false) into hide_mature from public.profiles pr where pr.id = me;
-  hide_mature := coalesce(hide_mature, false);
-  perform public.spotlight_expire();
-  return query
-  select s.id, s.category, s.creator_id, pr.username::text, pr.display_name::text, pr.avatar_url::text, s.post_id, p.thumbnail_url::text, s.ends_at
-  from public.spotlight_picks s
-  join public.posts p on p.id = s.post_id
-  join public.profiles pr on pr.id = s.creator_id
-  where s.status in ('full', 'strangers') and s.ends_at > now()
-    and public.spotlight_eligible(s.creator_id, s.status, me)
-    and p.parent_post_id is null and p.moderation_status = 'active' and p.media_deleted_at is null
-    and (not hide_mature or not p.is_mature)
-  order by s.starts_at desc, s.id
-  limit least(greatest(coalesce(p_limit, 10), 1), 30);
-end;
-$$;
+-- ── 5. what viewers see: the post leads their FEED (get_feed_engine below, with the category label) and the profile badge ──
+-- (There is no Spotlight section: an earlier version had get_spotlight for an Explore row; it is gone.)
+drop function if exists public.get_spotlight(integer);
 
 -- The badge on a creator's profile: the category, for badge_days after the Spotlight started. The creator always sees their own;
 -- anyone else only if they are eligible (so a known connection of a strangers-only Spotlight sees nothing).
@@ -331,17 +307,19 @@ $$;
 revoke all on function
   public.admin_spotlight_creators(text, integer), public.admin_spotlight_posts(uuid), public.admin_spotlight_offer(uuid, uuid, text),
   public.admin_spotlight_list(integer), public.admin_spotlight_withdraw(uuid), public.my_spotlight_offers(),
-  public.respond_spotlight_offer(uuid, text), public.get_spotlight(integer), public.profile_spotlight(uuid)
+  public.respond_spotlight_offer(uuid, text), public.profile_spotlight(uuid)
   from public, anon;
 grant execute on function
   public.admin_spotlight_creators(text, integer), public.admin_spotlight_posts(uuid), public.admin_spotlight_offer(uuid, uuid, text),
   public.admin_spotlight_list(integer), public.admin_spotlight_withdraw(uuid), public.my_spotlight_offers(),
-  public.respond_spotlight_offer(uuid, text), public.get_spotlight(integer), public.profile_spotlight(uuid)
+  public.respond_spotlight_offer(uuid, text), public.profile_spotlight(uuid)
   to authenticated;
 
 -- ── 6. the feed: the Spotlight boost (this is migration-stranger-only.sql's get_feed_engine plus the marked SPOTLIGHT parts) ──
+-- (a new column: spotlight_category, the label for a Spotlight post; the function is dropped and made again)
+drop function if exists public.get_feed_engine(integer, integer, uuid[]);
 create or replace function public.get_feed_engine(p_limit integer DEFAULT 20, p_offset integer DEFAULT 0, p_seen uuid[] DEFAULT '{}'::uuid[])
- returns table (post_id uuid, "position" integer, page_rows integer)
+ returns table (post_id uuid, "position" integer, page_rows integer, spotlight_category text)
  language plpgsql
  security definer
  set search_path = public
@@ -444,9 +422,10 @@ begin
     limit cfg.affinity_feed_boost
   ) x;
 
-  -- testing posts first, then the Spotlight boost, then the creators the viewer engages with
-  front := assigned
-    || array(select s from unnest(spot_front) s where not (s = any (assigned)))
+  -- The Spotlight posts this viewer is eligible for come FIRST (before the testing posts), each only until it has been seen;
+  -- then the testing posts, then the creators the viewer engages with.
+  front := spot_front
+    || array(select a from unnest(assigned) a where not (a = any (spot_front)))
     || array(select b from unnest(boosted) b where not (b = any (assigned)) and not (b = any (spot_front)));
   a_count := coalesce(cardinality(front), 0);
 
@@ -507,11 +486,18 @@ begin
 
   out_ids := coalesce(take_front, '{}') || coalesce(rest_ids, '{}');
   if coalesce(cardinality(out_ids), 0) = 0 then
-    return query select null::uuid, -1, avail;
+    return query select null::uuid, -1, avail, null::text;
     return;
   end if;
   return query
-    select o.id, (p_offset + o.ord)::integer, avail
+    select o.id, (p_offset + o.ord)::integer, avail,
+           case when o.id = any (spot_front)
+                then (select sp.category from public.spotlight_picks sp
+                       where sp.post_id = o.id and sp.status in ('full', 'strangers') and sp.ends_at > now()
+                       order by sp.starts_at desc limit 1)
+           end
     from unnest(out_ids) with ordinality as o(id, ord);
 end;
 $function$;
+revoke all on function public.get_feed_engine(integer, integer, uuid[]) from public, anon;
+grant execute on function public.get_feed_engine(integer, integer, uuid[]) to authenticated, service_role;

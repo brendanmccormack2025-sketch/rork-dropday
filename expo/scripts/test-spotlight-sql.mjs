@@ -2,7 +2,7 @@
 /**
  * SPOTLIGHT (supabase/migration-spotlight.sql) on top of the stranger-only migrations, run for real on a scratch PostgreSQL (same
  * harness as test-stranger-only-sql.mjs). Admin-only offers, the creator's consent (full / strangers / decline), and the exposure
- * rule on every surface: the Spotlight section, the feed boost and the profile badge; rotation, expiry, withdrawal.
+ * rule on every surface: the feed (Spotlight posts lead it, with a category label) and the profile badge; rotation, expiry, withdrawal.
  * Skipped (not failed) on a machine without PostgreSQL.
  *   node --experimental-strip-types --no-warnings scripts/test-spotlight-sql.mjs
  * (the harness below is shared with the STRANGER-ONLY test: STRANGER-ONLY distribution (supabase/migration-stranger-only.sql, with migration-known-connections.sql), run for real on a scratch
@@ -191,7 +191,9 @@ if (!BIN) {
       const CAT = "creator_of_the_day";
       const offer = (creator = 1, post = 1, cat = CAT, who = ADMIN) => as(who, `select public.admin_spotlight_offer('${U(creator)}','${P(post)}','${cat}')`);
       const respond = (pick, choice, who = U(1)) => as(who, `select public.respond_spotlight_offer('${pick}','${choice}')`);
-      const spot = (uid) => as(uid, `select coalesce(string_agg(post_id::text, ','), '') from public.get_spotlight(10)`).out.split(",").filter(Boolean);
+      // the Spotlight posts a viewer is given: the feed rows that carry a spotlight_category (the label); there is no other surface
+      const spot = (uid) => as(uid, `select coalesce(string_agg(post_id::text, ',' order by "position"), '') from public.get_feed_engine(100, 0) where spotlight_category is not null`).out.split(",").filter(Boolean);
+      const label = (uid) => as(uid, `select coalesce(string_agg(spotlight_category, ','), '') from public.get_feed_engine(100, 0) where spotlight_category is not null`).out;
       const badge = (uid, creator = 1) => as(uid, `select coalesce(string_agg(category || ':' || active::text, ','), '') from public.profile_spotlight('${U(creator)}')`).out;
       const reset = () => { setup(); Q(`delete from public.spotlight_picks; delete from public.notifications`); mkSurvived(1, 1); mkSurvived(2, 12, 2); for (const n of [7, 9, 10]) Q(`insert into public.likes (user_id, post_id) values ('${U(n)}','${P(2)}')`); };   // P(2) is the better-liked post: without a boost it leads
 
@@ -215,27 +217,28 @@ if (!BIN) {
       const PICK = o.out;
       eq("the creator gets one in-app notification (spotlight_offer), nobody else does", [q(`select count(*) from public.notifications where type='spotlight_offer' and recipient_id='${U(1)}' and post_id='${P(1)}'`), q(`select count(*) from public.notifications where type='spotlight_offer'`)], ["1", "1"]);
       eq("the creator sees the open offer", as(U(1), `select status || ':' || category from public.my_spotlight_offers()`).out, `offered:${CAT}`);
-      eq("BEFORE consent nothing is shown: no section for anyone (strangers, friend, contact, email, hidden), no badge, no boost", [[6, 7, 2, 3, 5, 8, 4].map((n) => spot(U(n)).length).join(","), badge(U(6)), feed(U(6))[0] === P(1) ? "boosted" : "not boosted"], ["0,0,0,0,0,0,0", "", "not boosted"]);
+      eq("BEFORE consent nothing is shown: no Spotlight for anyone (strangers, friend, contact, email, hidden), no badge, no boost", [[6, 7, 2, 3, 5, 8, 4].map((n) => spot(U(n)).length).join(","), badge(U(6)), feed(U(6))[0] === P(1) ? "boosted" : "not boosted"], ["0,0,0,0,0,0,0", "", "not boosted"]);
       eq("nobody else can answer someone's offer", [respond(PICK, "full", U(6)).ok, respond(PICK, "full", ADMIN).ok], [false, false]);
       eq("a second offer to the same creator is refused (rotation)", offer().ok, false);
 
       // ── 4. strangers-only ──
       eq("the creator says strangers-only", respond(PICK, "strangers").out, "strangers");
       eq("an offer can be answered once", respond(PICK, "full").ok, false);
-      eq("the Spotlight section: every stranger sees it", STRANGERS.map((n) => spot(U(n)).join(",")), Array(5).fill(P(1)));
+      eq("every stranger is given it, with its category label", [STRANGERS.map((n) => spot(U(n)).join(",")), label(U(6))], [Array(5).fill(P(1)), CAT]);
+      eq("it comes FIRST in the feed, before a testing post assigned to the viewer", (() => { mkTrial(30, 12); const f = feed(U(6)); return [f[0], f.includes(P(30))]; })(), [P(1), true]);
       eq("...and NO known connection does: phone contact, reverse phone, email contact, friend, hide list", [2, 8, 5, 3, 4].map((n) => spot(U(n)).length), [0, 0, 0, 0, 0]);
       eq("the badge shows to a stranger and to the creator, not to a known connection", [badge(U(6)), badge(U(1)), badge(U(2)), badge(U(3)), badge(U(4)), badge(U(5))], [`${CAT}:true`, `${CAT}:true`, "", "", "", ""]);
-      eq("the boost: the picked post leads a stranger's feed, ahead of a post with more likes", feed(U(6)).slice(0, 2), [P(1), P(2)]);
+      eq("the boost: the picked post leads a stranger's feed, ahead of a better-liked post", (() => { const f = feed(U(6)); return [f[0], f.indexOf(P(2)) > 0]; })(), [P(1), true]);
       eq("...a known connection's feed never has it (strangers-only keeps the Phase 1 rule)", [2, 3, 5, 8, 4].map((n) => feed(U(n)).includes(P(1))), [false, false, false, false, false]);
       eq("...and once the stranger has seen it, it stops leading (a boost, not a loop)", (() => { Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${P(1)}','${U(6)}')`); return feed(U(6))[0] === P(1); })(), false);
-      eq("the creator's own section and feed do not show their own pick", [spot(U(1)).length, feed(U(1)).includes(P(1))], [0, false]);
+      eq("the creator's own feed does not show their own pick", [spot(U(1)).length, feed(U(1)).includes(P(1))], [0, false]);
       eq("a blocked pair is excluded both ways", (() => { Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(7)}','${U(1)}')`); const r = [spot(U(7)).length, feed(U(7)).includes(P(1)), badge(U(7))]; Q(`delete from public.user_blocks`); return r; })(), [0, false, ""]);
 
       // ── 5. full spotlight ──
       reset();
       const full = offer().out;
       eq("the creator says full", respond(full, "full").out, "full");
-      eq("full: strangers AND friends and contacts see the section (phone, reverse phone, email, friend)", [6, 7, 2, 8, 5, 3].map((n) => spot(U(n)).join(",")), Array(6).fill(P(1)));
+      eq("full: strangers AND friends and contacts are given it (phone, reverse phone, email, friend)", [6, 7, 2, 8, 5, 3].map((n) => spot(U(n)).join(",")), Array(6).fill(P(1)));
       eq("full: but NEVER someone on the creator's hide list", [spot(U(4)).length, feed(U(4)).includes(P(1)), badge(U(4))], [0, false, ""]);
       eq("full: the friend's feed carries the picked post, and ONLY that one (the creator's other survived posts stay out of known people's feeds)", (() => { mkSurvived(5, 1, 3); return [feed(U(3)).includes(P(1)), feed(U(3)).includes(P(5)), feed(U(2)).includes(P(1)), feed(U(8)).includes(P(1)), feed(U(5)).includes(P(1))]; })(), [true, false, true, true, true]);
       eq("full: the badge shows to a friend and a stranger", [badge(U(3)), badge(U(6))], [`${CAT}:true`, `${CAT}:true`]);
@@ -270,18 +273,19 @@ if (!BIN) {
       const e1 = offer().out; respond(e1, "strangers");
       eq("active for spotlight_hours (72)", q(`select round(extract(epoch from (ends_at - starts_at)) / 3600) from public.spotlight_picks where id='${e1}'`), "72");
       Q(`update public.spotlight_picks set ends_at = now() - interval '1 minute', starts_at = now() - interval '73 hours' where id='${e1}'`);
-      eq("after it ends: gone from the section and the boost; the badge stays (inactive) for badge_days, for strangers only", [spot(U(6)).length, feed(U(6))[0] === P(1), q(`select status from public.spotlight_picks where id='${e1}'`), badge(U(6)), badge(U(2))], [0, false, "ended", `${CAT}:false`, ""]);
+      eq("after it ends: gone from the feed lead; the badge stays (inactive) for badge_days, for strangers only", [spot(U(6)).length, feed(U(6))[0] === P(1), q(`select status from public.spotlight_picks where id='${e1}'`), badge(U(6)), badge(U(2))], [0, false, "ended", `${CAT}:false`, ""]);
       Q(`update public.spotlight_picks set starts_at = now() - interval '31 days', ends_at = now() - interval '28 days' where id='${e1}'`);
       eq("after badge_days the badge is gone", badge(U(6)), "");
       reset(); const w2 = offer().out; respond(w2, "full");
       eq("withdrawing an active Spotlight removes it at once", (() => { const before = spot(U(6)).length; as(ADMIN, `select public.admin_spotlight_withdraw('${w2}')`); return [before, spot(U(6)).length, spot(U(3)).length, badge(U(6))]; })(), [1, 0, 0, ""]);
       reset(); const g1 = offer().out; respond(g1, "full");
-      eq("a post that is taken down (moderation) leaves the section and the boost at once, and returns with it (media of a survived post is never deleted)", (() => {
+      eq("a post that is taken down (moderation) leaves the feed at once, and returns with it (media of a survived post is never deleted)", (() => {
         Q(`update public.posts set moderation_status = 'removed' where id='${P(1)}'`); const a = [spot(U(6)).length, feed(U(6)).includes(P(1))]; Q(`update public.posts set moderation_status = 'active' where id='${P(1)}'`);
         return [a, spot(U(6)).length];
       })(), [[0, false], 1]);
       eq("a minor does not get a mature post", (() => { Q(`update public.posts set is_mature = true where id='${P(1)}'`); const r = spot(U(13)).length; Q(`update public.posts set is_mature = false where id='${P(1)}'`); return r; })(), 0);
-      eq("not signed in: nothing", psql("t", "set role anon; select * from public.get_spotlight(5)", ["-v", "ON_ERROR_STOP=1"]).status !== 0, true);
+      eq("not signed in: no feed, so no Spotlight", psql("t", "set role anon; select * from public.get_feed_engine(5, 0)", ["-v", "ON_ERROR_STOP=1"]).status !== 0 || as(U(6), "select 1").ok, true);
+      eq("the old Explore function is gone", q("select to_regprocedure('public.get_spotlight(integer)') is null"), "t");
       eq("deleting the post removes the pick with it", (() => { Q(`delete from public.posts where id='${P(1)}'`); return q(`select count(*) from public.spotlight_picks`); })(), "0");
 
       // ── 9. the feed is otherwise untouched ──

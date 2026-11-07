@@ -11,14 +11,12 @@ async function rows<T>(fn: string, args?: Record<string, unknown>): Promise<T[]>
   return (data ?? []) as T[];
 }
 
-export type SpotlightItem = { pick_id: string; category: string; creator_id: string; username: string; display_name: string | null; avatar_url: string | null; post_id: string; thumbnail_url: string | null; ends_at: string };
 export type SpotlightBadgeRow = { category: string; starts_at: string; active: boolean };
 export type SpotlightOffer = { pick_id: string; category: string; post_id: string; thumbnail_url: string | null; status: string; created_at: string; expires_at: string | null };
 export type AdminCreator = { id: string; username: string; display_name: string | null; avatar_url: string | null; survived_posts: number; last_pick_at: string | null; next_eligible_at: string | null };
 export type AdminPost = { post_id: string; caption: string | null; thumbnail_url: string | null; survived_at: string; likes: number };
 export type AdminPick = { id: string; creator_id: string; username: string | null; post_id: string; category: string; status: string; created_at: string; responded_at: string | null; starts_at: string | null; ends_at: string | null };
 
-export const getSpotlight = (limit = 10) => rows<SpotlightItem>("get_spotlight", { p_limit: limit });
 export const profileSpotlight = async (userId: string): Promise<SpotlightBadgeRow | null> => (await rows<SpotlightBadgeRow>("profile_spotlight", { p_user_id: userId }))[0] ?? null;
 export const myOffers = () => rows<SpotlightOffer>("my_spotlight_offers");
 export async function respondToOffer(pick: string, choice: SpotlightChoice): Promise<string> {

@@ -19,9 +19,9 @@ eq("watch report: whole ms, completed at 90% of a known duration", [viewProgress
   { watch_ms: 5000, duration_ms: 0, completed: false }, { watch_ms: 0, duration_ms: 0, completed: false }]);
 eq("a glance under 250 ms is not reported", [worthReporting(100), worthReporting(300)], [false, true]);
 eq("engine feed rows: ids in order, end detection uses page_rows (filtering must not look like the end)",
-  readFeedRows([{ post_id: "a", position: 1, page_rows: 20 }, { post_id: "b", position: 2, page_rows: 20 }]), { ids: [{ post_id: "a", position: 1 }, { post_id: "b", position: 2 }], rowCount: 20 });
+  readFeedRows([{ post_id: "a", position: 1, page_rows: 20 }, { post_id: "b", position: 2, page_rows: 20 }]), { ids: [{ post_id: "a", position: 1, spotlight_category: null }, { post_id: "b", position: 2, spotlight_category: null }], rowCount: 20 });
 eq("the empty-page sentinel row has no post and keeps the source row count", readFeedRows([{ post_id: null, position: -1, page_rows: 7 }]), { ids: [], rowCount: 7 });
-eq("old get_feed rows (no page_rows) count as they are", readFeedRows([{ post_id: "a", position: 1 }]), { ids: [{ post_id: "a", position: 1 }], rowCount: 1 });
+eq("old get_feed rows (no page_rows) count as they are", readFeedRows([{ post_id: "a", position: 1 }]), { ids: [{ post_id: "a", position: 1, spotlight_category: null }], rowCount: 1 });
 eq("creator sees ON TRYAL for a testing post and nothing for finished, ended or incomplete ones", [creatorTrialNote("trial"), creatorTrialNote("incomplete"), creatorTrialNote("survived"), creatorTrialNote("archived")], [{ title: "YOUR VIDEO IS ON TRYAL", body: null }, null, null, null]);
 
 const feed = read("../components/FeedItem.tsx"), prov = read("../providers/PostsProvider.tsx"), notif = read("../components/NotificationItem.tsx"), badge = read("../components/TrialStatusBadge.tsx");

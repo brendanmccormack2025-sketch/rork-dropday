@@ -19,7 +19,6 @@ import { usePosts, type ExploreCreator } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { supabase } from "@/lib/supabase";
-import { SpotlightSection } from "@/components/SpotlightSection";
 
 function formatEngagement(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -216,8 +215,6 @@ export default function ExploreScreen() {
             }
             ListHeaderComponent={
               <View style={styles.sectionHeaderWrap}>
-                {/* Spotlight: only creators who said yes, and only what the database shows this viewer */}
-                <SpotlightSection />
                 {/* Suggested Creators */}
                 <View style={styles.sectionHeader}>
                   <View style={styles.sectionBadge}>

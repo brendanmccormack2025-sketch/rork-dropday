@@ -36,6 +36,7 @@ import { useVideoStatusFeed, type VideoPlaybackStatus } from "@/hooks/useVideoSt
 
 import DoubleTapLikeZone from "@/components/DoubleTapLikeZone";
 import { TrialStatusBadge } from "@/components/TrialStatusBadge";
+import { spotlightLabel } from "@/lib/spotlightText";
 import { formatCount, shouldDimPost, viewsShown } from "@/lib/postDisplay";
 import CreatorLinkIcons from "@/components/CreatorLinkIcons";
 import { theme } from "@/constants/theme";
@@ -1876,6 +1877,11 @@ export const FeedItem = memo(function FeedItem({
       >
         <View style={styles.badgeSlot} pointerEvents="none">
           <TrialStatusBadge status={post.status} distributionExpiresAt={post.distribution_expires_at} survivedAt={post.survived_at} />
+          {post.spotlight_category ? (
+            <View style={styles.spotlightPill} accessibilityLabel={spotlightLabel(post.spotlight_category)}>
+              <UiText style={styles.spotlightText}>{spotlightLabel(post.spotlight_category)}</UiText>
+            </View>
+          ) : null}
         </View>
         {trialNote ? (
           <View style={styles.trialNote} pointerEvents="none">
@@ -1984,7 +1990,9 @@ const styles = StyleSheet.create({
     gap: 4,
     zIndex: 999,
   },
-  badgeSlot: { marginBottom: 2 },
+  badgeSlot: { marginBottom: 2, gap: 4 },
+  spotlightPill: { alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: theme.accent },
+  spotlightText: { color: "#fff", fontSize: 10, fontWeight: "700" as const, letterSpacing: 0.5 },
   trialNote: { marginBottom: 6, maxWidth: 260 },
   trialNoteTitle: { color: "#fff", fontSize: 11, fontWeight: "600" as const, letterSpacing: 0.6 },
   trialBar: { height: 3, borderRadius: 2, marginTop: 5, backgroundColor: "rgba(255,255,255,0.25)", overflow: "hidden" as const },
