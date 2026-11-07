@@ -16,6 +16,7 @@ export type NotificationType =
   | "verdict_unjudged"
   | "spotlight_offer"
   | "recovery_offer"
+  | "report_alert"
   | "followed_post_survived"
   | "friend_request"
   | "friend_accept"

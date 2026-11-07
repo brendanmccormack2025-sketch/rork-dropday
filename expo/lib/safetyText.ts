@@ -2,6 +2,8 @@
  * Wording for the harassment-protection controls (pure; erasable TypeScript so the Node tests can run it). The rules are in the
  * database (supabase/migration-harassment.sql); this file only says them to people.
  */
+import { sanctionError } from "./sanctionText.ts";
+
 export type DmPolicy = "friends" | "friends_7d" | "nobody";
 export type InteractionMode = "open" | "established" | "closed";
 
@@ -31,5 +33,7 @@ export function safetyError(e: unknown): string | null {
   if (m.includes("been friends for")) return "This person only takes messages from people who have been friends for a while.";
   if (m.includes("wait for a reply")) return "Wait for a reply before sending more.";
   if (m.includes("interactions are limited")) return "Interactions are limited on this post.";
+  const sanctioned = sanctionError(e);
+  if (sanctioned) return sanctioned;
   return null;
 }

@@ -101,6 +101,6 @@ const mig = readFileSync(join(root, "supabase/migration-views-exclude-author.sql
 eq("the creator's own views are not recorded (app) ...", /if \(!active \|\| isOwner\) return;[^\n]*\n\s*if \(rawViewRecorded/.test(feedItem), true);
 eq("... nor counted (trigger and RPC), and old author rows are removed and the counter recounted", [/user_id <> new\.viewer_id/.test(mig), /function public\.record_raw_view[\s\S]*user_id = auth\.uid\(\)\) then return/.test(mig), /delete from public\.post_raw_views/.test(mig), /set view_count = c\.n/.test(mig)], [true, true, true, true]);
 const order = readFileSync(join(root, "supabase/MIGRATIONS_ORDER.txt"), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
-eq("the migration is in MIGRATIONS_ORDER.txt, before known-connections and stranger-only (which stays last)", [order.includes("migration-views-exclude-author.sql"), order[order.length - 1]], [true, "migration-recovery.sql"]);
+eq("the migration is in MIGRATIONS_ORDER.txt, before known-connections and stranger-only (which stays last)", [order.includes("migration-views-exclude-author.sql"), order[order.length - 1]], [true, "migration-sanctions.sql"]);
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

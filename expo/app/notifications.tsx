@@ -52,6 +52,10 @@ export default function NotificationsScreen() {
         router.push(`/messages/${notif.actor_id}` as never);
         return;
       }
+      if (notif.type === "report_alert") {
+        router.push("/moderation-admin" as never);
+        return;
+      }
       if (notif.type === "recovery_offer") {
         router.push("/recovery-offer" as never);
         return;

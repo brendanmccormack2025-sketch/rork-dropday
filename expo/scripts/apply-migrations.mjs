@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Applies ONLY the stranger-only, Spotlight, harassment-protection and Recovery Boost migrations to the live database, in this order, each in its own transaction:
+ * Applies ONLY the stranger-only, Spotlight, harassment-protection, Recovery Boost and account-sanctions migrations to the live database, in this order, each in its own transaction:
  *   supabase/migration-live-snapshot.sql, supabase/migration-known-connections.sql, supabase/migration-stranger-only.sql,
- *   supabase/migration-spotlight.sql, supabase/migration-harassment.sql, supabase/migration-recovery.sql
+ *   supabase/migration-spotlight.sql, supabase/migration-harassment.sql, supabase/migration-recovery.sql, supabase/migration-sanctions.sql
  * It never runs ship.sh, never deploys functions and never publishes an app update.
  *
- *   SUPABASE_ACCESS_TOKEN=sbp_... node scripts/apply-migrations.mjs          check the Vault pepper, apply the six files
+ *   SUPABASE_ACCESS_TOKEN=sbp_... node scripts/apply-migrations.mjs          check the Vault pepper, apply the seven files
  *   node scripts/apply-migrations.mjs --dry                                   print what it would run (no token, no network)
  *
  * First it checks that the Vault secret trial_contact_pepper exists (contacts and email hashing need it) and stops with a
  * clear message if not (nothing is applied). Each file is sent as ONE request wrapped in begin/commit: if a file fails,
- * the database rolls it back, the script stops, and the files after it are not run. All six files are idempotent, so after
+ * the database rolls it back, the script stops, and the files after it are not run. All seven files are idempotent, so after
  * fixing the cause you can simply run it again. The token comes from SUPABASE_ACCESS_TOKEN (whitespace stripped) and is never
  * printed. Exit 0 ok, 1 an API / SQL error, 2 bad usage or missing token / pepper.
  * SUPABASE_API_BASE and SUPABASE_PROJECT_REF exist for the tests.
@@ -25,7 +25,7 @@ const REF = process.env.SUPABASE_PROJECT_REF || "tfdjymogbtfavdzgfqas";
 const TOKEN = (process.env.SUPABASE_ACCESS_TOKEN || "").replace(/\s+/g, "");
 const MAX_BYTES = 1_000_000;
 
-export const FILES = ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql"];
+export const FILES = ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql", "migration-sanctions.sql"];
 export const PEPPER_QUERY = "select count(*)::int as n from vault.decrypted_secrets where name = 'trial_contact_pepper' and coalesce(decrypted_secret, '') <> ''";
 export const PEPPER_HELP = `The Vault secret 'trial_contact_pepper' does not exist, so nothing was applied.
 Create it once in the Supabase SQL editor (use a long random value and never change it afterwards, or every stored hash stops matching):

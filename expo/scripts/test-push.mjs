@@ -32,6 +32,7 @@ eq("a reply to my reaction", one(row({ on_reaction: true })).body, "Ana replied 
 for (const [m, text] of [[1, "Your post got its first like"], [5, "Your post reached 5 likes"], [10, "Your post reached 10 likes"], [25, "Your post reached 25 likes"]]) eq(`like milestone ${m}`, one(row({ type: "like", milestone: m })).body, text);
 eq("friend request: the sender's name", [one(row({ type: "friend_request", post_id: null })).title, one(row({ type: "friend_request", post_id: null })).body], ["Ana", "sent you a friend request"]);
 eq("friend accept", [one(row({ type: "friend_accept", post_id: null })).title, one(row({ type: "friend_accept", post_id: null })).body], ["Ana", "is now your friend"]);
+eq("owner alert: 'A new report to review', and a burst is ONE push saying how many", [one(row({ type: "report_alert", post_id: null })).title, one(row({ type: "report_alert", post_id: null })).body, buildPushes([row({ type: "report_alert", post_id: null }), row({ type: "report_alert", post_id: null }), row({ type: "report_alert", post_id: null })]).map((p) => p.body)], ["Tryal moderation", "A new report to review", ["3 new reports to review"]]);
 eq("message: sender name + 'sent you a message'", [one(row({ type: "message", post_id: null, last_was_post: false })).title, one(row({ type: "message", post_id: null, last_was_post: false })).body], ["Ana", "sent you a message"]);
 eq("message with a shared post: 'sent you a post'", one(row({ type: "message", post_id: null, last_was_post: true })).body, "sent you a post");
 eq("a missing or blank name is 'Someone'", [one(row({ actor_name: null })).body, one(row({ actor_name: "   " })).body], ["Someone reacted to your post", "Someone reacted to your post"]);
@@ -47,9 +48,9 @@ eq("a long preview is cut to 120", msg({ preview: "y".repeat(500) }).body.length
 ok("the data of a push never holds message text", !JSON.stringify(msg({ preview: "SECRET TEXT" }).data).includes("SECRET"));
 
 // ── routes ──
-eq("tap targets", [routeFor(row({ type: "message" })), routeFor(row({ type: "friend_request" })), routeFor(row({ type: "friend_accept" })), routeFor(row({ type: "reaction" })), routeFor(row({ type: "like" })), routeFor(row({ type: "verdict_survived" })), routeFor(row({ type: "x", post_id: null }))],
-  [`/messages/${U(2)}`, "/people", `/messages/${U(2)}`, `/post/${P(1)}/reaction-tree`, `/post/${P(1)}/reaction-tree`, `/post/${P(1)}/reaction-tree`, "/notifications"]);
-ok("every route the server makes is one the app accepts", ["message", "friend_request", "friend_accept", "reaction", "like", "verdict_survived"].every((type) => routeFromPushData({ route: routeFor(row({ type })) }) !== null));
+eq("tap targets", [routeFor(row({ type: "message" })), routeFor(row({ type: "friend_request" })), routeFor(row({ type: "friend_accept" })), routeFor(row({ type: "reaction" })), routeFor(row({ type: "like" })), routeFor(row({ type: "verdict_survived" })), routeFor(row({ type: "report_alert" })), routeFor(row({ type: "x", post_id: null }))],
+  [`/messages/${U(2)}`, "/people", `/messages/${U(2)}`, `/post/${P(1)}/reaction-tree`, `/post/${P(1)}/reaction-tree`, `/post/${P(1)}/reaction-tree`, "/moderation-admin", "/notifications"]);
+ok("every route the server makes is one the app accepts", ["message", "friend_request", "friend_accept", "reaction", "like", "verdict_survived", "report_alert"].every((type) => routeFromPushData({ route: routeFor(row({ type })) }) !== null));
 eq("the app opens only known routes", [routeFromPushData({ route: "/evil" }), routeFromPushData({ route: "https://x.test" }), routeFromPushData({ route: 5 }), routeFromPushData(null), routeFromPushData({ route: `/messages/${"z".repeat(36)}` }), routeFromPushData({ route: "/people" }), routeFromPushData({ route: "/".padEnd(200, "a") })], [null, null, null, null, null, "/people", null]);
 
 // ── batching duplicates ──
@@ -130,7 +131,7 @@ ok("Expo token shape", EXPO_TOKEN_RE.test("ExponentPushToken[abc_DEF-123]") && E
   ok("only a service-level key may call it; a plain call is a dry run", /return new Response\("forbidden", \{ status: 403 \}\)/.test(fn) && /dryRun: true/.test(fn));
   ok("it retries, removes dead tokens (tickets and receipts) and records each result", /push_mark_retry/.test(fn) && /push_remove_tokens/.test(fn) && /push_due_tickets/.test(fn) && /getReceipts/.test(fn) && /push_mark_sent/.test(fn) && /chunk\(messages, 100\)/.test(fn));
   const order = read("../supabase/MIGRATIONS_ORDER.txt").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
-  eq("migration-push.sql runs after friends and before the snapshot, known-connections and stranger-only (which stays last)", order.slice(-8), ["migration-friends-messages.sql", "migration-push.sql", "migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql"]);
+  eq("migration-push.sql runs after friends and before the snapshot, known-connections and stranger-only (which stays last)", order.slice(-9), ["migration-friends-messages.sql", "migration-push.sql", "migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql", "migration-sanctions.sql"]);
 }
 
 console.log(failed === 0 ? "\nall passed" : `\n${failed} FAILED`);

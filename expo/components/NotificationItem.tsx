@@ -1,7 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
-import { Archive, Bell, Heart, Star, Trophy, Zap } from "lucide-react-native";
+import { Archive, Bell, Flag, Heart, Star, Trophy, Zap } from "lucide-react-native";
 
 import UiText from "@/components/UiText";
 import { FeedAvatar } from "@/components/Avatar";
@@ -17,7 +17,7 @@ import type { NotificationRow } from "@/providers/NotificationsProvider";
  * follow_request, follow_accept, followed_post_survived) and anything unknown
  * render nothing.
  */
-const DISPLAYED_TYPES: string[] = ["like", "reaction", "verdict_survived", "verdict_unjudged", "spotlight_offer", "recovery_offer", "friend_request", "friend_accept"];   // "message" rows exist for the push; chats show their own unread dot   // posts that end or stay incomplete disappear quietly: no such notifications
+const DISPLAYED_TYPES: string[] = ["like", "reaction", "verdict_survived", "verdict_unjudged", "spotlight_offer", "recovery_offer", "report_alert", "friend_request", "friend_accept"];   // "message" rows exist for the push; chats show their own unread dot   // posts that end or stay incomplete disappear quietly: no such notifications
 
 export function isDisplayedNotification(notif: { type: string }): boolean {
   return DISPLAYED_TYPES.includes(notif.type);
@@ -66,7 +66,7 @@ export default function NotificationItem({
   };
   const thumbUri = resolveThumbUrl(notif.post?.thumbnail_url ?? null);
   const isVerdict =
-    notif.type === "verdict_survived" || notif.type === "verdict_unjudged" || notif.type === "spotlight_offer" || notif.type === "recovery_offer";
+    notif.type === "verdict_survived" || notif.type === "verdict_unjudged" || notif.type === "spotlight_offer" || notif.type === "recovery_offer" || notif.type === "report_alert";
 
   let icon = <Bell color={theme.textMuted} size={15} strokeWidth={2} />;
   let actionText = "";
@@ -96,6 +96,9 @@ export default function NotificationItem({
   } else if (notif.type === "recovery_offer") {
     icon = <Heart color={theme.accent} size={15} strokeWidth={2} fill={theme.accent} />;
     actionText = RECOVERY_NOTIFICATION_TEXT;
+  } else if (notif.type === "report_alert") {
+    icon = <Flag color={theme.accent} size={15} strokeWidth={2} />;
+    actionText = "New report to review";
   }
 
   return (

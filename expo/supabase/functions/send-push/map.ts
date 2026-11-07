@@ -6,6 +6,7 @@
  *   - survived: "Your post survived Tryal 🏆"; reaction: "<name> reacted to your post" (several on one post collapse:
  *     "<name> and N others reacted to your post"); like milestones (1, 5, 10, 25): "Your post reached N likes";
  *     friend request / accept; message: title = sender, body "sent you a message" or "sent you a post".
+ *   - report_alert (admins only): "A new report to review" / "N new reports to review", opens the moderation screen; a burst is one push.
  *   - Message TEXT is never shown unless the row carries a preview, which the database only sends for an adult who turned
  *     previews on; and a minor never gets one, whatever the row says.
  *   - One push per (person, kind, post / sender) in a batch; every row of a group is marked together.
@@ -65,6 +66,8 @@ export function routeFor(row: Pick<ClaimedRow, "type" | "actor_id" | "post_id">)
       return "/people";
     case "friend_accept":
       return row.actor_id ? `/messages/${row.actor_id}` : "/people";
+    case "report_alert":
+      return "/moderation-admin";
     case "reaction":
     case "like":
     case "verdict_survived":
@@ -83,6 +86,8 @@ function groupKey(row: ClaimedRow): string {
       return `message:${row.recipient_id}:${row.actor_id}`;
     case "like":
       return `like:${row.recipient_id}:${row.post_id}`;
+    case "report_alert":
+      return `report_alert:${row.recipient_id}`;   // a burst of reports is one push
     default:
       return `${row.type}:${row.recipient_id}:${row.id}`;   // one push each
   }
@@ -105,6 +110,8 @@ function textFor(rows: ClaimedRow[]): { title: string; body: string } {
       const n = Math.max(...rows.map((r) => r.milestone ?? 0));
       return { title: "Tryal", body: n <= 1 ? "Your post got its first like" : `Your post reached ${n} likes` };
     }
+    case "report_alert":
+      return { title: "Tryal moderation", body: rows.length > 1 ? `${rows.length} new reports to review` : "A new report to review" };
     case "friend_request":
       return { title: nameOf(first), body: "sent you a friend request" };
     case "friend_accept":

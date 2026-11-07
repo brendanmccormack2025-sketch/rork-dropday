@@ -31,7 +31,7 @@ export function normalizePrefs(row: Partial<PushPrefs> | null | undefined): Push
 export const EXPO_TOKEN_RE = /^(Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$/;
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const ROUTES = [new RegExp(`^/messages/${UUID}$`), /^\/messages$/, /^\/people$/, /^\/notifications$/, new RegExp(`^/post/${UUID}/reaction-tree$`)];
+const ROUTES = [new RegExp(`^/messages/${UUID}$`), /^\/messages$/, /^\/people$/, /^\/notifications$/, /^\/moderation-admin$/, new RegExp(`^/post/${UUID}/reaction-tree$`)];
 
 /** The screen a tapped push opens: only routes the app knows (a push can never open an arbitrary path). */
 export function routeFromPushData(data: unknown): string | null {

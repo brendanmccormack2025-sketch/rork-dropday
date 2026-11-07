@@ -32,7 +32,7 @@ eq("no payments anywhere in Spotlight", [lib, read("../app/spotlight-admin.tsx")
 
 const sql = read("../supabase/migration-spotlight.sql");
 eq("the migration: consent first (offers show nothing), one eligibility rule used by the feed and the badge", [/spotlight_eligible\(sp\.creator_id, sp\.status, me\)/.test(sql), /spotlight_eligible\(p_user_id,/.test(sql)], [true, true]);
-eq("the migration is in the order (before harassment and recovery) and in the apply script", [read("../supabase/MIGRATIONS_ORDER.txt").split("\n").filter((l) => l.trim() && !l.startsWith("#")).slice(-3, -1), /"migration-spotlight\.sql"/.test(read("../scripts/apply-migrations.mjs"))], [["migration-spotlight.sql", "migration-harassment.sql"], true]);
+eq("the migration is in the order (before harassment, recovery and sanctions) and in the apply script", [read("../supabase/MIGRATIONS_ORDER.txt").split("\n").filter((l) => l.trim() && !l.startsWith("#")).slice(-4, -2), /"migration-spotlight\.sql"/.test(read("../scripts/apply-migrations.mjs"))], [["migration-spotlight.sql", "migration-harassment.sql"], true]);
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

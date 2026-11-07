@@ -31,3 +31,10 @@ export const adminResolveFlag = (flag: string, status: "reviewed" | "dismissed")
 export const adminTerms = async () => (await rows<{ term: string }>("admin_filter_terms")).map((r) => r.term);
 export const adminAddTerm = (term: string) => call<void>("admin_filter_add", { p_term: term });
 export const adminRemoveTerm = (term: string) => call<void>("admin_filter_remove", { p_term: term });
+
+export type SanctionRow = { id: string; user_id: string; username: string | null; kind: string; until: string | null; reason: string | null; created_at: string; lifted_at: string | null };
+export type LogRow = { id: string; actor_username: string | null; action: string; target_username: string | null; detail: Record<string, unknown>; created_at: string };
+export const adminSanctionUser = (user: string, kind: "suspend" | "ban", days: number | null, reason: string) => call<string>("admin_sanction_user", { p_user: user, p_kind: kind, p_days: days, p_reason: reason });
+export const adminLiftSanction = (user: string) => call<void>("admin_lift_sanction", { p_user: user });
+export const adminSanctions = () => rows<SanctionRow>("admin_sanctions_list", { p_active_only: true });
+export const adminModerationLog = () => rows<LogRow>("admin_moderation_log", { p_limit: 50 });

@@ -35,6 +35,9 @@ import { SpaceGrotesk_700Bold } from "@expo-google-fonts/space-grotesk/700Bold";
 
 import SaveToRollToast from "@/components/SaveToRollToast";
 import { AuthProvider, useAuth } from "@/providers/AuthProvider";
+import SanctionScreen from "@/components/SanctionScreen";
+import { mySanction } from "@/lib/sanction";
+import { useQuery } from "@tanstack/react-query";
 import { UserBlocksProvider } from "@/hooks/useUserBlocks";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { isContactsAvailable, isContactsEnabled, syncContactsIfDue } from "@/lib/contacts";
@@ -59,7 +62,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 const queryClient = new QueryClient();
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { session, loading } = useAuth();
+  const { session, loading, signOut } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const pathname = usePathname();
@@ -132,6 +135,19 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       router.replace("/(tabs)");
     }
   }, [session, loading, segments, router]);
+
+  // A suspended or banned account sees why, instead of the app (the database refuses its writes whatever the app does).
+  // Re-checked every minute while it is in force, so the end of a suspension lets the person straight back in.
+  const sanctionQuery = useQuery({
+    queryKey: ["sanction", session?.user?.id ?? null],
+    enabled: !!session?.user?.id,
+    queryFn: mySanction,
+    staleTime: 30_000,
+    refetchInterval: (q) => (q.state.data ? 60_000 : 10 * 60_000),
+  });
+  if (session && sanctionQuery.data) {
+    return <SanctionScreen sanction={sanctionQuery.data} onSignOut={() => void signOut()} />;
+  }
 
   return <>{children}</>;
 }

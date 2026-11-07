@@ -8,11 +8,11 @@ import { ChevronLeft } from "lucide-react-native";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { isDebugOwner } from "@/constants/debug";
-import { adminAddTerm, adminFlags, adminRemoveTerm, adminReports, adminResolveFlag, adminResolveReport, adminTerms, type ReportAction } from "@/lib/safety";
+import { adminAddTerm, adminFlags, adminLiftSanction, adminModerationLog, adminSanctions, adminSanctionUser, adminRemoveTerm, adminReports, adminResolveFlag, adminResolveReport, adminTerms, type ReportAction } from "@/lib/safety";
 import { adminRecovery } from "@/lib/recovery";
 import { useAuth } from "@/providers/AuthProvider";
 
-type Tab = "reports" | "flags" | "recovery" | "words";
+type Tab = "reports" | "flags" | "accounts" | "recovery" | "words";
 
 /**
  * Owner only (the database checks the admin list again on every call). Reports (posts, reactions, messages), flags from the
@@ -28,6 +28,8 @@ export default function ModerationAdminScreen() {
 
   const reports = useQuery({ queryKey: ["mod", "reports"], queryFn: () => adminReports("pending"), enabled: owner });
   const flags = useQuery({ queryKey: ["mod", "flags"], queryFn: () => adminFlags("open"), enabled: owner });
+  const sanctions = useQuery({ queryKey: ["mod", "sanctions"], queryFn: adminSanctions, enabled: owner });
+  const modLog = useQuery({ queryKey: ["mod", "log"], queryFn: adminModerationLog, enabled: owner });
   const recovery = useQuery({ queryKey: ["mod", "recovery"], queryFn: adminRecovery, enabled: owner });
   const terms = useQuery({ queryKey: ["mod", "terms"], queryFn: adminTerms, enabled: owner });
 
@@ -37,6 +39,23 @@ export default function ModerationAdminScreen() {
   }, [qc]);
   const resolveFlag = useCallback((id: string, status: "reviewed" | "dismissed") => {
     adminResolveFlag(id, status).then(() => qc.invalidateQueries({ queryKey: ["mod", "flags"] })).catch(fail);
+  }, [qc]);
+  // Suspend (7 or 30 days) or ban an account: the database refuses its posts, reactions, likes and messages and hides its content.
+  const sanction = useCallback((userId: string | null, name: string | null) => {
+    if (!userId) return;
+    const run = (kind: "suspend" | "ban", days: number | null) =>
+      adminSanctionUser(userId, kind, days, "Moderation review")
+        .then(() => Promise.all([qc.invalidateQueries({ queryKey: ["mod"] })]))
+        .catch(fail);
+    Alert.alert(`@${name ?? "this account"}`, "Their posts and reactions are hidden at once, and they can't post, react, like or message.", [
+      { text: "Suspend 7 days", onPress: () => void run("suspend", 7) },
+      { text: "Suspend 30 days", onPress: () => void run("suspend", 30) },
+      { text: "Ban", style: "destructive", onPress: () => void run("ban", null) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [qc]);
+  const lift = useCallback((userId: string) => {
+    adminLiftSanction(userId).then(() => qc.invalidateQueries({ queryKey: ["mod"] })).catch(fail);
   }, [qc]);
   const addTerm = useCallback(() => {
     const t = term.trim();
@@ -63,7 +82,7 @@ export default function ModerationAdminScreen() {
           <View style={styles.back} />
         </View>
         <View style={styles.tabs}>
-          {([["reports", `Reports${reports.data ? ` (${reports.data.length})` : ""}`], ["flags", `Flags${flags.data ? ` (${flags.data.length})` : ""}`], ["recovery", "Recovery"], ["words", "Word list"]] as Array<[Tab, string]>).map(([k, label]) => (
+          {([["reports", `Reports${reports.data ? ` (${reports.data.length})` : ""}`], ["flags", `Flags${flags.data ? ` (${flags.data.length})` : ""}`], ["accounts", "Accounts"], ["recovery", "Recovery"], ["words", "Word list"]] as Array<[Tab, string]>).map(([k, label]) => (
             <Pressable key={k} onPress={() => setTab(k)} style={[styles.tab, tab === k && styles.tabOn]}>
               <UiText style={[styles.tabText, tab === k && styles.tabTextOn]}>{label}</UiText>
             </Pressable>
@@ -81,6 +100,11 @@ export default function ModerationAdminScreen() {
                     <UiText style={[styles.actionText, (a === "hide" || a === "remove") && styles.actionTextDanger]}>{a === "reviewed" ? "Mark reviewed" : a[0]!.toUpperCase() + a.slice(1)}</UiText>
                   </Pressable>
                 ))}
+                {r.reported_user_id ? (
+                  <Pressable onPress={() => sanction(r.reported_user_id, r.reported_username)} style={[styles.action, styles.actionDanger]}>
+                    <UiText style={styles.actionTextDanger}>Suspend / ban account</UiText>
+                  </Pressable>
+                ) : null}
               </View>
             </View>
           )))}
@@ -92,9 +116,33 @@ export default function ModerationAdminScreen() {
               <View style={styles.actions}>
                 <Pressable onPress={() => resolveFlag(f.id, "dismissed")} style={styles.action}><UiText style={styles.actionText}>Dismiss</UiText></Pressable>
                 <Pressable onPress={() => resolveFlag(f.id, "reviewed")} style={styles.action}><UiText style={styles.actionText}>Mark reviewed</UiText></Pressable>
+                <Pressable onPress={() => sanction(f.user_id, f.username)} style={[styles.action, styles.actionDanger]}><UiText style={styles.actionTextDanger}>Suspend / ban account</UiText></Pressable>
               </View>
             </View>
           )))}
+          {tab === "accounts" && (
+            <>
+              <UiText style={styles.cardTitle}>In force</UiText>
+              {(sanctions.data ?? []).length === 0 ? <UiText style={styles.muted}>No suspended or banned accounts.</UiText> : (sanctions.data ?? []).map((s) => (
+                <View key={s.id} style={styles.card}>
+                  <UiText style={styles.cardTitle}>@{s.username ?? "?"} · {s.kind === "ban" ? "banned" : `suspended until ${s.until ? new Date(s.until).toLocaleString() : "?"}`}</UiText>
+                  <UiText style={styles.muted}>since {new Date(s.created_at).toLocaleString()}{s.reason ? ` · ${s.reason}` : ""}</UiText>
+                  <View style={styles.actions}>
+                    <Pressable onPress={() => lift(s.user_id)} style={styles.action}><UiText style={styles.actionText}>{s.kind === "ban" ? "Unban" : "Unsuspend"}</UiText></Pressable>
+                  </View>
+                </View>
+              ))}
+              <UiText style={[styles.cardTitle, { marginTop: 12 }]}>Log</UiText>
+              {(modLog.data ?? []).length === 0 ? <UiText style={styles.muted}>Nothing yet.</UiText> : (modLog.data ?? []).map((l) => (
+                <View key={l.id} style={styles.term}>
+                  <View style={{ flex: 1 }}>
+                    <UiText style={styles.cardTitle}>{l.action.replace(/_/g, " ")}{l.target_username ? ` · @${l.target_username}` : ""}</UiText>
+                    <UiText style={styles.muted}>{l.actor_username ? `@${l.actor_username}` : "automatic"} · {new Date(l.created_at).toLocaleString()}</UiText>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
           {tab === "recovery" && (recovery.isLoading ? <ActivityIndicator color={theme.accent} /> : (recovery.data ?? []).length === 0 ? <UiText style={styles.muted}>No Recovery Boost offers yet.</UiText> : (recovery.data ?? []).map((o) => (
             <View key={o.id} style={styles.card}>
               <UiText style={styles.cardTitle}>@{o.creator_username ?? "?"} · {o.status} · {o.source}</UiText>
