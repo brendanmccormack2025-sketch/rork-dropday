@@ -233,3 +233,18 @@ export async function measureAndSanitize<T extends BoundedClip>(clips: T[], prob
   });
   return sanitizeClips(withLength);
 }
+
+/**
+ * What a player's status event may change on the clip it is attributed to. A file with a known length (measured, or the merged
+ * file's verified render length) keeps it: the event can still be the previous clip's player. Only an unmeasured file takes
+ * the player's number. Returns the corrected clip, or null when nothing changes.
+ */
+export function applyPlayerDuration<T extends BoundedClip>(clip: T, sourceDur: number): T | null {
+  const known = fileLengthMs(clip.uri);
+  const realDur = known !== undefined ? known : sourceDur;
+  if (!(realDur > 0)) return null;
+  const end = clip.trimEndMs ?? 0;
+  const needs = clip.durationMs === undefined || clip.durationMs === 0 || Math.abs(clip.durationMs - realDur) > 100 || end > realDur + 100;
+  if (!needs) return null;
+  return { ...clip, durationMs: realDur, trimEndMs: clip.trimEndMs !== undefined && clip.trimEndMs > 0 ? Math.min(clip.trimEndMs, realDur) : realDur };
+}

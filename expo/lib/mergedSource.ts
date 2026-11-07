@@ -31,3 +31,24 @@ export function enforceMergedSource<T extends ClipLike>(
   for (const c of clips) (segments.has(c.uri) ? dropped : kept).push(c);
   return { clips: kept, dropped };
 }
+
+/**
+ * After a merge the merged file is the ONE source of truth for its own length: every clip of it carries the length the render
+ * verified (durationMs), and no trim end reaches past it. Nothing a player reports while a clip is loading (it can still be the
+ * previous clip's length) may shorten it. Returns the same array when nothing needs fixing.
+ */
+export function pinMergedLength<T extends ClipLike & { durationMs?: number; trimStartMs?: number; trimEndMs?: number }>(
+  clips: T[],
+  merged: { uri: string; durationMs: number } | null,
+): T[] {
+  if (!merged || !(merged.durationMs > 0)) return clips;
+  let changed = false;
+  const out = clips.map((c) => {
+    if (c.uri !== merged.uri) return c;
+    const end = c.trimEndMs && c.trimEndMs > 0 ? Math.min(c.trimEndMs, merged.durationMs) : merged.durationMs;
+    if (c.durationMs === merged.durationMs && c.trimEndMs === end) return c;
+    changed = true;
+    return { ...c, durationMs: merged.durationMs, trimEndMs: end };
+  });
+  return changed ? out : clips;
+}

@@ -74,8 +74,8 @@ import { captionLookKey, drawCaptionsLive, lookSignature } from "@/lib/previewFr
 import { backAction, initialStep, nextStep, selectionBarSide, stepLayout, videoTapAction, type EditorStep } from "@/lib/editorFlow";
 import { DEFAULT_TEXT_OVERLAY_POS, TEXT_MAX_WIDTH, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame, frameToFrac } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
-import { fileLengthMs, setFileLengthMs } from "@/lib/clipBounds";
-import { blocksAutoCuts, summarizePlan } from "@/lib/autoEdit/planSummary";
+import { applyPlayerDuration, fileLengthMs, setFileLengthMs } from "@/lib/clipBounds";
+import { blocksAutoCuts, cutRangesOf, describeClips, summarizePlan } from "@/lib/autoEdit/planSummary";
 import { measureClips, probeFileLengthMs } from "@/lib/clipMeasure";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { formatRenderStats, recordRenderStats, reportRender } from "@/lib/renderReport";
@@ -124,7 +124,7 @@ import { LAST_PART_MESSAGE, markerAction, planDeletePart, undoThisCut } from "@/
 import { analysisSource, loadLoudnessChecked } from "@/lib/mergeTiming";
 import { AUTO_EDIT_STALL_MS, transcriptionGate } from "@/lib/captionsGate";
 import { exitPreviewPlan, isPlayingWholeSource } from "@/lib/autoEdit/noCuts";
-import { enforceMergedSource, playerUris } from "@/lib/mergedSource";
+import { enforceMergedSource, pinMergedLength, playerUris } from "@/lib/mergedSource";
 import { resetPlayer } from "@/lib/playerReset";
 import { blockForKind, postingBlockedKind } from "@/lib/creatorStatus";
 import type { PlaybackDebug } from "@/lib/autoEdit/debugText";
@@ -1319,27 +1319,13 @@ export default function EditScreen() {
       const idx = activeIndexRef.current;
       const currentClips = clipsRef.current;
       const clip = currentClips[idx];
-      // never longer than the measured file; a trim end that is past the real end comes back with it
-      // (the merged file's length was verified when it was rendered: the player never shrinks it)
-      const isMergedClip = !!clip && clip.uri === mergedRef.current?.uri;
-      const knownLen = clip && !isMergedClip ? fileLengthMs(clip.uri) : undefined;
-      const realDur = knownLen !== undefined ? Math.min(sourceDur, knownLen) : sourceDur;
-      if (
-        clip &&
-        clip.type === "video" &&
-        (clip.durationMs === undefined ||
-          clip.durationMs === 0 ||
-          Math.abs(clip.durationMs - realDur) > 100 ||
-          (!isMergedClip && (clip.trimEndMs ?? 0) > realDur + 100))
-      ) {
+      // A file whose length is known (measured, or the merged file's verified render length) keeps that length: a status
+      // event can still belong to the PREVIOUS clip's player while a new clip loads, and must not rewrite it. Only a file
+      // nobody measured takes the player's number (see applyPlayerDuration).
+      const fixed = clip && clip.type === "video" ? applyPlayerDuration(clip, sourceDur) : null;
+      if (fixed) {
         const updated = [...currentClips];
-        updated[idx] = {
-          ...clip,
-          durationMs: realDur,
-          trimEndMs: clip.trimEndMs !== undefined && clip.trimEndMs > 0
-            ? (isMergedClip ? clip.trimEndMs : Math.min(clip.trimEndMs, realDur))
-            : realDur,
-        };
+        updated[idx] = fixed;
         setClips(updated);
       }
     }
@@ -2608,11 +2594,13 @@ export default function EditScreen() {
   // Swap the whole clip list (same playback reset as undo/redo, text untouched).
   const replaceClips = useCallback((requested: DraftClip[]) => {
     // A merged project plays the merged file only: a clip of a pre-merge segment never reaches the player.
-    const { clips: next, dropped } = enforceMergedSource(
+    const { clips: enforced, dropped } = enforceMergedSource(
       requested,
       mergedRef.current,
       originalClipsRef.current.map((c) => c.uri),
     );
+    // the merged file's length is the render's verified one, whatever a player or a plan carried over
+    const next = pinMergedLength(enforced, mergedRef.current);
     if (dropped.length > 0) {
       void recordClientError(new Error("a pre-merge segment reached the editor timeline"), {
         kind: "segmentInTimeline",
@@ -2663,9 +2651,13 @@ export default function EditScreen() {
     if (!mountedRef.current) return;
     if (result.ok) {
       mergedRef.current = { uri: result.clip.uri, durationMs: result.clip.durationMs };
+      // the render's verified length is the merged file's length for every clamp and every player event from now on
+      setFileLengthMs(result.clip.uri, result.clip.durationMs);
       const timing = result.timing as { issues?: string[] } | undefined;
       if (timing?.issues?.length) void recordClientError(new Error(`merge timing: ${timing.issues.join("; ")}`), { kind: "mergeTiming", ...(timing as object) });
       replaceClips([result.clip]);
+      // what the editor holds right after the merge: ONE clip, the merged file
+      recordBreadcrumb("merge: editor clips", { clips: describeClips([result.clip]), registryMs: fileLengthMs(result.clip.uri) ?? null, parts: partsCount() });
       setMergeUi({ kind: "idle" });
       // Check in the background that the merged file plays straight through, past every join; the numbers are logged.
       const segmentMs = (timing as { sourceDurationsMs?: Array<number | null> } | undefined)?.sourceDurationsMs;
@@ -2918,6 +2910,7 @@ export default function EditScreen() {
       pushSnapshot(current, textOverlaysForUndoRef.current);
       aheadRef.current?.startNextImmediately();
       replaceClips(produced);
+      recordBreadcrumb("ai edit: silence plan applied", { clips: describeClips(produced), cuts: cutRangesOf(modelState), mergedMs: mergedRef.current?.durationMs ?? null });
       autoEditWindowsRef.current = result.windows;
       setAutoEditSession({
         original,
@@ -3833,6 +3826,7 @@ export default function EditScreen() {
           pushSnapshot(current, textOverlaysForUndoRef.current);
           aheadRef.current?.startNextImmediately();
           replaceClips(produced);
+          recordBreadcrumb("ai edit: transcript plan applied", { clips: describeClips(produced), cuts: cutRangesOf(merged.state), mergedMs: mergedRef.current?.durationMs ?? null });
           const keptMs = derived.reduce((sum, c) => sum + (c.trimEndMs - c.trimStartMs), 0);
           setAutoEditSession((prev) =>
             prev

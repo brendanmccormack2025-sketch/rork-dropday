@@ -51,3 +51,20 @@ export function blocksAutoCuts(args: { sourceMs: number; keptMs: number; multiCl
   const removed = (args.sourceMs - args.keptMs) / args.sourceMs;
   return removed > (args.maxFraction ?? MAX_AUTO_CUT_FRACTION);
 }
+
+/** The clips as the breadcrumbs show them: the end of the uri, the trim and the length each carries. */
+export function describeClips(clips: ReadonlyArray<{ uri: string; trimStartMs?: number; trimEndMs?: number; durationMs?: number }>): Array<{ uri: string; trimStart: number; trimEnd: number | null; durationMs: number | null }> {
+  return clips.map((c) => ({ uri: c.uri.slice(-20), trimStart: Math.round(c.trimStartMs ?? 0), trimEnd: c.trimEndMs === undefined ? null : Math.round(c.trimEndMs), durationMs: c.durationMs === undefined ? null : Math.round(c.durationMs) }));
+}
+
+/** The source ranges the plan cuts, [start, end] in ms of the file the plan was made on (merged ranges, sorted). */
+export function cutRangesOf(state: EditState): Array<[number, number]> {
+  const sorted = effectiveCutRanges(state).map((r) => [Math.round(r.startMs), Math.round(r.endMs)] as [number, number]).sort((a, b) => a[0] - b[0]);
+  const out: Array<[number, number]> = [];
+  for (const r of sorted) {
+    const last = out[out.length - 1];
+    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+    else out.push([r[0], r[1]]);
+  }
+  return out;
+}

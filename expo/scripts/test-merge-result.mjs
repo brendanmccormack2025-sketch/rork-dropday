@@ -83,7 +83,7 @@ eq("renderer: the result carries the parts and the pieces of each composition tr
 const mn = read("../lib/mergeNative.ts"), ed = read("../app/edit.tsx");
 eq("merge: the result is probed and one breadcrumb carries video/audio ms, segment counts and per-clip orientation", [/crumb\("result"/.test(mn), /videoSegments/.test(mn), /audioSegments/.test(mn), /mirrored: p\.mirrored/.test(mn), /rot: p\.rotationDeg/.test(mn)], [true, true, true, true, true]);
 eq("editor: both AI plans leave a summary breadcrumb and are guarded for merged videos", [/recordBreadcrumb\("ai edit: silence plan"/.test(ed), /recordBreadcrumb\("ai edit: transcript plan"/.test(ed), (ed.match(/blocksAutoCuts\(/g) ?? []).length, /kind: "autoCutGuard"/.test(ed)], [true, true, 2, true]);
-eq("editor: the player never shrinks the merged clip's trim end", [/const isMergedClip = !!clip && clip\.uri === mergedRef\.current\?\.uri/.test(ed), /!isMergedClip && \(clip\.trimEndMs/.test(ed)], [true, true]);
+eq("editor: a player event never rewrites a file whose length is known (merged included)", [/applyPlayerDuration\(clip, sourceDur\)/.test(ed), /setFileLengthMs\(result\.clip\.uri/.test(ed)], [true, true]);
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);
