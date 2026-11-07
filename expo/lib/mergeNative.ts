@@ -3,6 +3,7 @@
  * render at a time; EVERY step has a time limit and leaves a breadcrumb (start, end, ms), so a step that never
  * comes back is both survived and visible in client_errors. A render that hangs is cancelled.
  */
+import type { RenderResult } from "@/modules/video-render";
 import { recordBreadcrumb } from "@/lib/clientErrors";
 import { DeadlineError, deadline } from "@/lib/deadline";
 import { toRenderJson } from "@/lib/editStyles";
@@ -76,7 +77,7 @@ export async function renderMerge(
       overlays: [],
     });
     // A plain concatenation: no dip in the audio at the joins (build 1.0.4; older builds ignore the option).
-    let result: { uri: string; sizeBytes: number; actualDurationMs: number };
+    let result: RenderResult;
     try {
       result = await step("rendering", MERGE_TIMEOUT_MS + CANCEL_GRACE_MS, onStage, () => mod.renderAsync(json, { width, height, reframe: "fit", bitrate: 3_500_000, punchIn: false, seamFades: false }), { clips: uris.length });
     } catch (e) {
@@ -93,8 +94,25 @@ export async function renderMerge(
       const probe = async (u: string): Promise<TrackTiming | null> =>
         (await deadline(Promise.resolve(mod.probeTimingAsync(u)), PROBE_MS, "measuring the result").catch(() => null)) as TrackTiming | null;
       const [merged, ...sources] = await Promise.all([probe(result.uri), ...uris.map(probe)]);
-      timing = mergeTimingReport(sources, merged ?? null, uris.length - 1);
+      timing = mergeTimingReport(sources, merged ?? null, uris.length - 1, {
+        parts: result.parts ?? null,
+        renderVideoSegments: result.videoSegments ?? null,
+        renderAudioSegments: result.audioSegments ?? null,
+      });
       if (timing) console.log("[merge] timing", JSON.stringify(timing));
+      // The breadcrumb the log needs: how long the merged file's picture and sound are, how many pieces each has, and for
+      // every clip the orientation used (rotation, mirrored) and how much picture / sound went in.
+      crumb("result", {
+        mergedMs: result.actualDurationMs,
+        videoMs: timing?.mergedVideoMs ?? null,
+        audioMs: timing?.mergedAudioMs ?? null,
+        videoSegments: timing?.mergedVideoSegments ?? result.videoSegments ?? null,
+        audioSegments: timing?.mergedAudioSegments ?? result.audioSegments ?? null,
+        sourcesMs: timing?.sourceDurationsMs ?? null,
+        clips: (result.parts ?? []).map((p) => ({ i: p.index, at: p.compStartMs, ms: p.durationMs, size: `${p.naturalWidth}x${p.naturalHeight}`, rot: p.rotationDeg, mirrored: p.mirrored, video: p.videoInsertedMs, audio: p.hasAudio ? p.audioInsertedMs : null, t: p.appliedTransform })),
+        newBuild: Array.isArray(result.parts),
+        issues: timing?.issues ?? [],
+      });
     } catch {
       timing = null;
     }

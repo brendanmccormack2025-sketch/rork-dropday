@@ -23,6 +23,27 @@ export const ALIGN_TOLERANCE_MS = 100;
 /** The merged length may differ from the sum of the parts by this much per join (frame rounding). */
 export const JOIN_TOLERANCE_MS = 50;
 
+/** What the renderer says it placed for one clip (RenderPart in modules/video-render, newer builds). */
+export type MergePart = {
+  index: number;
+  durationMs: number;
+  hasAudio: boolean;
+  videoInsertedMs: number;
+  audioInsertedMs: number;
+  rotationDeg?: number;
+  mirrored?: boolean;
+  naturalWidth?: number;
+  naturalHeight?: number;
+  preferredTransform?: number[];
+  appliedTransform?: number[];
+};
+
+/** What the renderer and the probe of the merged file say about its pieces. */
+export type MergeExtra = { parts?: MergePart[] | null; renderVideoSegments?: number | null; renderAudioSegments?: number | null };
+
+/** A part keeps its picture and sound when at least this share of its length went in. */
+export const PART_KEEP_SHARE = 0.9;
+
 export type MergeTimingReport = {
   /** Sum of the source clips' durations (ms), or null when a source could not be probed. */
   sourceSumMs: number | null;
@@ -38,10 +59,15 @@ export type MergeTimingReport = {
   /** Per source: its movie length (ms), in order; null when it could not be probed. */
   sourceDurationsMs: Array<number | null>;
   issues: string[];
+  /** Pieces in the merged file's tracks (probe of the written file): one per clip when every clip went in. */
+  mergedVideoSegments?: number | null;
+  mergedAudioSegments?: number | null;
+  /** Per clip, from the renderer: orientation used and how much picture / sound went in. */
+  parts?: MergePart[];
 };
 
 /** Compare the merged file with the parts it was made from. */
-export function mergeTimingReport(sources: Array<TrackTiming | null>, merged: TrackTiming | null, joinCount: number): MergeTimingReport | null {
+export function mergeTimingReport(sources: Array<TrackTiming | null>, merged: TrackTiming | null, joinCount: number, extra: MergeExtra = {}): MergeTimingReport | null {
   if (!merged) return null;
   const known = sources.every((s) => s && s.durationMs > 0);
   const sourceSumMs = known ? sources.reduce((n, s) => n + s!.durationMs, 0) : null;
@@ -55,7 +81,24 @@ export function mergeTimingReport(sources: Array<TrackTiming | null>, merged: Tr
   if (merged.audioDurationMs >= 0 && merged.videoDurationMs >= 0 && Math.abs(merged.audioDurationMs - merged.videoDurationMs) > ALIGN_TOLERANCE_MS) {
     issues.push(`audio is ${merged.audioDurationMs - merged.videoDurationMs} ms longer than the video`);
   }
+  // every clip's picture AND sound must be in the file, each with its own orientation
+  const parts = extra.parts ?? [];
+  for (const p of parts) {
+    if (p.durationMs > 0 && p.videoInsertedMs < PART_KEEP_SHARE * p.durationMs) issues.push(`clip ${p.index + 1}: only ${p.videoInsertedMs} of ${p.durationMs} ms of picture went in`);
+    if (p.hasAudio && p.durationMs > 0 && p.audioInsertedMs < PART_KEEP_SHARE * p.durationMs) issues.push(`clip ${p.index + 1}: only ${p.audioInsertedMs} of ${p.durationMs} ms of sound went in`);
+  }
+  const withAudio = parts.filter((p) => p.hasAudio).length;
+  const mergedVideoSegments = (merged as TrackTiming & { videoSegments?: number }).videoSegments;
+  const mergedAudioSegments = (merged as TrackTiming & { audioSegments?: number }).audioSegments;
+  if (typeof mergedVideoSegments === "number" && mergedVideoSegments >= 0 && sources.length > 0 && mergedVideoSegments < 1) issues.push("the merged file has no video pieces");
+  if (parts.length > 0 && withAudio > 0 && typeof mergedAudioSegments === "number" && mergedAudioSegments === 0) issues.push("the merged file has no sound");
+  if (merged.audioDurationMs >= 0 && merged.videoDurationMs > 0 && merged.audioDurationMs < PART_KEEP_SHARE * merged.videoDurationMs && withAudio > 0) {
+    issues.push(`the merged sound is ${merged.audioDurationMs} ms for ${merged.videoDurationMs} ms of picture`);
+  }
   return {
+    ...(parts.length > 0 ? { parts } : {}),
+    mergedVideoSegments: typeof mergedVideoSegments === "number" ? mergedVideoSegments : null,
+    mergedAudioSegments: typeof mergedAudioSegments === "number" ? mergedAudioSegments : null,
     sourceSumMs,
     mergedDurationMs: merged.durationMs,
     mergedVideoMs: merged.videoDurationMs,

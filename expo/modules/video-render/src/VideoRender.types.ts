@@ -25,6 +25,27 @@ export type TimingProbe = {
   videoDurationMs: number;
   audioStartMs: number;
   audioDurationMs: number;
+  /** Non-empty segments of the first video / audio track (a merged file has one per clip). Absent before the build that added them; -1 = no such track. */
+  videoSegments?: number;
+  audioSegments?: number;
+};
+
+/** One clip of a render as the renderer placed it (build after 1.0.6; absent before). */
+export type RenderPart = {
+  index: number;
+  compStartMs: number;
+  durationMs: number;
+  naturalWidth: number;
+  naturalHeight: number;
+  /** The file's own orientation matrix [a, b, c, d, tx, ty] and the matrix the renderer applied (rotation, mirroring, fit). */
+  preferredTransform: number[];
+  appliedTransform: number[];
+  rotationDeg: number;
+  mirrored: boolean;
+  hasAudio: boolean;
+  /** How much of this clip's picture and sound really went into the composition. */
+  videoInsertedMs: number;
+  audioInsertedMs: number;
 };
 
 export type RenderResult = {
@@ -35,6 +56,11 @@ export type RenderResult = {
   /** Duration of the written file, read back (within 150 ms of durationMs or the render fails). */
   actualDurationMs: number;
   sizeBytes: number;
+  /** Per clip, as placed (newer builds only). */
+  parts?: RenderPart[];
+  /** Non-empty segments in the composition's video / audio track (one per clip when every clip went in). */
+  videoSegments?: number;
+  audioSegments?: number;
 };
 
 export type RenderProgressEvent = {

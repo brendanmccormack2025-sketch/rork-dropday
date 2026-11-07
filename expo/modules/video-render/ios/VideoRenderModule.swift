@@ -201,6 +201,9 @@ private func probeTiming(uri: String) throws -> [String: Any] {
     "videoDurationMs": video.map { ms($0.timeRange.duration) } ?? -1,
     "audioStartMs": audio.map { ms($0.timeRange.start) } ?? -1,
     "audioDurationMs": audio.map { ms($0.timeRange.duration) } ?? -1,
+    // How many separate pieces each track is made of (a merge of four clips has four of each).
+    "videoSegments": video.map { $0.segments.filter { !$0.isEmpty }.count } ?? -1,
+    "audioSegments": audio.map { $0.segments.filter { !$0.isEmpty }.count } ?? -1,
   ]
 }
 
@@ -768,6 +771,7 @@ private func render(
   var audioTrack: AVMutableCompositionTrack?
   var assets: [URL: AVURLAsset] = [:]
   var segments: [Segment] = []
+  var partInfo: [[String: Any]] = []
   var cursor = CMTime.zero
 
   for clip in clips {
@@ -797,6 +801,8 @@ private func render(
     guard end > start else { continue }
     let range = CMTimeRange(start: start, end: end)
 
+    var audioInsertedMs = 0
+    var hadAudio = false
     do {
       // Each track goes in at its own place on the clip's clock: a track that starts late (audio often does) or
       // ends early keeps that offset instead of sliding to the start of the range, so audio and video stay in step.
@@ -810,18 +816,41 @@ private func render(
         }
         if let audioTrack = audioTrack {
           try insertAligned(audioTrack, from: sourceAudio, range: range, at: cursor)
+          hadAudio = true
+          let usableAudio = range.intersection(sourceAudio.timeRange)
+          audioInsertedMs = usableAudio.isEmpty ? 0 : Int((CMTimeGetSeconds(usableAudio.duration) * 1000).rounded())
         }
       }
     } catch {
       throw fail("ERR_RENDER_COMPOSITION_FAILED", error.localizedDescription)
     }
 
-    segments.append(Segment(
+    let placed = Segment(
       compStart: cursor,
       duration: range.duration,
       naturalSize: sourceVideo.naturalSize,
       preferredTransform: sourceVideo.preferredTransform
-    ))
+    )
+    // What was placed for this clip (for the merge's breadcrumb): its size, orientation, the matrix used, how much
+    // picture and sound went in.
+    let pt = sourceVideo.preferredTransform
+    let applied = segmentTransform(placed, index: segments.count, settings: settings)
+    let usableVideo = range.intersection(sourceVideo.timeRange)
+    partInfo.append([
+      "index": segments.count,
+      "compStartMs": Int((CMTimeGetSeconds(cursor) * 1000).rounded()),
+      "durationMs": Int((CMTimeGetSeconds(range.duration) * 1000).rounded()),
+      "naturalWidth": Int(sourceVideo.naturalSize.width),
+      "naturalHeight": Int(sourceVideo.naturalSize.height),
+      "preferredTransform": [Double(pt.a), Double(pt.b), Double(pt.c), Double(pt.d), Double(pt.tx), Double(pt.ty)],
+      "appliedTransform": [Double(applied.a), Double(applied.b), Double(applied.c), Double(applied.d), Double(applied.tx), Double(applied.ty)],
+      "rotationDeg": Int((atan2(Double(pt.b), Double(pt.a)) * 180 / Double.pi).rounded()),
+      "mirrored": (pt.a * pt.d - pt.b * pt.c) < 0,
+      "hasAudio": hadAudio,
+      "videoInsertedMs": usableVideo.isEmpty ? 0 : Int((CMTimeGetSeconds(usableVideo.duration) * 1000).rounded()),
+      "audioInsertedMs": audioInsertedMs,
+    ])
+    segments.append(placed)
     cursor = CMTimeAdd(cursor, range.duration)
   }
 
@@ -998,5 +1027,8 @@ private func render(
     "durationMs": Int((totalSeconds * 1000).rounded()),
     "actualDurationMs": Int((outputSeconds * 1000).rounded()),
     "sizeBytes": sizeBytes,
+    "parts": partInfo,
+    "videoSegments": videoTrack.segments.filter { !$0.isEmpty }.count,
+    "audioSegments": audioTrack?.segments.filter { !$0.isEmpty }.count ?? 0,
   ]
 }

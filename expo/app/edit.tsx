@@ -75,6 +75,7 @@ import { backAction, initialStep, nextStep, selectionBarSide, stepLayout, videoT
 import { DEFAULT_TEXT_OVERLAY_POS, TEXT_MAX_WIDTH, VIDEO_ASPECT, computeCoverCrop, feedAspect, fitFrame, frameToFrac } from "@/lib/feedLayout";
 import { useCaptions } from "@/lib/transcription/useCaptions";
 import { fileLengthMs, setFileLengthMs } from "@/lib/clipBounds";
+import { blocksAutoCuts, summarizePlan } from "@/lib/autoEdit/planSummary";
 import { measureClips, probeFileLengthMs } from "@/lib/clipMeasure";
 import { buildRenderEdit, renderForPost, renderSkipReason, renderTimeoutMs, type RenderedEdit } from "@/lib/renderAtPost";
 import { formatRenderStats, recordRenderStats, reportRender } from "@/lib/renderReport";
@@ -366,6 +367,7 @@ export default function EditScreen() {
     () => (shouldMerge(initialClips, { isDraft: !!draftId }) ? { kind: "merging", progress: 0 } : { kind: "idle" }),
   );
   const originalClipsRef = useRef<DraftClip[]>(initialClips);
+  const partsCount = () => originalClipsRef.current.length;
   // The merged file once the merge has finished (what the analysis may run on).
   const mergedRef = useRef<{ uri: string; durationMs: number } | null>(null);
   const mergeStartedRef = useRef(false);
@@ -1318,7 +1320,9 @@ export default function EditScreen() {
       const currentClips = clipsRef.current;
       const clip = currentClips[idx];
       // never longer than the measured file; a trim end that is past the real end comes back with it
-      const knownLen = clip ? fileLengthMs(clip.uri) : undefined;
+      // (the merged file's length was verified when it was rendered: the player never shrinks it)
+      const isMergedClip = !!clip && clip.uri === mergedRef.current?.uri;
+      const knownLen = clip && !isMergedClip ? fileLengthMs(clip.uri) : undefined;
       const realDur = knownLen !== undefined ? Math.min(sourceDur, knownLen) : sourceDur;
       if (
         clip &&
@@ -1326,14 +1330,14 @@ export default function EditScreen() {
         (clip.durationMs === undefined ||
           clip.durationMs === 0 ||
           Math.abs(clip.durationMs - realDur) > 100 ||
-          (clip.trimEndMs ?? 0) > realDur + 100)
+          (!isMergedClip && (clip.trimEndMs ?? 0) > realDur + 100))
       ) {
         const updated = [...currentClips];
         updated[idx] = {
           ...clip,
           durationMs: realDur,
           trimEndMs: clip.trimEndMs !== undefined && clip.trimEndMs > 0
-            ? Math.min(clip.trimEndMs, realDur)
+            ? (isMergedClip ? clip.trimEndMs : Math.min(clip.trimEndMs, realDur))
             : realDur,
         };
         setClips(updated);
@@ -2886,6 +2890,20 @@ export default function EditScreen() {
       const original = { ...current[0]!, trimStartMs: 0, trimEndMs: current[0]!.trimEndMs || clip.durationMs };
       // The render comes from the decision model: every silence cut is one decision.
       const modelState = newEditState(clip.uri, silenceCutsFromDetection(result.detection));
+      // What the pause cuts would do, in numbers; a merged multi-clip video is never cut down to a fraction automatically.
+      const silenceSummary = summarizePlan(modelState, result.durationMs);
+      const multiClip = !!mergedRef.current;
+      recordBreadcrumb("ai edit: silence plan", { ...silenceSummary, merged: multiClip, parts: partsCount() });
+      if (blocksAutoCuts({ sourceMs: result.durationMs, keptMs: silenceSummary.keptMs, multiClip })) {
+        void recordClientError(new Error("ai edit: pause cuts would remove most of a merged video; not applied"), { kind: "autoCutGuard", stage: "silence", ...silenceSummary, parts: partsCount() });
+        if (mountedRef.current) {
+          setAutoEditNote("Too much would be cut, so your video was left as recorded");
+          setTimeout(() => {
+            if (mountedRef.current) setAutoEditNote(null);
+          }, 4000);
+        }
+        return;
+      }
       setEditModel({ state: modelState, durationMs: result.durationMs });
       const derived = renderClipsOf(modelState, result.durationMs);
       if (__DEV__ && JSON.stringify(derived) !== JSON.stringify(result.clips)) {
@@ -3785,6 +3803,14 @@ export default function EditScreen() {
         const umPlan = planUmCuts(protectedState.state, [...sounds, ...blockUmsOverlapping(stretchedPlan.sounds, captions.removedWords)], durationMs);
         const umDecisions = editChoice.cleanup ? umPlan.decisions : [];
         const merged = mergePlan(protectedState.state, umDecisions, ["umCut"]);
+        // The whole plan in numbers (pause cuts, slow start, fillers, ums), and the guard for a merged multi-clip video.
+        const planSummary = summarizePlan(merged.state, durationMs);
+        const planMultiClip = !!mergedRef.current;
+        recordBreadcrumb("ai edit: transcript plan", { ...planSummary, merged: planMultiClip, parts: partsCount() });
+        if (blocksAutoCuts({ sourceMs: durationMs, keptMs: planSummary.keptMs, multiClip: planMultiClip })) {
+          void recordClientError(new Error("ai edit: the plan would remove most of a merged video; not applied"), { kind: "autoCutGuard", stage: "transcript", ...planSummary, parts: partsCount() });
+          return;
+        }
         // AI planning is not an undo step: saved snapshots are re-planned, not extended.
         historyRef.current = mapHistory(historyRef.current, (snap) =>
           mergePlan(

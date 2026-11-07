@@ -3,7 +3,7 @@ import { Platform } from "react-native";
 
 import type { RenderOptions, RenderProgressEvent, RenderResult, TimingProbe } from "./src/VideoRender.types";
 
-export type { RenderOptions, RenderProgressEvent, RenderResult, TimingProbe } from "./src/VideoRender.types";
+export type { RenderOptions, RenderPart, RenderProgressEvent, RenderResult, TimingProbe } from "./src/VideoRender.types";
 
 type Subscription = { remove(): void };
 
