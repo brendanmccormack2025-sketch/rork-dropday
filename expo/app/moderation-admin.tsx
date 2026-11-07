@@ -9,9 +9,10 @@ import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { isDebugOwner } from "@/constants/debug";
 import { adminAddTerm, adminFlags, adminRemoveTerm, adminReports, adminResolveFlag, adminResolveReport, adminTerms, type ReportAction } from "@/lib/safety";
+import { adminRecovery } from "@/lib/recovery";
 import { useAuth } from "@/providers/AuthProvider";
 
-type Tab = "reports" | "flags" | "words";
+type Tab = "reports" | "flags" | "recovery" | "words";
 
 /**
  * Owner only (the database checks the admin list again on every call). Reports (posts, reactions, messages), flags from the
@@ -27,6 +28,7 @@ export default function ModerationAdminScreen() {
 
   const reports = useQuery({ queryKey: ["mod", "reports"], queryFn: () => adminReports("pending"), enabled: owner });
   const flags = useQuery({ queryKey: ["mod", "flags"], queryFn: () => adminFlags("open"), enabled: owner });
+  const recovery = useQuery({ queryKey: ["mod", "recovery"], queryFn: adminRecovery, enabled: owner });
   const terms = useQuery({ queryKey: ["mod", "terms"], queryFn: adminTerms, enabled: owner });
 
   const fail = (e: unknown) => Alert.alert("Couldn't do that", e instanceof Error ? e.message : undefined);
@@ -61,7 +63,7 @@ export default function ModerationAdminScreen() {
           <View style={styles.back} />
         </View>
         <View style={styles.tabs}>
-          {([["reports", `Reports${reports.data ? ` (${reports.data.length})` : ""}`], ["flags", `Flags${flags.data ? ` (${flags.data.length})` : ""}`], ["words", "Word list"]] as Array<[Tab, string]>).map(([k, label]) => (
+          {([["reports", `Reports${reports.data ? ` (${reports.data.length})` : ""}`], ["flags", `Flags${flags.data ? ` (${flags.data.length})` : ""}`], ["recovery", "Recovery"], ["words", "Word list"]] as Array<[Tab, string]>).map(([k, label]) => (
             <Pressable key={k} onPress={() => setTab(k)} style={[styles.tab, tab === k && styles.tabOn]}>
               <UiText style={[styles.tabText, tab === k && styles.tabTextOn]}>{label}</UiText>
             </Pressable>
@@ -91,6 +93,12 @@ export default function ModerationAdminScreen() {
                 <Pressable onPress={() => resolveFlag(f.id, "dismissed")} style={styles.action}><UiText style={styles.actionText}>Dismiss</UiText></Pressable>
                 <Pressable onPress={() => resolveFlag(f.id, "reviewed")} style={styles.action}><UiText style={styles.actionText}>Mark reviewed</UiText></Pressable>
               </View>
+            </View>
+          )))}
+          {tab === "recovery" && (recovery.isLoading ? <ActivityIndicator color={theme.accent} /> : (recovery.data ?? []).length === 0 ? <UiText style={styles.muted}>No Recovery Boost offers yet.</UiText> : (recovery.data ?? []).map((o) => (
+            <View key={o.id} style={styles.card}>
+              <UiText style={styles.cardTitle}>@{o.creator_username ?? "?"} · {o.status} · {o.source}</UiText>
+              <UiText style={styles.muted}>offered {new Date(o.created_at).toLocaleDateString()}{o.boost_post_id ? ` · boosted to ${o.boosted_viewers} people until ${o.boost_ends_at ? new Date(o.boost_ends_at).toLocaleString() : "?"}` : ""}</UiText>
             </View>
           )))}
           {tab === "words" && (

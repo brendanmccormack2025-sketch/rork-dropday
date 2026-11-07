@@ -6,8 +6,9 @@
 # access to them) and builds the known_connections view (phone, email, friends, hide list); migration-friends-messages.sql comes
 # before it. migration-stranger-only.sql redefines the feed, the trial rules and sharing on top of all of them and revokes its own
 # internals itself. migration-spotlight.sql: Spotlight tables and RPCs, and the feed once more (the stranger-only feed plus the Spotlight
-# lead). migration-harassment.sql is the LAST file: the word filter, unwanted-contact flags, creator controls and the review
-# queue (triggers on chat_messages, posts and likes; nothing it replaces).
+# lead). migration-harassment.sql: the word filter, unwanted-contact flags, creator controls and the review queue (triggers on
+# chat_messages, posts and likes). migration-recovery.sql is the LAST file: Recovery Boost (offers, the boost, the owner's
+# confirmation in admin_report_resolve) and the feed once more.
 #
 # migration-live-snapshot.sql (written by scripts/dump-live-definitions.mjs from the LIVE database, listed here right before
 # migration-known-connections.sql) is the record of what was applied by hand: get_feed_engine, expire_posts, chat_can_send_post,
@@ -31,6 +32,7 @@ migration-known-connections.sql
 migration-stranger-only.sql
 migration-spotlight.sql
 migration-harassment.sql
+migration-recovery.sql
 
 # ── NOT run by ship.sh, on purpose ───────────────────────────────────────────────────────────────────────────────
 # Baseline, applied once when the database was created. Re-running them would put OLDER definitions back over newer

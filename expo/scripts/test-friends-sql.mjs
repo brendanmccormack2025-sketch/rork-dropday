@@ -112,7 +112,7 @@ if (!BIN) {
       const kcPath = join(sqlDir, "migration-known-connections.sql");
       const kc1 = psqlFile("t", kcPath), kc2 = psqlFile("t", kcPath);
       eq("known-connections after friends applies cleanly, and again", [/ERROR/.test(kc1.stderr), /ERROR/.test(kc2.stderr)], [false, false]);
-      eq("MIGRATIONS_ORDER.txt: friends, push, the live snapshot, known-connections, then stranger-only last", (() => { const o = readFileSync(join(sqlDir, "MIGRATIONS_ORDER.txt"), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")); return o.slice(-7); })(), ["migration-friends-messages.sql", "migration-push.sql", "migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql"]);
+      eq("MIGRATIONS_ORDER.txt: friends, push, the live snapshot, known-connections, then stranger-only last", (() => { const o = readFileSync(join(sqlDir, "MIGRATIONS_ORDER.txt"), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")); return o.slice(-8); })(), ["migration-friends-messages.sql", "migration-push.sql", "migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql"]);
 
       const U = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
       const asUser = (uid, sql) => psql("t", `set role authenticated; set request.jwt.claim.sub='${uid}'; ${sql}`, ["-v", "ON_ERROR_STOP=1"]);

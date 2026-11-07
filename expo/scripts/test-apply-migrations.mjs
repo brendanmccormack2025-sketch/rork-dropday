@@ -50,13 +50,13 @@ async function withServer(handler, fn) {
   }
 }
 
-eq("the five files, in this order, and no others", FILES, ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql"]);
+eq("the six files, in this order, and no others", FILES, ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql"]);
 eq("a file is wrapped in one transaction", wrapInTransaction("select 1;\n\n"), "begin;\nselect 1;\ncommit;\n");
 const order = readFileSync(new URL("../supabase/MIGRATIONS_ORDER.txt", import.meta.url), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
-eq("they are the last five of MIGRATIONS_ORDER.txt, same order", order.slice(-5), FILES);
+eq("they are the last six of MIGRATIONS_ORDER.txt, same order", order.slice(-6), FILES);
 
 const dry = await runScript(["--dry"], { SUPABASE_ACCESS_TOKEN: SECRET, SUPABASE_API_BASE: "http://127.0.0.1:1" });
-eq("--dry: exit 0, lists the pepper check and the five files in order, sends nothing (the API base is unreachable)", [dry.status, /trial_contact_pepper/.test(dry.stdout), FILES.every((f) => dry.stdout.includes(f)), FILES.map((f) => dry.stdout.indexOf(f)).every((v, i, a) => i === 0 || v > a[i - 1])], [0, true, true, true]);
+eq("--dry: exit 0, lists the pepper check and the six files in order, sends nothing (the API base is unreachable)", [dry.status, /trial_contact_pepper/.test(dry.stdout), FILES.every((f) => dry.stdout.includes(f)), FILES.map((f) => dry.stdout.indexOf(f)).every((v, i, a) => i === 0 || v > a[i - 1])], [0, true, true, true]);
 eq("--dry needs no token and prints none", [(await runScript(["--dry"], { SUPABASE_ACCESS_TOKEN: "" })).status, dry.stdout.includes(SECRET)], [0, false]);
 eq("no token: refused (exit 2)", (await runScript([], { SUPABASE_ACCESS_TOKEN: "" })).status, 2);
 eq("an unknown option is refused", (await runScript(["--force"], { SUPABASE_ACCESS_TOKEN: SECRET })).status, 2);
@@ -69,7 +69,7 @@ await withServer(() => [200, [{ n: 0 }]], async (base, seen) => {
 
 await withServer((q) => [200, q.startsWith("select count(*)::int") ? [{ n: 1 }] : []], async (base, seen) => {
   const r = await runScript([], { SUPABASE_ACCESS_TOKEN: SECRET, SUPABASE_API_BASE: base });
-  eq("with the pepper: pepper check first, then exactly the five files in order, each begin ... commit, bearer token sent", [r.status, seen.length, /vault/.test(seen[0].query), seen.slice(1).every((s, i) => s.query === wrapInTransaction(readFileSync(new URL(`../supabase/${FILES[i]}`, import.meta.url), "utf8"))), seen.every((s) => s.auth === `Bearer ${SECRET}`)], [0, 6, true, true, true]);
+  eq("with the pepper: pepper check first, then exactly the six files in order, each begin ... commit, bearer token sent", [r.status, seen.length, /vault/.test(seen[0].query), seen.slice(1).every((s, i) => s.query === wrapInTransaction(readFileSync(new URL(`../supabase/${FILES[i]}`, import.meta.url), "utf8"))), seen.every((s) => s.auth === `Bearer ${SECRET}`)], [0, 7, true, true, true]);
   eq("it prints what it applied and that ship.sh etc. were not run; no token", [FILES.every((f) => r.stdout.includes(f)), /Not run: ship\.sh/.test(r.stdout), r.stdout.includes("TOPSECRET")], [true, true, false]);
 });
 
