@@ -19,6 +19,7 @@ import { graduationColumns, linkSourceFor, noteMissingGraduationColumns, parseCr
 import { noteMissingYoutubeColumn, profileLinkColumns } from "@/lib/creatorLinks";
 import { supabase } from "@/lib/supabase";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
+import { SpotlightBadge } from "@/components/SpotlightBadge";
 
 export default function PublicProfileScreen() {
   const router = useRouter();
@@ -198,6 +199,7 @@ export default function PublicProfileScreen() {
                     {showsVerifiedBadge(profile) ? <VerifiedCreatorBadge compact /> : null}
                   </View>
                   <UiText style={styles.handle}>@{username}</UiText>
+                  <SpotlightBadge userId={id} />
                   {profile?.bio ? (
                     <UiText style={styles.bio} numberOfLines={3}>
                       {profile.bio}

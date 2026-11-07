@@ -15,7 +15,7 @@ const migrations = entries("supabase/MIGRATIONS_ORDER.txt");
 const functions = entries("supabase/FUNCTIONS.txt");
 
 eq("every listed migration exists", migrations.filter((f) => !existsSync(root + "supabase/" + f)), []);
-eq("migration-stranger-only.sql is last, known-connections right before it", migrations.slice(-2), ["migration-known-connections.sql", "migration-stranger-only.sql"]);
+eq("migration-spotlight.sql is last, after stranger-only and known-connections", migrations.slice(-3), ["migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql"]);
 eq("no duplicates", new Set(migrations).size, migrations.length);
 const defines = (f) => /create or replace function public\.run_survival_checkpoint\(\)/i.test(readFileSync(root + "supabase/" + f, "utf8"));
 eq("the only listed file that defines run_survival_checkpoint() is the engine (older definitions are excluded)", migrations.filter(defines), ["migration-trial-engine.sql"]);

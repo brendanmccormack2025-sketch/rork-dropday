@@ -52,6 +52,10 @@ export default function NotificationsScreen() {
         router.push(`/messages/${notif.actor_id}` as never);
         return;
       }
+      if (notif.type === "spotlight_offer") {
+        router.push("/spotlight-offer" as never);
+        return;
+      }
       if (notif.post_id) {
         router.push(`/post/${notif.post_id}/reaction-tree` as never);
       }

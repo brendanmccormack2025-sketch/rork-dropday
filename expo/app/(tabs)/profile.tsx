@@ -24,6 +24,7 @@ import {
 } from "@/components/profile/ProfileParts";
 import { linkSourceFor, showsVerifiedBadge } from "@/lib/creatorStatus";
 import { isOnOwnProfilePost } from "@/lib/profileVisibility";
+import { SpotlightBadge } from "@/components/SpotlightBadge";
 import { EMPTY_OWN_SURVIVED_BODY, EMPTY_OWN_SURVIVED_TITLE, GRID_COLUMNS, OWN_TABS, initialOwnTab, postsForTab, type OwnTab } from "@/lib/profileUi";
 
 type Item = { kind: "post"; post: Post } | { kind: "draft"; draft: DraftProject };
@@ -187,6 +188,7 @@ function ProfileHeader({
           {showsVerifiedBadge(profile) ? <VerifiedCreatorBadge compact /> : null}
         </View>
         <UiText style={styles.handle}>@{username}</UiText>
+        <SpotlightBadge userId={profile?.id} />
         {profile?.bio ? (
           <UiText style={styles.bio} numberOfLines={3}>
             {profile.bio}
