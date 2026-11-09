@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * TRYAL FRIENDS (supabase/migration-tryal-friends.sql) on top of everything before it (sanctions last), run for real on a scratch
- * PostgreSQL. A friend made inside the app (friend request) with no contact / email / hide-list link gets the creator's posts, testing
- * ones included, pushed to the top of the feed; never as a tester, never in the verdict; real life (contacts, email, hide list, invite
- * links) always wins. Skipped (not failed) on a machine without PostgreSQL.
+ * TRYAL FRIENDS and OPEN MESSAGES (supabase/migration-tryal-friends.sql) on top of everything before it (sanctions last), run for
+ * real on a scratch PostgreSQL. A stranger who liked or reacted to a creator's judged post gets the creator's new posts, testing ones
+ * included, pushed to the top of the feed; never as a tester, never in the verdict; real life (contacts, email, hide list, added
+ * friends) always wins. Messages: adults can message anyone who takes messages from everyone; never across the under-18 line. Skipped (not failed) on a machine without PostgreSQL.
  *   node --experimental-strip-types --no-warnings scripts/test-tryal-friends-sql.mjs
  * (harness copied from test-sanctions-sql.mjs: ACCOUNT SANCTIONS and OWNER ALERTS (supabase/migration-sanctions.sql) on top of everything before it, run for real on a scratch PostgreSQL (same
  * harness as test-stranger-only-sql.mjs). Admin-only offers, the creator's consent (full / strangers / decline), and the exposure
@@ -222,56 +222,74 @@ if (!BIN) {
       if (/ERROR/.test(t1.stderr + t2.stderr)) console.log((t1.stderr + t2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 8).join("\n"));
       eq("the Tryal-friends migration applies cleanly, and again (idempotent)", [/ERROR/.test(t1.stderr), /ERROR/.test(t2.stderr)], [false, false]);
 
-      const friend = (x, y, via = "request") => Q(`insert into public.friendships (user_a, user_b, via) values ('${U(Math.min(x, y))}','${U(Math.max(x, y))}','${via}') on conflict (user_a, user_b) do update set via = excluded.via`);
       const supporter = (creator, viewer) => q(`select public.trial_is_supporter('${U(creator)}','${U(viewer)}')`);
       const readable = (viewer, post) => as(U(viewer), `select count(*) from public.posts where id='${P(post)}'`).out;
-      // setup(): A=1 creator; C=3 is A's friend by request with no other link -> a Tryal friend. B=2 / H=8 phone, E=5 email, D=4 hidden.
-      const tfSetup = () => { setup(); friend(1, 7, "invite"); };   // G=7: a friend through an invite link (came from outside the app)
+      const like = (viewer, post) => Q(`insert into public.likes (user_id, post_id) values ('${U(viewer)}','${P(post)}') on conflict do nothing`);
+      const react = (viewer, n, parent) => Q(`insert into public.posts (id, user_id, media_url, media_type, parent_post_id) values ('${P(n)}','${U(viewer)}','u','video','${P(parent)}')`);
+      // setup(): A=1 creator; B=2 / H=8 phone, E=5 email, D=4 hidden, C=3 an added friend. Strangers 6, 7, 9, 10, 11.
+      const fanSetup = () => { setup(); mkSurvived(50, 1, 100); like(6, 50); react(7, 51, 50); like(2, 50); like(3, 50); like(4, 50); };
 
       // ── 1. who is a Tryal friend ──
-      tfSetup();
-      eq("C (friend request, nothing else) is a Tryal friend, both ways", [supporter(1, 3), supporter(3, 1)], ["t", "t"]);
-      eq("an invite-link friend is real life, not a Tryal friend", supporter(1, 7), "f");
-      eq("contacts, email, the hide list and strangers are not Tryal friends", [2, 4, 5, 8, 6].map((n) => supporter(1, n)), ["f", "f", "f", "f", "f"]);
-      friend(1, 2); friend(1, 4); friend(1, 5); friend(1, 8);
-      eq("real life always wins: a friend request does not turn a contact (either way), an email match or a hidden person into a Tryal friend", [2, 4, 5, 8].map((n) => supporter(1, n)), ["f", "f", "f", "f"]);
-      eq("known_connections is unchanged: C is still known (so C never tests or votes)", q(`select count(*) from public.known_connections where user_id='${U(1)}' and other_id='${U(3)}' and source='friend'`), "1");
+      fanSetup();
+      eq("a stranger who liked A's (judged) post, and one who reacted to it, are A's Tryal friends", [supporter(1, 6), supporter(1, 7)], ["t", "t"]);
+      eq("it is one way: A is not their Tryal friend", [supporter(6, 1), supporter(7, 1)], ["f", "f"]);
+      eq("real life always wins: a contact, an added friend and a hidden person who liked it are not Tryal friends", [supporter(1, 2), supporter(1, 3), supporter(1, 4)], ["f", "f", "f"]);
+      eq("strangers who never engaged are not", [supporter(1, 9), supporter(1, 10)], ["f", "f"]);
+      mkTrial(52, 1); like(9, 52); Q(`insert into public.post_raw_views (post_id, viewer_id) values ('${P(52)}','${U(9)}')`);
+      eq("a like on a post still on trial does not make a Tryal friend (testers' likes always count)", supporter(1, 9), "f");
+      ok("...and that tester's score counts for the post", q(`select count(*) from public.trial_post_scores('${P(52)}') s where s.viewer_id='${U(9)}'`) === "1");
 
-      // ── 2. testing posts reach Tryal friends, never in the test audience, never in the verdict ──
-      tfSetup(); friend(1, 2);
+      // ── 2. testing posts reach Tryal friends, never as testers, never in the verdict ──
+      fanSetup();
       mkTrial(1, 1);
-      eq("C gets A's testing post at the top of the feed", feed(U(3))[0], P(1));
-      ok("contacts, email, hidden, reverse contact, invite friend: still not in their feed", [2, 4, 5, 8, 7].every((n) => !feed(U(n)).includes(P(1))));
-      ok("strangers still get it", STRANGERS.filter((n) => n !== 7).every((n) => feed(U(n)).includes(P(1))));
-      eq("C can open it (RLS); B, the contact who is also a friend, cannot", [readable(3, 1), readable(2, 1)], ["1", "0"]);
-      ok("C is never assigned as a tester", q(`select count(*) from public.trial_assignments where post_id='${P(1)}' and viewer_id='${U(3)}'`) === "0");
-      as(U(3), `select public.record_view_progress('${P(1)}', 12000, 12000, true)`);
-      Q(`insert into public.likes (user_id, post_id) values ('${U(3)}','${P(1)}')`);
-      eq("C's watch and like never count toward the verdict (excluded as known)", [q(`select count(*) from public.trial_post_scores('${P(1)}') s where s.viewer_id='${U(3)}'`), q(`select excluded from public.trial_post_score_details('${P(1)}') d where d.viewer_id='${U(3)}'`)], ["0", "t"]);
-      ok("once C has seen it, it is not pushed again", !feed(U(3)).includes(P(1)));
-      eq("...but it stays readable for C", readable(3, 1), "1");
+      eq("F (liked) gets A's testing post at the top of the feed; G (reacted) too", [feed(U(6))[0], feed(U(7))[0]], [P(1), P(1)]);
+      ok("contacts, the hidden person, the added friend and email: still not in their feed", [2, 3, 4, 5, 8].every((n) => !feed(U(n)).includes(P(1))));
+      ok("other strangers still get it", [9, 10, 11].every((n) => feed(U(n)).includes(P(1))));
+      eq("F can open it (RLS); B, the contact who liked A's post, cannot", [readable(6, 1), readable(2, 1)], ["1", "0"]);
+      ok("Tryal friends are never assigned as testers", q(`select count(*) from public.trial_assignments where post_id='${P(1)}' and viewer_id in ('${U(6)}','${U(7)}')`) === "0");
+      as(U(6), `select public.record_view_progress('${P(1)}', 12000, 12000, true)`); like(6, 1);
+      eq("F's watch and like never count toward the verdict (excluded as a fan)", [q(`select count(*) from public.trial_post_scores('${P(1)}') s where s.viewer_id='${U(6)}'`), q(`select excluded_reason from public.trial_post_score_details('${P(1)}') d where d.viewer_id='${U(6)}'`)], ["0", "known: fan"]);
+      ok("once F has seen it, it is not pushed again", !feed(U(6)).includes(P(1)));
+      eq("...but it stays readable for F", readable(6, 1), "1");
 
-      // ── 3. survived posts ──
-      tfSetup();
+      // ── 3. survived posts, order ──
+      fanSetup();
       mkSurvived(2, 1, 1); mkSurvived(3, 1, 80); mkTrial(4, 1);
-      ok("C gets A's new testing post and fresh survived post first (newest first), and the older survived one later", (() => { const f = feed(U(3)); return f[0] === P(4) && f[1] === P(2) && f.includes(P(3)); })());
+      ok("F gets A's new testing post and fresh survived post first (newest first), and the older survived one later", (() => { const f = feed(U(6)); return f[0] === P(4) && f[1] === P(2) && f.includes(P(3)); })());
       ok("contacts and the hide list still get none of A's posts", [2, 4, 5, 8].every((n) => { const f = feed(U(n)); return !f.includes(P(2)) && !f.includes(P(3)) && !f.includes(P(4)); }));
 
-      // ── 4. real life appears later ──
-      tfSetup(); mkTrial(1, 1);
-      as(U(3), `select public.set_my_phone('+14155559003')`); as(U(1), `select public.sync_my_contacts(array['${NUM(2)}', '+14155559003'])`);
-      eq("A syncs contacts and C is in them: C is no longer a Tryal friend and loses A's testing post", [supporter(1, 3), String(feed(U(3)).includes(P(1))), readable(3, 1)], ["f", "false", "0"]);
-      tfSetup(); mkTrial(1, 1);
-      Q(`insert into public.hide_from_list (owner_id, hidden_user_id) values ('${U(1)}','${U(3)}')`);
-      eq("A hides C: not a Tryal friend, nothing in the feed", [supporter(1, 3), String(feed(U(3)).includes(P(1)))], ["f", "false"]);
-      tfSetup(); mkTrial(1, 1);
-      Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(3)}','${U(1)}')`);
-      ok("a block still wins", !feed(U(3)).includes(P(1)));
-      tfSetup(); mkTrial(1, 1);
-      Q(`delete from public.friendships where user_a='${U(1)}' and user_b='${U(3)}'`);
-      ok("unfriending ends it (C becomes a stranger again and may be assigned as a tester)", supporter(1, 3) === "f");
+      // ── 4. real life appears later; blocks ──
+      fanSetup(); mkTrial(1, 1);
+      as(U(6), `select public.set_my_phone('+14155559006')`); as(U(1), `select public.sync_my_contacts(array['${NUM(2)}', '+14155559006'])`);
+      eq("A syncs contacts and F is in them: F is no longer a Tryal friend and loses A's testing post", [supporter(1, 6), String(feed(U(6)).includes(P(1))), readable(6, 1)], ["f", "false", "0"]);
+      fanSetup(); mkTrial(1, 1);
+      Q(`insert into public.hide_from_list (owner_id, hidden_user_id) values ('${U(1)}','${U(6)}')`);
+      eq("A hides F: not a Tryal friend, nothing in the feed", [supporter(1, 6), String(feed(U(6)).includes(P(1)))], ["f", "false"]);
+      fanSetup(); mkTrial(1, 1);
+      Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(6)}','${U(1)}')`);
+      ok("a block still wins", !feed(U(6)).includes(P(1)));
 
-      ok("the new internals are not callable by apps", ["trial_is_supporter(gen_random_uuid(), gen_random_uuid())", "trial_supporter_creators(gen_random_uuid())"].every((f) => !as(U(6), `select public.${f}`).ok));
+      // ── 5. open messages ──
+      fanSetup();
+      const msg = (from, to, body = "hey") => as(U(from), `select public.send_message('${U(to)}', '${body}')`);
+      eq("two adult strangers can message each other (default: everyone)", [msg(9, 10).ok, msg(10, 9).ok], [true, true]);
+      eq("...and it shows in both Messages lists", [as(U(9), `select count(*) from public.my_conversations()`).out, as(U(10), `select count(*) from public.my_conversations()`).out], ["1", "1"]);
+      eq("messaging does not make anyone a friend or known", [q(`select count(*) from public.friendships where '${U(9)}' in (user_a, user_b)`), q(`select count(*) from public.known_connections where user_id='${U(9)}' and other_id='${U(10)}'`)], ["0", "0"]);
+      ok("a Tryal friend who messages the creator still gets their posts", (() => { mkTrial(60, 1); return msg(6, 1).ok && feed(U(6)).includes(P(60)); })());
+      ok("an adult cannot message an under-18 stranger, nor the other way round", !msg(9, 13).ok && !msg(13, 9).ok);
+      eq("...the error is the generic one", msg(9, 13).err.includes("cannot message this person"), true);
+      as(U(11), `select public.set_dm_policy('friends')`);
+      ok("someone who chose 'friends' cannot be messaged by a stranger", !msg(9, 11).ok && msg(9, 11).err.includes("not taking messages"));
+      as(U(10), `select public.set_dm_policy('nobody')`);
+      ok("'nobody' stops even an existing conversation", !msg(9, 10).ok);
+      as(U(10), `select public.set_dm_policy('everyone')`);
+      eq("my_controls defaults to everyone; 'everyone' is a valid choice", [as(U(7), `select dm_policy from public.my_controls()`).out, as(U(10), `select dm_policy from public.my_controls()`).out], ["everyone", "everyone"]);
+      Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(10)}','${U(9)}')`);
+      ok("blocked: no messages either way", !msg(9, 10).ok && !msg(10, 9).ok);
+      Q(`delete from public.user_blocks`);
+      ok("friends (including under-18 friends) still message as before", (() => { Q(`insert into public.friendships (user_a, user_b) values ('${U(12)}','${U(13)}') on conflict do nothing`); return msg(12, 13).ok; })());
+
+      ok("the new internals are not callable by apps", ["trial_is_supporter(gen_random_uuid(), gen_random_uuid())", "trial_supporter_creators(gen_random_uuid())", "trial_is_fan(gen_random_uuid(), gen_random_uuid())", "chat_check_stranger(gen_random_uuid(), gen_random_uuid())"].every((f) => !as(U(6), `select public.${f}`).ok));
       }
     }
   } finally {

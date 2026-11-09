@@ -19,7 +19,7 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const sql = read("../supabase/migration-harassment.sql");
 const code = (t) => t.replace(/--.*$/gm, "");
 
-eq("DM policies in the app are exactly what the database accepts", [DM_POLICIES.map((p) => p.key), (sql.match(/dm_policy\s+text not null default 'friends' check \(dm_policy in \(([^)]*)\)/) ?? [])[1]?.match(/'([a-z_0-9]+)'/g)?.map((s) => s.slice(1, -1))], [["friends", "friends_7d", "nobody"], ["friends", "friends_7d", "nobody"]]);
+eq("DM policies in the app are exactly what the database accepts (migration-tryal-friends.sql added 'everyone')", [DM_POLICIES.map((p) => p.key), (read("../supabase/migration-tryal-friends.sql").match(/check \(dm_policy in \(([^)]*)\)/) ?? [])[1]?.match(/'([a-z_0-9]+)'/g)?.map((s) => s.slice(1, -1))], [["everyone", "friends", "friends_7d", "nobody"], ["everyone", "friends", "friends_7d", "nobody"]]);
 eq("interaction modes: open (no row) / established / closed", [INTERACTION_MODES.map((m) => m.key), /mode in \('established', 'closed'\)/.test(sql), /p_mode not in \('open', 'established', 'closed'\)/.test(sql)], [["open", "established", "closed"], true, true]);
 
 eq("errors from the database read well, and a blocked word is never named", [safetyError(new Error("This contains words that are not allowed on Tryal.")), safetyError(new Error("This person is not taking messages right now.")), safetyError(new Error("Wait for a reply before sending more.")), safetyError(new Error("Interactions are limited on this post.")), safetyError(new Error("boom"))], ["That contains words that aren't allowed on Tryal.", "This person isn't taking messages right now.", "Wait for a reply before sending more.", "Interactions are limited on this post.", null]);
