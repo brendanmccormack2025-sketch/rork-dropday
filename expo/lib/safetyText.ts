@@ -4,11 +4,12 @@
  */
 import { sanctionError } from "./sanctionText.ts";
 
-export type DmPolicy = "friends" | "friends_7d" | "nobody";
+export type DmPolicy = "everyone" | "friends" | "friends_7d" | "nobody";
 export type InteractionMode = "open" | "established" | "closed";
 
 export const DM_POLICIES: ReadonlyArray<{ key: DmPolicy; title: string; body: string }> = [
-  { key: "friends", title: "My friends", body: "Anyone you're friends with can message you." },
+  { key: "everyone", title: "Everyone", body: "Anyone 18+ can message you. Under-18 accounts only message their friends." },
+  { key: "friends", title: "My friends", body: "Only people you're friends with can message you." },
   { key: "friends_7d", title: "Friends of a week or more", body: "New friends have to wait 7 days before they can message you." },
   { key: "nobody", title: "Nobody", body: "No new messages. You can still message your friends, and block or report anyone." },
 ];

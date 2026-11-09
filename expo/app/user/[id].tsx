@@ -4,7 +4,7 @@ import UiText from "@/components/UiText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Ban, Trophy } from "lucide-react-native";
+import { ArrowLeft, Ban, MessageCircle, Trophy } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -208,6 +208,14 @@ export default function PublicProfileScreen() {
                   <LinkIconRow profile={linkSourceFor(profile)} />
                   {!isOwnProfile && (
                     <View style={styles.actionWrap}>
+                      {!userProfileBlocked && (
+                        <SoftButton
+                          label="Message"
+                          primary
+                          icon={<MessageCircle color={colors.onPrimary} size={15} strokeWidth={2.2} />}
+                          onPress={() => router.push(`/messages/${id}` as never)}
+                        />
+                      )}
                       <SoftButton
                         label={userProfileBlocked ? "Unblock" : "Block"}
                         disabled={blockPending}
@@ -258,5 +266,5 @@ const styles = StyleSheet.create({
   name: { color: colors.text, ...type.name, flexShrink: 1 },
   handle: { color: colors.textSecondary, ...type.handle, marginTop: 2 },
   bio: { color: colors.text, ...type.body, textAlign: "center", marginTop: space.md, maxWidth: 320 },
-  actionWrap: { marginTop: space.lg },
+  actionWrap: { marginTop: space.lg, flexDirection: "row", gap: space.sm },
 });
