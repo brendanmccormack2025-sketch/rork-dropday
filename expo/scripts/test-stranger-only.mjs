@@ -27,6 +27,6 @@ eq("privacy texts say emails are read and never promise friends/contacts see pos
 const notif = read("../components/NotificationItem.tsx"), vis = read("../lib/profileVisibility.ts"), badge = read("../components/TrialStatusBadge.tsx");
 eq("client knows 'unjudged': own profile keeps it, badge, notification text; other profiles never show it", [/unjudged/.test(vis), /unjudged/.test(badge), /Not enough people saw this yet\./.test(notif), /verdict_unjudged/.test(read("../providers/NotificationsProvider.tsx"))], [true, true, true, true]);
 const order = read("../supabase/MIGRATIONS_ORDER.txt").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
-eq("migration order ends: snapshot, known-connections, stranger-only", order.slice(-7), ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql", "migration-sanctions.sql"]);
+eq("migration order ends: snapshot, known-connections, stranger-only", order.slice(-8), ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql", "migration-sanctions.sql", "migration-tryal-friends.sql"]);
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);
