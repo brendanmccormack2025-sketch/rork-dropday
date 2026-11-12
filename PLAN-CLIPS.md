@@ -605,16 +605,50 @@ On any violation: alert the owner (push) and **automatically set `money_config.p
 
 ---
 
+## 11.1 Changes since section 11 (supersede earlier text where they disagree)
+
+**Storage: a private Supabase bucket behind a storage interface; Cloudflare R2 becomes a later switch, not a v1 dependency.**
+- Wherever sections 4-6 say "R2", read **"the MediaStore interface"**. v1 ships the **Supabase provider**; the **R2 provider** is written and switched on before launch only if the owner wants it (one config value, no rewrite).
+- Interface (TypeScript, in `supabase/functions/_shared/mediaStore.ts`, mirrored by a thin client in `lib/moneyMedia.ts`): `initUpload(key, contentType, size) -> { method, url, headers, completeToken }`, `completeUpload(key, expectedSize)` (verifies size and type server-side), `signedGetUrl(key, ttlSeconds)`, `head(key)`, `delete(key)`. Provider-neutral descriptors mean the client never knows which store it talks to.
+- **Supabase provider:** one **private** bucket `money-media` with **no client storage policies at all** (closed to apps, like the tables). Every upload and download goes through the edge functions `media-upload-init`, `media-upload-complete` and `media-get-url`, which check access in SQL (`money_can_read`, `money_can_upload`), then use the service role: signed upload URLs for uploads, signed GET URLs for downloads. Because access control already lives in the functions, switching to R2 later changes only the provider, not who may read what.
+- `money_media_objects` gains `provider text not null default 'supabase' check (provider in ('supabase', 'r2'))` and `bucket text`; deletions go through the existing `trial_media_delete_queue` + `delete-media` for the Supabase provider (an `r2-delete` function only if R2 is switched on).
+- **Free-plan consequence:** Supabase's global per-object limit on the free plan is small (about 50 MB; verify in the dashboard). Until the plan is upgraded: `money_config.max_footage_bytes` and `max_clip_bytes` are set to that limit (clips fit: 26 MB per minute at the editor's bitrate, so ~1.9 minutes), **footage upload is effectively "short footage only" and Drive/Dropbox links are the real path for long footage**, and the resumable-upload spike (step 7) is deferred until the limit is raised. Egress on the free plan is also limited, so the per-campaign download cap stays low in test.
+
+**Pitch metrics (built in from the start, extended by every step)**
+- **Test vs live is labelled everywhere:** `livemode boolean not null` on `ledger_txns`, `money_campaigns`, `payout_requests` and on the Stripe linkage rows (taken from the Stripe event/object `livemode`; every non-Stripe row inherits it from the campaign it belongs to). All metric views group by `livemode` and the admin screen shows **"TEST" and "LIVE" as separate sections**, never summed.
+- **Event data needed:** `money_opens (user_id, opened_at)` written by the client on each Money tab open (a service-role RPC with a once-per-hour dedupe), so "users who opened Money" is real data. Everything else is derived from tables the features already create (profiles, submissions, campaigns, ledger, payouts).
+- **View `money_weekly_metrics`**, one row per `(week_start, livemode)`, weeks start Monday UTC (the same Monday as payout batches):
+  | Column | Definition |
+  |---|---|
+  | `new_users` | profiles created that week (not livemode-split; repeated on both rows) |
+  | `users_opened_money` | distinct users with a `money_opens` row that week |
+  | `clippers_first_submission` | clippers whose first-ever submission was that week |
+  | `clippers_second_submission` | clippers whose second-ever submission was that week |
+  | `approval_rate` | approved / (approved + rejected) among decisions made that week |
+  | `avg_rating` | mean rating of approvals decided that week |
+  | `creators_first_funded` | creators whose first funded campaign was that week |
+  | `creators_second_funded` | creators whose second funded campaign was that week |
+  | `funded_cents` | sum of budget (without fee) of campaigns funded that week |
+  | `paid_out_cents` | sum of `payout_paid` that week |
+  | `fee_earned_cents` | Tryal fee kept (gross), plus `fee_net_cents` after Stripe processing fees |
+  | `median_submit_to_approval_hours` | `percentile_cont(0.5)` of `decided_at - created_at` for approvals decided that week |
+- Access: the view is closed to apps; `admin_money_metrics(p_weeks int default 12)` (owner only, `mod_is_admin()`) returns the rows; the admin screen (`app/money-metrics.tsx`, added in the moderation/admin area) shows a table per week with a TEST/LIVE switch and a "copy as CSV" button for investor decks.
+- Build order: the view is created in step 3 as a skeleton returning the columns that exist (new users, opens) and **gains columns in the step that creates their data** (submissions in 18, approvals/ratings in 9, funding in 8, payouts in 11); each such step's test asserts its metric against hand-computed fixtures. The admin screen is built in step 22.
+
+**Build log additions:** step 3 also creates `money_opens`, the `livemode` columns and the metrics skeleton; step 6 becomes "MediaStore interface + Supabase provider + functions"; step 7 (spike) is deferred; step 22 includes the metrics screen.
+
+---
+
 ## 12. Build log (one step at a time; the owner confirms each before the next)
 
 | Step | What | Status |
 |---|---|---|
 | 1 | Feature flag + strict adult check (`migration-money.sql`, `test-money-sql.mjs`) | **Built, awaiting confirmation** |
 | 2 | Birthdate lock-down + collection | not started |
-| 3 | Config + campaigns/joins/submissions schema + read RPCs | not started |
+| 3 | Config + campaigns/joins/submissions schema + read RPCs + `money_opens`, `livemode`, metrics skeleton | not started |
 | 4 | Pure money logic `_shared/money.ts` + tests | not started |
 | 5 | Ledger + invariants | not started |
-| 6 | R2 plumbing | not started |
-| 7 | Resumable-upload spike | not started |
+| 6 | MediaStore interface + Supabase provider (R2 later) | not started |
+| 7 | Resumable-upload spike | deferred (free-plan file-size limit) |
 | 8-14 | Stripe funding, approve/reject (with rating), Connect, payouts, refunds, disputes, daily solvency + alerts | not started |
 | 15-24 | Client, moderation, legal, rollout | not started |
