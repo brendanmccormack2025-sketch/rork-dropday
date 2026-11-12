@@ -1,5 +1,7 @@
 # PLAN-CLIPS (revision 2): the "Money" tab
 
+**Build status and the final v1 scope are in sections 11 and 12 (they supersede anything above that disagrees).**
+
 Status: plan only. No code, SQL, config or dependency is changed by this file.
 Written against branch `feature/stranger-only`. Revision 2 replaces the "no payments" version with your decisions:
 real money (Stripe Checkout funding on the web, Stripe Connect Express payouts), footage in Cloudflare R2, and a later Pro subscription (Apple IAP via RevenueCat).
@@ -564,3 +566,55 @@ create table public.caption_style_presets (id uuid primary key default gen_rando
 **Operations**
 21. **Who reviews payouts, disputes and reports** and within what time (the Terms promise 24 hours for reports)?
 22. **Support channel** for money problems (email address in Terms) and a documented dispute procedure before launch.
+
+---
+
+## 11. Final v1 scope: additions and changes since this plan was written
+
+**Setup (decided)**
+- Branch: **`money-v1`**, created from `feature/stranger-only` (the branch the current release builds from). `main` and `release/1.0.6` are not touched.
+- **Test mode only:** Stripe **test** keys, Cloudflare R2 free tier, no live keys anywhere. The owner sets every secret with `supabase secrets set`; keys are never pasted in chat or committed.
+- **Everything behind the database flag `money`** (`app_flags`): off for everyone except the allow-listed owner until the owner says otherwise. Kill switches for funding, approving and payouts live in `money_config` (`funding_enabled`, `payouts_enabled`, and an approvals switch), not as extra `app_flags` rows (this replaces the extra flag keys listed in 3.1).
+- `my_features()` returns three booleans: `money` (show the tab: flag on, not a known minor, not sanctioned, profile exists), `needs_birthdate` (flag on and no birthdate yet: ask before anything else), `allowed` (flag on, strict adult, not sanctioned). Teens and under-13s never see the tab; a user with no birthdate sees it and is asked for one on first visit.
+
+**Navigation (proposal, awaiting the owner's choice; no nav change until then)**
+Visible tabs today: Feed, center "+", Me (Explore and Friends exist but are hidden with `href: null`). Four visible destinations cannot keep "+" centered, so:
+- **A (recommended): five slots when Money is on:** `Feed · Money · [+] · Friends · Me`. "+" stays exactly centered; uses the existing hidden Friends screen (a visible product change).
+- **B: four slots, "+" off-center:** `Feed · Money · [+] · Me`. Cheapest; "+" is the third of four.
+- **C: five slots with the hidden Explore shown:** `Feed · Explore · [+] · Money · Me`. Breaks "Explore stays hidden".
+- **D: floating "+":** three tabs `Feed · Money · Me` and the "+" as a centered button floating above the bar. Larger visual change.
+Either way, the tab bar is unchanged for everyone while the flag is off (three slots), so nothing visible changes for other users.
+
+**Approval requires a rating**
+- Approving a submission **requires a 1-5 star rating** and allows an optional note. Rejecting does not rate. Columns: `money_submissions.rating smallint check (rating between 1 and 5)`, `rating_note text check (char_length(rating_note) <= 280)` (word-filtered; shown to the clipper only), a check that `status = 'approved'` implies rating not null. `money-approve-clip` refuses without a rating. The notification to the clipper includes the stars.
+
+**Reputation (v1 = data only; tiers later)**
+Per clipper, computed from **paid** approvals only (free campaigns count for nothing, so ratings cannot be farmed with free jobs):
+- `approved_paid`, `submitted_paid`, `distinct_paying_creators`, `repeat_hires` (creators with 2+ paid approvals), `avg_rating`, `on_time_rate` (submissions delivered before the campaign deadline / submissions), `disputes_lost`.
+- **Per-creator cap:** at most `reputation_cap_per_creator` (default 5) approved clips from the same creator count toward the totals and the rating average, so one creator cannot inflate a clipper.
+- Profile line: **"X approved clips · 4.8★"** (shown only to Money-eligible viewers; hidden until the first paid approval).
+- Implementation: a view/materialised summary fed by `money_submissions`; no tier logic or perks in v1.
+
+**Daily solvency check (replaces "nightly reconcile")**
+`money-reconcile` runs **daily** and checks that **payouts + holds + refunds never exceed funds in**:
+1. Ledger identity: for every campaign, `escrow >= 0`; globally `sum(funded gross) >= escrow + wallet_pending + wallet_available + payout_hold + stripe_out + refunds + (fees kept net of Stripe fees)`.
+2. Against Stripe: the platform's Stripe balance (available + pending) must cover the ledger's obligations (`escrow + wallet_* + payout_hold`).
+On any violation: alert the owner (push) and **automatically set `money_config.payouts_enabled = false`** (and `funding_enabled = false` if funds-in cannot be proven) until the owner clears it. It never "repairs" the ledger.
+
+**Unchanged and confirmed:** US only; Monday payout batch approved by the owner; 14-day hold; $50 first-campaign cap; fee on top; birthdate at sign-up for new users and on first Money visit for existing ones (birthdate column locked down; Stripe identity verification gates cash-out); submissions are not posts (feed, survive/expire lifecycle and messaging rules untouched); owner push alerts for anything entering the admin queue; reminder to the creator at day 3 and escalation to the owner at day 5, never auto-approve.
+
+---
+
+## 12. Build log (one step at a time; the owner confirms each before the next)
+
+| Step | What | Status |
+|---|---|---|
+| 1 | Feature flag + strict adult check (`migration-money.sql`, `test-money-sql.mjs`) | **Built, awaiting confirmation** |
+| 2 | Birthdate lock-down + collection | not started |
+| 3 | Config + campaigns/joins/submissions schema + read RPCs | not started |
+| 4 | Pure money logic `_shared/money.ts` + tests | not started |
+| 5 | Ledger + invariants | not started |
+| 6 | R2 plumbing | not started |
+| 7 | Resumable-upload spike | not started |
+| 8-14 | Stripe funding, approve/reject (with rating), Connect, payouts, refunds, disputes, daily solvency + alerts | not started |
+| 15-24 | Client, moderation, legal, rollout | not started |
