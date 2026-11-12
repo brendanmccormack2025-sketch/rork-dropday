@@ -113,10 +113,13 @@ create table public.money_config (
   max_budget_cents integer not null default 500000,
   new_creator_days integer not null default 30,
   hold_days_after_approval integer not null default 14,         -- pending -> available (chargeback exposure window)
-  review_window_days integer not null default 7,                -- creator must decide within this after the deadline
+  review_reminder_days integer not null default 3,              -- days after a clip is submitted with no decision: remind the creator
+  review_escalate_days integer not null default 5,              -- ...and escalate to the owner's dispute queue (never auto-approve / auto-reject)
+  payout_batch_weekday integer not null default 1,              -- 1 = Monday: the owner approves payouts in one weekly batch
+  dispute_sla_business_days integer not null default 3,
   min_payout_cents integer not null default 1000,
   unverified_accrual_cap_cents integer not null default 10000,  -- earnings an unverified clipper may accrue
-  payout_manual_approval boolean not null default true,         -- v1: you approve every payout
+  payout_manual_approval boolean not null default true,         -- v1: the owner approves every payout, in the Monday batch
   payouts_enabled boolean not null default false,               -- master kill switch
   funding_enabled boolean not null default false,
   allowed_countries text[] not null default '{US}',
@@ -306,7 +309,7 @@ All money logic is in edge functions using the service role; the app and the web
 | `money-reject-clip` | user JWT (creator) | fixed reasons only |
 | `money-request-payout` | user JWT | enforces the cash-out gate, minimum, flags; posts `payout_requested`; creates the request |
 | `money-admin` | user JWT, must be in `spotlight_admins` | approve/reject payouts (calls Stripe Transfer, Idempotency-Key `payout:<id>`), resolve disputes (force-approve pays from escrow; or refund), refund a campaign, freeze/unfreeze a user, post an `adjustment` (reason mandatory, logged) |
-| `money-cron` | service key, pg_cron + pg_net like `schedule-send-push.sql` | releases holds (`clip_released`), closes expired campaigns, issues refunds of unspent escrow after the review window, applies the review-window rule, retries failed transfers, queues R2 deletions, clears abandoned uploads |
+| `money-cron` | service key, pg_cron + pg_net like `schedule-send-push.sql` | releases holds (`clip_released`), closes expired campaigns, issues refunds of unspent escrow after the review window, sends the day-3 review reminder to creators and the day-5 escalation to the owner's queue, builds the Monday payout batch, retries failed transfers, queues R2 deletions, clears abandoned uploads |
 | `money-reconcile` | service key, nightly | ledger vs Stripe balance; writes a flag, never "fixes" |
 | `r2-upload-init` / `r2-upload-parts` / `r2-upload-complete` | user JWT | R2 S3 multipart: create, presign part URLs (short TTL), complete + verify size/content-type against limits, mark `ready` |
 | `r2-get-url` | user JWT | decides access in SQL (`money_can_read(object)`: creator of the campaign; joined and eligible clipper for footage; clipper/creator/approved-and-eligible viewer for clips), logs `money_downloads`, enforces the per-campaign cap, returns a presigned GET (TTL `signed_url_seconds`) |
@@ -402,9 +405,9 @@ Consequences to build in:
 9. **Approve/reject:** `money-approve-clip`/`money-reject-clip`, `clip_approved` posting, escrow checks, cap-closes-campaign. *Test:* double-approve, approve with insufficient escrow, creator-only, concurrent last slot.
 10. **Connect onboarding:** `money-connect-onboarding`, `stripe-connect-webhook` (`account.updated` -> verification, `stripe_adult`, `dob_mismatch`). *Test:* under-18 DOB from Stripe blocks cash-out; mismatch freezes and flags.
 11. **Holds + payouts:** `money-cron` (`clip_released`), `money-request-payout`, payout flags (new account, known connection of funder, velocity), `money-admin` approve -> Stripe Transfer, `transfer.created` -> `payout_paid`, failures -> `payout_failed`. *Test:* gate, minimum, double request, replayed webhook, failed transfer returns funds.
-12. **Refunds + review window:** unspent escrow refund after close + `review_window_days`, `charge.refunded` -> postings, fee refund rule. *Test:* partial/full refunds, refund while submissions are pending.
+12. **Refunds + review reminders:** unspent escrow refund after close and once no submission is waiting (decided or escalated), `charge.refunded` -> postings, fee refund rule; day-3 creator reminder and day-5 escalation (`review_reminder_days`, `review_escalate_days`, counted from the submission time). *Test:* partial/full refunds, refund while submissions are pending.
 13. **Disputes/chargebacks:** `money_disputes`, `charge.dispute.*`, freeze/release, loss posting; admin resolve. *Test:* dispute before/after payout, escrow frozen, no double loss.
-14. **Reconciliation + alerts:** `money-reconcile`; owner alert on drift, failed payout, dispute.
+14. **Reconciliation + owner alerts:** `money-reconcile`; **an alert (in-app + push via `send-push`; email through a mail provider, see 10.A) whenever anything enters the admin queue**: a report, a payout request (and the Monday batch summary), a dispute or chargeback, a day-5 escalation, a flag (`dob_mismatch`, known-connection payout), or reconciliation drift. One `owner_alerts` function/trigger family, one dedupe key per item.
 15. **Client scaffold:** `FeaturesProvider`, "Money" tab ($ icon, `DollarSign`) shown only when `features.money`; five-section shell; deep-link guards. *Test:* tab absent when flag off or birthdate missing.
 16. **Jobs + Footage sections:** browse, join (accepts terms), received-footage list, download via `r2-get-url`, Drive/Dropbox link flow.
 17. **Creator: create a campaign:** title/requirements/deadline, pay and slots, rights attestation, footage upload (client from step 7) or link, fee breakdown, "Fund on the web" state (no in-app payment UI; Apple option (a)).
@@ -504,7 +507,31 @@ create table public.caption_style_presets (id uuid primary key default gen_rando
 
 ---
 
-## 10. Remaining decisions for you
+## 10. Decisions
+
+### 10.A Decided (your answers, recorded)
+- **Entity:** sole proprietor now, LLC when investors arrive (6.2).
+- **Rows 4-9 and 11-16 of the previous list: my recommendations accepted**, with one change:
+  - **Fee:** creator pays the Tryal fee on top (default 10%, floor $1).
+  - **Hold:** 14 days; **first-campaign cap:** $50; minimums per 3.2 ($1 pay per clip, $10 budget, $10 payout).
+  - **Unreviewed clips (changed):** reminder to the creator at **day 3**, escalation to the owner's dispute queue at **day 5**; never auto-approve or auto-reject. (Assumed: days are counted from when the clip was submitted. Tell me if you meant from the campaign deadline.)
+  - **Refunds:** unspent budget and its proportional Tryal fee are refunded; Stripe's processing fee is absorbed by Tryal.
+  - **Unverified earnings:** $100 accrual cap before Stripe verification; the `unclaimed_days` rule needs counsel (see 6).
+  - **Free campaigns:** kept alongside paid ones. **Clip media in R2** as well as footage. **Profile clips:** shown only to Money-eligible (18+) viewers. **Known-connection payouts:** flag only.
+- **Birthdate:** collected at **sign-up for new users**; **existing users are asked the first time they open Money** (the tab stays hidden/locked until they answer). Browsing is gated by this; cash-out by Stripe verification.
+- **Received footage** = footage from jobs the clipper has joined. **Direct-to-one-clipper is v2: not built, no tables, no UI.**
+- **Operations:** the owner reviews everything: **reports within 24 hours; payouts in one weekly batch on Mondays; disputes within 3 business days** (`payout_batch_weekday`, `dispute_sla_business_days`). Alerts to the owner for every item entering the admin queue (step 14).
+- **Funding page:** a **new repository under the Tryal name** (not DropDay-Legal), static site + Supabase auth + calls to `money-create-funding-session`; hosting on GitHub Pages or Cloudflare Pages.
+- **Order of work:** finish and submit the current release first; start steps 1-14 once the build is in review; **nothing goes live until step 24.**
+
+### 10.B Still waiting on you
+- **Support email for money** (new address): goes into Terms/Privacy, Stripe's business profile, the funding page footer and the app's money screens.
+- **Demo account for App Review** (to be sent separately): goes into `app_flags.allow_user_ids` and the review notes; do not paste credentials in chat or commit them.
+- **Email alerts:** push is already in the stack; email needs a mail provider (e.g. Resend/Postmark), a verified sending domain, an API key set with `supabase secrets set`, and one edge function. Pick the provider, or say "push only for now".
+- **New repo name** for the funding page and who owns it on GitHub (it must be added to the session before I can create files in it).
+- Items still open from the earlier list: who is the Stripe account holder (you, with an EIN) and whether a separate bank account is opened; the Apple 3.1 funding strategy (2) and the country-enforcement method (3); Pro items 17-20.
+
+### 10.C Earlier list (kept for reference; the answers are in 10.A, so items 1, 4-9, 10-12, 14-16 and 21 are settled)
 
 **Blocking before any money code**
 1. ~~Business entity~~ **Decided: sole proprietor now, LLC when investors arrive** (6.2). Still open: who the Stripe account holder is (you, personally, with an EIN), and whether you will open a separate bank account.
