@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ban, Bell, ChevronLeft, EyeOff, FileText, LogOut, Phone, Scissors, Shield, Star, Trash2, User, Users } from "lucide-react-native";
+import { Ban, Bell, CalendarDays, ChevronLeft, EyeOff, FileText, LogOut, Phone, Scissors, Shield, Star, Trash2, User, Users } from "lucide-react-native";
 
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
@@ -207,6 +207,10 @@ export default function SettingsScreen() {
                 <Pressable onPress={() => router.push("/moderation-admin" as never)} style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
                   <Shield color={theme.textMuted} size={18} strokeWidth={2} />
                   <UiText style={styles.rowText}>Moderation</UiText>
+                </Pressable>
+                <Pressable onPress={() => router.push("/onboarding-birthdate" as never)} style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
+                  <CalendarDays color={theme.textMuted} size={18} strokeWidth={2} />
+                  <UiText style={styles.rowText}>Birthdate (Money)</UiText>
                 </Pressable>
               </View>
             </>

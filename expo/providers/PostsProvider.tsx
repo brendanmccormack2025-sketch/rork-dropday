@@ -1223,7 +1223,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       const runProfileQuery = async () =>
         (await supabase
           .from("profiles")
-          .select(`id, username, display_name, avatar_url, bio, ${profileLinkColumns()}, birthdate, bypass_drop_window${graduationColumns()}`)
+          .select(`id, username, display_name, avatar_url, bio, ${profileLinkColumns()}, bypass_drop_window${graduationColumns()}`)
           .eq("id", user.id)
           .maybeSingle()) as unknown as {
           data: Record<string, unknown> | null;
@@ -1246,6 +1246,20 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       }
 
       if (data) {
+        // The birthdate is private (unreadable from profiles once the lock-down is applied): ask for my own through my_birthdate().
+        let birthdate: string | null = null;
+        try {
+          const bd = await supabase.rpc("my_birthdate");
+          if (!bd.error) {
+            birthdate = (bd.data as string | null) ?? null;
+          } else {
+            // my_birthdate does not exist until migration-money.sql is run: the column is still readable then.
+            const old = (await supabase.from("profiles").select("birthdate").eq("id", user.id).maybeSingle()) as unknown as { data: { birthdate?: string | null } | null };
+            birthdate = old.data?.birthdate ?? null;
+          }
+        } catch {
+          birthdate = null;
+        }
         return {
           id: data.id as string,
           username: data.username as string,
@@ -1256,7 +1270,7 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
           instagram_handle: (data.instagram_handle as string | null) ?? null,
           tiktok_handle: (data.tiktok_handle as string | null) ?? null,
           youtube_url: (data.youtube_url as string | null | undefined) ?? null,
-          birthdate: (data.birthdate as string | null) ?? null,
+          birthdate,
           bypass_drop_window: (data.bypass_drop_window as boolean | null) ?? false,
           creator_status: parseCreatorStatus(data.creator_status),
           graduation_reason: (data.graduation_reason as string | null | undefined) ?? null,

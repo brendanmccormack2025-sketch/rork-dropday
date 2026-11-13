@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MONEY, step 1 (supabase/migration-money.sql: the feature flag and the strict adult check) on top of everything before it, run for real on a scratch PostgreSQL (same
+ * MONEY, steps 1-2 (supabase/migration-money.sql: the feature flag, the strict adult check, birthdate collection and lock-down) on top of everything before it, run for real on a scratch PostgreSQL (same
  * harness as test-stranger-only-sql.mjs). Admin-only offers, the creator's consent (full / strangers / decline), and the exposure
  * rule on every surface: the feed (Spotlight posts lead it, with a category label) and the profile badge; rotation, expiry, withdrawal.
  * The flag (off for everyone but the owner), allow-listed testers, the strict adult check (no birthdate / teen / under-13 are never adult),
@@ -272,6 +272,81 @@ if (!BIN) {
       eq("re-applying keeps enabled = true and a tester added by hand", (() => { const r = psqlFile("t", mo); return [/ERROR/.test(r.stderr), q(`select enabled::text from public.app_flags where key='money'`), q(`select ('${U(21)}' = any (allow_user_ids))::text from public.app_flags where key='money'`), q(`select cardinality(allow_user_ids) from public.app_flags where key='money'`)]; })(), [false, "true", "true", "2"]);
       eq("...and the owner is added back if somebody removed them", (() => { Q(`update public.app_flags set allow_user_ids = '{}' where key='money'`); psqlFile("t", mo); return q(`select (allow_user_ids = array['${OWNER}']::uuid[])::text from public.app_flags where key='money'`); })(), "true");
       eq("flag back to off for the rest of the checks", (() => { Q(`update public.app_flags set enabled = false where key='money'`); return feat(20).allowed; })(), false);
+
+      // ══ STEP 2: birthdate collection and lock-down ══
+      Q(`update public.app_flags set enabled = true where key = 'money'`);
+      const bdOf = (n) => q(`select coalesce(birthdate::text, 'null') from public.profiles where id='${U(n)}'`);
+      const mkMeta = (n, meta) => Q(`insert into auth.users (id, raw_user_meta_data, email) values ('${U(n)}','${JSON.stringify({ username: "m" + n, ...meta })}','m${n}@example.test') on conflict do nothing`);
+      const lockOn = () => q(`select enabled::text from public.app_flags where key='birthdate_lockdown'`);
+      eq("(2) the lock-down flag exists and starts OFF", lockOn(), "false");
+
+      // before the lock-down: nothing is stored
+      mkUser(30, "1990-01-01"); setBirth(30, null);
+      eq("(2) before the lock-down set_my_birthdate refuses (the date would be publicly readable)", as(U(30), `select public.set_my_birthdate('1990-01-01')`).ok, false);
+      mkMeta(31, { birthdate: "1992-03-04" });
+      eq("(2) before the lock-down a sign-up birthdate in the metadata is IGNORED", bdOf(31), "null");
+      eq("(2) ...and the profile still got its username (same sign-up inserts as before)", q(`select username from public.profiles where id='${U(31)}'`), "m31");
+
+      // a direct write is refused whether or not the lock-down is on
+      eq("(2) a direct profile update of birthdate by the user is refused", as(U(30), `update public.profiles set birthdate = '1990-01-01' where id='${U(30)}'`).ok, false);
+      eq("(2) ...and a direct insert of a profile carrying a birthdate is refused", (() => { Q(`insert into auth.users (id, raw_user_meta_data, email) values ('${U(32)}','{"username":"m32"}','m32@example.test') on conflict do nothing; delete from public.profiles where id='${U(32)}'`); return as(U(32), `insert into public.profiles (id, username, birthdate) values ('${U(32)}','m32','1990-01-01')`).ok; })(), false);
+      eq("(2) ...but an ordinary profile edit (bio) still works, as do inserts without a birthdate (ensureProfile)", [as(U(30), `update public.profiles set bio = 'hi' where id='${U(30)}'`).ok, as(U(32), `insert into public.profiles (id, username) values ('${U(32)}','m32')`).ok, as(U(30), `update public.profiles set bio = 'hi2', birthdate = null where id='${U(30)}'`).ok], [true, true, true]);
+      eq("(2) the upsert the app uses for profile edits still works (no birthdate in it)", as(U(30), `insert into public.profiles (id, username, bio) values ('${U(30)}','u30','up') on conflict (id) do update set bio = excluded.bio`).ok, true);
+
+      // metadata set by an existing account is picked up by the lock-down, bad values never break it
+      mkMeta(33, { birthdate: "1992-03-04" }); mkMeta(34, { birthdate: "1992-13-45" }); mkMeta(35, { birthdate: "2999-01-01" }); mkMeta(36, { birthdate: "garbage" }); mkMeta(37, { birthdate: "2012-02-02" });
+      eq("(2) none of them stored before the lock-down", [33, 34, 35, 36, 37].map(bdOf), Array(5).fill("null"));
+      eq("(2) a signed-in user cannot run the lock-down or refresh the grants", [as(U(30), `select public.money_apply_birthdate_lockdown()`).ok, as(U(30), `select public.money_refresh_profile_grants()`).ok, as(ADMIN, `select public.money_apply_birthdate_lockdown()`).ok], [false, false, false]);
+
+      // old builds keep working until the owner applies it: they select birthdate, and a profile read still returns it
+      eq("(2) before the lock-down an old build can still read profiles including birthdate", as(U(30), `select count(birthdate) from public.profiles`).ok, true);
+
+      const lk = psql("t", `select public.money_apply_birthdate_lockdown()`, ["-v", "ON_ERROR_STOP=1"]);
+      eq("(2) the owner's lock-down runs (SQL editor) and reports what it copied", [lk.status, /lockdown applied; 3 birthdates copied/.test(lk.stdout)], [0, true]);
+      eq("(2) the flag is on, valid metadata copied (even for a minor), bad values skipped", [lockOn(), bdOf(33), bdOf(34), bdOf(35), bdOf(36), bdOf(37)], ["true", "1992-03-04", "null", "null", "null", "2012-02-02"]);
+      eq("(2) running the lock-down again is harmless", [psql("t", `select public.money_apply_birthdate_lockdown()`, ["-v", "ON_ERROR_STOP=1"]).status, lockOn()], [0, "true"]);
+
+      // after: nobody can read the column, everything else is readable as before
+      eq("(2) signed-in users can no longer read birthdate, directly or with select *", [as(U(30), `select birthdate from public.profiles`).ok, as(U(30), `select * from public.profiles`).ok, as(U(30), `select p.* from public.profiles p`).ok, as(U(30), `select birthdate_set_at from public.profiles`).ok], [false, false, false, false]);
+      eq("(2) anon cannot either", [psql("t", `set role anon; select birthdate from public.profiles`, ["-v", "ON_ERROR_STOP=1"]).status !== 0, psql("t", `set role anon; select username, avatar_url, bio from public.profiles limit 1`, ["-v", "ON_ERROR_STOP=1"]).status === 0], [true, true]);
+      eq("(2) every other column is still readable, and filtering by id still works", [as(U(30), `select username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, created_at from public.profiles where id='${U(30)}'`).ok, as(U(30), `select count(*) from public.profiles where id = '${U(31)}'`).out], [true, "1"]);
+      eq("(2) profile edits (update and upsert) still work after the lock-down", [as(U(30), `update public.profiles set bio = 'after' where id='${U(30)}'`).ok, as(U(30), `insert into public.profiles (id, username, bio) values ('${U(30)}','u30','up2') on conflict (id) do update set bio = excluded.bio`).ok], [true, true]);
+      eq("(2) functions that read birthdate on the server (age_tier checks, the feed) still work", [as(U(30), `select count(*) from public.get_feed_engine(10, 0)`).ok, as(U(30), `select public.my_features()`).ok], [true, true]);
+
+      // set_my_birthdate
+      eq("(2) set_my_birthdate refuses a future date, a date before 1900 and null", [as(U(30), `select public.set_my_birthdate(current_date + 1)`).ok, as(U(30), `select public.set_my_birthdate('1899-12-31')`).ok, as(U(30), `select public.set_my_birthdate(null)`).ok], [false, false, false]);
+      eq("(2) ...and not signed in", psql("t", `set role anon; select public.set_my_birthdate('1990-01-01')`, ["-v", "ON_ERROR_STOP=1"]).status !== 0, true);
+      eq("(2) existing user with no birthdate: asked first (needs_birthdate), not allowed yet", (() => { const f = feat(30); return [f.money, f.needs_birthdate, f.allowed]; })(), [true, true, false]);
+      eq("(2) an adult sets it: returns 'adult', stored, set time recorded", [as(U(30), `select public.set_my_birthdate('1990-01-01')`).out, bdOf(30), q(`select (birthdate_set_at is not null)::text from public.profiles where id='${U(30)}'`)], ["adult", "1990-01-01", "true"]);
+      eq("(2) ...and now Money is allowed and nothing is asked again", (() => { const f = feat(30); return [f.money, f.needs_birthdate, f.allowed]; })(), [true, false, true]);
+      eq("(2) my_birthdate returns my own date, only mine", [as(U(30), `select public.my_birthdate()`).out, as(U(20), `select public.my_birthdate()`).out], ["1990-01-01", "1990-01-01"]);
+      eq("(2) a second set_my_birthdate is refused, as is a direct change (a teen cannot become an adult)", [as(U(30), `select public.set_my_birthdate('1980-01-01')`).ok, as(U(30), `update public.profiles set birthdate = '1980-01-01' where id='${U(30)}'`).ok, bdOf(30)], [false, false, "1990-01-01"]);
+      eq("(2) the set time cannot be edited by the user either (the write is ignored)", (() => { const before = q(`select birthdate_set_at from public.profiles where id='${U(30)}'`); as(U(30), `update public.profiles set birthdate_set_at = now() + interval '5 days' where id='${U(30)}'`); return q(`select birthdate_set_at from public.profiles where id='${U(30)}'`) === before; })(), true);
+
+      // a teen and an under-13
+      mkUser(38, "1990-01-01"); setBirth(38, null); mkUser(39, "1990-01-01"); setBirth(39, null);
+      eq("(2) a 16-year-old: tier 'teen', stored, tab hidden, never allowed", [as(U(38), `select public.set_my_birthdate('${yearsAgo(16)}')`).out, (() => { const f = feat(38); return [f.money, f.allowed, f.needs_birthdate]; })()], ["teen", [false, false, false]]);
+      eq("(2) an 11-year-old: tier 'under_13', stored, never allowed", [as(U(39), `select public.set_my_birthdate('${yearsAgo(11)}')`).out, feat(39).allowed], ["under_13", false]);
+      eq("(2) turning 18 exactly today is adult; one day short is a teen", (() => { mkUser(41, "1990-01-01"); setBirth(41, null); mkUser(42, "1990-01-01"); setBirth(42, null); return [as(U(41), `select public.set_my_birthdate('${yearsAgo(18)}')`).out, as(U(42), `select public.set_my_birthdate('${q(`select (current_date - interval '18 years' + interval '1 day')::date`)}')`).out]; })(), ["adult", "teen"]);
+
+      // sign-up after the lock-down
+      mkMeta(43, { birthdate: "1995-07-07" }); mkMeta(44, { birthdate: "2999-01-01" }); mkMeta(45, { birthdate: "not-a-date" }); mkMeta(46, {}); mkMeta(47, { birthdate: "" });
+      eq("(2) a new sign-up's birthdate is stored when valid, ignored when not, null when absent (asked on first Money visit)", [43, 44, 45, 46, 47].map(bdOf), ["1995-07-07", "null", "null", "null", "null"]);
+      eq("(2) a new adult is allowed straight away; a new sign-up without a date is asked", [feat(43).allowed, feat(46).needs_birthdate], [true, true]);
+      eq("(2) the sign-up date cannot be changed afterwards by the user", as(U(43), `update public.profiles set birthdate = '1980-01-01' where id='${U(43)}'`).ok, false);
+
+      // admin correction, and the service role
+      eq("(2) only the SQL editor / service role can correct a date (an admin's app write changes nothing: RLS)", [as(ADMIN, `update public.profiles set birthdate = '1991-01-01' where id='${U(30)}'`).ok, bdOf(30), (() => { Q(`update public.profiles set birthdate = '1992-02-02' where id='${U(30)}'`); return bdOf(30); })()], [true, "1990-01-01", "1992-02-02"]);
+      eq("(2) a non-admin cannot correct someone else's date (RLS) or their own", [as(U(20), `update public.profiles set birthdate = '1980-01-01' where id='${U(30)}'`).ok, bdOf(30)], [true, "1992-02-02"]);
+
+      // new profile columns: not granted until the refresh
+      Q(`alter table public.profiles add column if not exists test_new_col text`);
+      eq("(2) a column added later is NOT readable until money_refresh_profile_grants() runs", as(U(30), `select test_new_col from public.profiles limit 1`).ok, false);
+      Q(`select public.money_refresh_profile_grants()`);
+      eq("(2) ...and is after it, with birthdate still locked", [as(U(30), `select test_new_col from public.profiles limit 1`).ok, as(U(30), `select birthdate from public.profiles limit 1`).ok], [true, false]);
+      eq("(2) re-applying the migration keeps the lock-down on and the column locked", [/ERROR/.test(psqlFile("t", mo).stderr), lockOn(), as(U(30), `select birthdate from public.profiles limit 1`).ok], [false, "true", false]);
+      eq("(2) apps cannot call the internal birthdate functions", [as(U(30), `select public.birthdate_is_valid('1990-01-01')`).ok, as(U(30), `select public.birthdate_parse('1990-01-01')`).ok, as(U(30), `select public.money_refresh_profile_grants()`).ok], [false, false, false]);
+      Q(`update public.app_flags set enabled = false where key = 'money'`);
       }
     }
   } finally {

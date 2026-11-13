@@ -177,18 +177,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           },
         });
         if (signUpErr) throw signUpErr;
-        // Persist birthdate to the profile row. The handle_new_user DB
-        // trigger creates the profile from raw_user_meta_data, but it
-        // doesn't currently copy birthdate — so we upsert it here as a
-        // belt-and-braces step. This runs AFTER the auth user exists,
-        // so for under-13 users we abort BEFORE this point (the caller
-        // gates before invoking this function — on a self-reported
-        // 13+ confirmation checkbox on the sign-up screen, not a
-        // computed birthdate check).
+        // Terms and the 13+ confirmation go on the profile row. The birthdate is NOT written here: the database refuses a direct write
+        // (it is private and set once), and the sign-up trigger copies it from the metadata sent above.
         const uid = data.user?.id;
-        if (uid && (birthdate || agreedToTerms || ageConfirmed13Plus)) {
+        if (uid && (agreedToTerms || ageConfirmed13Plus)) {
           const update: Record<string, unknown> = {};
-          if (birthdate) update.birthdate = birthdate;
           if (agreedToTerms) update.terms_accepted_at = new Date().toISOString();
           if (ageConfirmed13Plus) update.age_confirmed_13_plus = true;
           try {
