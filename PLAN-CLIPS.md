@@ -614,6 +614,11 @@ On any violation: alert the owner (push) and **automatically set `money_config.p
 - `money_media_objects` gains `provider text not null default 'supabase' check (provider in ('supabase', 'r2'))` and `bucket text`; deletions go through the existing `trial_media_delete_queue` + `delete-media` for the Supabase provider (an `r2-delete` function only if R2 is switched on).
 - **Free-plan consequence:** Supabase's global per-object limit on the free plan is small (about 50 MB; verify in the dashboard). Until the plan is upgraded: `money_config.max_footage_bytes` and `max_clip_bytes` are set to that limit (clips fit: 26 MB per minute at the editor's bitrate, so ~1.9 minutes), **footage upload is effectively "short footage only" and Drive/Dropbox links are the real path for long footage**, and the resumable-upload spike (step 7) is deferred until the limit is raised. Egress on the free plan is also limited, so the per-campaign download cap stays low in test.
 
+**Update (owner, after step 1): Supabase Pro, ~2 GB uploads; navigation.**
+- The project is on Supabase **Pro**. The owner raises the global file-size limit in Storage settings to about **2 GB**, so v1 plans **direct footage upload up to that limit** (`max_footage_bytes` = 2 GB, `max_clip_bytes` sized to the editor's output). Drive/Dropbox links remain the path for anything bigger. The free-plan consequence above no longer applies. **The resumable-upload spike (step 7) can come back** if uploads near 2 GB fail on real devices.
+- **Navigation (decided):** `Feed · Money · [+] · Inbox · Me`, where Inbox is the existing `app/dm/inbox.tsx`. Friends and Explore stay hidden (the Friends screen has follow UI that contradicts the no-followers rule). The nav change is shown to the owner at step 15, before it is applied; nothing changes before that.
+- **Birthdate (step 2):** the column is written only by `set_my_birthdate` / the sign-up trigger, once; unreadable by other people only after the owner runs `select public.money_apply_birthdate_lockdown();` (deliberately manual: builds 48/49 select `birthdate` from `profiles` and would fail to load a profile). After it, any migration that adds a `profiles` column must be followed by `select public.money_refresh_profile_grants();`.
+
 **Pitch metrics (built in from the start, extended by every step)**
 - **Test vs live is labelled everywhere:** `livemode boolean not null` on `ledger_txns`, `money_campaigns`, `payout_requests` and on the Stripe linkage rows (taken from the Stripe event/object `livemode`; every non-Stripe row inherits it from the campaign it belongs to). All metric views group by `livemode` and the admin screen shows **"TEST" and "LIVE" as separate sections**, never summed.
 - **Event data needed:** `money_opens (user_id, opened_at)` written by the client on each Money tab open (a service-role RPC with a once-per-hour dedupe), so "users who opened Money" is real data. Everything else is derived from tables the features already create (profiles, submissions, campaigns, ledger, payouts).
@@ -643,8 +648,8 @@ On any violation: alert the owner (push) and **automatically set `money_config.p
 
 | Step | What | Status |
 |---|---|---|
-| 1 | Feature flag + strict adult check (`migration-money.sql`, `test-money-sql.mjs`) | **Built, awaiting confirmation** |
-| 2 | Birthdate lock-down + collection | not started |
+| 1 | Feature flag + strict adult check (`migration-money.sql`, `test-money-sql.mjs`) | **Confirmed** |
+| 2 | Birthdate lock-down + collection (`migration-money.sql` step 2, `lib/birthdate.ts`, `lib/moneyFeatures.ts`, `app/onboarding-birthdate.tsx`, sign-up fields, `test-birthdate.mjs`) | **Built, awaiting confirmation** |
 | 3 | Config + campaigns/joins/submissions schema + read RPCs + `money_opens`, `livemode`, metrics skeleton | not started |
 | 4 | Pure money logic `_shared/money.ts` + tests | not started |
 | 5 | Ledger + invariants | not started |

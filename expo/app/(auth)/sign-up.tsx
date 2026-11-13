@@ -20,6 +20,7 @@ import PrimaryButton from "@/components/PrimaryButton";
 import AuthField from "@/components/AuthField";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
+import { parseBirthdate, signUpAgeError } from "@/lib/birthdate";
 
 export default function SignUpScreen() {
   const navigation = useNavigation();
@@ -32,6 +33,11 @@ export default function SignUpScreen() {
   const [showCheckInbox, setShowCheckInbox] = useState<boolean>(false);
   const emailRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
+  const [bdMonth, setBdMonth] = useState<string>("");
+  const [bdDay, setBdDay] = useState<string>("");
+  const [bdYear, setBdYear] = useState<string>("");
+  const bdDayRef = useRef<TextInput>(null);
+  const bdYearRef = useRef<TextInput>(null);
 
   // Self-reported 13+ age confirmation
   const [ageConfirmed, setAgeConfirmed] = useState<boolean>(false);
@@ -49,6 +55,16 @@ export default function SignUpScreen() {
       setError("Password must be at least 6 characters.");
       return;
     }
+    const bd = parseBirthdate(bdMonth, bdDay, bdYear);
+    if (!bd.ok) {
+      setError(bd.error);
+      return;
+    }
+    const tooYoung = signUpAgeError(bd.tier);
+    if (tooYoung) {
+      setError(tooYoung);
+      return;
+    }
     if (!ageConfirmed) {
       setError("You must confirm you are 13 or older to continue.");
       return;
@@ -59,7 +75,7 @@ export default function SignUpScreen() {
     }
     setLoading(true);
     try {
-      await signUpWithEmail(email, password, username, undefined, agreedToTerms, ageConfirmed);
+      await signUpWithEmail(email, password, username, bd.iso, agreedToTerms, ageConfirmed);
     } catch (e: any) {
       const msg: string = e?.message ?? "Sign-up failed.";
       const code: string = (e as any)?.code ?? "";
@@ -185,6 +201,31 @@ export default function SignUpScreen() {
                   textContentType="newPassword"
                   returnKeyType="done"
                 />
+                <View style={styles.fieldWrap}>
+                  <UiText style={styles.fieldLabel}>Birthdate</UiText>
+                  <View style={styles.bdRow}>
+                    <TextInput
+                      value={bdMonth}
+                      onChangeText={(t) => { setBdMonth(t.replace(/\D/g, "").slice(0, 2)); if (t.length >= 2) bdDayRef.current?.focus(); }}
+                      placeholder="MM" placeholderTextColor={theme.textDim} keyboardType="number-pad" maxLength={2}
+                      style={[styles.input, styles.bdField]} accessibilityLabel="Birth month"
+                    />
+                    <TextInput
+                      ref={bdDayRef}
+                      value={bdDay}
+                      onChangeText={(t) => { setBdDay(t.replace(/\D/g, "").slice(0, 2)); if (t.length >= 2) bdYearRef.current?.focus(); }}
+                      placeholder="DD" placeholderTextColor={theme.textDim} keyboardType="number-pad" maxLength={2}
+                      style={[styles.input, styles.bdField]} accessibilityLabel="Birth day"
+                    />
+                    <TextInput
+                      ref={bdYearRef}
+                      value={bdYear}
+                      onChangeText={(t) => setBdYear(t.replace(/\D/g, "").slice(0, 4))}
+                      placeholder="YYYY" placeholderTextColor={theme.textDim} keyboardType="number-pad" maxLength={4}
+                      style={[styles.input, styles.bdField, { flex: 1.4 }]} accessibilityLabel="Birth year"
+                    />
+                  </View>
+                </View>
                 {error ? (
                   <View style={styles.errorBox}>
                     <UiText style={styles.error}>{error}</UiText>
@@ -283,6 +324,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  bdField: { flex: 1, textAlign: "center" },
   bdMonthPill: {
     backgroundColor: theme.card,
     borderWidth: 1,
