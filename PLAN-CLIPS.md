@@ -1,3 +1,5 @@
+> **Superseded for v1 by MONEY_TAB_SPEC.md; Stripe plan deferred to v2 (see money-v1 branch).**
+
 # PLAN-CLIPS (revision 2): the "Money" tab
 
 **Build status and the final v1 scope are in sections 11 and 12 (they supersede anything above that disagrees).**

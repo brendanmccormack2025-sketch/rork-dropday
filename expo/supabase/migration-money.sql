@@ -253,10 +253,14 @@ set search_path = public
 as $$
 declare
   cols text;
+  lock_on boolean := exists (select 1 from public.app_flags where key = 'birthdate_lockdown' and enabled);
 begin
+  -- readable by everyone, as before, except: money_banned and birthdate_set_at always; birthdate once the lock-down is on
   select string_agg(quote_ident(column_name), ', ' order by ordinal_position) into cols
   from information_schema.columns
-  where table_schema = 'public' and table_name = 'profiles' and column_name not in ('birthdate', 'birthdate_set_at');
+  where table_schema = 'public' and table_name = 'profiles'
+    and column_name not in ('money_banned', 'birthdate_set_at')
+    and (column_name <> 'birthdate' or not lock_on);
   execute 'revoke select on public.profiles from anon, authenticated';
   execute format('grant select (%s) on public.profiles to anon, authenticated', cols);
   return cols;
@@ -288,8 +292,8 @@ begin
   )
   select count(*) into copied from upd;
   perform set_config('tryal.birthdate_write', '', true);
+  update public.app_flags set enabled = true where key = 'birthdate_lockdown';   -- first: the grants below read it
   perform public.money_refresh_profile_grants();
-  update public.app_flags set enabled = true where key = 'birthdate_lockdown';
   return format('lockdown applied; %s birthdates copied from sign-up metadata', copied);
 end;
 $$;

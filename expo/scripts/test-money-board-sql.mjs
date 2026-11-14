@@ -521,6 +521,64 @@ if (!BIN) {
       eq("(N) a dispute note and a payment-case note go through the word filter", [psql("t", `insert into public.submission_disputes (submission_id, raised_by, reason, note) values ('${rsub}','${U(C)}','other','kill yourself')`, ["-v", "ON_ERROR_STOP=1"]).status === 0, psql("t", `insert into public.payment_cases (submission_id, opened_by, clipper_note) values ('${rsub}','${U(A)}','go die')`, ["-v", "ON_ERROR_STOP=1"]).status === 0], [false, false]);
       eq("(N) at most 3 proof images and 3 receipts per row", [psql("t", `update public.campaign_submissions set proof_paths = array['a','b','c','d'] where id = '${rsub}'`, ["-v", "ON_ERROR_STOP=1"]).status === 0, psql("t", `update public.campaign_submissions set proof_paths = array['a','b','c'] where id = '${rsub}'`, ["-v", "ON_ERROR_STOP=1"]).status === 0], [false, true]);
 
+      // ── P. follow-up: approvals capped at the budget left, budget can only go up, failed clips stay payable, money_banned is private ──
+      const capCamp = newCamp({ rate: 1, cap: 8, guar: 0, budget: 12, minv: 0, maxc: 10, title: "Budget cap" });
+      as(U(A), `select public.money_join_campaign('${capCamp}', true)`);
+      const mkSub = (views, status = "posted") => q(`insert into public.campaign_submissions (campaign_id, clipper_id, views_claimed, status) values ('${capCamp}','${U(A)}', ${views}, '${status}') returning id`).split("\n")[0];
+      const owedOf = (id) => q(`select amount_owed::text from public.campaign_submissions where id = '${id}'`);
+      const left = () => q(`select budget_committed::text || ':' || budget_left::text || ':' || status || ':' || coalesce(closed_reason, '-') from public.campaigns where id = '${capCamp}'`);
+      const s1 = mkSub(8000), s2 = mkSub(9000), s3 = mkSub(5000);
+      eq("(P1) pending clips show their full figure (8, 8, 5) and commit nothing; Browse's budget_left is live (12)", [owedOf(s1), owedOf(s2), owedOf(s3), left()], ["8.00", "8.00", "5.00", "0.00:12.00:open:-"]);
+      Q(`update public.campaign_submissions set status = 'approved' where id = '${s1}'`);
+      eq("(P1) the first approval takes its 8; 4 is left", [owedOf(s1), left()], ["8.00", "8.00:4.00:open:-"]);
+      Q(`update public.campaign_submissions set status = 'approved' where id = '${s2}'`);
+      eq("(P1) the second would be 8 but only 4 is left: capped at 4, the budget is spent, the campaign closes for new clips", [owedOf(s2), left()], ["4.00", "12.00:0.00:closed:budget"]);
+      Q(`update public.campaign_submissions set status = 'approved' where id = '${s3}'`);
+      eq("(P1) a third approval with $0 left owes 0.00 (never more than the budget)", [owedOf(s3), left()], ["0.00", "12.00:0.00:closed:budget"]);
+      eq("(P1) total committed never exceeds total_budget, and a new clip is refused while it is closed", [q(`select (budget_committed <= total_budget)::text from public.campaigns where id = '${capCamp}'`), su(U(A), `insert into public.campaign_submissions (campaign_id, clipper_id) values ('${capCamp}','${U(A)}')`).ok, postClip(U(A), { camp: capCamp }).ok], ["true", false, false]);
+      Q(`update public.campaign_submissions set status = 'paid', received_at = now() where id = '${s2}'`);
+      eq("(P1) a settled amount does not move again when its status changes (paid keeps 4.00)", [owedOf(s2), left()], ["4.00", "12.00:0.00:closed:budget"]);
+      Q(`update public.campaign_submissions set views_claimed = 2000 where id = '${s1}'`);
+      eq("(P1) an admin correction of views re-caps against the others: s1 at 2000 views owes 2, so 6 of the budget is free again", [owedOf(s1), left()], ["2.00", "6.00:6.00:closed:budget"]);
+
+      // more budget after the freeze, never less
+      const incBefore = q(`select total_budget::text from public.campaigns where id = '${capCamp}'`);
+      eq("(P2) the budget cannot decrease or stay the same after the freeze (RPC)", [as(U(C), `select public.money_increase_budget('${capCamp}', 11)`).ok, as(U(C), `select public.money_increase_budget('${capCamp}', 12)`).ok, q(`select total_budget::text from public.campaigns where id = '${capCamp}'`)], [false, false, incBefore]);
+      eq("(P2) ...and not by a direct update either, up or down (the freeze trigger)", [su(U(C), `update public.campaigns set total_budget = 50 where id = '${capCamp}'`).ok, su(U(C), `update public.campaigns set total_budget = 9 where id = '${capCamp}'`).ok, q(`select total_budget::text from public.campaigns where id = '${capCamp}'`)], [false, false, incBefore]);
+      eq("(P2) only the creator, ready, can raise it; nobody else; not above the limit; null is refused", [as(U(A), `select public.money_increase_budget('${capCamp}', 50)`).ok, as(U(STR), `select public.money_increase_budget('${capCamp}', 50)`).ok, as(U(NOTOB), `select public.money_increase_budget('${capCamp}', 50)`).ok, as(U(C), `select public.money_increase_budget('${capCamp}', 20000000)`).ok, as(U(C), `select public.money_increase_budget('${capCamp}', null)`).ok], [false, false, false, false, false]);
+      eq("(P2) the creator raises it to 20: allowed after the freeze, and a campaign closed for budget reopens", [as(U(C), `select public.money_increase_budget('${capCamp}', 20)`).ok, left()], [true, "6.00:14.00:open:-"]);
+      eq("(P2) the other frozen terms are still frozen, and earlier capped amounts did not change", [as(U(C), `select public.money_update_campaign('${capCamp}', '{"rate_per_1k": 2}'::jsonb)`).ok, owedOf(s2), owedOf(s3)], [false, "4.00", "0.00"]);
+      eq("(P2) a new clip is accepted again after the increase", postClip(U(A), { camp: capCamp }).ok, true);
+      eq("(P2) a campaign closed by its creator or past its deadline does NOT reopen by a budget increase", (() => { Q(`update public.campaigns set status = 'closed', closed_reason = 'creator' where id = '${capCamp}'`); as(U(C), `select public.money_increase_budget('${capCamp}', 25)`); const a = left(); Q(`update public.campaigns set status = 'open', closed_reason = null where id = '${capCamp}'`); return a.split(":")[2]; })(), "closed");
+      eq("(P2) before the freeze the budget can still be lowered through the edit RPC (no clipper has joined)", (() => { const c2 = newCamp({ title: "Edit me", budget: 100, cap: 20, guar: 3 }); return [as(U(C), `select public.money_update_campaign('${c2}', '{"total_budget": 60}'::jsonb)`).ok, as(U(C), `select public.money_increase_budget('${c2}', 70)`).ok, q(`select total_budget::text from public.campaigns where id = '${c2}'`)]; })(), [true, true, "70.00"]);
+
+      // a clip that failed its Tryal test is still payable
+      eq("(P3) a clip whose post failed stays payable: it can be approved and owes its amount; the creator can still dispute it as wrong_content", (() => {
+        const pfail = postClip(U(B), { camp: capCamp }); const pr = as(U(B), `select public.money_join_campaign('${capCamp}', true)`);
+        const p = postClip(U(B), { camp: capCamp });
+        Q(`insert into public.trial_post_state (post_id, decision, decided_at, posterior_mean) values ('${p.id}','failed', now(), 0.1) on conflict (post_id) do update set decision = 'failed'`);
+        Q(`select public.trial_delete_failed_post('${p.id}')`);
+        const sid2 = q(`select id from public.campaign_submissions where campaign_id = '${capCamp}' and clipper_id = '${U(B)}' and post_outcome = 'failed' limit 1`);
+        Q(`update public.campaign_submissions set views_claimed = 1000, status = 'approved' where id = '${sid2}'`);
+        const dispute = psql("t", `insert into public.submission_disputes (submission_id, raised_by, reason, note) values ('${sid2}', '${U(C)}', 'wrong_content', 'not what I asked for')`, ["-v", "ON_ERROR_STOP=1"]).status === 0;
+        return [pfail.ok || true, q(`select post_outcome || ':' || status || ':' || amount_owed::text from public.campaign_submissions where id = '${sid2}'`), dispute];
+      })(), [true, "failed:approved:1.00", true]);
+
+      // money_banned is private: only the user (through the functions), admins and the money functions read it
+      Q(`update public.profiles set money_banned = true where id = '${U(BANNED)}'`);
+      eq("(P4) money_banned is not a readable column: not for anyone signed in (even on their own row), not for signed-out visitors, not with select *", [
+        as(U(A), `select money_banned from public.profiles`).ok, as(U(BANNED), `select money_banned from public.profiles where id = '${U(BANNED)}'`).ok, as(U(ADM), `select money_banned from public.profiles`).ok,
+        psql("t", `set role anon; select money_banned from public.profiles`, ["-v", "ON_ERROR_STOP=1"]).status === 0, as(U(A), `select * from public.profiles`).ok, as(U(A), `select count(*) from public.profiles where money_banned`).ok], [false, false, false, false, false, false]);
+      eq("(P4) the other profile columns still read as before (username, avatar, bio, links, birthdate while the birthdate lock-down is off)", as(U(A), `select id, username, display_name, avatar_url, bio, website, instagram_handle, tiktok_handle, created_at, birthdate from public.profiles where id = '${U(C)}'`).ok, true);
+      eq("(P4) profile edits and inserts still work", [as(U(A), `update public.profiles set bio = 'still works' where id = '${U(A)}'`).ok, as(U(A), `insert into public.profiles (id, username, bio) values ('${U(A)}','u${A}','up') on conflict (id) do update set bio = excluded.bio`).ok], [true, true]);
+      eq("(P4) a user reads their OWN ban state through my_features and my_money_profile (and only theirs)", [JSON.parse(as(U(BANNED), `select public.my_features()`).out).banned, JSON.parse(as(U(BANNED), `select public.my_money_profile()`).out).banned, JSON.parse(as(U(A), `select public.my_features()`).out).banned, JSON.parse(as(U(A), `select public.my_money_profile()`).out).banned], [true, true, false, false]);
+      eq("(P4) admins list who is banned through admin_money_banned_users(); nobody else can", [as(U(ADM), `select count(*) from public.admin_money_banned_users() where user_id = '${U(BANNED)}'`).out, as(U(A), `select count(*) from public.admin_money_banned_users()`).ok], ["1", false]);
+      eq("(P4) the money functions still see it (a banned account is not ready, its campaigns are not listed)", [feat(BANNED).ready, JSON.parse(as(U(BANNED), `select public.my_money_profile()`).out).ready], [false, false]);
+      Q(`update public.profiles set money_banned = false where id = '${U(BANNED)}'`);
+      eq("(P4) a column added to profiles later is not readable until money_refresh_profile_grants() runs, and money_banned stays private after it", (() => { Q(`alter table public.profiles add column if not exists later_col text`); const a = as(U(A), `select later_col from public.profiles limit 1`).ok; Q(`select public.money_refresh_profile_grants()`); return [a, as(U(A), `select later_col from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok]; })(), [false, true, false]);
+      eq("(P4) the birthdate lock-down (step 2) keeps the column private as well as money_banned, and re-grants don't undo either", (() => { Q(`select public.money_apply_birthdate_lockdown()`); const r = [as(U(A), `select birthdate from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok, as(U(A), `select username, bio from public.profiles limit 1`).ok, as(U(A), `select later_col from public.profiles limit 1`).ok]; Q(`select public.money_refresh_profile_grants()`); return r.concat([as(U(A), `select birthdate from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok]); })(), [false, false, true, true, false, false]);
+      eq("(P4) re-applying the migration keeps money_banned private", [/ERROR/.test(psqlFile("t", mb).stderr), as(U(A), `select money_banned from public.profiles limit 1`).ok], [false, false]);
+
       // ── O. nothing else changed ──
       eq("(O) the feed still works and an ordinary post is not queued by Money", as(U(A), `select count(*) >= 0 from public.get_feed_engine(10, 0)`).ok, true);
       eq("(O) step 1-2 behaviour holds: the flag is on for the owner while off for everyone else, and the adult check is strict", (() => { Q(`update public.app_flags set enabled = false where key = 'money'`); const r = [feat(A).money, feat(A).allowed]; Q(`update public.app_flags set enabled = true where key = 'money'`); return r; })(), [false, false]);

@@ -171,7 +171,8 @@ begin
     'onboarded_at', mp.money_onboarded_at,
     'agreement_version', mp.money_agreement_version,
     'current_agreement_version', cur,
-    'needs_onboarding', public.money_allowed(me) and not public.money_ready(me)
+    'needs_onboarding', public.money_allowed(me) and not public.money_ready(me),
+    'banned', coalesce((select p.money_banned from public.profiles p where p.id = me), false)
   );
 end;
 $$;
@@ -192,7 +193,7 @@ declare
   on_flag boolean;
 begin
   if me is null then
-    return jsonb_build_object('money', false, 'needs_birthdate', false, 'allowed', false, 'ready', false, 'needs_onboarding', false);
+    return jsonb_build_object('money', false, 'needs_birthdate', false, 'allowed', false, 'ready', false, 'needs_onboarding', false, 'banned', false);
   end if;
   select p.birthdate, true, p.money_banned into bd, has_profile, banned from public.profiles p where p.id = me;
   on_flag := public.flag_on('money', me);
@@ -201,7 +202,8 @@ begin
     'needs_birthdate', coalesce(on_flag and has_profile and not banned and bd is null, false),
     'allowed', public.money_allowed(me),
     'ready', public.money_ready(me),
-    'needs_onboarding', public.money_allowed(me) and not public.money_ready(me)
+    'needs_onboarding', public.money_allowed(me) and not public.money_ready(me),
+    'banned', coalesce(banned, false)
   );
 end;
 $$;
@@ -234,6 +236,7 @@ create table if not exists public.campaigns (
   created_at            timestamptz not null default now(),
   check (guaranteed_per_clip + cap_per_clip <= total_budget)
 );
+alter table public.campaigns add column if not exists budget_left numeric(12,2) generated always as (total_budget - budget_committed) stored;   -- what Browse shows, always live
 create index if not exists campaigns_creator_idx on public.campaigns (creator_id);
 create index if not exists campaigns_open_idx on public.campaigns (created_at desc) where status = 'open';
 
@@ -334,12 +337,21 @@ begin
     if new.terms_frozen_at is distinct from old.terms_frozen_at then
       raise exception 'terms are frozen' using errcode = '42501';
     end if;
-    if (new.title, new.description, new.footage_url, new.rate_per_1k, new.cap_per_clip, new.total_budget, new.guaranteed_per_clip,
+    if (new.title, new.description, new.footage_url, new.rate_per_1k, new.cap_per_clip, new.guaranteed_per_clip,
         new.platforms, new.view_window_days, new.min_views, new.payment_method, new.payment_handle, new.deadline, new.max_clips_per_clipper)
        is distinct from
-       (old.title, old.description, old.footage_url, old.rate_per_1k, old.cap_per_clip, old.total_budget, old.guaranteed_per_clip,
+       (old.title, old.description, old.footage_url, old.rate_per_1k, old.cap_per_clip, old.guaranteed_per_clip,
         old.platforms, old.view_window_days, old.min_views, old.payment_method, old.payment_handle, old.deadline, old.max_clips_per_clipper) then
       raise exception 'terms are frozen once the first clipper has joined' using errcode = '42501';
+    end if;
+    -- the one change allowed after the freeze: MORE budget, and only through money_increase_budget (which sets the flag below)
+    if new.total_budget is distinct from old.total_budget then
+      if new.total_budget < old.total_budget then
+        raise exception 'the budget can only go up once terms are frozen' using errcode = '42501';
+      end if;
+      if coalesce(nullif(current_setting('tryal.budget_increase', true), ''), '') <> '1' then
+        raise exception 'terms are frozen once the first clipper has joined' using errcode = '42501';
+      end if;
     end if;
   end if;
   return new;
@@ -564,7 +576,7 @@ revoke all on table public.campaigns, public.campaign_members, public.campaign_s
 -- campaigns: every column except payment_handle (members read it through campaign_payment_info)
 grant select (id, creator_id, title, description, footage_url, rate_per_1k, cap_per_clip, total_budget, guaranteed_per_clip, platforms,
   view_window_days, min_views, payment_method, deadline, max_clips_per_clipper, status, paused_reason, closed_reason, terms_frozen_at,
-  budget_committed, agreement_version, creator_agreed_at, created_at) on public.campaigns to authenticated;
+  budget_committed, budget_left, agreement_version, creator_agreed_at, created_at) on public.campaigns to authenticated;
 grant select on public.campaign_members, public.campaign_submissions, public.submission_links, public.submission_disputes,
   public.payment_cases, public.money_reviews, public.money_strikes to authenticated;
 
@@ -715,15 +727,31 @@ drop trigger if exists money_submission_guard on public.campaign_submissions;
 create trigger money_submission_guard before insert on public.campaign_submissions
   for each row execute function public.money_submission_guard();
 
--- amount_owed is always recomputed: whatever a caller writes into it is replaced
+-- amount_owed is always recomputed: whatever a caller writes into it is replaced. Once a clip is approved its amount is capped at the budget
+-- that is left (total - the other approved clips), so approvals can never promise more than the creator set aside; an amount that was already
+-- settled does not move again unless the views are corrected. (A pending clip shows the uncapped figure.)
 create or replace function public.money_submission_calc()
 returns trigger
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  raw numeric := public.money_compute_owed(new.campaign_id, new.views_claimed, new.proof_waived);
+  c public.campaigns;
+  others numeric;
 begin
-  new.amount_owed := public.money_compute_owed(new.campaign_id, new.views_claimed, new.proof_waived);
+  new.amount_owed := raw;
+  if raw is null or new.status not in ('approved', 'paid', 'unpaid') then return new; end if;
+  select * into c from public.campaigns where id = new.campaign_id for update;
+  if tg_op = 'UPDATE' and old.status in ('approved', 'paid', 'unpaid') and old.amount_owed is not null
+     and new.views_claimed is not distinct from old.views_claimed and new.proof_waived is not distinct from old.proof_waived then
+    new.amount_owed := old.amount_owed;
+    return new;
+  end if;
+  select coalesce(sum(s.amount_owed), 0) into others from public.campaign_submissions s
+   where s.campaign_id = new.campaign_id and s.status in ('approved', 'paid', 'unpaid') and s.id <> new.id;
+  new.amount_owed := least(raw, greatest(c.total_budget - others, 0));
   return new;
 end;
 $$;
@@ -1051,6 +1079,31 @@ begin
 end;
 $$;
 
+-- more budget after the freeze (never less). A campaign that closed because the budget ran out reopens if its deadline has not passed.
+create or replace function public.money_increase_budget(p_campaign uuid, p_new_total numeric)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  me uuid := public.money_require_ready('creator');
+  c public.campaigns;
+begin
+  select * into c from public.campaigns where id = p_campaign and creator_id = me for update;
+  if not found then raise exception 'unknown campaign' using errcode = 'P0002'; end if;
+  if p_new_total is null or p_new_total <= c.total_budget then raise exception 'the new budget must be higher than the current one' using errcode = '22023'; end if;
+  if p_new_total > 10000000 then raise exception 'that budget is too high' using errcode = '22023'; end if;
+  perform set_config('tryal.budget_increase', '1', true);
+  update public.campaigns
+     set total_budget = round(p_new_total, 2),
+         status = case when status = 'closed' and closed_reason = 'budget' and deadline > now() then 'open' else status end,
+         closed_reason = case when status = 'closed' and closed_reason = 'budget' and deadline > now() then null else closed_reason end
+   where id = p_campaign;
+  perform set_config('tryal.budget_increase', '', true);
+end;
+$$;
+
 -- join: the terms the clipper saw are stored with the membership; the first join freezes them (trigger)
 create or replace function public.money_join_campaign(p_campaign uuid, p_agree boolean)
 returns void
@@ -1113,6 +1166,20 @@ begin
 end;
 $$;
 
+-- who is banned from Money (the column itself is not readable by apps): admins only
+create or replace function public.admin_money_banned_users()
+returns table (user_id uuid, username text)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not public.mod_is_admin() then raise exception 'not allowed' using errcode = '42501'; end if;
+  return query select p.id, p.username::text from public.profiles p where p.money_banned order by p.username;
+end;
+$$;
+
 -- reputation: published reviews only, plus the creator's payment record (paid / approved, average days to pay, late count)
 create or replace function public.money_profile_stats(p_user uuid)
 returns jsonb
@@ -1146,9 +1213,11 @@ $$;
 
 revoke all on function public.money_complete_onboarding(text, text[]), public.my_money_profile(), public.money_create_campaign(text, text, text, numeric, numeric, numeric, numeric, text[], integer, integer, text, text, timestamptz, integer, boolean),
   public.money_update_campaign(uuid, jsonb), public.money_set_campaign_status(uuid, text), public.money_join_campaign(uuid, boolean),
+  public.money_increase_budget(uuid, numeric), public.admin_money_banned_users(),
   public.campaign_payment_info(uuid), public.money_profile_stats(uuid), public.admin_money_set_banned(uuid, boolean, text) from public, anon;
 grant execute on function public.money_complete_onboarding(text, text[]), public.my_money_profile(), public.money_create_campaign(text, text, text, numeric, numeric, numeric, numeric, text[], integer, integer, text, text, timestamptz, integer, boolean),
   public.money_update_campaign(uuid, jsonb), public.money_set_campaign_status(uuid, text), public.money_join_campaign(uuid, boolean),
+  public.money_increase_budget(uuid, numeric), public.admin_money_banned_users(),
   public.campaign_payment_info(uuid), public.money_profile_stats(uuid), public.admin_money_set_banned(uuid, boolean, text) to authenticated;
 revoke all on function public.my_features() from public, anon;
 grant execute on function public.my_features() to authenticated;
@@ -1209,10 +1278,9 @@ begin
   end if;
 end $$;
 
--- ══ 17. the birthdate lock-down: new profile columns need a re-grant once it is on ═══════════
-do $$
-begin
-  if exists (select 1 from public.app_flags where key = 'birthdate_lockdown' and enabled) then
-    perform public.money_refresh_profile_grants();
-  end if;
-end $$;
+-- ══ 17. profile columns: money_banned is not publicly readable ═══════════════════════════════
+-- profiles is readable by everyone with a table-wide select grant. money_refresh_profile_grants() (migration-money.sql) replaces it with an
+-- explicit column list that leaves out money_banned and birthdate_set_at (and birthdate once the birthdate lock-down is on). The user reads
+-- their own state through my_features() / my_money_profile(), admins through admin_money_banned_users(), the money functions as the owner.
+-- After ANY later migration that adds a profiles column, run: select public.money_refresh_profile_grants();
+select public.money_refresh_profile_grants();
