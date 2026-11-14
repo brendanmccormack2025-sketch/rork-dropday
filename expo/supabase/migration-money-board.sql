@@ -1105,7 +1105,9 @@ begin
 end;
 $$;
 
--- join: the terms the clipper saw are stored with the membership; the first join freezes them (trigger)
+-- join: the terms the clipper saw are stored with the membership; the first join freezes them (trigger). Joining also opens (or reuses) the
+-- message thread with the creator and puts one message in it that summarizes the terms (sent as the clipper; it goes through the same word
+-- filter and checks as any message, and if that fails for any reason the join still succeeds, just without the message).
 create or replace function public.money_join_campaign(p_campaign uuid, p_agree boolean)
 returns void
 language plpgsql
@@ -1115,6 +1117,8 @@ as $$
 declare
   me uuid := public.money_require_ready('clipper');
   c public.campaigns;
+  cid uuid;
+  body text;
 begin
   if p_agree is not true then raise exception 'accept the Clipper Agreement to join' using errcode = '22023'; end if;
   select * into c from public.campaigns where id = p_campaign;
@@ -1126,6 +1130,21 @@ begin
     'max_clips_per_clipper', c.max_clips_per_clipper, 'payment_method', c.payment_method, 'footage_url', c.footage_url,
     'clipper_agreement_version', (select agreement_version from public.money_config), 'agreed_at', now()))
   on conflict do nothing;
+  if found then
+    begin
+      body := format('I joined your campaign "%s". Terms: $%s per 1,000 views (from %s views), up to $%s per clip%s, budget $%s, up to %s clips each, post on %s, view window %s days, closes %s. Let''s use this thread for questions about the work.',
+                     c.title, to_char(c.rate_per_1k, 'FM999999990.00'), c.min_views, to_char(c.cap_per_clip, 'FM999999990.00'),
+                     case when c.guaranteed_per_clip > 0 then format(', plus $%s guaranteed per approved clip', to_char(c.guaranteed_per_clip, 'FM999999990.00')) else '' end,
+                     to_char(c.total_budget, 'FM999999990.00'), c.max_clips_per_clipper, array_to_string(c.platforms, ', '), c.view_window_days,
+                     to_char(c.deadline at time zone 'UTC', 'Mon DD YYYY'));
+      cid := public.chat_conversation_for(c.creator_id);
+      insert into public.chat_messages (conversation_id, sender_id, body) values (cid, me, left(body, 2000));
+      update public.chat_conversations set last_message_at = now() where id = cid;
+      perform public.friends_notify(c.creator_id, me, 'message');
+    exception when others then
+      raise notice 'money_join_campaign: joined, but the terms message was not sent (%)', sqlerrm;
+    end;
+  end if;
 end;
 $$;
 

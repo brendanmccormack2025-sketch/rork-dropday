@@ -1,5 +1,5 @@
 import { Tabs, useRouter } from "expo-router";
-import { Home, User } from "lucide-react-native";
+import { CircleDollarSign, Home, User } from "lucide-react-native";
 import React, { useCallback, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { BlurView } from "expo-blur";
@@ -7,10 +7,16 @@ import { BlurView } from "expo-blur";
 import { colors } from "@/constants/design";
 import CenterPostButton from "@/components/CenterPostButton";
 import PostChoiceSheet from "@/components/PostChoiceSheet";
+import { useMoney } from "@/hooks/useMoney";
 
 export default function TabLayout() {
   const router = useRouter();
   const [chooserOpen, setChooserOpen] = useState<boolean>(false);
+
+  // Money is in the tab bar only when the database says it is on for this person (the 'money' flag, an adult, not banned). For everyone else
+  // the tab does not exist: href null removes it from the bar and from navigation.
+  const { features } = useMoney();
+  const showMoney = features.money;
 
   const openChooser = useCallback(() => {
     setChooserOpen(true);
@@ -45,7 +51,11 @@ export default function TabLayout() {
           ),
         }}
       />
-      {/* Hidden (files stay): only Feed, the center + and Me are visible. */}
+      <Tabs.Screen
+        name="money"
+        options={showMoney ? { title: "Money", tabBarIcon: ({ color }) => <CircleDollarSign color={color} size={23} /> } : { href: null }}
+      />
+      {/* Hidden (files stay): only Feed, the center + and Me are visible (and Money, for people it is turned on for). */}
       <Tabs.Screen name="explore" options={{ href: null }} />
       <Tabs.Screen
         name="drop"

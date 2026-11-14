@@ -2,15 +2,15 @@
 import { supabase } from "@/lib/supabase";
 import { birthdateServerError, type AgeTier } from "@/lib/birthdate";
 
-export type MyFeatures = { money: boolean; needs_birthdate: boolean; allowed: boolean };
+export type MyFeatures = { money: boolean; needs_birthdate: boolean; allowed: boolean; ready: boolean; needs_onboarding: boolean; banned: boolean };
 
-export const NO_FEATURES: MyFeatures = { money: false, needs_birthdate: false, allowed: false };
+export const NO_FEATURES: MyFeatures = { money: false, needs_birthdate: false, allowed: false, ready: false, needs_onboarding: false, banned: false };
 
 /** Parse the my_features() payload defensively: anything missing or odd is "off". */
 export function parseFeatures(raw: unknown): MyFeatures {
   if (!raw || typeof raw !== "object") return NO_FEATURES;
   const r = raw as Record<string, unknown>;
-  return { money: r.money === true, needs_birthdate: r.needs_birthdate === true, allowed: r.allowed === true };
+  return { money: r.money === true, needs_birthdate: r.needs_birthdate === true, allowed: r.allowed === true, ready: r.ready === true, needs_onboarding: r.needs_onboarding === true, banned: r.banned === true };
 }
 
 export async function fetchMyFeatures(): Promise<MyFeatures> {

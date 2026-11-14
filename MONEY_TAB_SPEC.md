@@ -57,7 +57,7 @@ Budget tracking: `budget_committed` = sum of owed amounts on approved clips. Clo
   - submit through Tryal
   - upload view proof by the deadline
   - Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
-- Joining creates a `campaign_members` row and opens (or reuses) a message thread with the creator, starting with a system message that summarizes the terms. The creator and every clipper who has joined can always message each other about the campaign, whatever either has set in "Who can message me" (even `nobody`) and without being friends; blocks, the under-18 rule, the word filter, the unanswered-message limit and sanctions still apply, and it ends with the membership.
+- Joining creates a `campaign_members` row and opens (or reuses) a message thread with the creator, starting with a message (sent as the clipper) that summarizes the terms. The creator and every clipper who has joined can always message each other about the campaign, whatever either has set in "Who can message me" (even `nobody`) and without being friends; blocks, the under-18 rule, the word filter, the unanswered-message limit and sanctions still apply, and it ends with the membership.
 - The first join sets `campaigns.terms_frozen_at`.
 
 ## 5. Making and submitting a clip
@@ -150,15 +150,15 @@ A simple admin screen (or Supabase dashboard views to start): disputes, "not pai
 **First open of the Money tab:**
 1. **Age gate.** Under-18 accounts never see the tab. Adults see a short intro: "Creators hire clippers. Clippers get paid for views. Tryal keeps everyone honest. Payments happen outside the app."
 2. **Role picker:** Creator, Clipper, or Both. Users can change it later.
-3. **Role walkthrough:** a full-screen swipeable walkthrough (5–7 cards, each with one picture or animation, a title, and at most 2 short lines). The last card is the agreement. The user can't finish until they tick each key rule (one checkbox per rule) and tap Agree. Store `money_role`, `money_onboarded_at` and `money_agreement_version` in a closed `money_profiles` table, not on public `profiles`. If the agreement version changes, show it again.
+3. **Role walkthrough:** a full-screen swipeable walkthrough (5–7 cards, each with one picture or animation, a title, and at most 2 short lines; the messaging sentence, where a card carries it, is a small note under those lines). The last card is the agreement. The user can't finish until they tick each key rule (one checkbox per rule) and tap Agree. Store `money_role`, `money_onboarded_at` and `money_agreement_version` in a closed `money_profiles` table, not on public `profiles`. If the agreement version changes, show it again.
 
 **Creator walkthrough cards:**
 1. How it works: post a campaign → clippers make clips in Tryal → strangers test them → clippers post on their own accounts → you pay for the views.
 2. Your footage: share a Google Drive or Dropbox link with clips of 1 minute or less.
 3. Setting pay: rate per 1,000 views, cap per clip, budget, an optional guaranteed amount, with a worked example ("10,000 views × $1.50 = $15").
-4. Terms freeze once the first clipper joins.
+4. Terms freeze once the first clipper joins. Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
 5. Approving: you have 48 hours to approve or dispute, or the clip auto-approves.
-6. Paying: pay outside the app within 3 days. Your payment record is public, late payments pause your campaigns, and repeat late payments mean a ban. Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
+6. Paying: pay outside the app within 3 days. Your payment record is public, late payments pause your campaigns, and repeat late payments mean a ban.
 7. Agreement checkboxes: pay on time · terms freeze · auto-approval after 48 h · Tryal isn't part of the payment · I own or have rights to my footage · campaign members can message me about the work, even if my messages are set to nobody (I can still block anyone).
 
 **Clipper walkthrough cards:**
