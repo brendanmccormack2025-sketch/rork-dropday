@@ -223,6 +223,14 @@ if (!BIN) {
       const tfm = join(sqlDir, "migration-tryal-friends.sql");
       const tf1 = psqlFile("t", tfm), tf2 = psqlFile("t", tfm);
       eq("the Tryal-friends migration (open messages) applies, as in the real order", [/ERROR/.test(tf1.stderr), /ERROR/.test(tf2.stderr)], [false, false]);
+      // The dashboard-made get_feed (supabase/get_feed.sql, not in any migration) exists in the live database, with execute revoked from apps
+      // by migration-stranger-only.sql. Its dashboard helpers are stubbed here.
+      Q(`create or replace function public.feed_settings() returns table(testing_ratio numeric, reaction_weight numeric, like_weight numeric, smoothing numeric, decay_hours numeric) language sql as $f$ select 0.2::numeric, 2::numeric, 1::numeric, 5::numeric, 24::numeric $f$;
+         create or replace function public.trial_required_views() returns integer language sql as $f$ select 10 $f$;
+         create or replace function public.feed_seen_ids(p_ids uuid[]) returns setof uuid language sql as $f$ select null::uuid where false $f$`);
+      const getFeedSql = readFileSync(join(sqlDir, "get_feed.sql"), "utf8");
+      const loadGetFeed = (text) => { const f = join(dir, "get_feed_variant.sql"); writeFileSync(f, text); if (asRoot) chownSync(f, Number(spawnSync("id", ["-u", "postgres"], { encoding: "utf8" }).stdout.trim()), -1); const r = psqlFile("t", f); return !/ERROR/.test(r.stderr); };
+      eq("(G1) the dashboard get_feed (supabase/get_feed.sql) is loaded and, as live, nobody signed in can run it", [loadGetFeed(getFeedSql), (Q(`revoke all on function public.get_feed(integer, integer) from public, anon, authenticated`), true), q(`select has_function_privilege('authenticated', 'public.get_feed(integer, integer)', 'execute')`)], [true, true, "f"]);
       const rows = (file) => q(readFileSync(join(sqlDir, file), "utf8").replace(/^--.*$/gm, "")).split("\n").filter(Boolean).map((l) => l.split("|"));
       const status = () => rows("check-migrations-applied.sql").map(([step, , , st]) => `${step}:${st.split(" ")[0] === "NOT" ? "NOT" : st.split(" ")[0]}`);
       eq("(S) check-migrations-applied.sql before Money's board file: steps 1-10 applied, 11 NOT applied, 12 reports the lock-down state", status().slice(0, 11), ["1:applied", "2:applied", "3:applied", "4:applied", "5:applied", "6:applied", "7:applied", "8:applied", "9:applied", "10:applied", "11:NOT"]);
@@ -241,6 +249,7 @@ if (!BIN) {
       eq("the money-board migration applies cleanly, and again (idempotent)", [/ERROR/.test(b1.stderr), /ERROR/.test(b2.stderr)], [false, false]);
 
       eq("(S) after the board file every one of the 11 steps reads 'applied', and the lock-down is reported as not applied", [status().slice(0, 11).every((s) => s.endsWith(":applied")), rows("check-migrations-applied.sql")[11][3].startsWith("lock-down NOT applied")], [true, true]);
+      const feedDef = () => q(`select prosrc from pg_proc where proname = 'get_feed' and pronamespace = 'public'::regnamespace`);
       const yearsAgo = (y, extraDays = 0) => q(`select (current_date - interval '${y} years' - interval '${extraDays} days')::date`);
       const su = (uid, sql) => { const r = psql("t", `set request.jwt.claim.sub='${uid}'; ${sql}`, ["-v", "ON_ERROR_STOP=1"]); return { ok: r.status === 0, out: r.stdout.trim().split("\n").filter((l) => l && l !== "SET").pop() ?? "", err: r.stderr }; };
       const feat = (n) => JSON.parse(as(U(n), `select public.my_features()`).out);
@@ -259,6 +268,9 @@ if (!BIN) {
       mk(BANNED, "clipper"); mk(STR, "clipper");
       Q(`insert into public.spotlight_admins (user_id) values ('${U(ADM)}') on conflict do nothing`);
 
+      eq("(G1) after the board migration get_feed no longer reads birthdate (its lookup goes through my_hides_mature()), and nothing else in it changed", [/birthdate/i.test(feedDef()), /my_hides_mature/.test(feedDef()), feedDef().replace(/\s+/g, "") === getFeedSql.match(/\$function\$([\s\S]*)\$function\$/)[1].replace(/\s+/g, "").replace(/selectcoalesce\(public\.age_tier\(pr\.birthdate\)in\('under_13','teen'\),false\)intov_hide_maturefrompublic\.profilesprwherepr\.id=v_uid;/, "v_hide_mature:=public.my_hides_mature();")], [false, true, true]);
+      eq("(G1) get_feed stays unrunnable for apps (the stranger-only revoke is untouched: it is not stranger-aware)", [q(`select has_function_privilege('authenticated', 'public.get_feed(integer, integer)', 'execute')`), q(`select has_function_privilege('anon', 'public.get_feed(integer, integer)', 'execute')`), as(U(A), `select count(*) from public.get_feed(5, 0)`).ok], ["f", "f", false]);
+      eq("(G1) my_hides_mature() answers only about the caller: a teen true, an adult false, signed out nothing", [as(U(TEEN), `select public.my_hides_mature()`).out, as(U(A), `select public.my_hides_mature()`).out, psql("t", `set role anon; select public.my_hides_mature()`, ["-v", "ON_ERROR_STOP=1"]).status !== 0], ["t", "f", true]);
       // ── A. every money table is closed to apps for writing, and RLS is on ──
       const TABLES = ["campaigns", "campaign_members", "campaign_submissions", "submission_links", "submission_disputes", "payment_cases", "money_reviews", "money_strikes"];
       eq("(A) row level security is on for every money table", TABLES.concat(["money_profiles", "money_config"]).map((t) => q(`select relrowsecurity from pg_class where oid = 'public.${t}'::regclass`)), Array(10).fill("t"));
@@ -587,6 +599,28 @@ if (!BIN) {
       Q(`update public.profiles set money_banned = false where id = '${U(BANNED)}'`);
       eq("(P4) a column added to profiles later is not readable until money_refresh_profile_grants() runs, and money_banned stays private after it", (() => { Q(`alter table public.profiles add column if not exists later_col text`); const a = as(U(A), `select later_col from public.profiles limit 1`).ok; Q(`select public.money_refresh_profile_grants()`); return [a, as(U(A), `select later_col from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok]; })(), [false, true, false]);
       eq("(P4) the birthdate lock-down (step 2) keeps the column private as well as money_banned, and re-grants don't undo either", (() => { Q(`select public.money_apply_birthdate_lockdown()`); const r = [as(U(A), `select birthdate from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok, as(U(A), `select username, bio from public.profiles limit 1`).ok, as(U(A), `select later_col from public.profiles limit 1`).ok]; Q(`select public.money_refresh_profile_grants()`); return r.concat([as(U(A), `select birthdate from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok]); })(), [false, false, true, true, false, false]);
+      // get_feed as a signed-in user AFTER the lock-down (execute is granted only inside this test, as it is not for apps in production)
+      {
+        const runFeed = (uid) => as(uid, `select count(*) from public.get_feed(10, 0)`);
+        Q(`grant execute on function public.get_feed(integer, integer) to authenticated`);
+        eq("(G2) after the birthdate lock-down an adult and a teen can run the patched get_feed as authenticated (no permission error on birthdate)", [as(U(A), `select birthdate from public.profiles limit 1`).ok, runFeed(U(A)).ok, runFeed(U(TEEN)).ok], [false, true, true]);
+        Q(`select public.my_hides_mature()`);
+        // the same function WITHOUT the patch fails after the lock-down (what the fix prevents)
+        loadGetFeed(getFeedSql); Q(`grant execute on function public.get_feed(integer, integer) to authenticated`);
+        eq("(G2) the unpatched dashboard get_feed fails for a signed-in user once the column is locked (so the patch matters)", [runFeed(U(A)).ok, /birthdate/i.test(runFeed(U(A)).err)], [false, true]);
+        // re-applying the migration repairs it, with Windows line endings in the live text too
+        loadGetFeed(getFeedSql.replace(/\n/g, "\r\n"));
+        const rr = psqlFile("t", mb);
+        eq("(G2) re-applying the migration patches a get_feed that has Windows line endings, and it runs as authenticated", [/ERROR/.test(rr.stderr), /birthdate/i.test(feedDef()), /\r/.test(feedDef()), (Q(`grant execute on function public.get_feed(integer, integer) to authenticated`), runFeed(U(A)).ok)], [false, false, true, true]);
+        // a get_feed that is not the repo's version is left alone (and still flagged by the dependency check)
+        loadGetFeed(getFeedSql.replace("in ('under_13', 'teen')", "= 'teen'"));
+        const r3 = psqlFile("t", mb);
+        eq("(G2) a get_feed that differs from supabase/get_feed.sql is NOT changed, and says so", [/ERROR/.test(r3.stderr), /NOT changed/.test(r3.stderr), /birthdate/i.test(feedDef())], [false, true, true]);
+        eq("(G2) ...and check-profile-column-dependencies.sql would flag exactly that one", rows("check-profile-column-dependencies.sql").filter((r) => r[3].startsWith("CHECK")).map((r) => r[1]), ["public.get_feed"]);
+        loadGetFeed(getFeedSql); psqlFile("t", mb);
+        Q(`revoke all on function public.get_feed(integer, integer) from public, anon, authenticated`);
+        eq("(G2) back to the live state: patched again, not runnable by apps, and the dependency check is clean", [/birthdate/i.test(feedDef()), q(`select has_function_privilege('authenticated', 'public.get_feed(integer, integer)', 'execute')`), rows("check-profile-column-dependencies.sql").filter((r) => r[3].startsWith("CHECK")).length], [false, "f", 0]);
+      }
       eq("(S) after the lock-down check-migrations-applied.sql reports it as applied", rows("check-migrations-applied.sql")[11][3].startsWith("lock-down APPLIED"), true);
       {
         const dep = rows("check-profile-column-dependencies.sql");

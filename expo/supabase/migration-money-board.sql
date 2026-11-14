@@ -1365,7 +1365,48 @@ end;
 $$;
 revoke all on function public.money_chat_pair(uuid, uuid), public.chat_check_stranger(uuid, uuid), public.chat_messages_guard() from public, anon, authenticated;
 
--- ══ 18. profile columns: money_banned is not publicly readable ═══════════════════════════════
+-- ══ 18. the old dashboard feed function get_feed no longer reads birthdate as the caller ═════
+-- get_feed (made in the dashboard, saved in supabase/get_feed.sql) is not security definer and reads profiles.birthdate. Nobody can run it
+-- any more (migration-stranger-only.sql revoked execute from apps, because it is not stranger-aware: that stays), but if it were ever run as
+-- a signed-in user the birthdate lock-down would make it fail. So its one birthdate lookup becomes a call to my_hides_mature(), which answers
+-- ONLY about the caller (security definer; it reveals nothing about anybody else). Only that statement is replaced, in the live function's own
+-- text (whitespace and Windows line endings tolerated), and its privileges are left exactly as they are. If the live function is not the
+-- version in the repo (the statement is not found) it is left alone and a notice says so.
+create or replace function public.my_hides_mature()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((select public.age_tier(p.birthdate) in ('under_13', 'teen') from public.profiles p where p.id = auth.uid()), false)
+$$;
+revoke all on function public.my_hides_mature() from public, anon;
+grant execute on function public.my_hides_mature() to authenticated;
+
+do $$
+declare
+  f record;
+  def text;
+  patched text;
+begin
+  for f in select p.oid from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = 'get_feed' and p.prokind = 'f' loop
+    def := pg_get_functiondef(f.oid);
+    patched := regexp_replace(def,
+      'select\s+coalesce\(\s*public\.age_tier\(\s*pr\.birthdate\s*\)\s+in\s*\(\s*''under_13''\s*,\s*''teen''\s*\)\s*,\s*false\s*\)\s+into\s+v_hide_mature\s+from\s+public\.profiles\s+pr\s+where\s+pr\.id\s*=\s*v_uid\s*;',
+      'v_hide_mature := public.my_hides_mature();', 'i');
+    if patched <> def then
+      execute patched;
+      raise notice 'get_feed: the birthdate lookup now goes through my_hides_mature()';
+    elsif def !~* 'birthdate' then
+      raise notice 'get_feed: already does not read birthdate';
+    else
+      raise notice 'get_feed: reads birthdate but is not the version in supabase/get_feed.sql, so it was NOT changed';
+    end if;
+  end loop;
+end $$;
+
+-- ══ 19. profile columns: money_banned is not publicly readable ═══════════════════════════════
 -- profiles is readable by everyone with a table-wide select grant. money_refresh_profile_grants() (migration-money.sql) replaces it with an
 -- explicit column list that leaves out money_banned and birthdate_set_at (and birthdate once the birthdate lock-down is on). The user reads
 -- their own state through my_features() / my_money_profile(), admins through admin_money_banned_users(), the money functions as the owner.
