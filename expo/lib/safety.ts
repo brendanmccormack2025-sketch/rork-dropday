@@ -18,7 +18,7 @@ export type ReportRow = { report_id: string; target_type: string; target_id: str
 export type FlagRow = { id: string; user_id: string; username: string | null; target_id: string | null; target_username: string | null; kind: string; detail: Record<string, unknown>; status: string; created_at: string };
 export type ReportAction = "dismiss" | "reviewed" | "hide" | "remove";
 
-export const getDmPolicy = async (): Promise<DmPolicy> => ((await rows<{ dm_policy: DmPolicy }>("my_controls"))[0]?.dm_policy ?? "friends");
+export const getDmPolicy = async (): Promise<DmPolicy> => ((await rows<{ dm_policy: DmPolicy }>("my_controls"))[0]?.dm_policy ?? "everyone");
 export const setDmPolicy = (policy: DmPolicy) => call<void>("set_dm_policy", { p_policy: policy });
 export const getPostInteractionMode = (post: string) => call<InteractionMode>("my_post_interaction_mode", { p_post: post });
 export const setPostInteractions = (post: string, mode: InteractionMode) => call<void>("set_post_interactions", { p_post: post, p_mode: mode });
