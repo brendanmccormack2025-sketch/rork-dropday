@@ -8,6 +8,7 @@
  *
  *   SUPABASE_ACCESS_TOKEN=sbp_... node scripts/apply-migrations.mjs          check the Vault pepper, apply the eight files
  *   node scripts/apply-migrations.mjs --dry                                   print what it would run (no token, no network)
+ *   node scripts/apply-migrations.mjs --only=migration-money.sql,migration-money-board.sql [--dry]   just those files, in the order above
  *
  * First it checks that the Vault secret trial_contact_pepper exists (contacts and email hashing need it) and stops with a
  * clear message if not (nothing is applied). Each file is sent as ONE request wrapped in begin/commit: if a file fails,
@@ -74,10 +75,19 @@ async function api(sql) {
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
   const args = process.argv.slice(2);
-  for (const a of args) if (a !== "--dry") die(`unknown option ${a} (only --dry exists)`, 2);
+  for (const a of args) if (a !== "--dry" && !a.startsWith("--only=")) die(`unknown option ${a} (only --dry and --only=<file>[,<file>] exist)`, 2);
   const dry = args.includes("--dry");
+  // --only=migration-money.sql,migration-money-board.sql : just those files (they must be in FILES), always in FILES order.
+  // The older files are not meant to be re-run on a database that already has the newer ones (some redefine functions with a
+  // different return type), so after a release has been applied once, use --only for what is new.
+  const onlyArg = args.find((a) => a.startsWith("--only="));
+  const only = onlyArg ? onlyArg.slice(7).split(",").map((n) => n.trim()).filter(Boolean).map((n) => (n.endsWith(".sql") ? n : `${n}.sql`).replace(/^(?!migration-)/, "migration-")) : null;
+  if (only) {
+    const unknown = only.filter((n) => !FILES.includes(n));
+    if (!only.length || unknown.length) die(`--only: ${unknown.length ? `not a known file: ${unknown.join(", ")}. ` : ""}Known files: ${FILES.join(", ")}`, 2);
+  }
   const dir = process.env.MIGRATIONS_DIR || join(root, "supabase");
-  const files = FILES.map((name) => {
+  const files = FILES.filter((n) => !only || only.includes(n)).map((name) => {
     let sql;
     try {
       sql = readFileSync(join(dir, name), "utf8");

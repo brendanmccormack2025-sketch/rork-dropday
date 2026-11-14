@@ -60,6 +60,11 @@ eq("--dry: exit 0, lists the pepper check and the ten files in order, sends noth
 eq("--dry needs no token and prints none", [(await runScript(["--dry"], { SUPABASE_ACCESS_TOKEN: "" })).status, dry.stdout.includes(SECRET)], [0, false]);
 eq("no token: refused (exit 2)", (await runScript([], { SUPABASE_ACCESS_TOKEN: "" })).status, 2);
 eq("an unknown option is refused", (await runScript(["--force"], { SUPABASE_ACCESS_TOKEN: SECRET })).status, 2);
+const ONLY = ["migration-money.sql", "migration-money-board.sql"];
+const dryOnly = await runScript([`--only=${ONLY.join(",")}`, "--dry"], { SUPABASE_ACCESS_TOKEN: "" });
+eq("--only=<money files> --dry: exit 0, lists exactly those two files, in order, and none of the older ones", [dryOnly.status, ONLY.every((f) => dryOnly.stdout.includes(f)), FILES.filter((f) => !ONLY.includes(f)).some((f) => dryOnly.stdout.includes(f)), dryOnly.stdout.indexOf(ONLY[0]) < dryOnly.stdout.indexOf(ONLY[1])], [0, true, false, true]);
+eq("--only lists them in FILES order whatever order they are given, and accepts short names", (await runScript(["--only=money-board,money", "--dry"], { SUPABASE_ACCESS_TOKEN: "" })).stdout.match(/apply supabase\/(\S+)/g)?.map((x) => x.replace("apply supabase/", "")), ONLY);
+eq("--only with an unknown file, or nothing, is refused (exit 2) and nothing runs", [(await runScript(["--only=migration-nope.sql", "--dry"], { SUPABASE_ACCESS_TOKEN: "" })).status, (await runScript(["--only=", "--dry"], { SUPABASE_ACCESS_TOKEN: "" })).status], [2, 2]);
 
 await withServer(() => [200, [{ n: 0 }]], async (base, seen) => {
   const r = await runScript([], { SUPABASE_ACCESS_TOKEN: ` ${SECRET}\n`, SUPABASE_API_BASE: base });
@@ -71,6 +76,11 @@ await withServer((q) => [200, q.startsWith("select count(*)::int") ? [{ n: 1 }] 
   const r = await runScript([], { SUPABASE_ACCESS_TOKEN: SECRET, SUPABASE_API_BASE: base });
   eq("with the pepper: pepper check first, then exactly the ten files in order, each begin ... commit, bearer token sent", [r.status, seen.length, /vault/.test(seen[0].query), seen.slice(1).every((s, i) => s.query === wrapInTransaction(readFileSync(new URL(`../supabase/${FILES[i]}`, import.meta.url), "utf8"))), seen.every((s) => s.auth === `Bearer ${SECRET}`)], [0, 11, true, true, true]);
   eq("it prints what it applied and that ship.sh etc. were not run; no token", [FILES.every((f) => r.stdout.includes(f)), /Not run: ship\.sh/.test(r.stdout), r.stdout.includes("TOPSECRET")], [true, true, false]);
+});
+
+await withServer((q) => [200, q.startsWith("select count(*)::int") ? [{ n: 1 }] : []], async (base, seen) => {
+  const r = await runScript([`--only=${ONLY.join(",")}`], { SUPABASE_ACCESS_TOKEN: SECRET, SUPABASE_API_BASE: base });
+  eq("--only against the API: the pepper check, then ONLY the two money files, each begin ... commit", [r.status, seen.length, seen.slice(1).every((s, i) => s.query === wrapInTransaction(readFileSync(new URL(`../supabase/${ONLY[i]}`, import.meta.url), "utf8")))], [0, 3, true]);
 });
 
 await withServer((q, n) => (q.startsWith("select count(*)::int") ? [200, [{ n: 1 }]] : n === 3 ? [400, { message: "syntax error at or near x" }] : [200, []]), async (base, seen) => {

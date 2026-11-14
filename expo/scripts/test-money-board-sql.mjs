@@ -223,6 +223,10 @@ if (!BIN) {
       const tfm = join(sqlDir, "migration-tryal-friends.sql");
       const tf1 = psqlFile("t", tfm), tf2 = psqlFile("t", tfm);
       eq("the Tryal-friends migration (open messages) applies, as in the real order", [/ERROR/.test(tf1.stderr), /ERROR/.test(tf2.stderr)], [false, false]);
+      const rows = (file) => q(readFileSync(join(sqlDir, file), "utf8").replace(/^--.*$/gm, "")).split("\n").filter(Boolean).map((l) => l.split("|"));
+      const status = () => rows("check-migrations-applied.sql").map(([step, , , st]) => `${step}:${st.split(" ")[0] === "NOT" ? "NOT" : st.split(" ")[0]}`);
+      eq("(S) check-migrations-applied.sql before Money's board file: steps 1-10 applied, 11 NOT applied, 12 reports the lock-down state", status().slice(0, 11), ["1:applied", "2:applied", "3:applied", "4:applied", "5:applied", "6:applied", "7:applied", "8:applied", "9:applied", "10:applied", "11:NOT"]);
+      eq("(S) it is a single read-only SELECT (no insert / update / delete / drop / alter / create / grant / truncate)", /\b(insert|update|delete|drop|alter|create|grant|revoke|truncate)\b/i.test(readFileSync(join(sqlDir, "check-migrations-applied.sql"), "utf8").replace(/^--.*$/gm, "")), false);
       const mb = join(sqlDir, "migration-money-board.sql");
       // a minimal copy of Supabase's storage schema, so the private bucket and its policies can be tested
       Q(`create schema if not exists storage;
@@ -236,6 +240,7 @@ if (!BIN) {
       if (/ERROR/.test(b1.stderr + b2.stderr)) console.log((b1.stderr + b2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 8).join("\n"));
       eq("the money-board migration applies cleanly, and again (idempotent)", [/ERROR/.test(b1.stderr), /ERROR/.test(b2.stderr)], [false, false]);
 
+      eq("(S) after the board file every one of the 11 steps reads 'applied', and the lock-down is reported as not applied", [status().slice(0, 11).every((s) => s.endsWith(":applied")), rows("check-migrations-applied.sql")[11][3].startsWith("lock-down NOT applied")], [true, true]);
       const yearsAgo = (y, extraDays = 0) => q(`select (current_date - interval '${y} years' - interval '${extraDays} days')::date`);
       const su = (uid, sql) => { const r = psql("t", `set request.jwt.claim.sub='${uid}'; ${sql}`, ["-v", "ON_ERROR_STOP=1"]); return { ok: r.status === 0, out: r.stdout.trim().split("\n").filter((l) => l && l !== "SET").pop() ?? "", err: r.stderr }; };
       const feat = (n) => JSON.parse(as(U(n), `select public.my_features()`).out);
@@ -582,6 +587,18 @@ if (!BIN) {
       Q(`update public.profiles set money_banned = false where id = '${U(BANNED)}'`);
       eq("(P4) a column added to profiles later is not readable until money_refresh_profile_grants() runs, and money_banned stays private after it", (() => { Q(`alter table public.profiles add column if not exists later_col text`); const a = as(U(A), `select later_col from public.profiles limit 1`).ok; Q(`select public.money_refresh_profile_grants()`); return [a, as(U(A), `select later_col from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok]; })(), [false, true, false]);
       eq("(P4) the birthdate lock-down (step 2) keeps the column private as well as money_banned, and re-grants don't undo either", (() => { Q(`select public.money_apply_birthdate_lockdown()`); const r = [as(U(A), `select birthdate from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok, as(U(A), `select username, bio from public.profiles limit 1`).ok, as(U(A), `select later_col from public.profiles limit 1`).ok]; Q(`select public.money_refresh_profile_grants()`); return r.concat([as(U(A), `select birthdate from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok]); })(), [false, false, true, true, false, false]);
+      eq("(S) after the lock-down check-migrations-applied.sql reports it as applied", rows("check-migrations-applied.sql")[11][3].startsWith("lock-down APPLIED"), true);
+      {
+        const dep = rows("check-profile-column-dependencies.sql");
+        eq("(S) check-profile-column-dependencies.sql: nothing in the repo's database reads those columns as the caller (no CHECK rows)", dep.filter((r) => r[3].startsWith("CHECK")), []);
+        eq("(S) ...and it does find the server functions that read them (security definer), so it is not an empty query", dep.some((r) => r[0] === "function" && r[2] === "t"), true);
+        eq("(S) it is a single read-only SELECT", /\b(insert|update|delete|drop|alter|create|grant|revoke|truncate)\b/i.test(readFileSync(join(sqlDir, "check-profile-column-dependencies.sql"), "utf8").replace(/^--.*$/gm, "")), false);
+        // a policy or an invoker function that reads the column must be flagged
+        Q(`create policy test_dep_policy on public.likes for select using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.birthdate is not null))`);
+        Q(`create function public.test_dep_invoker() returns date language sql stable as $f$ select birthdate from public.profiles limit 1 $f$`);
+        eq("(S) a policy and a non-security-definer function that read birthdate are flagged CHECK", rows("check-profile-column-dependencies.sql").filter((r) => r[3].startsWith("CHECK")).map((r) => r[0]).sort(), ["function", "policy"]);
+        Q(`drop policy test_dep_policy on public.likes; drop function public.test_dep_invoker()`);
+      }
       eq("(P4) re-applying the migration keeps money_banned private", [/ERROR/.test(psqlFile("t", mb).stderr), as(U(A), `select money_banned from public.profiles limit 1`).ok], [false, false]);
 
       // ── Q. messaging about a campaign (on top of open messaging between adults) ──
