@@ -31,12 +31,16 @@ eq("it runs AFTER migration-live-snapshot.sql in apply-migrations.mjs (friends-m
 eq("it runs after every other release file in apply-migrations.mjs except Money's", FILES.filter((f) => idx(FILES, f) > idx(FILES, TF)).every((f) => f.startsWith("migration-money")), true);
 
 const mine = defined(TF);
+// Money's board migration deliberately carries copies of two of its functions (with the lines marked "-- MONEY" added: the campaign
+// messaging exception). The next check makes sure those copies are exactly its versions plus the marked lines.
+const MONEY_COPIES = new Set(["chat_check_stranger", "chat_messages_guard"]);
 const clashes = [];
 for (const f of readdirSync(dir).filter((n) => /^migration-.*\.sql$/.test(n) && n !== TF)) {
   const both = [...defined(f)].filter((n) => mine.has(n));
   for (const fn of both) {
     const iOther = idx(order, f), iMine = idx(order, TF);
     if (iOther < 0) continue;                          // not part of the ordered run (one-off files)
+    if (f === "migration-money-board.sql" && MONEY_COPIES.has(fn)) continue;   // checked below
     if (iOther > iMine) clashes.push(`${f} (after ${TF}) redefines ${fn}`);
     const aOther = idx(FILES, f), aMine = idx(FILES, TF);
     if (aOther >= 0 && aMine >= 0 && aOther > aMine) clashes.push(`${f} (apply-migrations order) redefines ${fn}`);
@@ -46,6 +50,19 @@ eq("no file that runs after it redefines a function it redefines (so chat_conver
 ok: {
   const shared = [...mine].filter((n) => readdirSync(dir).some((f) => f !== TF && /^migration-.*\.sql$/.test(f) && defined(f).has(n)));
   eq("sanity: it does redefine chat_conversation_for (the friends-only one in migration-friends-messages.sql)", [mine.has("chat_conversation_for"), defined("migration-friends-messages.sql").has("chat_conversation_for"), shared.includes("chat_conversation_for")], [true, true, true]);
+}
+const body = (file, name) => {
+  const sql = readFileSync(new URL(file, dir), "utf8");
+  const start = sql.search(new RegExp(`create or replace function public\\.${name}\\s*\\(`, "i"));
+  if (start < 0) return null;
+  const end = sql.indexOf("$$;", sql.indexOf("as $$", start) + 5);
+  return sql.slice(start, end + 3);
+};
+const norm = (txt, dropMarked) => txt.split("\n").filter((l) => !(dropMarked && l.includes("-- MONEY"))).map((l) => l.trim()).filter(Boolean).join("\n");
+for (const fn of MONEY_COPIES) {
+  const theirs = body(TF, fn), copy = body("migration-money-board.sql", fn);
+  eq(`money-board's copy of ${fn} is migration-tryal-friends.sql's version plus only the lines marked '-- MONEY'`, theirs && copy ? norm(copy, true) === norm(theirs, false) : false, true);
+  eq(`...and it does carry the marked line(s)`, !!copy && /-- MONEY/.test(copy), true);
 }
 const MONEY = order.filter((f) => f.startsWith("migration-money"));
 eq("Money's migrations (when present) come after it", MONEY.every((f) => idx(order, f) > idx(order, TF)), true);

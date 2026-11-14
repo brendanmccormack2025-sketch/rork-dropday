@@ -1278,7 +1278,93 @@ begin
   end if;
 end $$;
 
--- ══ 17. profile columns: money_banned is not publicly readable ═══════════════════════════════
+-- ══ 17. messaging about a campaign ═══════════════════════════════════════════════════════════
+-- Messaging is open between adults (migration-tryal-friends.sql). On top of that, a creator and a clipper who has joined their campaign can
+-- always message each other about it, whatever either has chosen in "Who can message me" (friends / friends 7 days / nobody) and without being
+-- friends. Unchanged: a block in either direction ends it, an under-18 account is never part of it, the word filter, the one-sided-message
+-- limit and sanctions. It exists only while the membership does.
+create or replace function public.money_chat_pair(p_a uuid, p_b uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p_a is not null and p_b is not null and p_a <> p_b
+     and exists (select 1 from public.campaign_members m join public.campaigns c on c.id = m.campaign_id
+                  where (c.creator_id = p_a and m.clipper_id = p_b) or (c.creator_id = p_b and m.clipper_id = p_a))
+     and public.money_is_adult(p_a) and public.money_is_adult(p_b)
+     and not exists (select 1 from public.profiles p where p.id in (p_a, p_b) and p.money_banned)
+     and not public.friends_blocked(p_a, p_b)
+$$;
+
+-- Copies of the two functions migration-tryal-friends.sql defines, with the lines marked "-- MONEY" added (scripts/test-migration-order.mjs
+-- checks that everything else is identical to that file's version, so the two cannot drift apart).
+create or replace function public.chat_check_stranger(p_from uuid, p_to uuid)
+returns void
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  pol text;
+begin
+  if public.friends_is_minor(p_from) or public.friends_is_minor(p_to) then
+    raise exception 'you cannot message this person' using errcode = '42501';
+  end if;
+  if public.money_chat_pair(p_from, p_to) then return; end if;   -- MONEY
+  select dm_policy into pol from public.creator_controls where user_id = p_to;
+  if coalesce(pol, 'everyone') <> 'everyone' then
+    raise exception 'This person is not taking messages from people who are not their friends.' using errcode = '42501';
+  end if;
+end;
+$$;
+
+create or replace function public.chat_messages_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c public.chat_conversations;
+  other uuid;
+  cfg public.harassment_config;
+  pol text;
+  since timestamptz;
+begin
+  select * into c from public.chat_conversations where id = new.conversation_id;
+  if not found then return new; end if;
+  other := case when c.user_a = new.sender_id then c.user_b else c.user_a end;
+  select * into cfg from public.harassment_config where id;
+  -- 1. the words
+  perform public.text_check(new.body);
+  -- 2. who may message the recipient (people who are not friends: adults only, and only when the recipient takes messages from
+  --    everyone; migration-tryal-friends.sql)
+  if not public.friends_are(new.sender_id, other) then
+    perform public.chat_check_stranger(new.sender_id, other);
+  end if;
+  select dm_policy into pol from public.creator_controls where user_id = other;
+  if public.money_chat_pair(new.sender_id, other) then pol := null; end if;   -- MONEY
+  if pol = 'nobody' then
+    raise exception 'This person is not taking messages right now.' using errcode = '42501';
+  elsif pol = 'friends_7d' then
+    select created_at into since from public.friendships where user_a = least(new.sender_id, other) and user_b = greatest(new.sender_id, other);
+    if since is null or since > now() - (cfg.friend_min_days * interval '1 day') then
+      raise exception 'This person only takes messages from people who have been friends for % days.', cfg.friend_min_days using errcode = '42501';
+    end if;
+  end if;
+  -- 3. no endless one-sided messaging
+  if public.harassment_unanswered(new.conversation_id, new.sender_id) >= cfg.unanswered_limit then
+    raise exception 'Wait for a reply before sending more.' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.money_chat_pair(uuid, uuid), public.chat_check_stranger(uuid, uuid), public.chat_messages_guard() from public, anon, authenticated;
+
+-- ══ 18. profile columns: money_banned is not publicly readable ═══════════════════════════════
 -- profiles is readable by everyone with a table-wide select grant. money_refresh_profile_grants() (migration-money.sql) replaces it with an
 -- explicit column list that leaves out money_banned and birthdate_set_at (and birthdate once the birthdate lock-down is on). The user reads
 -- their own state through my_features() / my_money_profile(), admins through admin_money_banned_users(), the money functions as the owner.

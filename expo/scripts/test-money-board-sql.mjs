@@ -219,6 +219,10 @@ if (!BIN) {
       if (/ERROR/.test(t1.stderr + t2.stderr)) console.log((t1.stderr + t2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 8).join("\n"));
       eq("the money migration (step 1) applies cleanly, and again (idempotent)", [/ERROR/.test(t1.stderr), /ERROR/.test(t2.stderr)], [false, false]);
 
+      // Tryal friends + open messages sit between sanctions and Money in the real order (MIGRATIONS_ORDER.txt)
+      const tfm = join(sqlDir, "migration-tryal-friends.sql");
+      const tf1 = psqlFile("t", tfm), tf2 = psqlFile("t", tfm);
+      eq("the Tryal-friends migration (open messages) applies, as in the real order", [/ERROR/.test(tf1.stderr), /ERROR/.test(tf2.stderr)], [false, false]);
       const mb = join(sqlDir, "migration-money-board.sql");
       // a minimal copy of Supabase's storage schema, so the private bucket and its policies can be tested
       Q(`create schema if not exists storage;
@@ -578,6 +582,34 @@ if (!BIN) {
       eq("(P4) a column added to profiles later is not readable until money_refresh_profile_grants() runs, and money_banned stays private after it", (() => { Q(`alter table public.profiles add column if not exists later_col text`); const a = as(U(A), `select later_col from public.profiles limit 1`).ok; Q(`select public.money_refresh_profile_grants()`); return [a, as(U(A), `select later_col from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok]; })(), [false, true, false]);
       eq("(P4) the birthdate lock-down (step 2) keeps the column private as well as money_banned, and re-grants don't undo either", (() => { Q(`select public.money_apply_birthdate_lockdown()`); const r = [as(U(A), `select birthdate from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok, as(U(A), `select username, bio from public.profiles limit 1`).ok, as(U(A), `select later_col from public.profiles limit 1`).ok]; Q(`select public.money_refresh_profile_grants()`); return r.concat([as(U(A), `select birthdate from public.profiles limit 1`).ok, as(U(A), `select money_banned from public.profiles limit 1`).ok]); })(), [false, false, true, true, false, false]);
       eq("(P4) re-applying the migration keeps money_banned private", [/ERROR/.test(psqlFile("t", mb).stderr), as(U(A), `select money_banned from public.profiles limit 1`).ok], [false, false]);
+
+      // ── Q. messaging about a campaign (on top of open messaging between adults) ──
+      Q(`delete from public.chat_messages; delete from public.chat_conversations; delete from public.creator_controls; delete from public.user_blocks`);
+      const MC = newCamp({ title: "Chat camp", maxc: 5 });
+      as(U(A), `select public.money_join_campaign('${MC}', true)`);
+      const say = (from, to, body = "hello") => as(U(from), `select public.send_message('${U(to)}', '${body}')`);
+      const policy = (n, p) => as(U(n), `select public.set_dm_policy('${p}')`);
+      eq("(Q) ordinary adults message each other (open messaging, the default)", [say(STR, C).ok, say(C, STR).ok], [true, true]);
+      for (const pol of ["friends", "friends_7d", "nobody"]) {
+        policy(C, pol); policy(A, pol); policy(STR, pol);
+        eq(`(Q) dm_policy '${pol}' on both sides: a stranger is refused, but the creator and the clipper who joined can message each other, both ways`, [say(STR, C).ok, say(STR, A).ok, say(A, C).ok, say(C, A).ok], [false, false, true, true]);
+      }
+      policy(C, "everyone"); policy(A, "everyone"); policy(STR, "everyone");
+      eq("(Q) the conversation shows in both Messages lists", [as(U(A), `select count(*) from public.my_conversations() where other_id = '${U(C)}'`).out, as(U(C), `select count(*) from public.my_conversations() where other_id = '${U(A)}'`).out], ["1", "1"]);
+      eq("(Q) messaging about a campaign makes nobody a friend", q(`select count(*) from public.friendships where '${U(A)}' in (user_a, user_b) and '${U(C)}' in (user_a, user_b)`), "0");
+      mk(80, "clipper");
+      eq("(Q) a clipper who never joined any of the creator's campaigns gets no exception", (() => { policy(C, "friends"); const r = say(80, C).ok; policy(C, "everyone"); return r; })(), false);
+      eq("(Q) the exception is tied to the membership: another creator's clipper has none with this creator", (() => { policy(A, "friends"); const r = say(B, A).ok; policy(A, "everyone"); return r; })(), false);
+      eq("(Q) either side blocking the other ends it (blocks always win)", (() => { policy(C, "nobody"); policy(A, "nobody"); Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(C)}','${U(A)}')`); const a = [say(A, C).ok, say(C, A).ok]; Q(`delete from public.user_blocks`); Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(A)}','${U(C)}')`); const b = [say(A, C).ok, say(C, A).ok]; Q(`delete from public.user_blocks`); return a.concat(b); })(), [false, false, false, false]);
+      eq("(Q) ...and it works again once the block is lifted", [say(A, C).ok, say(C, A).ok], [true, true]);
+      eq("(Q) an under-18 account is never part of it (the adult/minor rule holds)", (() => { Q(`update public.profiles set birthdate = '${yearsAgo(16)}' where id = '${U(A)}'`); const r = [say(A, C).ok, say(C, A).ok]; Q(`update public.profiles set birthdate = '1990-01-01' where id = '${U(A)}'`); return r; })(), [false, false]);
+      eq("(Q) a member banned from Money loses the exception (the person's own 'nobody' applies again); the creator banned too", (() => { Q(`update public.profiles set money_banned = true where id = '${U(A)}'`); const a = [say(A, C).ok, say(C, A).ok]; Q(`update public.profiles set money_banned = false where id = '${U(A)}'`); Q(`update public.profiles set money_banned = true where id = '${U(C)}'`); const b = say(A, C).ok; Q(`update public.profiles set money_banned = false where id = '${U(C)}'`); return a.concat([b]); })(), [false, false, false]);
+      eq("(Q) with no membership (removed in the SQL editor) the exception is gone, the person's own 'nobody' applies again", (() => { mk(81, "creator"); mk(82, "clipper"); const c81 = newCamp({ title: "Pair camp" }, U(81)); as(U(82), `select public.money_join_campaign('${c81}', true)`); policy(81, "nobody"); policy(82, "nobody"); const withM = [say(82, 81).ok, say(81, 82).ok]; Q(`delete from public.campaign_members where campaign_id = '${c81}'`); const without = [say(82, 81).ok, say(81, 82).ok]; return withM.concat(without); })(), [true, true, false, false]);
+      eq("(Q) the word filter and the one-sided-message limit still apply to the exception", (() => { policy(C, "everyone"); policy(A, "everyone"); const w = say(A, C, "kill yourself").ok; Q(`delete from public.chat_messages`); let sent = 0; for (let i = 0; i < 22; i++) { if (say(A, C, `m${i}`).ok) sent++; } return [w, sent]; })(), [false, 20]);
+      eq("(Q) sanctions still stop messaging", (() => { Q(`delete from public.chat_messages`); Q(`insert into public.account_sanctions (user_id, kind, until, created_by) values ('${U(A)}', 'suspend', now() + interval '2 days', '${U(ADM)}')`); const r = say(A, C).ok; Q(`update public.account_sanctions set lifted_at = now() where user_id = '${U(A)}'`); return r; })(), false);
+      eq("(Q) the pair rule itself refuses blocked people in either direction (defence in depth, checked directly)", (() => { const pair = () => q(`select public.money_chat_pair('${U(A)}', '${U(C)}')`); const a = pair(); Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(A)}','${U(C)}')`); const b = pair(); Q(`delete from public.user_blocks`); Q(`insert into public.user_blocks (blocker_id, blocked_id) values ('${U(C)}','${U(A)}')`); const c = pair(); Q(`delete from public.user_blocks`); return [a, b, c]; })(), ["t", "f", "f"]);
+      eq("(Q) apps cannot call money_chat_pair (it would reveal who has joined whose campaign)", as(U(A), `select public.money_chat_pair('${U(A)}', '${U(C)}')`).ok, false);
+      Q(`delete from public.creator_controls`);
 
       // ── O. nothing else changed ──
       eq("(O) the feed still works and an ordinary post is not queued by Money", as(U(A), `select count(*) >= 0 from public.get_feed_engine(10, 0)`).ok, true);
