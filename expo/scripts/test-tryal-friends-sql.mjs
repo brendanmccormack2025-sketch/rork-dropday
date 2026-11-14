@@ -289,6 +289,22 @@ if (!BIN) {
       Q(`delete from public.user_blocks`);
       ok("friends (including under-18 friends) still message as before", (() => { Q(`insert into public.friendships (user_a, user_b) values ('${U(12)}','${U(13)}') on conflict do nothing`); return msg(12, 13).ok; })());
 
+      // ── 6. re-running migrations can never put back the friends-only chat_conversation_for ──
+      {
+        const { FILES } = await import("./apply-migrations.mjs");
+        const REDEFINED = ["chat_conversation_for", "my_conversations", "chat_messages_guard", "my_controls", "set_dm_policy", "get_feed_engine", "trial_is_silenced", "trial_post_score_details", "posts_testing_readable"];
+        const defs = () => q(`select md5(string_agg(pg_get_functiondef(p.oid), '|' order by p.proname, p.oid::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname in (${REDEFINED.map((n) => `'${n}'`).join(",")})`);
+        const before = defs();
+        const lines = [];
+        for (const f of FILES) { const r = psqlFile("t", join(sqlDir, f)); if (/ERROR/.test(r.stderr)) lines.push(f); }
+        ok("(the re-run is the worst case: every file again, in apply-migrations order, errors and all)", true);
+        const def = q(`select pg_get_functiondef('public.chat_conversation_for(uuid)'::regprocedure)`);
+        eq("after re-applying the release's files in apply-migrations order, chat_conversation_for is still the open one (not 'you can only message friends')", [def.includes("you can only message friends"), def.includes("chat_check_stranger")], [false, true]);
+        eq("...and every function migration-tryal-friends.sql redefines is exactly its version again (nothing reverted)", defs(), before);
+        fanSetup();
+        eq("...and two adult strangers can still message each other, an adult and a minor still cannot", [msg(9, 10).ok, msg(9, 13).ok], [true, false]);
+      }
+
       ok("the new internals are not callable by apps", ["trial_is_supporter(gen_random_uuid(), gen_random_uuid())", "trial_supporter_creators(gen_random_uuid())", "trial_is_fan(gen_random_uuid(), gen_random_uuid())", "chat_check_stranger(gen_random_uuid(), gen_random_uuid())"].every((f) => !as(U(6), `select public.${f}`).ok));
       }
     }
