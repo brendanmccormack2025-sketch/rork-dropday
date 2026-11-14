@@ -46,6 +46,7 @@ The creator must accept the **Campaign Agreement** before posting:
 - Pay within 3 days of approval.
 - The creator allows their footage to be posted on Tryal, tagged as clipped for them.
 - Tryal is not part of the payment.
+- Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
 
 Budget tracking: `budget_committed` = sum of owed amounts on approved clips. Close the campaign to new submissions automatically when committed ≥ total_budget.
 
@@ -55,7 +56,8 @@ Budget tracking: `budget_committed` = sum of owed amounts on approved clips. Clo
   - fake or bought views mean a ban
   - submit through Tryal
   - upload view proof by the deadline
-- Joining creates a `campaign_members` row and opens (or reuses) a message thread with the creator, starting with a system message that summarizes the terms.
+  - Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
+- Joining creates a `campaign_members` row and opens (or reuses) a message thread with the creator, starting with a system message that summarizes the terms. The creator and every clipper who has joined can always message each other about the campaign, whatever either has set in "Who can message me" (even `nobody`) and without being friends; blocks, the under-18 rule, the word filter, the unanswered-message limit and sanctions still apply, and it ends with the membership.
 - The first join sets `campaigns.terms_frozen_at`.
 
 ## 5. Making and submitting a clip
@@ -156,19 +158,19 @@ A simple admin screen (or Supabase dashboard views to start): disputes, "not pai
 3. Setting pay: rate per 1,000 views, cap per clip, budget, an optional guaranteed amount, with a worked example ("10,000 views × $1.50 = $15").
 4. Terms freeze once the first clipper joins.
 5. Approving: you have 48 hours to approve or dispute, or the clip auto-approves.
-6. Paying: pay outside the app within 3 days. Your payment record is public, late payments pause your campaigns, and repeat late payments mean a ban.
-7. Agreement checkboxes: pay on time · terms freeze · auto-approval after 48 h · Tryal isn't part of the payment · I own or have rights to my footage.
+6. Paying: pay outside the app within 3 days. Your payment record is public, late payments pause your campaigns, and repeat late payments mean a ban. Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
+7. Agreement checkboxes: pay on time · terms freeze · auto-approval after 48 h · Tryal isn't part of the payment · I own or have rights to my footage · campaign members can message me about the work, even if my messages are set to nobody (I can still block anyone).
 
 **Clipper walkthrough cards:**
 1. How it works: join a campaign → make the clip in Tryal → post to Tryal (that's your submission) → post on your own accounts → prove your views → get paid.
 2. Import from Files: get footage straight from Drive or Dropbox, 1 minute max.
 3. Tryal first: only clips posted on Tryal count. The clean file saves to your camera roll, then finish it anywhere.
 4. Proving views: add your post links, and when the window ends upload screenshots of your analytics.
-5. Getting paid: the app shows what you're owed, the creator pays you directly, and you tap "Payment received."
+5. Getting paid: the app shows what you're owed, the creator pays you directly, and you tap "Payment received." Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
 6. Real views only: fake or bought views mean a ban.
-7. Agreement checkboxes: only real views · submit through Tryal · upload proof on time · Tryal isn't part of the payment.
+7. Agreement checkboxes: only real views · submit through Tryal · upload proof on time · Tryal isn't part of the payment · campaign members can message me about the work, even if my messages are set to nobody (I can still block anyone).
 
-**"Both" role:** show the clipper cards, then the creator-only cards (2, 3, 4, 5, 6), then one combined agreement.
+**"Both" role:** show the clipper cards, then the creator-only cards (2, 3, 4, 5, 6), then one combined agreement (the union of both checkbox lists; the messaging checkbox appears once).
 
 **First-time guides (coach marks):** short tooltips the first time a user does each step: creating a campaign (one per field group), joining, Make a clip (pointing at Import from Files), adding external links, uploading proof, approving, and marking payment. Each tip shows once and can be dismissed.
 

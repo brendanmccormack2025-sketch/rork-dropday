@@ -108,17 +108,18 @@ security definer
 set search_path = public
 as $$ select mp.money_role from public.money_profiles mp where mp.user_id = p_user $$;
 
--- the rules a person must tick, per role (one checkbox per rule)
+-- the rules a person must tick, per role (one checkbox per rule). 'campaign_messaging' = "Campaign members can message each other about the
+-- work, even if your messages are set to nobody. You can still block anyone." (see section 17)
 create or replace function public.money_required_rules(p_role text)
 returns text[]
 language sql
 immutable
 as $$
   select case p_role
-    when 'creator' then array['pay_on_time', 'terms_freeze', 'auto_approval_48h', 'not_part_of_payment', 'own_footage_rights']
-    when 'clipper' then array['only_real_views', 'submit_through_tryal', 'upload_proof_on_time', 'not_part_of_payment']
+    when 'creator' then array['pay_on_time', 'terms_freeze', 'auto_approval_48h', 'not_part_of_payment', 'own_footage_rights', 'campaign_messaging']
+    when 'clipper' then array['only_real_views', 'submit_through_tryal', 'upload_proof_on_time', 'not_part_of_payment', 'campaign_messaging']
     when 'both'    then array['pay_on_time', 'terms_freeze', 'auto_approval_48h', 'not_part_of_payment', 'own_footage_rights',
-                              'only_real_views', 'submit_through_tryal', 'upload_proof_on_time']
+                              'only_real_views', 'submit_through_tryal', 'upload_proof_on_time', 'campaign_messaging']
   end
 $$;
 

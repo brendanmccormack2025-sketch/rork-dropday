@@ -241,7 +241,7 @@ if (!BIN) {
       const feat = (n) => JSON.parse(as(U(n), `select public.my_features()`).out);
       const sql1 = (e) => q(`select ${e}`);
       const MONEY = [...Array(40).keys()].map((i) => 60 + i);
-      const RULES = { creator: ["pay_on_time", "terms_freeze", "auto_approval_48h", "not_part_of_payment", "own_footage_rights"], clipper: ["only_real_views", "submit_through_tryal", "upload_proof_on_time", "not_part_of_payment"] };
+      const RULES = { creator: ["pay_on_time", "terms_freeze", "auto_approval_48h", "not_part_of_payment", "own_footage_rights", "campaign_messaging"], clipper: ["only_real_views", "submit_through_tryal", "upload_proof_on_time", "not_part_of_payment", "campaign_messaging"] };
       RULES.both = [...new Set([...RULES.creator, ...RULES.clipper])];
       const arr = (a) => `array[${a.map((x) => `'${x}'`).join(",")}]`;
       const onboard = (n, role) => as(U(n), `select public.money_complete_onboarding('${role}', ${arr(RULES[role])})`);
@@ -267,6 +267,7 @@ if (!BIN) {
       eq("(B) a teen and a person without a birthdate are neither allowed nor ready", [feat(TEEN).ready, feat(TEEN).allowed, feat(NOBD).ready, feat(NOBD).allowed], [false, false, false, false]);
       eq("(B) a teen cannot even start the walkthrough", as(U(TEEN), `select public.money_complete_onboarding('clipper', ${arr(RULES.clipper)})`).ok, false);
       eq("(B) the walkthrough needs every rule ticked for the role (server-side)", [as(U(NOTOB), `select public.money_complete_onboarding('creator', ${arr(RULES.creator.slice(1))})`).ok, as(U(NOTOB), `select public.money_complete_onboarding('both', ${arr(RULES.clipper)})`).ok, as(U(NOTOB), `select public.money_complete_onboarding('nope', ${arr(RULES.clipper)})`).ok, as(U(NOTOB), `select public.money_complete_onboarding('clipper', null)`).ok], [false, false, false, false]);
+      eq("(B) the campaign-messaging rule is required too: every role is refused without it, and 'both' needs it once", [as(U(NOTOB), `select public.money_complete_onboarding('creator', ${arr(RULES.creator.filter((r) => r !== "campaign_messaging"))})`).ok, as(U(NOTOB), `select public.money_complete_onboarding('clipper', ${arr(RULES.clipper.filter((r) => r !== "campaign_messaging"))})`).ok, as(U(NOTOB), `select public.money_complete_onboarding('both', ${arr(RULES.both.filter((r) => r !== "campaign_messaging"))})`).ok, q(`select count(*) from public.money_profiles where user_id = '${U(NOTOB)}'`)], [false, false, false, "0"]);
       eq("(B) 'both' needs the union of the creator and clipper rules", [onboard(NOTOB, "both").ok, JSON.parse(as(U(NOTOB), `select public.my_money_profile()`).out).role], [true, "both"]);
       Q(`delete from public.money_profiles where user_id = '${U(NOTOB)}'`);
       eq("(B) the agreement is stored with the version, in the closed table", [q(`select money_agreement_version || ':' || money_role || ':' || (money_onboarded_at is not null) from public.money_profiles where user_id = '${U(A)}'`)], ["1:clipper:true"]);

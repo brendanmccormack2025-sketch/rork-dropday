@@ -222,6 +222,28 @@ if (!BIN) {
       if (/ERROR/.test(t1.stderr + t2.stderr)) console.log((t1.stderr + t2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 8).join("\n"));
       eq("the Tryal-friends migration applies cleanly, and again (idempotent)", [/ERROR/.test(t1.stderr), /ERROR/.test(t2.stderr)], [false, false]);
 
+      // ── the read-only "is the live database on this file's version?" query (supabase/check-tryal-friends-live.sql) ──
+      {
+        const { buildQuery, functionsIn } = await import("./gen-live-check.mjs");
+        const chk = readFileSync(join(sqlDir, "check-tryal-friends-live.sql"), "utf8");
+        const run = () => q(chk.replace(/^--.*$/gm, "")).split("\n").filter(Boolean).map((l) => l.split("|"));
+        const n = functionsIn(readFileSync(tf, "utf8")).size;
+        eq("the checked-in query is the generator's output for the current migration file (not stale)", chk === buildQuery(readFileSync(tf, "utf8")), true);
+        eq("it is a single SELECT: no insert / update / delete / drop / alter / create / grant / truncate anywhere", /\b(insert|update|delete|drop|alter|create|grant|revoke|truncate|vacuum|call|do)\b/i.test(chk.replace(/^--.*$/gm, "")), false);
+        eq(`on a database built from the file, every one of its ${n} functions reports 'match'`, [run().length, run().every(([, s]) => s === "match")], [n, true]);
+        const before = q(`select md5(string_agg(pg_get_functiondef(p.oid), '|' order by p.oid::text)) from pg_proc p where p.pronamespace = 'public'::regnamespace`);
+        run();
+        eq("running it changes nothing (the catalog is identical afterwards)", q(`select md5(string_agg(pg_get_functiondef(p.oid), '|' order by p.oid::text)) from pg_proc p where p.pronamespace = 'public'::regnamespace`), before);
+        // the friends-only version coming back is exactly what it must catch
+        const orig = q(`select pg_get_functiondef('public.chat_conversation_for(uuid)'::regprocedure)`);
+        Q(`create or replace function public.chat_conversation_for(p_other uuid) returns uuid language plpgsql security definer set search_path = public as $$ begin raise exception 'you can only message friends'; end; $$`);
+        eq("with the friends-only chat_conversation_for put back, that one function reports MISMATCH and the rest still match", run().filter(([, s]) => s !== "match"), [["chat_conversation_for", "MISMATCH"]]);
+        Q(`drop function public.trial_is_fan(uuid, uuid) cascade`);
+        eq("a function that is gone reports MISSING", run().filter(([, s]) => s === "MISSING"), [["trial_is_fan", "MISSING"]]);
+        psqlFile("t", tf);
+        eq("re-applying the file brings everything back to match", run().every(([, s]) => s === "match"), true);
+      }
+
       const supporter = (creator, viewer) => q(`select public.trial_is_supporter('${U(creator)}','${U(viewer)}')`);
       const readable = (viewer, post) => as(U(viewer), `select count(*) from public.posts where id='${P(post)}'`).out;
       const like = (viewer, post) => Q(`insert into public.likes (user_id, post_id) values ('${U(viewer)}','${P(post)}') on conflict do nothing`);
@@ -292,7 +314,8 @@ if (!BIN) {
       // ── 6. re-running migrations can never put back the friends-only chat_conversation_for ──
       {
         const { FILES } = await import("./apply-migrations.mjs");
-        const REDEFINED = ["chat_conversation_for", "my_conversations", "chat_messages_guard", "my_controls", "set_dm_policy", "get_feed_engine", "trial_is_silenced", "trial_post_score_details", "posts_testing_readable"];
+        // (chat_messages_guard is left out when Money's migration is in the release files: it carries a marked copy, checked by test-migration-order.mjs)
+        const REDEFINED = ["chat_conversation_for", "my_conversations", ...(FILES.some((f) => f.startsWith("migration-money")) ? [] : ["chat_messages_guard"]), "my_controls", "set_dm_policy", "get_feed_engine", "trial_is_silenced", "trial_post_score_details", "posts_testing_readable"];
         const defs = () => q(`select md5(string_agg(pg_get_functiondef(p.oid), '|' order by p.proname, p.oid::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname in (${REDEFINED.map((n) => `'${n}'`).join(",")})`);
         const before = defs();
         const lines = [];
