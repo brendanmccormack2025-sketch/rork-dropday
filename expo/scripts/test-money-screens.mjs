@@ -55,6 +55,11 @@ eq("creating needs the Campaign Agreement ticked and shows it", [/CAMPAIGN_AGREE
 eq("coach marks: one per create field group and one for joining", [(src["app/money/create-campaign.tsx"].match(/<CoachMark id="create_/g) ?? []).length, /<CoachMark id="join"/.test(detail)], [4, true]);
 eq("the form's inputs are not components created inside render (they would lose focus on every keystroke)", /\n\s{2}const (Field|Chips) = /.test(src["app/money/create-campaign.tsx"]), false);
 
+// ── the live-database check lists exactly the functions these screens call ──
+const called = [...new Set([...(src["lib/moneyApi.ts"] + src["lib/moneyFeatures.ts"] + read("providers/PostsProvider.tsx")).matchAll(/(?:rpc<[^>]*>|supabase\.rpc)\(\s*"(money_[a-z_]+|my_money_profile|my_features|my_birthdate|set_my_birthdate|campaign_payment_info)"/g)].map((m) => m[1]))].sort();
+const checked = [...new Set([...read("supabase/check-money-step2-functions.sql").matchAll(/^\s*\('([a-z_]+)',\s+'/gm)].map((m) => m[1]))].sort();
+eq("check-money-step2-functions.sql checks exactly the database functions the Money screens call (so it cannot go stale)", checked, called);
+
 // ── the rest of the app is untouched ──
 eq("no Money file touches the feed, the post lifecycle or the editor", /PostsProvider|get_feed|trialEngine|app\/edit/.test(all.replace(/get_feed_engine/g, "")), false);
 
