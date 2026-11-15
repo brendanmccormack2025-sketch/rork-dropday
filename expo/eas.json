@@ -24,6 +24,10 @@
       "android": {
         "buildType": "app-bundle"
       }
+    },
+    "money-preview": {
+      "extends": "production",
+      "channel": "money-preview"
     }
   },
   "submit": {
