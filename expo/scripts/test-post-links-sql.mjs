@@ -294,6 +294,20 @@ if (!BIN) {
       eq("(F) clearing the link keeps the counts (the post's history does not vanish)", (() => { const keep = taps(); as(U(1), `select public.clear_post_video_link('${P(1)}')`); return [keep, taps(), q(`select count(*) from public.post_link_tap_days where post_id = '${P(1)}'`)]; })(), ["4", "4", "2"]);
       eq("(F) after clearing, the old code no longer redirects and counts nothing", [svc(`select count(*) from public.link_target('${code1}')`).out, tap(code1, "d".repeat(32)), taps()], ["0", "f", "4"]);
 
+      // ── F2. the hourly cap: a script with many addresses still cannot push one link's count past it ──
+      eq("(F2) the default cap is 120 counted taps per link per hour, kept in a closed one-row config table", [q("select max_per_hour from public.link_tap_config"), q("select count(*) from public.link_tap_config"), as(U(1), `select * from public.link_tap_config`).ok, as(U(1), `update public.link_tap_config set max_per_hour = 100000`).ok, psql("t", "update public.link_tap_config set max_per_hour = 0", ["-v", "ON_ERROR_STOP=1"]).status === 0], ["120", "1", false, false, false]);
+      Q(`update public.link_tap_config set max_per_hour = 5`);
+      mkPost(70, 1); mkPost(71, 1);
+      const cA = set(1, 70, "https://youtu.be/a").out, cB = set(1, 71, "https://youtu.be/b").out;
+      const fpn = (n) => String(n).padStart(2, "0").repeat(16);
+      eq("(F2) five different devices count; the sixth, seventh... do not, however many arrive", [1, 2, 3, 4, 5, 6, 7, 8, 50].map((n) => tap(cA, fpn(n))), ["t", "t", "t", "t", "t", "f", "f", "f", "f"]);
+      eq("(F2) the total is the cap, and refused taps left nothing behind (no hash rows past the cap)", [as(U(1), `select public.my_post_link_taps('${P(70)}')`).out, q(`select count(*) from public.link_tap_seen where code = '${cA}'`)], ["5", "5"]);
+      eq("(F2) a device already counted does not use up the cap again, and another link has its own allowance", [tap(cA, fpn(1)), tap(cB, fpn(1)), tap(cB, fpn(2)), as(U(1), `select public.my_post_link_taps('${P(71)}')`).out], ["f", "t", "t", "2"]);
+      eq("(F2) after the hour passes the link counts again (new devices), up to the cap again", (() => { Q(`update public.link_tap_seen set seen_at = now() - interval '61 minutes' where code = '${cA}'`); return [60, 61, 62, 63, 64, 65, 66].map((n) => tap(cA, fpn(n))); })(), ["t", "t", "t", "t", "t", "f", "f"]);
+      eq("(F2) the cap is the hourly COUNT of counted taps: 4 counted 30 minutes ago and 4 counted 90 minutes ago leave room for 1 only", (() => { const c = set(1, 70, "https://youtu.be/a").out; Q(`delete from public.link_tap_seen where code = '${c}'`); for (const n of [71, 72, 73, 74]) tap(c, fpn(n)); Q(`update public.link_tap_seen set seen_at = now() - interval '30 minutes' where code = '${c}'`); for (const n of [75, 76, 77, 78]) tap(c, fpn(n)); Q(`update public.link_tap_seen set seen_at = now() - interval '90 minutes' where code = '${c}' and fp in ('${fpn(75)}','${fpn(76)}','${fpn(77)}','${fpn(78)}')`); return [tap(c, fpn(79)), tap(c, fpn(80))]; })(), ["t", "f"]);
+      eq("(F2) the owner can raise the cap in the SQL editor and counting resumes at once", (() => { Q(`update public.link_tap_config set max_per_hour = 500`); return [tap(cA, fpn(90)), tap(cA, fpn(91))]; })(), ["t", "t"]);
+      Q(`update public.link_tap_config set max_per_hour = 120`);
+
       // ── G. the 48-hour purge ──
       eq("(G) the purge removes hashes older than 48 hours and keeps newer ones, and never touches the counts", (() => {
         const code = set(1, 1, "https://youtu.be/q").out;

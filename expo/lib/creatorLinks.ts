@@ -177,7 +177,7 @@ export function getCreatorLinks(profile: CreatorLinkSource): CreatorLink[] {
 // say no before the round trip. Everything else about links (https only, no login in the address, one place that parses) is the code above.
 export type VideoPlatform = "youtube" | "tiktok" | "instagram" | "x" | "twitch" | "spotify";
 export const VIDEO_PLATFORM_LABELS: Record<VideoPlatform, string> = { youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", x: "X", twitch: "Twitch", spotify: "Spotify" };
-export const VIDEO_LINK_DOMAINS = ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "x.com", "twitch.tv", "open.spotify.com"] as const;
+export const VIDEO_LINK_DOMAINS = ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "x.com", "twitter.com", "twitch.tv", "open.spotify.com"] as const;
 export const VIDEO_LINK_MAX_LENGTH = 500;
 
 /** Which allowed site a host belongs to; null if none. Subdomains count for the first five sites (www., m., vm.), look-alikes do not. */
@@ -187,7 +187,7 @@ export function videoPlatformOfHost(host: string): VideoPlatform | null {
   if (isOrSub("youtube.com") || h === "youtu.be") return "youtube";
   if (isOrSub("tiktok.com")) return "tiktok";
   if (isOrSub("instagram.com")) return "instagram";
-  if (isOrSub("x.com")) return "x";
+  if (isOrSub("x.com") || h === "twitter.com" || h === "www.twitter.com" || h === "mobile.twitter.com") return "x";
   if (isOrSub("twitch.tv")) return "twitch";
   if (h === "open.spotify.com") return "spotify";
   return null;

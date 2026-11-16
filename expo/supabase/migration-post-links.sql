@@ -2,8 +2,9 @@
 --
 -- A post can carry ONE video link ("A specific video" in the composer). The post shows a "Watch on <platform>" button; the button never opens
 -- the raw address, it opens a tracked short link (the `go` edge function, supabase/functions/go) that counts the tap and redirects.
---   * the address is validated here, on the server: https only, and only these sites: youtube.com, youtu.be, tiktok.com, instagram.com, x.com,
---     twitch.tv, open.spotify.com (subdomains of the first five are fine, e.g. www.youtube.com, vm.tiktok.com; not look-alikes)
+--   * the address is validated here, on the server: https only, and only these sites: youtube.com, youtu.be, tiktok.com, instagram.com, x.com (and
+--     twitter.com, www.twitter.com, mobile.twitter.com, shown as X), twitch.tv, open.spotify.com (subdomains of youtube / tiktok / instagram / x /
+--     twitch are fine, e.g. www.youtube.com, vm.tiktok.com; not look-alikes)
 --   * viewers see only the platform and the short code (columns on posts); the address itself is in post_links, readable by the post's owner only
 --   * taps are counted per post per day (post_link_tap_days). The same device within 24 hours counts once. To do that the edge function sends
 --     a salted hash of the caller (never the address, never the device); it sits in link_tap_seen for at most 48 hours and is then deleted.
@@ -38,6 +39,15 @@ create table if not exists public.post_link_tap_days (
   taps    integer not null default 0 check (taps >= 0),
   primary key (post_id, day)
 );
+-- one row: how many counted taps one post's link may collect per hour (a script cannot inflate a count past this); raise it if a post goes viral
+create table if not exists public.link_tap_config (
+  id             boolean primary key default true check (id),
+  max_per_hour   integer not null default 120 check (max_per_hour > 0)
+);
+insert into public.link_tap_config (id) values (true) on conflict do nothing;
+alter table public.link_tap_config enable row level security;
+revoke all on table public.link_tap_config from anon, authenticated;
+
 create table if not exists public.link_tap_seen (
   code    text not null,
   fp      text not null check (char_length(fp) between 16 and 64),   -- a salted hash made by the edge function; nothing else
@@ -72,7 +82,7 @@ begin
   if h = 'youtube.com' or h like '%.youtube.com' or h = 'youtu.be' then return 'youtube'; end if;
   if h = 'tiktok.com' or h like '%.tiktok.com' then return 'tiktok'; end if;
   if h = 'instagram.com' or h like '%.instagram.com' then return 'instagram'; end if;
-  if h = 'x.com' or h like '%.x.com' then return 'x'; end if;
+  if h = 'x.com' or h like '%.x.com' or h = 'twitter.com' or h = 'www.twitter.com' or h = 'mobile.twitter.com' then return 'x'; end if;
   if h = 'twitch.tv' or h like '%.twitch.tv' then return 'twitch'; end if;
   if h = 'open.spotify.com' then return 'spotify'; end if;
   return null;
@@ -180,7 +190,8 @@ as $$
    where l.code = p_code and p.moderation_status = 'active'
 $$;
 
--- Count one tap unless the same fingerprint already counted for this code in the last 24 hours. true = counted.
+-- Count one tap unless the same fingerprint already counted for this code in the last 24 hours, or this link already collected its hourly maximum
+-- (link_tap_config.max_per_hour counted taps in the last hour: link_tap_seen rows touched in the last hour ARE this hour's counted taps). true = counted.
 create or replace function public.record_link_tap(p_code text, p_fp text)
 returns boolean
 language plpgsql
@@ -193,6 +204,9 @@ declare
 begin
   select l.post_id into pid from public.post_links l where l.code = p_code;
   if pid is null or p_fp is null or char_length(p_fp) not between 16 and 64 then return false; end if;
+  if (select count(*) from public.link_tap_seen where code = p_code and seen_at > now() - interval '1 hour') >= (select max_per_hour from public.link_tap_config) then
+    return false;
+  end if;
   insert into public.link_tap_seen (code, fp, seen_at) values (p_code, p_fp, now())
   on conflict (code, fp) do update set seen_at = now()
     where public.link_tap_seen.seen_at < now() - interval '24 hours'

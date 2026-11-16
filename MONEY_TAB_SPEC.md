@@ -28,7 +28,7 @@ Fields:
 | title | required, ≤ 60 chars |
 | description | what to clip, the vibe, do's and don'ts, ≤ 1000 chars |
 | footage | required. One or more videos picked from the creator's camera roll: **up to 60 minutes in total per campaign, each video up to 30 minutes**. Compressed on the device before upload (720p, a streaming-friendly MP4 with the index at the front so it can play before it has fully downloaded). Uploads are resumable and continue in the background. Stored in a private bucket behind the MediaStore interface; signed URLs only for clippers who joined and for the campaign's creator. **Deleted 30 days after the campaign closes.** |
-| full_video_url | optional "Full video" link: one https URL on youtube.com, youtu.be, tiktok.com, instagram.com, x.com, twitch.tv or open.spotify.com (validated on the server). **A frozen term once the first clipper joins.** Every clip from the campaign uses it automatically, each through its clipper's own tracked link (section 16) |
+| full_video_url | optional "Full video" link: one https URL on youtube.com, youtu.be, tiktok.com, instagram.com, x.com (or twitter.com, www.twitter.com, mobile.twitter.com, shown as X), twitch.tv or open.spotify.com (validated on the server). **A frozen term once the first clipper joins.** Every clip from the campaign uses it automatically, each through its clipper's own tracked link (section 16) |
 | rate_per_1k | required, in dollars (e.g. 1.50) |
 | cap_per_clip | required, the max payout per clip |
 | total_budget | required |
@@ -230,9 +230,9 @@ After each step: show the SQL that actually ran and runtime logs proving it work
 ## 16. Links on posts (all posts, then Money)
 **For every post, not just Money** (built first, on its own):
 - The post composer gets a **Links** row: **My socials** (the default; shows the profile's existing social links, as today) or **A specific video** (one URL).
-- Allowed domains only, validated on the server: `youtube.com`, `youtu.be`, `tiktok.com`, `instagram.com`, `x.com`, `twitch.tv`, `open.spotify.com`.
+- Allowed domains only, validated on the server: `youtube.com`, `youtu.be`, `tiktok.com`, `instagram.com`, `x.com` (and `twitter.com`, `www.twitter.com`, `mobile.twitter.com`, all shown as X), `twitch.tv`, `open.spotify.com`.
 - A post with a video link shows a **Watch on <platform>** button.
-- Every outbound video link goes through a **tracked short link** (a Supabase edge function). Taps are counted per post. A tap from the same device/IP within 24 hours counts once. Only counts are kept: the de-duplication uses a short-lived salted hash that is deleted within 48 hours, and nothing about the person who tapped is stored.
+- Every outbound video link goes through a **tracked short link** (a Supabase edge function). Taps are counted per post. A tap from the same device/IP within 24 hours counts once, using the address the platform sets (never one the caller writes), and one link can collect at most a fixed number of counted taps per hour. Only counts are kept: the de-duplication uses a short-lived salted hash that is deleted within 48 hours, and nothing about the person who tapped is stored.
 - The post's owner sees "This post sent X people to your video."
 - Reuses the profile-links code (`lib/creatorLinks.ts`); there is no second link system.
 - Link taps are added to the pitch metrics (weekly counts).

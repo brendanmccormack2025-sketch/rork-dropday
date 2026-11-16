@@ -5,7 +5,7 @@
  *   node --experimental-strip-types --no-warnings scripts/test-link-redirect.mjs
  */
 import { readFileSync } from "node:fs";
-import { BOT_RE, clientAddress, codeFromUrl, fingerprint, handle, isCountable, safeTarget } from "../supabase/functions/go/core.ts";
+import { BOT_RE, clientAddress, codeFromUrl, deviceClass, fingerprint, handle, isCountable, safeTarget } from "../supabase/functions/go/core.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -28,11 +28,25 @@ eq("chat-app previews, crawlers and scripts follow the link but do not count", [
 eq("the bot pattern does not catch ordinary phones", [!BOT_RE.test(SAFARI), !BOT_RE.test("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")], [true, true]);
 
 // ── the caller's address and the fingerprint ──
-eq("the address: first of x-forwarded-for, else the platform's own headers", [clientAddress(new Headers({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" })), clientAddress(new Headers({ "cf-connecting-ip": "198.51.100.4" })), clientAddress(new Headers())], ["203.0.113.9", "198.51.100.4", ""]);
+eq("the address: cf-connecting-ip (the platform sets it) wins; else the LAST x-forwarded-for entry (appended by the nearest proxy); never the first", [
+  clientAddress(new Headers({ "cf-connecting-ip": "198.51.100.4", "x-forwarded-for": "6.6.6.6, 203.0.113.9" })),
+  clientAddress(new Headers({ "x-forwarded-for": "6.6.6.6, 7.7.7.7, 203.0.113.9" })),
+  clientAddress(new Headers({ "x-forwarded-for": "203.0.113.9" })),
+  clientAddress(new Headers({ "x-forwarded-for": " , 203.0.113.9 , " })),
+  clientAddress(new Headers()),
+], ["198.51.100.4", "203.0.113.9", "203.0.113.9", "203.0.113.9", ""]);
+eq("a caller writing its own first x-forwarded-for entries (or its own cf-connecting-ip behind the platform's) cannot change the address that is used", (() => {
+  const real = "203.0.113.9";
+  const spoofed = [`1.1.1.1, ${real}`, `9.9.9.9, 8.8.8.8, ${real}`, `${"1.2.3.4, ".repeat(20)}${real}`];
+  return spoofed.map((x) => clientAddress(new Headers({ "x-forwarded-for": x })) === real);
+})(), [true, true, true]);
+eq("device class: a handful of values, whatever the browser string says", [deviceClass(SAFARI), deviceClass("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"), deviceClass("Mozilla/5.0 (Windows NT 10.0) Gecko/20100101 Firefox/121.0"), deviceClass("zzzz"), deviceClass("")], ["ios-safari", "android-chrome", "windows-firefox", "other-other", "other-other"]);
+eq("a million different browser strings of one phone are one class", new Set(Array.from({ length: 200 }, (_, i) => deviceClass(SAFARI.replace("17_0", `17_${i}`).replace("604.1", `604.${i}`)))).size, 1);
 const f1 = await fingerprint("secret-1", "203.0.113.9", SAFARI);
 eq("the fingerprint is 32 hex characters, the same for the same device and secret", [/^[0-9a-f]{32}$/.test(f1), f1 === (await fingerprint("secret-1", "203.0.113.9", SAFARI))], [true, true]);
-eq("another address, another browser or another secret gives another fingerprint", [f1 === (await fingerprint("secret-1", "203.0.113.10", SAFARI)), f1 === (await fingerprint("secret-1", "203.0.113.9", SAFARI + " x")), f1 === (await fingerprint("secret-2", "203.0.113.9", SAFARI))], [false, false, false]);
-eq("the fingerprint does not contain the address or the browser string", [f1.includes("203"), f1.includes("Safari")], [false, false]);
+eq("another address, another device class or another secret gives another fingerprint", [f1 === (await fingerprint("secret-1", "203.0.113.10", SAFARI)), f1 === (await fingerprint("secret-1", "203.0.113.9", "Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile Safari/537.36")), f1 === (await fingerprint("secret-2", "203.0.113.9", SAFARI))], [false, false, false]);
+eq("but the same address with the browser string rewritten (same device class) is the SAME fingerprint: a script cannot mint new 'devices' by changing the string", [f1 === (await fingerprint("secret-1", "203.0.113.9", SAFARI + " tweak")), f1 === (await fingerprint("secret-1", "203.0.113.9", SAFARI.replace("17_0", "17_5")))], [true, true]);
+eq("the fingerprint does not contain the address or the device class", [f1.includes("203"), f1.includes("ios")], [false, false]);
 
 // ── the redirect ──
 eq("only an https address without a login in it is followed", [safeTarget("https://youtu.be/x"), safeTarget("http://youtu.be/x"), safeTarget("javascript:alert(1)"), safeTarget("https://a:b@youtu.be/x"), safeTarget(null), safeTarget("")], ["https://youtu.be/x", null, null, null, null, null]);
@@ -53,6 +67,17 @@ const req = (path = CODE, init = {}) => new Request(`${BASE}/${path}`, { headers
   eq("a person's tap: 302 to the video, counted once with a 32-character fingerprint only", [res.status, res.headers.get("location"), calls.record.length, calls.record[0]?.[0], /^[0-9a-f]{32}$/.test(calls.record[0]?.[1] ?? "")], [302, "https://www.youtube.com/watch?v=abc", 1, CODE, true]);
   eq("the redirect is never cached, sends no referrer and is not indexed", [res.headers.get("cache-control"), res.headers.get("referrer-policy"), res.headers.get("x-robots-tag")], ["no-store", "no-referrer", "noindex"]);
   eq("what the database receives contains neither the address nor the browser", JSON.stringify(calls.record).includes("203.0.113.9") || JSON.stringify(calls.record).includes("Safari"), false);
+}
+{
+  // a script that rewrites the first x-forwarded-for entry on every request must not get a new fingerprint each time
+  const { deps, calls } = mk();
+  for (let i = 0; i < 5; i++) await handle(req(CODE, { headers: { "x-forwarded-for": `10.0.0.${i}, 203.0.113.9`, "user-agent": SAFARI + ` v${i}` } }), deps);
+  const fps = new Set(calls.record.map(([, fp]) => fp));
+  eq("spoofed first x-forwarded-for entries and rewritten browser strings: five requests, one fingerprint (the database then counts once)", [calls.record.length, fps.size], [5, 1]);
+  const { deps: d2, calls: c2 } = mk();
+  await handle(req(CODE, { headers: { "cf-connecting-ip": "198.51.100.4", "x-forwarded-for": "6.6.6.6, 203.0.113.9" } }), d2);
+  await handle(req(CODE, { headers: { "cf-connecting-ip": "198.51.100.4", "x-forwarded-for": "1.1.1.1, 203.0.113.77" } }), d2);
+  eq("with cf-connecting-ip present, the x-forwarded-for value is ignored entirely", new Set(c2.calls ? [] : c2.record.map(([, fp]) => fp)).size, 1);
 }
 {
   const { deps, calls } = mk();

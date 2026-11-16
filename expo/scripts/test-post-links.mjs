@@ -36,11 +36,11 @@ eq("platform labels", Object.values(VIDEO_PLATFORM_LABELS), ["YouTube", "TikTok"
 // ── the allowed sites are the same everywhere: client, database, spec ──
 const sql = read("supabase/migration-post-links.sql");
 const sqlHosts = [...sql.matchAll(/h = '([a-z.]+)'/g)].map((m) => m[1]);
-eq("the client's site list is the owner's list", [...VIDEO_LINK_DOMAINS], ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "x.com", "twitch.tv", "open.spotify.com"]);
-eq("the database's link_platform_of names exactly those sites", [...new Set(sqlHosts)].sort(), [...VIDEO_LINK_DOMAINS].sort());
+eq("the client's site list is the owner's list (with twitter.com as X)", [...VIDEO_LINK_DOMAINS], ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "x.com", "twitter.com", "twitch.tv", "open.spotify.com"]);
+eq("the database's link_platform_of names exactly those sites (twitter.com only as itself, www. and mobile.)", [...new Set(sqlHosts)].sort(), [...VIDEO_LINK_DOMAINS, "www.twitter.com", "mobile.twitter.com"].sort());
 const spec = readFileSync(join(root, "../MONEY_TAB_SPEC.md"), "utf8");
 eq("the spec (section 16) lists the same sites", VIDEO_LINK_DOMAINS.every((d) => spec.includes("`" + d + "`")), true);
-eq("subdomains of the first five count, look-alikes and other subdomains do not", [videoPlatformOfHost("vm.tiktok.com"), videoPlatformOfHost("www.youtu.be"), videoPlatformOfHost("evilx.com"), videoPlatformOfHost("spotify.com"), videoPlatformOfHost("api.open.spotify.com")], ["tiktok", null, null, null, null]);
+eq("subdomains of the first five count, look-alikes and other subdomains do not; twitter.com / www. / mobile. are X, other twitter.com subdomains are not", [videoPlatformOfHost("vm.tiktok.com"), videoPlatformOfHost("www.youtu.be"), videoPlatformOfHost("evilx.com"), videoPlatformOfHost("spotify.com"), videoPlatformOfHost("api.open.spotify.com"), videoPlatformOfHost("twitter.com"), videoPlatformOfHost("www.twitter.com"), videoPlatformOfHost("mobile.twitter.com"), videoPlatformOfHost("m.twitter.com"), videoPlatformOfHost("api.twitter.com")], ["tiktok", null, null, null, null, "x", "x", "x", null, null]);
 
 // ── the tracked link and the button (lib/postLinks.ts pieces that need no network) ──
 const src = read("lib/postLinks.ts");
