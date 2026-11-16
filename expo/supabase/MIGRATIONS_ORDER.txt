@@ -10,7 +10,7 @@
 # chat_messages, posts and likes). migration-recovery.sql: Recovery Boost (offers, the boost, the owner's confirmation in
 # admin_report_resolve) and the feed once more. migration-sanctions.sql: suspend / ban, the moderation log and the
 # owner's report alerts (and push_claim_batch with the alert category). migration-tryal-friends.sql: Tryal friends (friends made inside the app with
-# no contact / email / hide-list link) get the creator's posts, and open messages; the feed once more. migration-money.sql is the LAST file: the Money tab
+# no contact / email / hide-list link) get the creator's posts, and open messages; the feed once more. migration-post-links.sql: links on posts (a "Watch on <platform>" button, tracked short links, tap counts; needs the `go` edge function deployed to count taps; standalone, it does not need Money). migration-money.sql is the LAST file: the Money tab
 # (feature flag, strict adult check, and in later steps campaigns, the ledger, payouts); everything in it is behind the database flag.
 #
 # migration-live-snapshot.sql (written by scripts/dump-live-definitions.mjs from the LIVE database, listed here right before
@@ -38,6 +38,7 @@ migration-harassment.sql
 migration-recovery.sql
 migration-sanctions.sql
 migration-tryal-friends.sql
+migration-post-links.sql
 migration-money.sql
 migration-money-board.sql
 

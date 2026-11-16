@@ -40,7 +40,7 @@ import { spotlightLabel } from "@/lib/spotlightText";
 import { setPostInteractions } from "@/lib/safety";
 import { INTERACTION_MODES, LIMIT_INTERACTIONS_BODY, LIMIT_INTERACTIONS_TITLE } from "@/lib/safetyText";
 import { formatCount, shouldDimPost, viewsShown } from "@/lib/postDisplay";
-import CreatorLinkIcons from "@/components/CreatorLinkIcons";
+import PostLinkOrSocials from "@/components/PostLinkOrSocials";
 import { theme } from "@/constants/theme";
 import { usePosts, resolveAvatarUrl, type Post, type TextOverlay, type TextBackgroundStyle } from "@/providers/PostsProvider";
 import { useAuth } from "@/providers/AuthProvider";
@@ -1919,7 +1919,7 @@ export const FeedItem = memo(function FeedItem({
           <UiText style={styles.dotSep}>·</UiText>
           <UiText style={styles.ago}>{ago}</UiText>
         </View>
-        <CreatorLinkIcons profile={post.profile} onBeforeOpen={pauseForExternalLink} />
+        <PostLinkOrSocials postId={post.id} profile={post.profile} isOwner={isOwner} onBeforeOpen={pauseForExternalLink} />
         {post.caption ? (
           <UiText style={styles.caption} numberOfLines={3}>
             {post.caption}

@@ -28,7 +28,7 @@ const idx = (list, f) => list.indexOf(f);
 eq("migration-tryal-friends.sql is in both lists", [idx(order, TF) >= 0, idx(FILES, TF) >= 0], [true, true]);
 eq("it runs AFTER migration-friends-messages.sql and migration-live-snapshot.sql in MIGRATIONS_ORDER.txt", [idx(order, TF) > idx(order, "migration-friends-messages.sql"), idx(order, TF) > idx(order, "migration-live-snapshot.sql")], [true, true]);
 eq("it runs AFTER migration-live-snapshot.sql in apply-migrations.mjs (friends-messages is not re-applied by that script at all)", [idx(FILES, TF) > idx(FILES, "migration-live-snapshot.sql"), idx(FILES, "migration-friends-messages.sql")], [true, -1]);
-eq("it runs after every other release file in apply-migrations.mjs except Money's", FILES.filter((f) => idx(FILES, f) > idx(FILES, TF)).every((f) => f.startsWith("migration-money")), true);
+eq("it runs after every other release file in apply-migrations.mjs except the later additions (post links, Money), which redefine none of its functions", FILES.filter((f) => idx(FILES, f) > idx(FILES, TF)).every((f) => f.startsWith("migration-money") || f === "migration-post-links.sql"), true);
 
 const mine = defined(TF);
 // Money's board migration deliberately carries copies of two of its functions (with the lines marked "-- MONEY" added: the campaign

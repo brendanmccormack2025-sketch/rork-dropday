@@ -172,6 +172,43 @@ export function getCreatorLinks(profile: CreatorLinkSource): CreatorLink[] {
   return out;
 }
 
+// ── A post's video link ("A specific video" in the composer) ──────────────────────────────────────────────────────────────────────────
+// The sites a post may link to: the SAME list the database enforces (link_platform_of in supabase/migration-post-links.sql), so the composer can
+// say no before the round trip. Everything else about links (https only, no login in the address, one place that parses) is the code above.
+export type VideoPlatform = "youtube" | "tiktok" | "instagram" | "x" | "twitch" | "spotify";
+export const VIDEO_PLATFORM_LABELS: Record<VideoPlatform, string> = { youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", x: "X", twitch: "Twitch", spotify: "Spotify" };
+export const VIDEO_LINK_DOMAINS = ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "x.com", "twitch.tv", "open.spotify.com"] as const;
+export const VIDEO_LINK_MAX_LENGTH = 500;
+
+/** Which allowed site a host belongs to; null if none. Subdomains count for the first five sites (www., m., vm.), look-alikes do not. */
+export function videoPlatformOfHost(host: string): VideoPlatform | null {
+  const h = host.toLowerCase();
+  const isOrSub = (d: string) => h === d || h.endsWith(`.${d}`);
+  if (isOrSub("youtube.com") || h === "youtu.be") return "youtube";
+  if (isOrSub("tiktok.com")) return "tiktok";
+  if (isOrSub("instagram.com")) return "instagram";
+  if (isOrSub("x.com")) return "x";
+  if (isOrSub("twitch.tv")) return "twitch";
+  if (h === "open.spotify.com") return "spotify";
+  return null;
+}
+
+export type VideoLinkResult = { ok: true; url: string; platform: VideoPlatform; label: string } | { ok: false; error: string };
+
+/** A pasted video link: https (a bare "youtube.com/..." gets https://), an allowed site, no login or port in the address. */
+export function parseVideoLink(raw: string | null | undefined): VideoLinkResult {
+  const t = (raw ?? "").trim();
+  if (!t) return { ok: false, error: "Paste the link to your video." };
+  if (t.length > VIDEO_LINK_MAX_LENGTH) return { ok: false, error: "That link is too long." };
+  const u = parseHttps(t);
+  if (!u || u.port !== "" || !/^[a-z0-9][a-z0-9.-]*$/i.test(u.hostname)) {
+    return { ok: false, error: "That doesn't look like a link. Use one that starts with https://." };
+  }
+  const platform = videoPlatformOfHost(u.hostname);
+  if (!platform) return { ok: false, error: "Links can go to YouTube, TikTok, Instagram, X, Twitch or Spotify." };
+  return { ok: true, url: u.toString(), platform, label: VIDEO_PLATFORM_LABELS[platform] };
+}
+
 /** Open a link; never throws. Returns whether the OS accepted it. */
 export async function openCreatorLink(url: string): Promise<boolean> {
   try {

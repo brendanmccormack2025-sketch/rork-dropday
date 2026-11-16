@@ -25,3 +25,4 @@ send-push  schedule=supabase/schedule-send-push.sql   --no-verify-jwt   # author
 # Calls:   POST /functions/v1/send-push          -> dry run (counts the waiting rows)
 #          POST /functions/v1/send-push?run=1    -> sends. Header: Authorization: Bearer <service role key>.
 # Schedule: pg_cron + pg_net every minute (schedule= above), set up by ship.sh like delete-media.
+go   --no-verify-jwt   # the tracked short link behind "Watch on <platform>": a browser opens it, so no gateway login; it reads and counts with the service role the platform provides

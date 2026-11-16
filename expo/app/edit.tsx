@@ -86,6 +86,8 @@ import { aiEditorFeatures } from "@/lib/autoEdit/rollout";
 import { postRenderSource } from "@/lib/renderSignature";
 import CaptionStyleSheet, { type CaptionLookPatch } from "@/components/CaptionStyleSheet";
 import { resetCaptionLook, usableCaptionStyle, withCaptionLook } from "@/lib/transcription/captionStyle";
+import PostLinksRow, { type LinksMode } from "@/components/PostLinksRow";
+import { parseVideoLink } from "@/lib/creatorLinks";
 import { supportedFontNames, supportsCaptionFont, supportsTextOutline, supportsTextOverlays } from "@/modules/video-render";
 import { RENDER_FINAL_IDLE_MS, RenderAhead, type AheadState } from "@/lib/renderAhead";
 import { cancelRender } from "@/modules/video-render";
@@ -522,6 +524,10 @@ export default function EditScreen() {
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [isMature, setIsMature] = useState<boolean>(false);
+  // Links row: "My socials" (default) or "A specific video" (one link, validated here and again by the database)
+  const [linksMode, setLinksMode] = useState<LinksMode>("socials");
+  const [videoLinkText, setVideoLinkText] = useState<string>("");
+  const videoLinkRef = useRef<string | null>(null);
   // No follower system: new posts are always created with follower_visibility false.
   const followerVisibility = false;
 
@@ -620,6 +626,10 @@ export default function EditScreen() {
   // The AI editor (captions, ums, hook trim) is for everyone. Root posts only: a reaction is not rendered at
   // post time, so captions could not be burned in.
   const isRootPost = !reactingTo && !rootDropId;
+  {
+    const parsedLink = isRootPost && linksMode === "video" ? parseVideoLink(videoLinkText) : null;
+    videoLinkRef.current = parsedLink && parsedLink.ok ? parsedLink.url : null;
+  }
   const features = aiEditorFeatures({ userId: user?.id, isRootPost });
   // Caption size/position and word edits live in the edit state (undo/redo); with no model (several source
   // files) they live here.
@@ -4359,6 +4369,7 @@ export default function EditScreen() {
         textOverlays: overlaysForPost,
         thumbnailUri: thumbnailUri ?? undefined,
         isMature,
+        videoLink: videoLinkRef.current ?? undefined,
         followerVisibility,
         cleanupUri: rendered?.uri,
         // If the rendered file cannot be uploaded: the old way, from the source clips.
@@ -4504,6 +4515,13 @@ export default function EditScreen() {
       if (tooLong) {
         setError(tooLong);
         return;
+      }
+      if (isRootPost && linksMode === "video") {
+        const parsedLink = parseVideoLink(videoLinkText);
+        if (!parsedLink.ok) {
+          setError(parsedLink.error);
+          return;
+        }
       }
       setError(null);
       setSuccess(null);
@@ -5247,6 +5265,9 @@ export default function EditScreen() {
               ios_backgroundColor={theme.border}
             />
           </View>
+          {isRootPost && (
+            <PostLinksRow mode={linksMode} onMode={setLinksMode} text={videoLinkText} onText={setVideoLinkText} />
+          )}
           {isVideo && isRootPost && Platform.OS !== "web" && (
             <View style={styles.saveRollRow}>
               <UiText style={styles.saveRollText}>Save to camera roll</UiText>

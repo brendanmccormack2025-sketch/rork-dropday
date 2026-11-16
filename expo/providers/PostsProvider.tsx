@@ -10,6 +10,7 @@ import { router } from "expo-router";
 import { showAlert } from "@/lib/showAlert";
 import { swapOptimistic } from "@/lib/postingFeed";
 import { noteMissingYoutubeColumn, profileLinkColumns } from "@/lib/creatorLinks";
+import { forgetPostLink, setPostVideoLink } from "@/lib/postLinks";
 import {
   blockForKind,
   blockFromBackendError,
@@ -1746,6 +1747,8 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       textOverlays?: TextOverlay[];
       thumbnailUri?: string;
       isMature?: boolean;
+      /** One video link for this post (already validated in the composer; the database checks it again). Root posts only. */
+      videoLink?: string;
       /** Per-post follower-visibility override. Undefined → use the creator's profile default. */
       followerVisibility?: boolean;
       /** Temporary file (a rendered mp4) to delete once the post is saved. */
@@ -2108,6 +2111,17 @@ export const [PostsProvider, usePosts] = createContextHook(() => {
       }
       if (parentDownloadUri) {
         await deleteAsync(parentDownloadUri, { idempotent: true }).catch(() => {});
+      }
+
+      // The video link, if the creator chose "A specific video": the database validates it again and mints the tracked short link.
+      // A refused or failed link never fails the post.
+      if (rawInput.videoLink && !input.parentPostId) {
+        try {
+          await setPostVideoLink(insData.id as string, rawInput.videoLink);
+          forgetPostLink(insData.id as string);
+        } catch (linkErr) {
+          console.warn("[createPost] video link not added (non-fatal)", (linkErr as Error)?.message);
+        }
       }
 
       // Return the inserted row data for optimistic updates
