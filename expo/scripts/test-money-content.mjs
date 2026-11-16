@@ -37,7 +37,7 @@ eq("5 to 7 cards per role including the agreement", [cardsFor("creator").length 
 eq("every card has a title, a picture and at most two short lines (the messaging and link sentences are small notes under them)", all.map((c) => { const { lines } = cardLines(c); return !!c.title && !!c.icon && lines.length >= 1 && lines.length <= 2; }), Array(all.length).fill(true));
 eq("every card's text is short (under 200 characters without the notice)", all.every((c) => cardLines(c).lines.join(" ").length < 200), true);
 eq("'both' = the clipper cards, then the creator cards 2-6 (the creator's 'how it works' skipped), then one combined agreement", [cardsFor("both").map((c) => c.id), cardsFor("both").length], [[...CLIPPER_CARDS.map((c) => c.id), ...CREATOR_CARDS.slice(1).map((c) => c.id)], 11]);
-eq("the combined agreement has the union of the rules, each once", [new Set(requiredRules("both")).size === requiredRules("both").length, [...requiredRules("creator"), ...requiredRules("clipper")].every((r) => requiredRules("both").includes(r)), requiredRules("both").length], [true, true, 9]);
+eq("the combined agreement has the union of the rules, each once", [new Set(requiredRules("both")).size === requiredRules("both").length, [...requiredRules("creator"), ...requiredRules("clipper")].every((r) => requiredRules("both").includes(r)), requiredRules("both").length], [true, true, 10]);
 
 // ── the messaging line ──
 eq("the sentence is exactly the one the owner approved", MESSAGING_NOTICE, "Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.");

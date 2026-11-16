@@ -117,9 +117,9 @@ immutable
 as $$
   select case p_role
     when 'creator' then array['pay_on_time', 'terms_freeze', 'auto_approval_48h', 'not_part_of_payment', 'own_footage_rights', 'campaign_messaging']
-    when 'clipper' then array['only_real_views', 'submit_through_tryal', 'upload_proof_on_time', 'not_part_of_payment', 'campaign_messaging']
+    when 'clipper' then array['only_real_views', 'submit_through_tryal', 'upload_proof_on_time', 'footage_use', 'not_part_of_payment', 'campaign_messaging']
     when 'both'    then array['pay_on_time', 'terms_freeze', 'auto_approval_48h', 'not_part_of_payment', 'own_footage_rights',
-                              'only_real_views', 'submit_through_tryal', 'upload_proof_on_time', 'campaign_messaging']
+                              'only_real_views', 'submit_through_tryal', 'upload_proof_on_time', 'footage_use', 'campaign_messaging']
   end
 $$;
 
@@ -237,6 +237,11 @@ create table if not exists public.campaigns (
   created_at            timestamptz not null default now(),
   check (guaranteed_per_clip + cap_per_clip <= total_budget)
 );
+-- footage is uploaded into Tryal (migration-money-footage.sql), so footage_url (the old Drive / Dropbox link) is no longer needed; the optional
+-- "Full video" link (a frozen term) is full_video_url; closed_at starts the 30-day footage deletion clock
+alter table public.campaigns alter column footage_url drop not null;
+alter table public.campaigns add column if not exists full_video_url text;
+alter table public.campaigns add column if not exists closed_at timestamptz;
 alter table public.campaigns add column if not exists budget_left numeric(12,2) generated always as (total_budget - budget_committed) stored;   -- what Browse shows, always live
 create index if not exists campaigns_creator_idx on public.campaigns (creator_id);
 create index if not exists campaigns_open_idx on public.campaigns (created_at desc) where status = 'open';
@@ -285,9 +290,19 @@ begin
   foreach p in array new.platforms loop
     if p not in ('tiktok', 'instagram', 'youtube', 'x') then raise exception 'unknown platform' using errcode = '22023'; end if;
   end loop;
-  if tg_op = 'INSERT' or new.footage_url is distinct from old.footage_url then
+  -- (footage_url is the old Drive / Dropbox link: only checked when somebody still sets it; footage is uploaded now)
+  if new.footage_url is not null and (tg_op = 'INSERT' or new.footage_url is distinct from old.footage_url) then
     if not public.money_is_footage_host(public.money_url_host(new.footage_url)) then
       raise exception 'footage must be a Google Drive or Dropbox share link' using errcode = '22023';
+    end if;
+  end if;
+  -- the optional "Full video" link: one of the allowed sites (public.link_platform_of, migration-post-links.sql)
+  if new.full_video_url is not null then
+    new.full_video_url := btrim(new.full_video_url);
+    if tg_op = 'INSERT' or new.full_video_url is distinct from old.full_video_url then
+      if public.link_platform_of(new.full_video_url) is null then
+        raise exception 'the Full video link must be a YouTube, TikTok, Instagram, X, Twitch or Spotify link' using errcode = '22023';
+      end if;
     end if;
   end if;
   if tg_op = 'INSERT' or new.payment_handle is distinct from old.payment_handle then
@@ -321,6 +336,23 @@ drop trigger if exists campaigns_validate on public.campaigns;
 create trigger campaigns_validate before insert or update on public.campaigns
   for each row execute function public.campaigns_validate();
 
+-- closed_at: when a campaign closes (the creator, the budget or an admin) the 30-day footage deletion clock starts
+create or replace function public.campaigns_closed_at()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status = 'closed' and old.status is distinct from 'closed' then new.closed_at := coalesce(new.closed_at, now()); end if;
+  return new;
+end;
+$$;
+drop trigger if exists campaigns_closed_at on public.campaigns;
+create trigger campaigns_closed_at before update of status on public.campaigns
+  for each row execute function public.campaigns_closed_at();
+update public.campaigns set closed_at = coalesce(closed_at, now()) where status = 'closed' and closed_at is null;
+
 -- The terms freeze when the first clipper joins (terms_frozen_at). From then on none of these columns can change, by anyone with an
 -- account; the owner in the SQL editor (no signed-in user) can still correct something by hand. Status and the budget numbers are the
 -- system's and stay editable.
@@ -338,10 +370,10 @@ begin
     if new.terms_frozen_at is distinct from old.terms_frozen_at then
       raise exception 'terms are frozen' using errcode = '42501';
     end if;
-    if (new.title, new.description, new.footage_url, new.rate_per_1k, new.cap_per_clip, new.guaranteed_per_clip,
+    if (new.title, new.description, new.footage_url, new.full_video_url, new.rate_per_1k, new.cap_per_clip, new.guaranteed_per_clip,
         new.platforms, new.view_window_days, new.min_views, new.payment_method, new.payment_handle, new.deadline, new.max_clips_per_clipper)
        is distinct from
-       (old.title, old.description, old.footage_url, old.rate_per_1k, old.cap_per_clip, old.guaranteed_per_clip,
+       (old.title, old.description, old.footage_url, old.full_video_url, old.rate_per_1k, old.cap_per_clip, old.guaranteed_per_clip,
         old.platforms, old.view_window_days, old.min_views, old.payment_method, old.payment_handle, old.deadline, old.max_clips_per_clipper) then
       raise exception 'terms are frozen once the first clipper has joined' using errcode = '42501';
     end if;
@@ -578,6 +610,7 @@ revoke all on table public.campaigns, public.campaign_members, public.campaign_s
 grant select (id, creator_id, title, description, footage_url, rate_per_1k, cap_per_clip, total_budget, guaranteed_per_clip, platforms,
   view_window_days, min_views, payment_method, deadline, max_clips_per_clipper, status, paused_reason, closed_reason, terms_frozen_at,
   budget_committed, budget_left, agreement_version, creator_agreed_at, created_at) on public.campaigns to authenticated;
+grant select (full_video_url, closed_at) on public.campaigns to authenticated;
 grant select on public.campaign_members, public.campaign_submissions, public.submission_links, public.submission_disputes,
   public.payment_cases, public.money_reviews, public.money_strikes to authenticated;
 
@@ -1013,6 +1046,10 @@ declare
   me uuid := public.money_require_ready('creator');
   cid uuid;
 begin
+  -- once footage upload exists (migration-money-footage.sql) a campaign needs uploaded footage: this older way (a Drive / Dropbox link) is closed
+  if to_regprocedure('public.money_footage_register(numeric, integer, integer, bigint)') is not null then
+    raise exception 'update Tryal to post a campaign: footage is uploaded now' using errcode = '0A000';
+  end if;
   if p_agree is not true then raise exception 'accept the Campaign Agreement to post' using errcode = '22023'; end if;
   insert into public.campaigns (creator_id, title, description, footage_url, rate_per_1k, cap_per_clip, total_budget, guaranteed_per_clip,
                                 platforms, view_window_days, min_views, payment_method, payment_handle, deadline, max_clips_per_clipper, agreement_version)

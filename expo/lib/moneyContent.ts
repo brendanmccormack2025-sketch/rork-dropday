@@ -26,11 +26,12 @@ export const RULE_LABELS: Record<string, string> = {
   only_real_views: "only real views",
   submit_through_tryal: "submit through Tryal",
   upload_proof_on_time: "upload proof on time",
+  footage_use: "footage is only for making clips for this campaign",
   campaign_messaging: "campaign members can message me about the work, even if my messages are set to nobody (I can still block anyone)",
 };
 
 const CREATOR_RULES = ["pay_on_time", "terms_freeze", "auto_approval_48h", "not_part_of_payment", "own_footage_rights", "campaign_messaging"];
-const CLIPPER_RULES = ["only_real_views", "submit_through_tryal", "upload_proof_on_time", "not_part_of_payment", "campaign_messaging"];
+const CLIPPER_RULES = ["only_real_views", "submit_through_tryal", "upload_proof_on_time", "footage_use", "not_part_of_payment", "campaign_messaging"];
 
 /** One checkbox per rule, in the order the spec lists them. "both" = the clipper rules then the creator-only ones, each once. */
 export function requiredRules(role: MoneyRole): string[] {

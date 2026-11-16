@@ -5,7 +5,7 @@ import type { MoneyRole } from "@/lib/moneyContent";
 
 /** Every column the card needs. NOT payment_handle (apps cannot select it; members get it through campaign_payment_info). */
 export const CAMPAIGN_COLUMNS =
-  "id, creator_id, title, description, footage_url, rate_per_1k, cap_per_clip, total_budget, guaranteed_per_clip, platforms, view_window_days, min_views, payment_method, deadline, max_clips_per_clipper, status, terms_frozen_at, budget_committed, budget_left, created_at";
+  "id, creator_id, title, description, full_video_url, rate_per_1k, cap_per_clip, total_budget, guaranteed_per_clip, platforms, view_window_days, min_views, payment_method, deadline, max_clips_per_clipper, status, terms_frozen_at, budget_committed, budget_left, created_at";
 
 export type MoneyProfile = {
   allowed: boolean; ready: boolean; role: MoneyRole | null; needs_onboarding: boolean; banned: boolean;
@@ -22,7 +22,7 @@ async function rpc<T>(name: string, args?: Record<string, unknown>): Promise<T> 
 
 export const fetchMoneyProfile = () => rpc<MoneyProfile>("my_money_profile");
 export const completeOnboarding = (role: MoneyRole, rules: string[]) => rpc<MoneyProfile>("money_complete_onboarding", { p_role: role, p_rules: rules });
-export const createCampaign = (args: CampaignArgs) => rpc<string>("money_create_campaign", args as unknown as Record<string, unknown>);
+export const createCampaign = (args: CampaignArgs) => rpc<string>("money_create_campaign_with_footage", args as unknown as Record<string, unknown>);
 export const joinCampaign = (id: string) => rpc<void>("money_join_campaign", { p_campaign: id, p_agree: true });
 export const setCampaignStatus = (id: string, status: "open" | "paused" | "closed") => rpc<void>("money_set_campaign_status", { p_campaign: id, p_status: status });
 export const campaignPaymentInfo = (id: string) => rpc<{ payment_method: string; payment_handle: string }>("campaign_payment_info", { p_campaign: id });
@@ -83,4 +83,12 @@ export type MoneyReportTarget = "campaign" | "submission" | "money_review" | "mo
 export async function reportMoney(reporterId: string, type: MoneyReportTarget, targetId: string, reason: "spam" | "harassment" | "nudity" | "other"): Promise<void> {
   const { error } = await supabase.from("reports").insert({ reporter_id: reporterId, target_type: type, target_id: targetId, reason });
   if (error && !/duplicate|unique/i.test(error.message)) throw new Error(error.message);
+}
+
+export type FootageRow = { id: string; duration_seconds: number | string; width: number; height: number; thumb_ok: boolean; thumb_path: string; storage_path: string; sort_order: number };
+/** The campaign's ready videos: the creator and the clippers who joined can read them (the table policy), nobody else. */
+export async function campaignFootage(campaignId: string): Promise<FootageRow[]> {
+  const { data, error } = await supabase.from("campaign_footage").select("id, duration_seconds, width, height, thumb_ok, thumb_path, storage_path, sort_order").eq("campaign_id", campaignId).eq("status", "ready").order("sort_order");
+  if (error) throw new Error(error.message);
+  return (data ?? []) as FootageRow[];
 }

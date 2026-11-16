@@ -12,7 +12,8 @@ import { FeedAvatar } from "@/components/Avatar";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
-import { campaignDetail, campaignPaymentInfo, joinCampaign, reportMoney, setCampaignStatus } from "@/lib/moneyApi";
+import { minutesLabel } from "@/lib/footageLimits";
+import { campaignDetail, campaignFootage, campaignPaymentInfo, joinCampaign, reportMoney, setCampaignStatus } from "@/lib/moneyApi";
 import { CLIPPER_AGREEMENT, MESSAGING_NOTICE } from "@/lib/moneyContent";
 import { PAYMENT_LABELS, PLATFORM_LABELS, cardModel, dollars, moneyErrorMessage, profileBadge, type PaymentMethod } from "@/lib/moneyCampaign";
 import { useMoney } from "@/hooks/useMoney";
@@ -33,6 +34,7 @@ export default function CampaignScreen() {
 
   const q = useQuery({ queryKey: ["money", "campaign", id, me], enabled: !!id && !!me, queryFn: () => campaignDetail(String(id), me) });
   const d = q.data;
+  const footage = useQuery({ queryKey: ["money", "footage", id], enabled: !!d && (d.joined || d.mine), queryFn: () => campaignFootage(String(id)) });
   const pay = useQuery({ queryKey: ["money", "pay", id], enabled: !!d && (d.joined || d.mine), queryFn: () => campaignPaymentInfo(String(id)) });
 
   if (q.isLoading) return <SettingsScaffold title="Campaign"><ActivityIndicator color={theme.accent} /></SettingsScaffold>;
@@ -112,7 +114,8 @@ export default function CampaignScreen() {
           {/* plain text on purpose: a handle is never a link or a button (no payments in the app) */}
           <UiText style={s.text}>{pay.data ? `${PAYMENT_LABELS[pay.data.payment_method as PaymentMethod] ?? pay.data.payment_method}: ${pay.data.payment_handle}` : "…"}</UiText>
           <UiText style={s.text}>The creator pays you directly, outside the app.</UiText>
-          <Pressable onPress={() => Linking.openURL(c.footage_url).catch(() => {})} accessibilityRole="link"><UiText style={styles.link}>Open the footage</UiText></Pressable>
+          {footage.data?.length ? <UiText style={s.text}>Footage: {footage.data.length} {footage.data.length === 1 ? "video" : "videos"}, {minutesLabel(footage.data.reduce((a, x) => a + Number(x.duration_seconds), 0))} in total.</UiText> : null}
+          {c.full_video_url ? <Pressable onPress={() => Linking.openURL(c.full_video_url!).catch(() => {})} accessibilityRole="link"><UiText style={styles.link}>Watch the full video</UiText></Pressable> : null}
         </View>
       ) : null}
 

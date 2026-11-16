@@ -194,7 +194,7 @@ A simple admin screen (or Supabase dashboard views to start): disputes, "not pai
 4. Proving views: add your post links, and when the window ends upload screenshots of your analytics. Put your link in your bio. Every tap is counted.
 5. Getting paid: the app shows what you're owed, the creator pays you directly, and you tap "Payment received." Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
 6. Real views only: fake or bought views mean a ban.
-7. Agreement checkboxes: only real views · submit through Tryal · upload proof on time · Tryal isn't part of the payment · campaign members can message me about the work, even if my messages are set to nobody (I can still block anyone).
+7. Agreement checkboxes: only real views · submit through Tryal · upload proof on time · footage is only for making clips for this campaign · Tryal isn't part of the payment · campaign members can message me about the work, even if my messages are set to nobody (I can still block anyone).
 
 **"Both" role:** show the clipper cards, then the creator-only cards (2, 3, 4, 5, 6), then one combined agreement (the union of both checkbox lists; the messaging checkbox appears once).
 

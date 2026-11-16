@@ -13,7 +13,11 @@ from (
       ('my_features',               'app launch: whether the tab shows, the birthdate prompt (migration-money.sql, replaced by migration-money-board.sql)'),
       ('my_money_profile',          'Money tab: role and walkthrough state (migration-money-board.sql)'),
       ('money_complete_onboarding', 'walkthrough: "I agree" (migration-money-board.sql)'),
-      ('money_create_campaign',     'Post a campaign (migration-money-board.sql)'),
+      ('money_create_campaign_with_footage', 'Post a campaign with its uploaded footage (migration-money-footage.sql)'),
+      ('money_footage_register',    'Add footage: reserve the minutes and the file paths (migration-money-footage.sql)'),
+      ('money_footage_complete',    'Add footage: the upload finished (migration-money-footage.sql)'),
+      ('money_footage_fail',        'Add footage: an upload that was given up on (migration-money-footage.sql)'),
+      ('money_footage_remove',      'Add footage: remove a video (migration-money-footage.sql)'),
       ('money_join_campaign',       'campaign: "I''m in" (migration-money-board.sql)'),
       ('money_set_campaign_status', 'campaign: Close campaign (migration-money-board.sql)'),
       ('campaign_payment_info',     'campaign: how you get paid, for members (migration-money-board.sql)'),
@@ -26,6 +30,11 @@ from (
   select 'money_join_campaign is the latest version', 'campaign: "I''m in" also opens the message thread with the creator',
          case when exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = 'money_join_campaign' and prosrc like '%I joined your campaign%')
               then 'ok' else 'OLD VERSION: run migration-money-board.sql again' end,
+         null, 2
+  union all
+  select 'footage bucket (private)', 'Add footage: the private bucket the videos are uploaded to',
+         case when exists (select 1 from storage.buckets where id = 'campaign-footage' and public = false)
+              then 'ok' else 'MISSING: run migration-money-footage.sql' end,
          null, 2
   union all
   select 'campaigns table + budget_left column', 'Browse and the cards',

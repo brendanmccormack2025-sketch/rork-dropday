@@ -255,7 +255,7 @@ if (!BIN) {
       const feat = (n) => JSON.parse(as(U(n), `select public.my_features()`).out);
       const sql1 = (e) => q(`select ${e}`);
       const MONEY = [...Array(40).keys()].map((i) => 60 + i);
-      const RULES = { creator: ["pay_on_time", "terms_freeze", "auto_approval_48h", "not_part_of_payment", "own_footage_rights", "campaign_messaging"], clipper: ["only_real_views", "submit_through_tryal", "upload_proof_on_time", "not_part_of_payment", "campaign_messaging"] };
+      const RULES = { creator: ["pay_on_time", "terms_freeze", "auto_approval_48h", "not_part_of_payment", "own_footage_rights", "campaign_messaging"], clipper: ["only_real_views", "submit_through_tryal", "upload_proof_on_time", "footage_use", "not_part_of_payment", "campaign_messaging"] };
       RULES.both = [...new Set([...RULES.creator, ...RULES.clipper])];
       const arr = (a) => `array[${a.map((x) => `'${x}'`).join(",")}]`;
       const onboard = (n, role) => as(U(n), `select public.money_complete_onboarding('${role}', ${arr(RULES[role])})`);
@@ -672,7 +672,8 @@ if (!BIN) {
       {
         const dep = rows("check-money-step2-functions.sql");
         const byName = Object.fromEntries(dep.map((r) => [r[0], r[2]]));
-        eq("(V) check-money-step2-functions.sql: every function the step 2 screens call is 'ok' on a database with both files applied", dep.filter((r) => r[0] !== "birthdate can be saved in the app" && !r[2].startsWith("ok")), []);
+        eq("(V) check-money-step2-functions.sql: every function the step 2 screens call is 'ok' on a database with both files applied (the footage ones need migration-money-footage.sql, tested in test-money-footage-sql.mjs, and are reported MISSING until then)", dep.filter((r) => r[0] !== "birthdate can be saved in the app" && !r[2].startsWith("ok") && !/footage/.test(r[0])), []);
+        eq("(V) ...and with only the board file the footage rows say what to run", dep.filter((r) => /footage/.test(r[0]) && !r[2].startsWith("ok")).every((r) => /MISSING/.test(r[2])), true);
         eq("(V) ...it checks the join-thread version and the tables, and reports the birthdate lock-down gate (the app says 'isn't available yet' until it is applied)", [byName["money_join_campaign is the latest version"], byName["campaigns table + budget_left column"], /^ok/.test(byName["birthdate can be saved in the app"]) || /^NOT YET/.test(byName["birthdate can be saved in the app"])], ["ok", "ok", true]);
         eq("(V) ...and it flags an old money_join_campaign (without the thread) and a missing function", (() => { Q(`create or replace function public.money_join_campaign(p_campaign uuid, p_agree boolean) returns void language sql as $f$ select 1 $f$`); const old = rows("check-money-step2-functions.sql").find((r) => r[0] === "money_join_campaign is the latest version")[2]; psqlFile("t", mb); const fixed = rows("check-money-step2-functions.sql").find((r) => r[0] === "money_join_campaign is the latest version")[2]; return [old.startsWith("OLD VERSION"), fixed]; })(), [true, "ok"]);
         eq("(V) ...and a function apps cannot execute", (() => { Q(`revoke execute on function public.my_money_profile() from authenticated`); const r = rows("check-money-step2-functions.sql").find((x) => x[0] === "my_money_profile")[2]; Q(`grant execute on function public.my_money_profile() to authenticated`); return r; })(), "NO EXECUTE FOR APPS");

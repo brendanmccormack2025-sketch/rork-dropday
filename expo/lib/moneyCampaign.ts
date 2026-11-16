@@ -10,11 +10,16 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export const PAYMENT_LABELS: Record<PaymentMethod, string> = { paypal: "PayPal", venmo: "Venmo", cashapp: "Cash App" };
 export const DEADLINE_DAYS = [3, 7, 14, 30] as const;
 export const WINDOW_DAYS = [3, 5, 7, 10, 14] as const;
+/** The quick pay buttons on the Pay screen: dollars per 1,000 views. "Other" lets the creator type any rate. */
+export const PAY_PRESETS = [1, 2, 3] as const;
+/** What a new campaign starts with; creators change these under "More options". */
+export const DEFAULT_PLATFORMS: Platform[] = ["tiktok", "instagram", "youtube"];
 
 export type CampaignForm = {
   title: string;
   description: string;
-  footageUrl: string;
+  /** optional: the creator's full video (YouTube, TikTok, Instagram, X, Twitch or Spotify) */
+  fullVideoUrl: string;
   ratePer1k: string;
   capPerClip: string;
   totalBudget: string;
@@ -30,8 +35,8 @@ export type CampaignForm = {
 };
 
 export const EMPTY_FORM: CampaignForm = {
-  title: "", description: "", footageUrl: "", ratePer1k: "", capPerClip: "", totalBudget: "", guaranteedPerClip: "",
-  platforms: [], viewWindowDays: 7, minViews: "1000", paymentMethod: null, paymentHandle: "", deadlineDays: 7, maxClips: "5", agree: false,
+  title: "", description: "", fullVideoUrl: "", ratePer1k: "", capPerClip: "", totalBudget: "", guaranteedPerClip: "",
+  platforms: [...DEFAULT_PLATFORMS], viewWindowDays: 7, minViews: "1000", paymentMethod: null, paymentHandle: "", deadlineDays: 14, maxClips: "5", agree: false,
 };
 
 /** "12", "12.5", "$12.50" -> 12.5; anything else -> null. At most two decimals. */
@@ -47,30 +52,45 @@ export function urlHost(url: string): string | null {
   const m = /^https:\/\/([a-z0-9][a-z0-9.-]*)(?:[/?#]|$)/.exec(url.trim().toLowerCase());
   return m ? m[1] : null;
 }
-export function footageHostOk(url: string): boolean {
-  const h = urlHost(url);
-  return !!h && (h === "drive.google.com" || h === "dropbox.com" || h.endsWith(".dropbox.com"));
+/** Which site a video link belongs to, by host: the same list as link_platform_of() in the database (shared cases: scripts/post-link-cases.mjs). */
+export function videoLinkPlatform(url: string): "youtube" | "tiktok" | "instagram" | "x" | "twitch" | "spotify" | null {
+  const t = url.trim();
+  if (!t || t.length > 500 || /\s/.test(t)) return null;
+  const h = urlHost(t);
+  if (!h) return null;
+  const sub = (d: string) => h === d || h.endsWith(`.${d}`);
+  if (sub("youtube.com") || h === "youtu.be") return "youtube";
+  if (sub("tiktok.com")) return "tiktok";
+  if (sub("instagram.com")) return "instagram";
+  if (sub("x.com") || h === "twitter.com" || h === "www.twitter.com" || h === "mobile.twitter.com") return "x";
+  if (sub("twitch.tv")) return "twitch";
+  if (h === "open.spotify.com") return "spotify";
+  return null;
 }
+export const fullVideoLinkOk = (url: string): boolean => videoLinkPlatform(url) !== null;
+/** A pasted address without https:// gets it (as the post composer does). */
+export const withHttps = (url: string): string => { const t = url.trim(); return t && !/^[a-z][a-z0-9+.-]*:/i.test(t) ? `https://${t}` : t; };
 /** Plain text only: an email, @name or $cashtag. Same rule as money_handle_ok(). */
 export function handleOk(handle: string): boolean {
   const h = handle.trim();
   return /^[A-Za-z0-9@$._+-]{2,64}$/.test(h) && /[A-Za-z0-9]/.test(h) && !/(paypal\.me|paypal\.com|venmo\.com|cash\.app|cash\.me|https?|www\.)/i.test(h);
 }
 
-export type FormErrors = Partial<Record<keyof CampaignForm, string>>;
+export type FormErrors = Partial<Record<keyof CampaignForm | "footage", string>>;
 export type CampaignArgs = {
-  p_title: string; p_description: string; p_footage_url: string; p_rate_per_1k: number; p_cap_per_clip: number; p_total_budget: number;
+  p_title: string; p_description: string; p_full_video_url: string | null; p_rate_per_1k: number; p_cap_per_clip: number; p_total_budget: number;
   p_guaranteed_per_clip: number; p_platforms: Platform[]; p_view_window_days: number; p_min_views: number; p_payment_method: PaymentMethod;
-  p_payment_handle: string; p_deadline: string; p_max_clips_per_clipper: number; p_agree: boolean;
+  p_payment_handle: string; p_deadline: string; p_max_clips_per_clipper: number; p_agree: boolean; p_footage_ids: string[];
 };
 
-export function validateCampaign(f: CampaignForm, now: Date = new Date()): { ok: true; args: CampaignArgs } | { ok: false; errors: FormErrors } {
+export function validateCampaign(f: CampaignForm, now: Date = new Date(), footageIds: string[] = []): { ok: true; args: CampaignArgs } | { ok: false; errors: FormErrors } {
   const e: FormErrors = {};
   const title = f.title.trim(), description = f.description.trim();
   if (!title) e.title = "Give your campaign a title."; else if (title.length > 60) e.title = "The title can be at most 60 characters.";
   if (!description) e.description = "Say what to clip."; else if (description.length > 1000) e.description = "The description can be at most 1000 characters.";
-  if (!f.footageUrl.trim()) e.footageUrl = "Add a Google Drive or Dropbox share link.";
-  else if (!footageHostOk(f.footageUrl)) e.footageUrl = "Footage must be a Google Drive or Dropbox share link (https).";
+  if (footageIds.length < 1) e.footage = "Add at least one video.";
+  const full = withHttps(f.fullVideoUrl);
+  if (full && !fullVideoLinkOk(full)) e.fullVideoUrl = "Use a YouTube, TikTok, Instagram, X, Twitch or Spotify link, or leave it empty.";
   const rate = parseMoney(f.ratePer1k), cap = parseMoney(f.capPerClip), budget = parseMoney(f.totalBudget);
   const guar = f.guaranteedPerClip.trim() === "" ? 0 : parseMoney(f.guaranteedPerClip);
   if (rate === null || rate <= 0 || rate > 1000) e.ratePer1k = "Enter the rate per 1,000 views, like 1.50.";
@@ -92,10 +112,10 @@ export function validateCampaign(f: CampaignForm, now: Date = new Date()): { ok:
   return {
     ok: true,
     args: {
-      p_title: title, p_description: description, p_footage_url: f.footageUrl.trim(), p_rate_per_1k: rate!, p_cap_per_clip: cap!, p_total_budget: budget!,
+      p_title: title, p_description: description, p_full_video_url: full || null, p_rate_per_1k: rate!, p_cap_per_clip: cap!, p_total_budget: budget!,
       p_guaranteed_per_clip: guar!, p_platforms: f.platforms, p_view_window_days: f.viewWindowDays, p_min_views: minViews!, p_payment_method: f.paymentMethod!,
       p_payment_handle: f.paymentHandle.trim(), p_deadline: new Date(now.getTime() + f.deadlineDays * 86_400_000).toISOString(),
-      p_max_clips_per_clipper: maxClips!, p_agree: true,
+      p_max_clips_per_clipper: maxClips!, p_agree: true, p_footage_ids: footageIds,
     },
   };
 }
@@ -108,18 +128,23 @@ export function owedFor(views: number, c: { ratePer1k: number; capPerClip: numbe
 
 export const dollars = (n: number): string => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
 
+/** "10,000 views = $23 per clip": the guarantee plus the per-view pay (capped), exactly what the server would owe for a clip with 10,000 views. */
 export function workedExample(f: CampaignForm): string | null {
   const rate = parseMoney(f.ratePer1k);
   if (rate === null || rate <= 0) return null;
-  const views = 10_000;
+  const guar = f.guaranteedPerClip.trim() === "" ? 0 : parseMoney(f.guaranteedPerClip);
   const cap = parseMoney(f.capPerClip);
-  const per = (views / 1000) * rate;
-  return `${views.toLocaleString("en-US")} views × ${dollars(rate)} = ${dollars(Math.round(per * 100) / 100)}${cap !== null && per > cap ? `, capped at ${dollars(cap)}` : ""}`;
+  const min = parseInt0(f.minViews) ?? 0;
+  if (guar === null) return null;
+  const views = 10_000;
+  const total = owedFor(views, { ratePer1k: rate, capPerClip: cap ?? Number.POSITIVE_INFINITY, guaranteedPerClip: guar, minViews: min });
+  const capped = cap !== null && (views / 1000) * rate > cap;
+  return `${views.toLocaleString("en-US")} views = ${dollars(total)} per clip${capped ? " (the most it can earn)" : ""}`;
 }
 
 // ── campaign cards ──
 export type CampaignRow = {
-  id: string; creator_id: string; title: string; description: string; footage_url: string; rate_per_1k: number | string; cap_per_clip: number | string;
+  id: string; creator_id: string; title: string; description: string; full_video_url: string | null; rate_per_1k: number | string; cap_per_clip: number | string;
   total_budget: number | string; guaranteed_per_clip: number | string; platforms: Platform[]; view_window_days: number; min_views: number;
   payment_method: PaymentMethod; deadline: string; max_clips_per_clipper: number; status: "open" | "paused" | "closed"; terms_frozen_at: string | null;
   budget_committed: number | string; budget_left: number | string; created_at: string;
@@ -179,7 +204,10 @@ export function moneyErrorMessage(message: string | undefined | null): string {
   if (m.includes("cannot join") || m.includes("cannot join your own")) return "You can't join this campaign.";
   if (m.includes("not available for this account")) return "Money isn't available for this account.";
   if (m.includes("tick every rule")) return "Tick every box to continue.";
-  if (m.includes("footage must be")) return "Footage must be a Google Drive or Dropbox share link.";
+  if (m.includes("full video link")) return "Use a YouTube, TikTok, Instagram, X, Twitch or Spotify link for the full video.";
+  if (m.includes("add at least one video")) return "Add at least one video.";
+  if (m.includes("missing or still uploading")) return "Some videos are still uploading. Wait until they finish.";
+  if (m.includes("minutes of footage")) return "A campaign can have at most 60 minutes of footage.";
   if (m.includes("payment handle")) return "Plain text only for the payment handle: an email, @name or $cashtag.";
   if (m.includes("deadline")) return "The deadline must be between 1 hour and a year from now.";
   return "Something went wrong. Check your connection and try again.";
