@@ -1,0 +1,16 @@
+# Publishes the app's JavaScript to the money-preview channel every time money-v1-board is pushed (EAS Update; no new build, no App Store).
+# Only the money-preview build on TestFlight receives it: it listens to the money-preview channel. The production channel and branch are never touched.
+name: Publish money-preview update
+
+on:
+  push:
+    branches:
+      - money-v1-board
+
+jobs:
+  publish_update:
+    name: Publish update to money-preview
+    type: update
+    params:
+      branch: money-preview
+      platform: ios

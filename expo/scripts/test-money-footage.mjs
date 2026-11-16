@@ -41,5 +41,7 @@ eq("the footage migration is listed after the board file in MIGRATIONS_ORDER.txt
 eq("the migration raises the agreement version (everyone ticks the new footage rules) and closes the old Drive-link create function", [/update public\.money_config set agreement_version = greatest\(agreement_version, 2\)/.test(mig), /money_footage_register\(numeric, integer, integer, bigint\)/.test(read("supabase/migration-money-board.sql"))], [true, true]);
 eq("footage is deleted through the existing queue (delete-media), and the purge job is scheduled daily", [/trial_media_delete_queue/.test(mig), /cron\.schedule\('money-footage-purge', '30 3 \* \* \*'/.test(mig)], [true, true]);
 
+const wf = read(".eas/workflows/publish-money-preview.yml");
+eq("the EAS workflow publishes only to money-preview, only for pushes to money-v1-board, iOS only, and never mentions production", [/^\s+- money-v1-board\s*$/m.test(wf), /branch: money-preview/.test(wf), /platform: ios/.test(wf), /branch: production|channel: production|--auto|submit/i.test(wf.replace(/^\s*#.*$/gm, ""))], [true, true, true, false]);
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

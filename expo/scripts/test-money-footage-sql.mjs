@@ -387,6 +387,25 @@ if (!BIN) {
       eq("(F9) the functions the app calls are callable by signed-in users only (not anon)", ["public.money_footage_register(numeric,integer,integer,bigint)", "public.money_footage_complete(uuid)", "public.money_footage_fail(uuid)", "public.money_footage_remove(uuid)"].map((f) => [q(`select has_function_privilege('authenticated', '${f}', 'execute')`), q(`select has_function_privilege('anon', '${f}', 'execute')`)].join("")), Array(4).fill("tf"));
       eq("(F9) a sanctioned creator cannot register or create", (() => { Q(`insert into public.account_sanctions (user_id, kind, until, created_by) values ('${U(C)}', 'suspend', now() + interval '2 days', '${U(ADM)}')`); const o = reg(U(C)).ok; Q(`update public.account_sanctions set lifted_at = now() where user_id = '${U(C)}'`); return o; })(), false);
       eq("(F9) the unused footage left over from the tests above counts toward nothing after purge (the minutes are free again)", reg(U(C), SEC(30)).ok, true);
+      // W. the one-paste file for the SQL editor (supabase/apply-money-preview.sql), run on this database that already has everything (the live situation)
+      {
+        const gen = spawnSync("node", ["--experimental-strip-types", "--no-warnings", join(sqlDir, "..", "scripts", "gen-apply-money-preview.mjs"), "--check"], { encoding: "utf8" });
+        eq("(W) apply-money-preview.sql is up to date with the four migration files", gen.status, 0);
+        const text = readFileSync(join(sqlDir, "apply-money-preview.sql"), "utf8");
+        const body = text.replace(/^\s*--.*$/gm, "");
+        eq("(W) it has no psql-only commands, no transaction control, no extension install and never calls the birthdate lock-down", [/^\s*\\[a-z]/m.test(body), /^\s*(begin|commit|rollback)\s*;/im.test(body), /create extension/i.test(body), /select\s+public\.money_apply_birthdate_lockdown\s*\(/i.test(body)], [false, false, false, false]);
+        eq("(W) it holds the four files in the right order", ["migration-post-links.sql", "migration-money.sql", "migration-money-board.sql", "migration-money-footage.sql"].map((f) => text.indexOf(`-- PART: ${f}`)).every((v, i, a) => v >= 0 && (i === 0 || v > a[i - 1])), true);
+        const before = q(`select md5(string_agg(prosrc, '' order by proname)) from pg_proc where pronamespace = 'public'::regnamespace and proname in ('my_features', 'money_allowed', 'money_ready', 'money_join_campaign', 'money_create_campaign', 'money_footage_register')`);
+        const paste = join(dir, "paste.sql"); writeFileSync(paste, text); if (asRoot) chownSync(paste, Number(spawnSync("id", ["-u", "postgres"], { encoding: "utf8" }).stdout.trim()), -1);
+        const w1 = spawnSync("psql", ["-h", dir, "-p", port, "-U", "postgres", "-X", "-q", "-A", "-t", "-F", "|", "-v", "ON_ERROR_STOP=1", "-d", "t", "-f", paste], { encoding: "utf8" });
+        const w2 = spawnSync("psql", ["-h", dir, "-p", port, "-U", "postgres", "-X", "-q", "-A", "-t", "-F", "|", "-v", "ON_ERROR_STOP=1", "-d", "t", "-f", paste], { encoding: "utf8" });
+        if (w1.status !== 0) console.log(w1.stderr.split("\n").filter((l) => /ERROR/.test(l)).slice(0, 4).join("\n"));
+        eq("(W) pasted into a database that already has everything, it runs cleanly, twice", [w1.status, w2.status], [0, 0]);
+        const rowsW = w2.stdout.trim().split("\n").filter(Boolean).map((l) => l.split("|")).filter((r) => r[0] === "footage" || r[0] === "functions");
+        eq("(W) its result is the check table, and every row is ok or info (except the birthdate lock-down note)", [rowsW.length > 12, rowsW.filter((r) => !["ok", "info"].includes(r[2]) && r[1] !== "birthdate can be saved in the app").map((r) => r.slice(0, 3).join(": "))], [true, []]);
+        eq("(W) the newer functions are back after the older money file ran inside the paste (same source as before the paste)", q(`select md5(string_agg(prosrc, '' order by proname)) from pg_proc where pronamespace = 'public'::regnamespace and proname in ('my_features', 'money_allowed', 'money_ready', 'money_join_campaign', 'money_create_campaign', 'money_footage_register')`), before);
+        eq("(W) and the feature still works for a ready creator afterwards", as(U(C), `select public.my_features()`).ok, true);
+      }
       // V. the read-only check the owner runs after applying
       {
         const chk = psql("t", readFileSync(join(sqlDir, "check-money-footage.sql"), "utf8").replace(/^--.*$/gm, ""), ["-v", "ON_ERROR_STOP=1", "-F", "|"]);
