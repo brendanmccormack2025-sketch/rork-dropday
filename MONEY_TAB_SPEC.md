@@ -3,7 +3,7 @@
 Hand this to Claude Code. Read the existing codebase first (`expo/` app, Supabase schema, posting flow, editor, messaging, reports, blocks, `public.age_tier()`), and reuse what exists instead of rebuilding it.
 
 ## 0. What it is (one paragraph)
-A marketplace inside Tryal where **creators** post paid clipping campaigns and **clippers** turn the creator's footage into short clips. Every clip must be edited in Tryal and posted to the Tryal feed first, which is how it gets submitted. Clippers then finish the clip anywhere and post it on their own TikTok, Instagram, YouTube or X, and get paid by the creator for the views. **v1 moves no money in the app.** Tryal connects the two sides, does the math, tracks who paid, and enforces reputation.
+A marketplace inside Tryal where **creators** post paid clipping campaigns and **clippers** turn the creator's footage into short clips. The creator uploads the footage into Tryal (private; streamed, never handed out whole) and a clipper marks a section of it to clip. Every clip must be edited in Tryal and posted to the Tryal feed first, which is how it gets submitted. Clippers then finish the clip anywhere and post it on their own TikTok, Instagram, YouTube or X, and get paid by the creator for the views. **v1 moves no money in the app.** Tryal connects the two sides, does the math, tracks who paid, and enforces reputation.
 
 ## 1. Hard rules
 - **18+ only.** Use `public.age_tier()`. The Money tab is hidden for under-18 accounts, and the RLS policies on every money table check it too, not just the UI.
@@ -27,7 +27,8 @@ Fields:
 |---|---|
 | title | required, ≤ 60 chars |
 | description | what to clip, the vibe, do's and don'ts, ≤ 1000 chars |
-| footage_url | required. A Google Drive or Dropbox share link. Validate the domain (`drive.google.com`, `dropbox.com`). Note: clips must be 1 minute or less |
+| footage | required. One or more videos picked from the creator's camera roll: **up to 60 minutes in total per campaign, each video up to 30 minutes**. Compressed on the device before upload (720p, a streaming-friendly MP4 with the index at the front so it can play before it has fully downloaded). Uploads are resumable and continue in the background. Stored in a private bucket behind the MediaStore interface; signed URLs only for clippers who joined and for the campaign's creator. **Deleted 30 days after the campaign closes.** |
+| full_video_url | optional "Full video" link: one https URL on youtube.com, youtu.be, tiktok.com, instagram.com, x.com, twitch.tv or open.spotify.com (validated on the server). **A frozen term once the first clipper joins.** Every clip from the campaign uses it automatically, each through its clipper's own tracked link (section 16) |
 | rate_per_1k | required, in dollars (e.g. 1.50) |
 | cap_per_clip | required, the max payout per clip |
 | total_budget | required |
@@ -44,9 +45,29 @@ The creator must accept the **Campaign Agreement** before posting:
 - Terms freeze when the first clipper joins.
 - 48-hour approval window, after which clips auto-approve.
 - Pay within 3 days of approval.
+- The creator uploads footage they own or have the rights to. Tryal stores it privately, shows it only to clippers who joined, and deletes it 30 days after the campaign closes.
 - The creator allows their footage to be posted on Tryal, tagged as clipped for them.
+- A "Full video" link is optional. It is frozen once a clipper joins, and every clip uses it through the clipper's own tracked link. Tryal counts taps, never who tapped.
 - Tryal is not part of the payment.
 - Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
+
+### 3.1 Creating a campaign: four short screens
+1. **Add footage:** pick videos from the camera roll; shows the total minutes used out of 60 (each video up to 30 minutes). Compression and upload start in the background straight away.
+2. **What to clip:** title, the creator's notes, and the optional "Full video" link (section 16).
+3. **Pay:** preset buttons (for example $1 / $2 / $3 per 1,000 views), an optional amount per clip (the guaranteed amount), the cap and the budget, with a live example line ("10,000 views = $23 per clip").
+4. **How you pay:** Cash App / PayPal / Venmo and the handle (plain text).
+Everything else (view window, views needed, clips each, deadline, platforms) uses defaults and is editable under "More options". The Campaign Agreement is accepted on the last screen.
+
+### 3.2 The campaign screen (one glance)
+- Creator row: avatar, @name, ★ rating · Paid X/Y.
+- Title and the creator's notes.
+- One big pay line, "Earn $3 per clip + $2 per 1,000 views", with small grey "Up to $250 a clip" under it (the per-clip amount plus the cap). Any part that is zero is left out.
+- Three chips: budget left · closes in · pays via.
+- A "Full video on YouTube" card, only if the campaign has a Full video link.
+- Footage: thumbnails with their lengths; tap to preview (streamed).
+- One primary red button: "I'm in" before joining, "Make a clip" after.
+- "See all terms", collapsed: views needed, view window, platforms, clips each, the terms-freeze note.
+- On the creator's own campaign, "Close campaign" lives in a ⋯ menu behind a confirm step.
 
 Budget tracking: `budget_committed` = sum of owed amounts on approved clips. Close the campaign to new submissions automatically when committed ≥ total_budget.
 
@@ -56,14 +77,17 @@ Budget tracking: `budget_committed` = sum of owed amounts on approved clips. Clo
   - fake or bought views mean a ban
   - submit through Tryal
   - upload view proof by the deadline
+  - footage is only for making clips for this campaign
+  - your clips use the creator's Full video link through your own tracked link: Tryal counts taps, never who tapped
   - Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
+- Footage is available only through signed URLs, and only to clippers who joined and the campaign's creator.
 - Joining creates a `campaign_members` row and opens (or reuses) a message thread with the creator, starting with a message (sent as the clipper) that summarizes the terms. The creator and every clipper who has joined can always message each other about the campaign, whatever either has set in "Who can message me" (even `nobody`) and without being friends; blocks, the under-18 rule, the word filter, the unanswered-message limit and sanctions still apply, and it ends with the membership.
 - The first join sets `campaigns.terms_frozen_at`.
 
 ## 5. Making and submitting a clip
-1. From the campaign, the clipper taps **Make a clip**, which opens the Tryal editor with the campaign attached.
-2. **Import from Files:** add an import option next to the existing Photos picker, using `expo-document-picker` (type `video/*`) so clippers can pick straight from Google Drive or Dropbox through the iOS Files browser. Reject anything over **60 s** when importing.
-3. Normal AI edit (pause removal, um and slow-start trimming, captions, text overlays).
+1. From the campaign, the clipper taps **Make a clip**. The footage list opens; the clipper picks a video and **previews it streamed** (it is never downloaded whole).
+2. The clipper scrubs and **marks a section of at most about 3 minutes**. Only that section is fetched and exported on the device (a time range exported from the remote asset), and the result is loaded into the Tryal editor with the campaign attached. If a time range cannot be exported from a remote asset with our native code, the trade-offs are reported before any full-download fallback is built. A hook is left for Pro's "find the best moments" to suggest sections later.
+3. Normal AI edit (pause removal, um and slow-start trimming, captions, text overlays). **The finished clip must be 60 seconds or shorter.**
 4. Posting creates a normal Tryal post with:
    - `campaign_id` and `clipped_for_user_id` (the creator) set
    - the label on the post **"clipped by @clipper for @creator"**
@@ -114,7 +138,7 @@ Flagged clips get a ⚠️ for the creator and show up in the admin queue.
 
 ## 11. Data model (Supabase)
 New tables (all with RLS; all money tables require 18+ and not `money_banned`):
-- `campaigns` (id, creator_id, title, description, footage_url, rate_per_1k, cap_per_clip, total_budget, guaranteed_per_clip, platforms text[], view_window_days, min_views, payment_method, payment_handle, deadline, max_clips_per_clipper, status [`open`,`paused`,`closed`], terms_frozen_at, budget_committed, created_at)
+- `campaigns` (id, creator_id, title, description, full_video_url, rate_per_1k, cap_per_clip, total_budget, guaranteed_per_clip, platforms text[], view_window_days, min_views, payment_method, payment_handle, deadline, max_clips_per_clipper, status [`open`,`paused`,`closed`], terms_frozen_at, budget_committed, created_at)
 - `campaign_members` (campaign_id, clipper_id, joined_at, agreed_terms jsonb snapshot)
 - `campaign_submissions` (id, campaign_id, clipper_id, post_id, status [`posted`,`awaiting_proof`,`awaiting_approval`,`disputed`,`approved`,`paid`,`unpaid`,`rejected`], views_claimed, likes_claimed, proof_path, amount_owed, approved_at, approval_source [`creator`,`auto`,`admin`], payment_due_at, paid_marked_at, received_at, flagged bool)
 - `submission_links` (id, submission_id, platform, url, posted_at)
@@ -122,7 +146,9 @@ New tables (all with RLS; all money tables require 18+ and not `money_banned`):
 - `money_reviews` (id, submission_id, reviewer_id, reviewee_id, role [`creator`,`clipper`], stars 1–5, tags text[], comment, published_at)
 - `money_strikes` (id, user_id, kind [`late_payment`,`non_payment`,`fake_views`], submission_id, created_at)
 - add to `profiles`: `money_banned bool`, plus a view or function for rating average, review count and payment record
-- add to `posts`: `campaign_id`, `clipped_for_user_id`, `edited_in_tryal`
+- add to `posts`: `campaign_id`, `clipped_for_user_id`, `edited_in_tryal`, `link_code`, `link_platform` (section 16)
+- `campaign_footage` (id, campaign_id, storage path, duration_seconds, width, height, size_bytes, thumbnail path, sort_order, status [`uploading`,`ready`,`failed`,`deleted`]) and `campaigns.full_video_url`, `campaigns.footage_delete_after`
+- `post_links` (post_id, url, platform, code), `link_tap_days` (post_id, day, taps) and a short-lived `link_tap_seen` (see section 16)
 
 DB rules (triggers/functions, enforced on the server):
 - Block updates to campaign term columns once `terms_frozen_at` is set.
@@ -150,45 +176,65 @@ A simple admin screen (or Supabase dashboard views to start): disputes, "not pai
 **First open of the Money tab:**
 1. **Age gate.** Under-18 accounts never see the tab. Adults see a short intro: "Creators hire clippers. Clippers get paid for views. Tryal keeps everyone honest. Payments happen outside the app."
 2. **Role picker:** Creator, Clipper, or Both. Users can change it later.
-3. **Role walkthrough:** a full-screen swipeable walkthrough (5–7 cards, each with one picture or animation, a title, and at most 2 short lines; the messaging sentence, where a card carries it, is a small note under those lines). The last card is the agreement. The user can't finish until they tick each key rule (one checkbox per rule) and tap Agree. Store `money_role`, `money_onboarded_at` and `money_agreement_version` in a closed `money_profiles` table, not on public `profiles`. If the agreement version changes, show it again.
+3. **Role walkthrough:** a full-screen swipeable walkthrough (5–7 cards, each with one picture or animation, a title, and at most 2 short lines; the messaging and link sentences, where a card carries them, are small notes under those lines). The last card is the agreement. The user can't finish until they tick each key rule (one checkbox per rule) and tap Agree. Store `money_role`, `money_onboarded_at` and `money_agreement_version` in a closed `money_profiles` table, not on public `profiles`. If the agreement version changes, show it again.
 
 **Creator walkthrough cards:**
 1. How it works: post a campaign → clippers make clips in Tryal → strangers test them → clippers post on their own accounts → you pay for the views.
-2. Your footage: share a Google Drive or Dropbox link with clips of 1 minute or less.
-3. Setting pay: rate per 1,000 views, cap per clip, budget, an optional guaranteed amount, with a worked example ("10,000 views × $1.50 = $15").
-4. Terms freeze once the first clipper joins. Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
+2. Your footage: upload videos from your camera roll, up to 60 minutes in total and 30 minutes each. We delete them 30 days after your campaign closes.
+3. Setting pay: an optional amount per clip plus a rate per 1,000 views, with a cap and a budget. Example: $3 per clip + $2 per 1,000 views, so 10,000 views = $23 per clip.
+4. Terms freeze once the first clipper joins. Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone. Your "Full video" link is frozen too, and every clip uses it with the clipper's own tracked link.
 5. Approving: you have 48 hours to approve or dispute, or the clip auto-approves.
 6. Paying: pay outside the app within 3 days. Your payment record is public, late payments pause your campaigns, and repeat late payments mean a ban.
 7. Agreement checkboxes: pay on time · terms freeze · auto-approval after 48 h · Tryal isn't part of the payment · I own or have rights to my footage · campaign members can message me about the work, even if my messages are set to nobody (I can still block anyone).
 
 **Clipper walkthrough cards:**
 1. How it works: join a campaign → make the clip in Tryal → post to Tryal (that's your submission) → post on your own accounts → prove your views → get paid.
-2. Import from Files: get footage straight from Drive or Dropbox, 1 minute max.
+2. Pick your moment: scrub the footage and mark a section up to 3 minutes. Only that part is downloaded to edit.
 3. Tryal first: only clips posted on Tryal count. The clean file saves to your camera roll, then finish it anywhere.
-4. Proving views: add your post links, and when the window ends upload screenshots of your analytics.
+4. Proving views: add your post links, and when the window ends upload screenshots of your analytics. Put your link in your bio. Every tap is counted.
 5. Getting paid: the app shows what you're owed, the creator pays you directly, and you tap "Payment received." Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.
 6. Real views only: fake or bought views mean a ban.
 7. Agreement checkboxes: only real views · submit through Tryal · upload proof on time · Tryal isn't part of the payment · campaign members can message me about the work, even if my messages are set to nobody (I can still block anyone).
 
 **"Both" role:** show the clipper cards, then the creator-only cards (2, 3, 4, 5, 6), then one combined agreement (the union of both checkbox lists; the messaging checkbox appears once).
 
-**First-time guides (coach marks):** short tooltips the first time a user does each step: creating a campaign (one per field group), joining, Make a clip (pointing at Import from Files), adding external links, uploading proof, approving, and marking payment. Each tip shows once and can be dismissed.
+**First-time guides (coach marks):** short tooltips the first time a user does each step: creating a campaign (one per field group), joining, Make a clip (pointing at the footage list), adding external links, uploading proof, approving, and marking payment. Each tip shows once and can be dismissed.
 
 **Always available:** a **"How it works" (?)** button in the Money tab header reopens the walkthrough for the user's role, plus a short FAQ: what if I'm not paid · what if views look fake · how disputes work · how reviews work · is Tryal taking a cut (no).
 
 **Empty states teach too:** for example, an empty Browse says "No campaigns yet — be the first creator" with a button, and an empty My Clips says "Join a campaign to start earning."
 
 ## 14. Out of scope for v1
-In-app payments/escrow (v2: Stripe Connect after confirming with App Review), uploading footage in the app, automatic view counting from platform APIs, fees/Pro, Android.
+In-app payments/escrow (v2: Stripe Connect after confirming with App Review), automatic view counting from platform APIs, fees/Pro (only the hook for Pro's "find the best moments" suggestions is left), Android. Google Drive / Dropbox footage links and the "Import from Files" picker are gone: footage is uploaded into Tryal.
 
 ## 15. Build order
-1. Schema + RLS + triggers (sections 11, 1)
-2. Walkthroughs + role picker + agreements (13b), then campaign create + Browse + join (2–4)
-3. Import from Files + submit-on-post + camera roll save + post labels (5)
+Steps 1-2 below are built. The footage / links work (owner's order) comes next, one step at a time, each confirmed before the next:
+- **a. Post links** (section 16, the non-Money part): standalone, shippable in the current app before Money.
+- **b. Footage upload + campaign creation** (sections 3 and 3.1): resumable background upload, MediaStore, 30-day deletion.
+- **c. The campaign screen** (section 3.2).
+- **d. The clipper's section-export flow** (section 5).
+- **e. Money full-video tracked links** (the rest of section 16), then a `money-preview` TestFlight build.
+
+Then, as before:
+1. Schema + RLS + triggers (sections 11, 1) - built
+2. Walkthroughs + role picker + agreements (13b), then campaign create + Browse + join (2-4) - built
+3. Submit-on-post + camera roll save + post labels (5)
 4. External links + view proof + owed math (6)
-5. Approval + auto-approve + payment tracking + strikes (7–8, scheduled jobs)
+5. Approval + auto-approve + payment tracking + strikes (7-8, scheduled jobs)
 6. Reviews with blind reveal (9)
 7. Fraud flags + admin screen (10, 12)
 8. Notifications, Terms update, App Review notes (11, 13)
 
 After each step: show the SQL that actually ran and runtime logs proving it works. Don't just report it as done.
+
+## 16. Links on posts (all posts, then Money)
+**For every post, not just Money** (built first, on its own):
+- The post composer gets a **Links** row: **My socials** (the default; shows the profile's existing social links, as today) or **A specific video** (one URL).
+- Allowed domains only, validated on the server: `youtube.com`, `youtu.be`, `tiktok.com`, `instagram.com`, `x.com`, `twitch.tv`, `open.spotify.com`.
+- A post with a video link shows a **Watch on <platform>** button.
+- Every outbound video link goes through a **tracked short link** (a Supabase edge function). Taps are counted per post. A tap from the same device/IP within 24 hours counts once. Only counts are kept: the de-duplication uses a short-lived salted hash that is deleted within 48 hours, and nothing about the person who tapped is stored.
+- The post's owner sees "This post sent X people to your video."
+- Reuses the profile-links code (`lib/creatorLinks.ts`); there is no second link system.
+- Link taps are added to the pitch metrics (weekly counts).
+
+**Money campaigns:** the optional **Full video** link is a frozen term once a clipper joins. Every clip from the campaign uses it automatically, with each clipper's own tracked link (a clip is a post, so its count is that clipper's). The creator sees taps per clipper; a clipper sees their own on My Clips. Clipper walkthrough: "Put your link in your bio. Every tap is counted."

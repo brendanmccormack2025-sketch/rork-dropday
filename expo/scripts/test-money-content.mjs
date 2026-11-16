@@ -5,7 +5,7 @@
  *   node --experimental-strip-types --no-warnings scripts/test-money-content.mjs
  */
 import { readFileSync } from "node:fs";
-import { CAMPAIGN_AGREEMENT, CLIPPER_AGREEMENT, CLIPPER_CARDS, CREATOR_CARDS, FAQ, MESSAGING_NOTICE, MONEY_INTRO, RULE_LABELS, cardLines, cardsFor, requiredRules } from "../lib/moneyContent.ts";
+import { CAMPAIGN_AGREEMENT, CARD_NOTES, CLIPPER_AGREEMENT, CLIPPER_CARDS, CREATOR_CARDS, FAQ, LINK_BIO_NOTE, LINK_FROZEN_NOTE, MESSAGING_NOTICE, MONEY_INTRO, RULE_LABELS, cardLines, cardsFor, requiredRules } from "../lib/moneyContent.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -34,21 +34,22 @@ eq("the intro is the spec's", spec.includes(`"${MONEY_INTRO}"`), true);
 // ── the shape the spec asks for ──
 const all = [...CREATOR_CARDS, ...CLIPPER_CARDS];
 eq("5 to 7 cards per role including the agreement", [cardsFor("creator").length + 1, cardsFor("clipper").length + 1].map((n) => n >= 5 && n <= 7), [true, true]);
-eq("every card has a title, a picture and at most two short lines (the messaging notice is a small note under them)", all.map((c) => { const { lines } = cardLines(c); return !!c.title && !!c.icon && lines.length >= 1 && lines.length <= 2; }), Array(all.length).fill(true));
+eq("every card has a title, a picture and at most two short lines (the messaging and link sentences are small notes under them)", all.map((c) => { const { lines } = cardLines(c); return !!c.title && !!c.icon && lines.length >= 1 && lines.length <= 2; }), Array(all.length).fill(true));
 eq("every card's text is short (under 200 characters without the notice)", all.every((c) => cardLines(c).lines.join(" ").length < 200), true);
 eq("'both' = the clipper cards, then the creator cards 2-6 (the creator's 'how it works' skipped), then one combined agreement", [cardsFor("both").map((c) => c.id), cardsFor("both").length], [[...CLIPPER_CARDS.map((c) => c.id), ...CREATOR_CARDS.slice(1).map((c) => c.id)], 11]);
 eq("the combined agreement has the union of the rules, each once", [new Set(requiredRules("both")).size === requiredRules("both").length, [...requiredRules("creator"), ...requiredRules("clipper")].every((r) => requiredRules("both").includes(r)), requiredRules("both").length], [true, true, 9]);
 
 // ── the messaging line ──
 eq("the sentence is exactly the one the owner approved", MESSAGING_NOTICE, "Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone.");
-eq("it is on the creator card 'Terms freeze' and the clipper card 'Getting paid', as a note", [CREATOR_CARDS.filter((c) => cardLines(c).note).map((c) => c.title), CLIPPER_CARDS.filter((c) => cardLines(c).note).map((c) => c.title)], [["Terms freeze"], ["Getting paid"]]);
+eq("the notes: messaging on the creator card 'Terms freeze' and the clipper card 'Getting paid'; the frozen Full video link on 'Terms freeze'; 'put your link in your bio' on the clipper card 'Proving views'", [CREATOR_CARDS.map((c) => [c.title, cardLines(c).notes.length]).filter(([, n]) => n), CLIPPER_CARDS.map((c) => [c.title, cardLines(c).notes.length]).filter(([, n]) => n), cardLines(CREATOR_CARDS[3]).notes, cardLines(CLIPPER_CARDS[3]).notes], [[["Terms freeze", 2]], [["Proving views", 1], ["Getting paid", 1]], [MESSAGING_NOTICE, LINK_FROZEN_NOTE], [LINK_BIO_NOTE]]);
+eq("the two link sentences are exactly the owner's", [LINK_BIO_NOTE, LINK_FROZEN_NOTE, CARD_NOTES.length], ["Put your link in your bio. Every tap is counted.", "Your \"Full video\" link is frozen too, and every clip uses it with the clipper's own tracked link.", 3]);
 eq("both agreements list it, and so do both agreement checkbox lines", [CAMPAIGN_AGREEMENT.includes(MESSAGING_NOTICE), CLIPPER_AGREEMENT.includes(MESSAGING_NOTICE), requiredRules("creator").includes("campaign_messaging"), requiredRules("clipper").includes("campaign_messaging")], [true, true, true, true]);
 eq("the spec has the same sentence in sections 3, 4 and 13b", [(spec.match(new RegExp(MESSAGING_NOTICE.replace(/[.]/g, "\\."), "g")) ?? []).length >= 4], [true]);
 
 // ── the agreements are the spec's lists ──
-const bullets = (from, to) => { const a = spec.indexOf(from); const b = spec.indexOf(to, a); return spec.slice(a, b).split("\n").filter((l) => /^\s*- /.test(l)).map((l) => l.replace(/^\s*- /, "").trim()); };
-eq("the Campaign Agreement is the spec's list (section 3)", CAMPAIGN_AGREEMENT, bullets("The creator must accept the **Campaign Agreement** before posting:", "Budget tracking"));
-eq("the Clipper Agreement is the spec's list (section 4), lower case as written", CLIPPER_AGREEMENT.map((l) => l.toLowerCase()), bullets("An **\"I'm in\"** button shows", "- Joining creates").filter((l) => !l.startsWith("An ")).map((l) => l.toLowerCase()));
+const bullets = (from, to, indent = "") => { const a = spec.indexOf(from); const b = spec.indexOf(to, a); return spec.slice(a, b).split("\n").filter((l) => new RegExp(`^${indent}- `).test(l)).map((l) => l.replace(/^\s*- /, "").trim()); };
+eq("the Campaign Agreement is the spec's list (section 3)", CAMPAIGN_AGREEMENT, bullets("The creator must accept the **Campaign Agreement** before posting:", "### 3.1"));
+eq("the Clipper Agreement is the spec's list (section 4), lower case as written", CLIPPER_AGREEMENT.map((l) => l.toLowerCase()), bullets("An **\"I'm in\"** button shows", "- Footage is available only", "  ").filter((l) => !l.startsWith("An ")).map((l) => l.toLowerCase()));
 
 // ── the rules are exactly what the database requires ──
 const sqlRules = (role) => { const m = new RegExp(`when '${role}'\\s+then array\\[([^\\]]*)\\]`).exec(sql); return m[1].match(/'([a-z_0-9]+)'/g).map((x) => x.slice(1, -1)); };

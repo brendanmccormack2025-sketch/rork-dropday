@@ -61,13 +61,13 @@ export default function MoneyWalkthrough() {
   const renderPage = ({ item }: { item: Page }) => {
     if (item.kind === "card") {
       const Icon = ICONS[item.card.icon];
-      const { lines, note } = cardLines(item.card);
+      const { lines, notes } = cardLines(item.card);
       return (
         <View style={[styles.page, { width }]}>
           <View style={styles.pic}><Icon color={theme.accent} size={54} /></View>
           <UiText style={styles.cardTitle}>{item.card.title}</UiText>
           {lines.map((l, i) => <UiText key={i} style={styles.line}>{l}</UiText>)}
-          {note ? <UiText style={styles.note}>{note}</UiText> : null}
+          {notes.map((n) => <UiText key={n} style={styles.note}>{n}</UiText>)}
         </View>
       );
     }
