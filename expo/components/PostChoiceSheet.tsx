@@ -21,6 +21,7 @@ import { parseCreatorStatus, postingBlock } from "@/lib/creatorStatus";
 import { usePosts } from "@/providers/PostsProvider";
 import { MAX_VIDEO_SECONDS } from "@/hooks/useCameraRecorder";
 import { launchLibraryWithRetry } from "@/lib/pickerRetry";
+import { libraryPickerOptions } from "@/lib/pickerOptions";
 import { wantsEditChoice } from "@/lib/editChoice";
 import { PICKER_ERROR_MESSAGES, classifyPickerError } from "@/lib/pickerErrors";
 
@@ -94,21 +95,11 @@ export default function PostChoiceSheet({ visible, onClose }: PostChoiceSheetPro
         return;
       }
 
-      const result = await launchLibraryWithRetry({
-        mediaTypes: photoCompatible ? ["images"] : ["images", "videos"],
-        // Videos: hand over the file exactly as it is in Photos ("Current"). The default ("Automatic") lets iOS
-        // convert an iPhone's HEVC video to H.264 first, which took a long time for longer clips; the editor reads
-        // HEVC fine, like the camera's own recordings. A photo that failed to read is retried as "Compatible".
-        preferredAssetRepresentationMode: photoCompatible
-          ? ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible
-          : ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
-        allowsMultipleSelection: false,
-        quality: 1,
-        videoMaxDuration: MAX_VIDEO_SECONDS,
-        // Without this, iCloud-hosted assets fail with PHPhotosErrorDomain 3164
-        // (NETWORK_ACCESS_REQUIRED) — the native default is false.
-        shouldDownloadFromNetwork: true,
-      }, (attempt) => setIsRetrying(attempt));
+      // The options (iCloud download on, "current" representation, no HEVC conversion) are shared with the footage picker: lib/pickerOptions.ts.
+      const result = await launchLibraryWithRetry(
+        libraryPickerOptions({ photoCompatible, videoMaxDuration: MAX_VIDEO_SECONDS }),
+        (attempt) => setIsRetrying(attempt),
+      );
       if (cancelledRef.current || result.canceled || result.assets.length === 0) return;
 
       const asset = result.assets[0];

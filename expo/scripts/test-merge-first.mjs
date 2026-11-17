@@ -82,7 +82,7 @@ const newId = () => `m${++idSeq}`;
 // ── camera roll: one video only (MVP) ──
 {
   const sheet = read("../components/PostChoiceSheet.tsx");
-  ok("the picker takes one item, no multi-select and no Arrange step", /allowsMultipleSelection: false/.test(sheet) && !/orderedSelection|selectionLimit|ArrangeClips|validateSelection/.test(sheet));
+  ok("the picker takes one item, no multi-select and no Arrange step", /libraryPickerOptions\(\{ photoCompatible, videoMaxDuration/.test(sheet) && !/multiple/.test(sheet) && /allowsMultipleSelection: !!o\.multiple/.test(read("../lib/pickerOptions.ts")) && !/orderedSelection|selectionLimit|ArrangeClips|validateSelection/.test(sheet));
   ok("a video over the existing single-video limit is refused", /\(asset\.duration \?\? 0\) > MAX_VIDEO_SECONDS \* 1000/.test(sheet));
 }
 

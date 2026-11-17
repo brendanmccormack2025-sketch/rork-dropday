@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Image, Pressable, StyleSheet, TextInput, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Image, Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import UiText from "@/components/UiText";
 import PrimaryButton from "@/components/PrimaryButton";
@@ -27,12 +27,17 @@ export function statusLine(i: UploadItem): string {
 /** Step 1 of 4: add videos from the camera roll, up to 60 minutes (30 each). Every refusal and failure is written on the screen, never an alert that can be lost. */
 export default function FootageStep({ items, link, onLink, linkError }: { items: UploadItem[]; link: string; onLink: (t: string) => void; linkError?: string }) {
   const [busy, setBusy] = useState(false);
+  const [attempt, setAttempt] = useState(1);
+  const run = useRef(0);
   const [notice, setNotice] = useState<string[]>([]);
   const add = async () => {
     setBusy(true);
+    setAttempt(1);
+    const my = ++run.current;
     setNotice([]);
     try {
-      const { inputs, message } = await pickFootage();
+      const { inputs, message } = await pickFootage({ onRetry: setAttempt, isCancelled: () => run.current !== my });
+      if (run.current !== my) return;   // Cancel was tapped while it downloaded: a late result is dropped
       if (message) { setNotice([message]); return; }
       if (!inputs.length) return;   // cancelled
       const { added, refused } = footageUploader.add(inputs);
@@ -42,7 +47,7 @@ export default function FootageStep({ items, link, onLink, linkError }: { items:
     } catch (e) {
       const m = `Couldn't add the video: ${String((e as Error)?.message ?? e).slice(0, 160)}`;
       setNotice([m]); recordPickerProblem(m, String(e));
-    } finally { setBusy(false); }
+    } finally { if (run.current === my) setBusy(false); }
   };
   const live = items.filter((i) => i.state !== "error");
   const active = items.filter((i) => i.state !== "done" && i.state !== "error").length;
@@ -51,6 +56,16 @@ export default function FootageStep({ items, link, onLink, linkError }: { items:
     <View style={{ gap: 12 }}>
       <UiText style={styles.head}>{usedLabel(live)}</UiText>
       <View style={styles.bar}><View style={[styles.fill, { width: `${Math.min(100, (usedSeconds(live) / MAX_TOTAL_SECONDS) * 100)}%` }]} /></View>
+      {busy ? (
+        <View style={styles.row}>
+          <View style={[styles.thumb, styles.thumbEmpty, { alignItems: "center", justifyContent: "center" }]}><ActivityIndicator color={theme.accent} /></View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <UiText style={styles.name}>{attempt >= 3 ? "Almost there…" : attempt >= 2 ? "Still downloading, trying again…" : "Downloading from iCloud…"}</UiText>
+            <UiText style={styles.sub}>Videos stored in iCloud are fetched first. This can take a moment.</UiText>
+          </View>
+          <Pressable onPress={() => { run.current++; setBusy(false); }} accessibilityRole="button" accessibilityLabel="Cancel"><UiText style={styles.link}>Cancel</UiText></Pressable>
+        </View>
+      ) : null}
       {items.map((i) => (
         <View key={i.localId} style={styles.row}>
           {i.previewUri ? <Image source={{ uri: i.previewUri }} style={styles.thumb} /> : <View style={[styles.thumb, styles.thumbEmpty]} />}
@@ -67,7 +82,7 @@ export default function FootageStep({ items, link, onLink, linkError }: { items:
         </View>
       ))}
       {notice.length ? <View style={styles.notice}>{notice.map((n) => <UiText key={n} style={styles.err}>{n}</UiText>)}</View> : null}
-      <PrimaryButton label={items.length ? "Add more videos" : "Add videos"} onPress={add} loading={busy} disabled={full} />
+      <PrimaryButton label={items.length ? "Add more videos" : "Add videos"} onPress={add} loading={busy} disabled={full || busy} />
       {active > 0 ? <UiText style={styles.sub}>You can carry on to the next step while your videos upload. Keep Tryal open until they are ready. If you close it, come back here to continue.</UiText> : null}
       <UiText style={styles.sub}>Up to 60 minutes in total, 30 minutes each (2 GB per video). We delete them 14 days after your campaign closes.</UiText>
       <View style={styles.alt}>

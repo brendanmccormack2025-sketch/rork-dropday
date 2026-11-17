@@ -134,7 +134,7 @@ const seg = (id, runId, ms, type = "video") => ({ id, uri: `file:///${id}.mov`, 
 // ── camera roll accepts only one video ──
 {
   const sheet = read("../components/PostChoiceSheet.tsx");
-  ok("one pick only; no Arrange step; the existing single-video limit stays", /allowsMultipleSelection: false/.test(sheet) && !/orderedSelection|selectionLimit|Arrange/.test(sheet) && /\(asset\.duration \?\? 0\) > MAX_VIDEO_SECONDS \* 1000/.test(sheet));
+  ok("one pick only; no Arrange step; the existing single-video limit stays", /libraryPickerOptions\(\{ photoCompatible, videoMaxDuration/.test(sheet) && !/multiple/.test(sheet) && /allowsMultipleSelection: !!o\.multiple/.test(read("../lib/pickerOptions.ts")) && !/orderedSelection|selectionLimit|Arrange/.test(sheet) && /\(asset\.duration \?\? 0\) > MAX_VIDEO_SECONDS \* 1000/.test(sheet));
   ok("the library limit is not the camera's 60 s", /MAX_VIDEO_SECONDS = 300/.test(read("../hooks/useCameraRecorder.ts")));
 }
 

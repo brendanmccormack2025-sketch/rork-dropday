@@ -6,6 +6,9 @@ import { getThumbnailAsync } from "expo-video-thumbnails";
 import { cacheDirectory, deleteAsync, getInfoAsync, readAsStringAsync, writeAsStringAsync, EncodingType } from "@/lib/fileSystemCompat";
 import { FootageUploader, type FootageDeps, type FootageInput, type Registered, type UploadItem } from "@/lib/footageUpload";
 import { supabaseMediaStore } from "@/lib/mediaStore";
+import { launchLibraryWithRetry } from "@/lib/pickerRetry";
+import { libraryPickerOptions } from "@/lib/pickerOptions";
+import { VIDEO_PICKER_ERROR_MESSAGES, classifyPickerError } from "@/lib/pickerErrors";
 import { renderMerge } from "@/lib/mergeNative";
 import { supabase } from "@/lib/supabase";
 import { MAX_ATTEMPTS, attemptFromItem, upsertAttempt, type Attempt } from "@/lib/footageAttempts";
@@ -131,21 +134,24 @@ export function recordPickerProblem(message: string, detail?: string): void {
 export type PickResult = { inputs: FootageInput[]; message: string | null };
 
 /**
- * Pick videos from the camera roll (several at once). iOS needs no permission for its own picker, so none is asked for first (a refused or "limited"
- * permission used to end the pick silently); every way this can fail returns a plain message instead of nothing.
+ * Pick videos from the camera roll (several at once), the same way the post picker does: the shared options (lib/pickerOptions.ts: iCloud download on,
+ * the file as it is in Photos, no HEVC conversion), one automatic retry for iCloud download errors (lib/pickerRetry.ts) and plain wording for every
+ * failure (lib/pickerErrors.ts). iOS needs no permission for its own picker, so none is asked for first (a refused or "limited" permission used to end
+ * the pick silently). Every way this can fail returns a message instead of nothing. `isCancelled` lets the screen's Cancel drop a result that arrives late.
  */
-export async function pickFootage(): Promise<PickResult> {
+export async function pickFootage(opts: { onRetry?: (attempt: number) => void; isCancelled?: () => boolean } = {}): Promise<PickResult> {
   let res: ImagePicker.ImagePickerResult;
   try {
-    res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"], allowsMultipleSelection: true, selectionLimit: 20, videoExportPreset: ImagePicker.VideoExportPreset.Passthrough, quality: 1 });
+    res = await launchLibraryWithRetry(libraryPickerOptions({ videosOnly: true, multiple: { limit: 20 } }), opts.onRetry);
   } catch (e) {
-    const why = String((e as Error)?.message ?? e).slice(0, 200);
-    const denied = /permission|denied|authori[sz]/i.test(why);
-    const message = denied ? "Tryal can't open your photos. Allow photo access for Tryal in Settings, then try again." : `Couldn't open your photos: ${why}`;
-    recordPickerProblem(message, why);
+    const why = String((e as Error)?.message ?? e).slice(0, 300);
+    const kind = classifyPickerError(e);
+    if (kind === "cancelled" || opts.isCancelled?.()) return { inputs: [], message: null };
+    const message = kind === "unknown" ? `Couldn't open your photos: ${why.slice(0, 160)}` : VIDEO_PICKER_ERROR_MESSAGES[kind];
+    recordPickerProblem(message, `${kind}: ${why}`);
     return { inputs: [], message };
   }
-  if (res.canceled) return { inputs: [], message: null };
+  if (opts.isCancelled?.() || res.canceled) return { inputs: [], message: null };
   if (!res.assets?.length) { const message = "Your photo library didn't return a video. Try picking it again."; recordPickerProblem(message, "no assets"); return { inputs: [], message }; }
   const inputs: FootageInput[] = [];
   let skipped = 0;
