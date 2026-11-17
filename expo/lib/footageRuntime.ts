@@ -8,9 +8,11 @@ import { FootageUploader, type FootageDeps, type FootageInput, type Registered, 
 import { supabaseMediaStore } from "@/lib/mediaStore";
 import { renderMerge } from "@/lib/mergeNative";
 import { supabase } from "@/lib/supabase";
+import { MAX_ATTEMPTS, attemptFromItem, upsertAttempt, type Attempt } from "@/lib/footageAttempts";
 import type { TusIO, TusResponse } from "@/lib/tus";
 
 const KEY = "money.footage.queue.v1";
+const ATTEMPTS_KEY = "money.footage.attempts.v1";
 const CHUNK_FILE = `${cacheDirectory}tus_chunk.bin`;
 
 async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
@@ -68,11 +70,22 @@ const deps: FootageDeps = {
       const r = await renderMerge([uri], onProgress);
       const thumb = await getThumbnailAsync(r.uri, { time: 0 }).catch(() => null);
       return { uri: r.uri, sizeBytes: (await info(r.uri)) || 1, width: thumb?.width ?? 0, height: thumb?.height ?? 0, durationSeconds: r.durationMs / 1000 };
-    } catch {
+    } catch (e) {
       const size = await info(uri);
-      if (!(size > 0)) throw new Error("that video could not be read");
-      return { uri, sizeBytes: size, width: 0, height: 0, durationSeconds: 0 };
+      if (!(size > 0)) throw new Error(`that video could not be read (${String((e as Error)?.message ?? e).slice(0, 120)})`);
+      return { uri, sizeBytes: size, width: 0, height: 0, durationSeconds: 0, note: `the compressor failed (${String((e as Error)?.message ?? e).slice(0, 120)}); the original file is uploaded` };
     }
+  },
+  async preview(uri) {
+    const t = await getThumbnailAsync(uri, { time: 0, quality: 0.4 });
+    return t.uri;
+  },
+  async readDuration(uri) {
+    try {
+      const m = await import("@/modules/video-render");
+      if (m.supportsTimingProbe) { const t = await m.probeTimingAsync(uri); if (t && t.durationMs > 0) return t.durationMs / 1000; }
+    } catch { /* fall through */ }
+    return null;
   },
   async thumbnail(uri) {
     const t = await getThumbnailAsync(uri, { time: 0, quality: 0.6 });
@@ -91,11 +104,55 @@ const deps: FootageDeps = {
 
 export const footageUploader = new FootageUploader(deps);
 
-/** Pick videos from the camera roll (several at once). Videos over the limits are refused by the uploader with a message. */
-export async function pickFootage(): Promise<FootageInput[]> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) return [];
-  const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"], allowsMultipleSelection: true, selectionLimit: 20, videoExportPreset: ImagePicker.VideoExportPreset.Passthrough, quality: 1 });
-  if (res.canceled) return [];
-  return res.assets.map((a, i) => ({ uri: a.uri, name: a.fileName ?? `Video ${i + 1}`, durationSeconds: (a.duration ?? 0) / 1000, width: a.width ?? 0, height: a.height ?? 0 }));
+// ── the last attempts, for the owner's debug screen ──
+export async function loadAttempts(): Promise<Attempt[]> {
+  try { return JSON.parse((await AsyncStorage.getItem(ATTEMPTS_KEY)) ?? "[]") as Attempt[]; } catch { return []; }
+}
+export async function clearAttempts(): Promise<void> { try { await AsyncStorage.removeItem(ATTEMPTS_KEY); } catch { /* nothing to clear */ } }
+let attempts: Promise<Attempt[]> | null = null;
+let writing: Promise<unknown> = Promise.resolve();
+async function record(a: Attempt): Promise<void> {
+  attempts = (attempts ?? loadAttempts()).then((l) => upsertAttempt(l, a).slice(0, MAX_ATTEMPTS));
+  const next = await attempts;
+  writing = writing.then(() => AsyncStorage.setItem(ATTEMPTS_KEY, JSON.stringify(next))).catch(() => {});
+}
+let lastSig = new Map<string, string>();
+footageUploader.subscribe((items) => {
+  for (const i of items) {
+    const sig = `${i.state}|${i.stage}|${i.error ?? ""}|${i.durationSeconds}|${i.sizeBytes ?? ""}`;   // not on every progress tick
+    if (lastSig.get(i.localId) !== sig) { lastSig.set(i.localId, sig); void record(attemptFromItem(i)); }
+  }
+});
+/** A problem before a video even reaches the list (the picker): it goes in the debug list too. */
+export function recordPickerProblem(message: string, detail?: string): void {
+  void record({ id: `pick-${Date.now()}`, at: Date.now(), name: "(picking videos)", stage: "picking videos", state: "error", error: message, rawError: detail });
+}
+
+export type PickResult = { inputs: FootageInput[]; message: string | null };
+
+/**
+ * Pick videos from the camera roll (several at once). iOS needs no permission for its own picker, so none is asked for first (a refused or "limited"
+ * permission used to end the pick silently); every way this can fail returns a plain message instead of nothing.
+ */
+export async function pickFootage(): Promise<PickResult> {
+  let res: ImagePicker.ImagePickerResult;
+  try {
+    res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"], allowsMultipleSelection: true, selectionLimit: 20, videoExportPreset: ImagePicker.VideoExportPreset.Passthrough, quality: 1 });
+  } catch (e) {
+    const why = String((e as Error)?.message ?? e).slice(0, 200);
+    const denied = /permission|denied|authori[sz]/i.test(why);
+    const message = denied ? "Tryal can't open your photos. Allow photo access for Tryal in Settings, then try again." : `Couldn't open your photos: ${why}`;
+    recordPickerProblem(message, why);
+    return { inputs: [], message };
+  }
+  if (res.canceled) return { inputs: [], message: null };
+  if (!res.assets?.length) { const message = "Your photo library didn't return a video. Try picking it again."; recordPickerProblem(message, "no assets"); return { inputs: [], message }; }
+  const inputs: FootageInput[] = [];
+  let skipped = 0;
+  res.assets.forEach((a, i) => {
+    if (a.type && a.type !== "video") { skipped++; return; }
+    inputs.push({ uri: a.uri, name: a.fileName ?? `Video ${i + 1}`, durationSeconds: a.duration && a.duration > 0 ? a.duration / 1000 : 0, width: a.width ?? 0, height: a.height ?? 0, sizeBytes: a.fileSize });
+  });
+  if (!inputs.length) { const message = "That wasn't a video. Pick a video from your camera roll."; recordPickerProblem(message, `${skipped} non-video asset(s)`); return { inputs, message }; }
+  return { inputs, message: null };
 }

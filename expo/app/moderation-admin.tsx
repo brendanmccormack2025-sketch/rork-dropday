@@ -156,6 +156,7 @@ export default function ModerationAdminScreen() {
               <UiText style={styles.muted}>{storage.data ? `${(Number(storage.data.total_bytes) / 1024 ** 3).toFixed(2)} GB in ${Number(storage.data.files)} ${Number(storage.data.files) === 1 ? "file" : "files"} across ${Number(storage.data.campaigns_with_footage)} campaigns` : "Nothing stored."}</UiText>
               <UiText style={styles.muted}>{storage.data?.oldest_at ? `Oldest file: ${new Date(storage.data.oldest_at).toLocaleDateString()} (${Math.floor((Date.now() - new Date(storage.data.oldest_at).getTime()) / 86_400_000)} days old)` : "No files yet."}</UiText>
               <UiText style={styles.muted}>{storage.data ? `${Number(storage.data.hidden_files)} hidden after reports. ` : ""}Footage is deleted 14 days after a campaign closes.</UiText>
+              <Pressable onPress={() => router.push("/footage-debug" as never)} accessibilityRole="link"><UiText style={styles.muted}>Footage attempts on this phone →</UiText></Pressable>
             </View>
           ))}
           {tab === "words" && (

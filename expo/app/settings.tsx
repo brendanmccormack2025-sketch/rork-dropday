@@ -212,6 +212,10 @@ export default function SettingsScreen() {
                   <CalendarDays color={theme.textMuted} size={18} strokeWidth={2} />
                   <UiText style={styles.rowText}>Birthdate (Money)</UiText>
                 </Pressable>
+                <Pressable onPress={() => router.push("/footage-debug" as never)} style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
+                  <Shield color={theme.textMuted} size={18} strokeWidth={2} />
+                  <UiText style={styles.rowText}>Footage attempts (debug)</UiText>
+                </Pressable>
               </View>
             </>
           )}

@@ -36,6 +36,8 @@ function world(over = {}) {
     async compress(uri, onProgress) { w.calls.push(`compress ${uri}`); onProgress(0.5); onProgress(1); const out = `file:///cache/c${++n}.mp4`; w.files.add(out); return { uri: out, sizeBytes: w.size ?? 10 * MB, width: 1280, height: 720, durationSeconds: w.dur ?? 0 }; },
     async thumbnail(uri) { w.calls.push(`thumb ${uri}`); if (w.gate) await w.gate; if (w.thumbFail) throw new Error("no frame"); const t = `file:///cache/t${n}.jpg`; w.files.add(t); return { uri: t, sizeBytes: 5000 }; },
     async fileExists(u) { return w.files.has(u); },
+    ...(w.noPreview ? {} : { async preview(uri) { w.calls.push(`preview ${uri}`); return `file:///cache/p-${uri.split('/').pop()}.jpg`; } }),
+    ...(w.readDur !== undefined ? { async readDuration(uri) { w.calls.push(`readDuration ${uri}`); return w.readDur; } } : {}),
     async deleteFile(u) { w.calls.push(`delete ${u}`); w.files.delete(u); },
     makeIO(uri, size) {
       return {
@@ -62,13 +64,46 @@ function world(over = {}) {
 }
 const vid = (name, sec) => ({ uri: `file:///roll/${name}.mov`, name, durationSeconds: sec, width: 1920, height: 1080 });
 
+// a picked video shows up at once, with a picture, and every failure names its step
+{
+  const { w, deps } = world();
+  const u = new FootageUploader(deps);
+  const seen = [];
+  u.subscribe((items) => seen.push(items.map((i) => `${i.name}:${i.state}:${i.stage ?? ""}`).join(",")));
+  const added = u.add([vid("a", 60)]);
+  eq("the video is in the list the moment it is added (before anything has run), waiting, with its length and file size", [seen.includes("a:queued:waiting"), u.list()[0].durationSeconds, u.list().length, added.added.length], [true, 60, 1, 1]);
+  await settle(u);
+  eq("it gets a preview picture early (not uploaded), and its steps are shown in order on the way to ready", [u.list()[0].previewUri?.endsWith(".jpg"), [...new Set(seen.map((x) => x.split(":")[2]))].filter(Boolean)], [true, ["waiting", "preparing the video", "checking the length", "checking the size", "registering the video", "making the thumbnail", "uploading the video", "finishing", "ready"]]);
+  const np = world({ noPreview: true }); const npu = new FootageUploader(np.deps); npu.add([vid("b", 60)]); await settle(npu);
+  eq("a preview that cannot be made does not matter", [npu.list()[0].state, npu.list()[0].previewUri ?? null], ["done", null]);
+}
+{
+  const a = world({ readDur: 90 });
+  const u = new FootageUploader(a.deps);
+  u.add([{ ...vid("nolen", 0), sizeBytes: 123 }]);
+  await settle(u);
+  eq("a length the picker did not give is read from the file, and the video goes on to ready; the picked file's size is kept", [u.list()[0].state, u.list()[0].durationSeconds, u.list()[0].sourceSize, a.w.calls.filter((c) => c.startsWith("register"))], ["done", 90, 123, ["register 90 1280x720 10485760"]]);
+  const b = world({ dur: 120 });
+  const v = new FootageUploader(b.deps); v.add([vid("nolen2", 0)]); await settle(v);
+  eq("...or from the compressor's own measurement", [v.list()[0].state, v.list()[0].durationSeconds], ["done", 120]);
+  const c = world({ dur: 1900 });
+  const y = new FootageUploader(c.deps); y.add([vid("long2", 0)]); await settle(y);
+  eq("a video that turns out to be over 30 minutes stops at the length check with that reason, and is never registered", [y.list()[0].state, y.list()[0].error, c.w.calls.some((x) => x.startsWith("register"))], ["error", "Stopped while checking the length. Each video can be at most 30 minutes.", false]);
+  const d = world({ readDur: 100 });
+  const z = new FootageUploader(d.deps); z.add([vid("a", 1800), vid("b", 1800), vid("c", 0)]); await settle(z);
+  eq("a length that is only known later, and no longer fits in the 60 minutes, stops at the length check with that reason", [z.list().map((i) => i.state), z.list()[2].error], [["done", "done", "error"], "Stopped while checking the length. A campaign can have at most 60 minutes of footage."]);
+  const e = world({ tusPlan: ["ok", 403] });
+  e.deps.compress = async () => { throw new Error("export session failed (-11800)"); };
+  const k = new FootageUploader(e.deps); k.add([vid("bad", 60)]); await settle(k);
+  eq("when the compressor throws, the error names the step and keeps the raw reason for the debug list", [k.list()[0].state, k.list()[0].stage, k.list()[0].error, k.list()[0].rawError], ["error", "preparing the video", "Stopped while preparing the video. Something went wrong with this video. Tap Retry.", "export session failed (-11800)"]);
+}
 // the happy path
 {
   const { w, deps } = world();
   const u = new FootageUploader(deps);
   const { added, refused } = u.add([vid("a", 600), vid("b", 300)]);
   await settle(u);
-  eq("two videos are added, and each goes compress, register, thumbnail, thumbnail upload, video upload, complete, in that order, one video at a time", [added.length, refused.length, w.calls.filter((c) => !c.startsWith("delete")).map((c) => c.split(" ")[0] + (c.startsWith("tus-patch") ? ":" + (c.includes(".jpg") ? "jpg" : "mp4") : ""))], [2, 0, ["compress", "register", "thumb", "tus-create", "tus-patch:jpg", "tus-create", "tus-patch:mp4", "tus-patch:mp4", "complete", "compress", "register", "thumb", "tus-create", "tus-patch:jpg", "tus-create", "tus-patch:mp4", "tus-patch:mp4", "complete"]]);
+  eq("two videos are added, and each goes compress, register, thumbnail, thumbnail upload, video upload, complete, in that order, one video at a time", [added.length, refused.length, w.calls.filter((c) => !c.startsWith("delete") && !c.startsWith("preview")).map((c) => c.split(" ")[0] + (c.startsWith("tus-patch") ? ":" + (c.includes(".jpg") ? "jpg" : "mp4") : ""))], [2, 0, ["compress", "register", "thumb", "tus-create", "tus-patch:jpg", "tus-create", "tus-patch:mp4", "tus-patch:mp4", "complete", "compress", "register", "thumb", "tus-create", "tus-patch:jpg", "tus-create", "tus-patch:mp4", "tus-patch:mp4", "complete"]]);
   eq("both are done; their ids come back in the order they were added; allDone is true", [u.list().map((i) => i.state), u.readyIds(), u.allDone()], [["done", "done"], ["f2", "f5"].map((x, i) => u.list()[i].footageId), true]);
   eq("the registration carries the real (compressed) size, size and length", w.calls.filter((c) => c.startsWith("register")), ["register 600 1280x720 10485760", "register 300 1280x720 10485760"]);
   eq("the temporary compressed file and thumbnail are deleted after a finished upload, and the picked original is never touched", [w.files.size, w.calls.some((c) => c === "delete file:///roll/a.mov")], [0, false]);
@@ -80,10 +115,10 @@ const vid = (name, sec) => ({ uri: `file:///roll/${name}.mov`, name, durationSec
   const u = new FootageUploader(deps);
   const r = u.add([vid("long", 1801), vid("ok1", 1800), vid("ok2", 1800), vid("one-too-many", 1), vid("ok3", 0)]);
   await settle(u);
-  eq("a 30:01 video, a video that would pass 60 minutes in total, and one with no length are refused by name with the reason; the rest are queued", [r.refused.map((x) => x.name), r.added.map((x) => x.name), r.refused[0].reason], [["long", "one-too-many", "ok3"], ["ok1", "ok2"], "Each video can be at most 30 minutes."]);
-  eq("refused videos never reach the server", w.calls.filter((c) => c.startsWith("register")).length, 2);
+  eq("a 30:01 video and a video that would pass 60 minutes in total are refused by name with the reason; one whose length the picker did not give is let in (its length is read next); the rest are queued", [r.refused.map((x) => x.name), r.added.map((x) => x.name), r.refused[0].reason], [["long", "one-too-many"], ["ok1", "ok2", "ok3"], "Each video can be at most 30 minutes."]);
+  eq("refused videos never reach the server, and the one with no length stops at the length check (nothing can read it here) with a plain message naming that step", [w.calls.filter((c) => c.startsWith("register")).length, u.list().find((i) => i.name === "ok3").state, u.list().find((i) => i.name === "ok3").error, u.list().find((i) => i.name === "ok3").stage], [2, "error", "Stopped while checking the length. Tryal couldn't read how long this video is. Try a different video.", "checking the length"]);
   u.add([vid("again", 60)]);
-  eq("the minutes in use count while uploading and once done", u.list().length, 2);
+  eq("the minutes in use count while uploading and once done (a failed one does not hold minutes)", u.list().length, 3);
 }
 // the server says no
 {
@@ -91,7 +126,7 @@ const vid = (name, sec) => ({ uri: `file:///roll/${name}.mov`, name, durationSec
   const u = new FootageUploader(deps);
   u.add([vid("a", 600)]);
   await settle(u);
-  eq("a refusal when registering shows a plain message, nothing is uploaded, and the item can be retried", [u.list()[0].state, u.list()[0].error, w.calls.some((c) => c.startsWith("tus-")), w.calls.some((c) => c.startsWith("fail"))], ["error", "A campaign can have at most 60 minutes of footage.", false, false]);
+  eq("a refusal when registering shows a plain message, nothing is uploaded, and the item can be retried", [u.list()[0].state, u.list()[0].error, w.calls.some((c) => c.startsWith("tus-")), w.calls.some((c) => c.startsWith("fail"))], ["error", "Stopped while registering the video. A campaign can have at most 60 minutes of footage.", false, false]);
   w.registerFail = null; u.retry(u.list()[0].localId); await settle(u);
   eq("retrying after the problem went away finishes it", u.list()[0].state, "done");
   eq("an error video does not use up minutes while it is in error", (() => { const x = new FootageUploader(world({ registerFail: "boom" }).deps); x.add([vid("a", 1800)]); return null; })(), null);
@@ -111,7 +146,7 @@ const vid = (name, sec) => ({ uri: `file:///roll/${name}.mov`, name, durationSec
   u.add([vid("a", 600)]);
   await settle(u);
   const it = u.list()[0];
-  eq("when the connection stays down the video ends in a retryable error and KEEPS its registration and upload URL (nothing is re-registered or restarted)", [it.state, it.error, !!it.footageId, !!it.tusVideoUrl, w.calls.some((c) => c.startsWith("fail"))], ["error", "The upload stopped. Check your connection and tap Retry.", true, true, false]);
+  eq("when the connection stays down the video ends in a retryable error and KEEPS its registration and upload URL (nothing is re-registered or restarted)", [it.state, it.error, !!it.footageId, !!it.tusVideoUrl, w.calls.some((c) => c.startsWith("fail"))], ["error", "Stopped while uploading the video. The upload stopped. Check your connection and tap Retry.", true, true, false]);
   w.tusPlan = []; const before = w.calls.filter((c) => c.startsWith("register")).length;
   u.retry(it.localId); await settle(u);
   eq("tapping Retry once the network is back continues the same upload: one registration in total, the same URL asked for its offset, then complete", [u.list()[0].state, w.calls.filter((c) => c.startsWith("register")).length === before, w.calls.some((c) => c.startsWith("tus-head")), w.calls.filter((c) => c.startsWith("complete")).length], ["done", true, true, 1]);
@@ -141,16 +176,16 @@ const vid = (name, sec) => ({ uri: `file:///roll/${name}.mov`, name, durationSec
   const u = new FootageUploader(deps);
   u.add([vid("a", 600)]);
   await settle(u);
-  eq("a refusal from Storage (403) gives the minutes back (fail is called), forgets the dead registration and says so", [u.list()[0].state, w.calls.filter((c) => c.startsWith("fail")), u.list()[0].footageId, u.list()[0].error], ["error", ["fail f2"], null, "You're not allowed to upload this. Sign in again and retry."]);
+  eq("a refusal from Storage (403) gives the minutes back (fail is called), forgets the dead registration and says so", [u.list()[0].state, w.calls.filter((c) => c.startsWith("fail")), u.list()[0].footageId, u.list()[0].error], ["error", ["fail f2"], null, "Stopped while uploading the video. You're not allowed to upload this. Sign in again and retry."]);
   w.tusPlan = []; u.retry(u.list()[0].localId); await settle(u);
   eq("...and a retry registers afresh and finishes", [u.list()[0].state, w.calls.filter((c) => c.startsWith("register")).length], ["done", 2]);
 }
 {
   const { deps, w } = world({ completeFail: "the upload is not complete yet" });
   const u = new FootageUploader(deps); u.add([vid("a", 600)]); await settle(u);
-  eq("if the database says the file is not complete, the item shows a retryable error and keeps its upload", [u.list()[0].state, u.list()[0].error, !!u.list()[0].footageId], ["error", "The upload stopped. Check your connection and tap Retry.", true]);
+  eq("if the database says the file is not complete, the item shows a retryable error and keeps its upload", [u.list()[0].state, u.list()[0].error, !!u.list()[0].footageId], ["error", "Stopped while finishing. The upload stopped. Check your connection and tap Retry.", true]);
   const big = world({ size: MAX_BYTES + 1 }); const u2 = new FootageUploader(big.deps); u2.add([vid("big", 600)]); await settle(u2);
-  eq("a file still over 2 GB after compression is refused before registering", [u2.list()[0].state, u2.list()[0].error, big.w.calls.some((c) => c.startsWith("register"))], ["error", "That video is too large. Try a shorter one.", false]);
+  eq("a file still over 2 GB after compression is refused before registering", [u2.list()[0].state, u2.list()[0].error, big.w.calls.some((c) => c.startsWith("register"))], ["error", "Stopped while checking the size. That video is too large. Try a shorter one.", false]);
 }
 // removing
 {

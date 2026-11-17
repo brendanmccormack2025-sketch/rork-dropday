@@ -57,7 +57,11 @@ export default function CreateCampaign() {
   const next = () => {
     setServerError(null);
     let e: FormErrors = {};
-    if (step === 0) e = stepErrors(["footage", "footageUrl"], items.some((i) => i.state !== "error") ? ["x"] : []);
+    if (step === 0) {
+      e = stepErrors(["footage", "footageUrl"], items.some((i) => i.state !== "error") ? ["x"] : []);
+      // a video that failed is not "no video": say which, so nobody wonders why Next refuses
+      if (e.footage && items.length) e = { ...e, footage: "Your video didn't upload. Tap Retry on it (or remove it and add another), or paste a Google Drive / Dropbox link." };
+    }
     if (step === 1) e = stepErrors(["title", "description", "fullVideoUrl"]);
     if (step === 2) e = stepErrors(["ratePer1k", "capPerClip", "totalBudget", "guaranteedPerClip"]);
     if (Object.keys(e).length) { setErrors(e); return; }
@@ -154,13 +158,13 @@ export default function CreateCampaign() {
             {errors.agree ? <UiText style={styles.error}>{errors.agree}</UiText> : null}
           </View>
           {errors.footage ? <UiText style={styles.error}>{errors.footage}</UiText> : null}
-          {uploading ? <UiText style={s.text}>Your videos are still uploading. You can post when they finish.</UiText> : null}
+          {uploading ? <UiText style={s.text}>Wait for your video to finish uploading, then post. You can see its progress on step 1 (Back).</UiText> : null}
           {serverError ? <UiText style={styles.error}>{serverError}</UiText> : null}
         </>
       ) : null}
 
       <View style={{ gap: 10 }}>
-        {step < 3 ? <PrimaryButton label="Next" onPress={next} /> : <PrimaryButton label="Post campaign" onPress={submit} loading={busy} disabled={uploading} />}
+        {step < 3 ? <PrimaryButton label="Next" onPress={next} /> : <PrimaryButton label={uploading ? "Wait for your video to finish uploading" : "Post campaign"} onPress={submit} loading={busy} disabled={uploading} />}
         {step > 0 ? <Pressable onPress={() => { setErrors({}); setStep(step - 1); }} accessibilityRole="button"><UiText style={[styles.link, { textAlign: "center" }]}>Back</UiText></Pressable> : null}
       </View>
     </SettingsScaffold>
