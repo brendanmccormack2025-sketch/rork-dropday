@@ -33,6 +33,7 @@ export type UploadItem = FootageItem & {
   createdAt?: number;
   note?: string;        // e.g. the compressor failed and the original was used
   sourceScheme?: string; // file / ph / content: what kind of address the picker gave
+  sourceKey?: string;    // the video's identity (the photo library's asset id, else name + size + length), so the same video is not added twice
 };
 export type Registered = { id: string; storage_path: string; thumb_path: string };
 
@@ -59,7 +60,12 @@ export type FootageDeps = {
   newId(): string;
 };
 
-export type FootageInput = { uri: string; name: string; durationSeconds: number; width: number; height: number; sizeBytes?: number };
+export type FootageInput = { uri: string; name: string; durationSeconds: number; width: number; height: number; sizeBytes?: number; assetId?: string | null };
+
+/** Same video = same photo-library asset id; when the picker gives none, the same name, file size and length. */
+export function footageKey(f: FootageInput): string {
+  return f.assetId ? `asset:${f.assetId}` : `file:${f.name}|${f.sizeBytes ?? 0}|${Math.round(f.durationSeconds * 10)}`;
+}
 export type Listener = (items: UploadItem[]) => void;
 
 export class FootageUploader {
@@ -88,10 +94,12 @@ export class FootageUploader {
   add(inputs: FootageInput[]): { added: UploadItem[]; refused: Array<{ name: string; reason: string }> } {
     const added: UploadItem[] = [], refused: Array<{ name: string; reason: string }> = [];
     for (const f of inputs) {
+      const key = footageKey(f);
+      if ([...this.items, ...added].some((i) => i.sourceKey === key)) { refused.push({ name: f.name, reason: "Already added." }); continue; }
       // a length the picker did not give (0) is read later; it is checked against the limits as soon as it is known
       const check = f.durationSeconds > 0 ? canAdd([...this.items.filter((i) => i.state !== "error"), ...added], f.durationSeconds) : { ok: true as const };
       if (!check.ok) { refused.push({ name: f.name, reason: check.reason }); continue; }
-      added.push({ localId: this.deps.newId(), sourceUri: f.uri, name: f.name, durationSeconds: f.durationSeconds, width: f.width, height: f.height, state: "queued", progress: 0, stage: "waiting", sourceSize: f.sizeBytes, createdAt: Date.now(), sourceScheme: f.uri.split(":")[0] });
+      added.push({ localId: this.deps.newId(), sourceUri: f.uri, name: f.name, durationSeconds: f.durationSeconds, width: f.width, height: f.height, state: "queued", progress: 0, stage: "waiting", sourceSize: f.sizeBytes, createdAt: Date.now(), sourceScheme: f.uri.split(":")[0], sourceKey: key });
     }
     if (added.length) { this.items = [...this.items, ...added]; this.emit(); for (const a of added) void this.makePreview(a.localId); void this.run(); }
     return { added, refused };

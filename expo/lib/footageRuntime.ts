@@ -157,7 +157,7 @@ export async function pickFootage(opts: { onRetry?: (attempt: number) => void; i
   let skipped = 0;
   res.assets.forEach((a, i) => {
     if (a.type && a.type !== "video") { skipped++; return; }
-    inputs.push({ uri: a.uri, name: a.fileName ?? `Video ${i + 1}`, durationSeconds: a.duration && a.duration > 0 ? a.duration / 1000 : 0, width: a.width ?? 0, height: a.height ?? 0, sizeBytes: a.fileSize });
+    inputs.push({ uri: a.uri, name: a.fileName ?? `Video ${i + 1}`, durationSeconds: a.duration && a.duration > 0 ? a.duration / 1000 : 0, width: a.width ?? 0, height: a.height ?? 0, sizeBytes: a.fileSize, assetId: a.assetId });
   });
   if (!inputs.length) { const message = "That wasn't a video. Pick a video from your camera roll."; recordPickerProblem(message, `${skipped} non-video asset(s)`); return { inputs, message }; }
   return { inputs, message: null };

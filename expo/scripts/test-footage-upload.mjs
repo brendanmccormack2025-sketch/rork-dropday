@@ -5,7 +5,7 @@
  *   node --experimental-strip-types --no-warnings scripts/test-footage-upload.mjs
  */
 import { MAX_BYTES, MAX_EACH_SECONDS, MAX_TOTAL_SECONDS, bytesLabel, canAdd, minutesLabel, usedLabel, usedSeconds } from "../lib/footageLimits.ts";
-import { FootageUploader, friendlyUploadError } from "../lib/footageUpload.ts";
+import { FootageUploader, footageKey, friendlyUploadError } from "../lib/footageUpload.ts";
 
 let failed = 0;
 function eq(name, actual, expected) {
@@ -96,6 +96,35 @@ const vid = (name, sec) => ({ uri: `file:///roll/${name}.mov`, name, durationSec
   e.deps.compress = async () => { throw new Error("export session failed (-11800)"); };
   const k = new FootageUploader(e.deps); k.add([vid("bad", 60)]); await settle(k);
   eq("when the compressor throws, the error names the step and keeps the raw reason for the debug list", [k.list()[0].state, k.list()[0].stage, k.list()[0].error, k.list()[0].rawError], ["error", "preparing the video", "Stopped while preparing the video. Something went wrong with this video. Tap Retry.", "export session failed (-11800)"]);
+}
+// the same video twice
+{
+  const { w, deps } = world();
+  const u = new FootageUploader(deps);
+  const A1 = { ...vid("video-48", 60), assetId: "ABC-123/L0/001" };
+  const r1 = u.add([A1]);
+  const r2 = u.add([{ ...vid("renamed", 61), assetId: "ABC-123/L0/001" }]);
+  eq("the same photo-library asset id is 'Already added', whatever its name, length or size now says", [r1.added.length, r2.added.length, r2.refused], [1, 0, [{ name: "renamed", reason: "Already added." }]]);
+  const r3 = u.add([{ ...vid("video-49", 60), assetId: "DEF-456/L0/001" }]);
+  eq("a different asset with a similar name is a different video", r3.added.length, 1);
+  const r4 = u.add([{ ...vid("p", 30), assetId: "X/1" }, { ...vid("p2", 30), assetId: "X/1" }]);
+  eq("the same video twice in ONE pick is added once", [r4.added.length, r4.refused.map((x) => x.reason)], [1, ["Already added."]]);
+  await settle(u);
+  const again = u.add([A1]);
+  eq("it is still 'Already added' after it finished uploading", [again.added.length, again.refused[0]?.reason], [0, "Already added."]);
+  const id = u.list().find((i) => i.name === "video-48").localId;
+  await u.remove(id);
+  eq("removing it lets it be added again", u.add([A1]).added.length, 1);
+  await settle(u);
+  await u.clear();
+  eq("after the campaign is posted (the list is cleared) the same video can be used for the next campaign", u.add([A1]).added.length, 1);
+  eq("without an asset id the key is name + file size + length: same file, same key; any difference, a different one", [footageKey({ uri: "a", name: "v", durationSeconds: 60, width: 1, height: 1, sizeBytes: 5 }) === footageKey({ uri: "b", name: "v", durationSeconds: 60, width: 1, height: 1, sizeBytes: 5 }), footageKey({ uri: "a", name: "v", durationSeconds: 60, width: 1, height: 1, sizeBytes: 5 }) === footageKey({ uri: "a", name: "v", durationSeconds: 60, width: 1, height: 1, sizeBytes: 6 })], [true, false]);
+  const e = world({ registerFail: "boom" }); const ue = new FootageUploader(e.deps);
+  ue.add([{ ...vid("bad", 60), assetId: "E/1" }]); await settle(ue);
+  eq("a video that failed is still in the list, so adding it again says 'Already added' (use Retry on it)", ue.add([{ ...vid("bad", 60), assetId: "E/1" }]).refused[0]?.reason, "Already added.");
+  const f = world(); f.w.stored = [{ localId: "L9", sourceUri: "s", name: "x", durationSeconds: 60, width: 1, height: 1, state: "done", progress: 1, footageId: "f1", sourceKey: "asset:Z/9" }];
+  const uf = new FootageUploader(f.deps); await uf.restore();
+  eq("the identity survives a restart", uf.add([{ ...vid("x", 60), assetId: "Z/9" }]).refused[0]?.reason, "Already added.");
 }
 // the happy path
 {
