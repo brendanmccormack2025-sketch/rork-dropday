@@ -27,7 +27,8 @@ Fields:
 |---|---|
 | title | required, ≤ 60 chars |
 | description | what to clip, the vibe, do's and don'ts, ≤ 1000 chars |
-| footage | required. One or more videos picked from the creator's camera roll: **up to 60 minutes in total per campaign, each video up to 30 minutes**. Compressed on the device before upload (720p, a streaming-friendly MP4 with the index at the front so it can play before it has fully downloaded). Uploads are resumable and continue in the background. Stored in a private bucket behind the MediaStore interface; signed URLs only for clippers who joined and for the campaign's creator. **Deleted 30 days after the campaign closes.** |
+| footage | required: at least one uploaded video **or** a Google Drive / Dropbox link (below). Videos are picked from the creator's camera roll: **up to 60 minutes in total per campaign, each video up to 30 minutes, and a per-file size cap of 2 GB** (all three are set in `money_config`, checked by the database). Compressed on the device before upload (720p, a streaming-friendly MP4 with the index at the front so it can play before it has fully downloaded). Uploads are resumable and continue in the background. Stored in a private bucket behind the MediaStore interface; signed URLs only for clippers who joined and for the campaign's creator. **Deleted 14 days after the campaign closes** (or 14 days after its deadline). Clippers who joined can **Report** a video (section 3.3). |
+| footage_url | optional, secondary: "or paste a Google Drive / Dropbox link" under the upload on screen 1, mainly for footage longer than the upload limit. Google Drive and Dropbox share links only (https, validated on the server). Shown only to the creator and the clippers who joined (never a readable column). Uploading stays the main path. |
 | full_video_url | optional "Full video" link: one https URL on youtube.com, youtu.be, tiktok.com, instagram.com, x.com (or twitter.com, www.twitter.com, mobile.twitter.com, shown as X), twitch.tv or open.spotify.com (validated on the server). **A frozen term once the first clipper joins.** Every clip from the campaign uses it automatically, each through its clipper's own tracked link (section 16) |
 | rate_per_1k | required, in dollars (e.g. 1.50) |
 | cap_per_clip | required, the max payout per clip |
@@ -45,7 +46,7 @@ The creator must accept the **Campaign Agreement** before posting:
 - Terms freeze when the first clipper joins.
 - 48-hour approval window, after which clips auto-approve.
 - Pay within 3 days of approval.
-- The creator uploads footage they own or have the rights to. Tryal stores it privately, shows it only to clippers who joined, and deletes it 30 days after the campaign closes.
+- The creator uploads footage they own or have the rights to. Tryal stores it privately, shows it only to clippers who joined, and deletes it 14 days after the campaign closes.
 - The creator allows their footage to be posted on Tryal, tagged as clipped for them.
 - A "Full video" link is optional. It is frozen once a clipper joins, and every clip uses it through the clipper's own tracked link. Tryal counts taps, never who tapped.
 - Tryal is not part of the payment.
@@ -70,6 +71,13 @@ Everything else (view window, views needed, clips each, deadline, platforms) use
 - On the creator's own campaign, "Close campaign" lives in a ⋯ menu behind a confirm step.
 
 Budget tracking: `budget_committed` = sum of owed amounts on approved clips. Close the campaign to new submissions automatically when committed ≥ total_budget.
+
+### 3.3 Footage safety and housekeeping (required before any real creator uses uploads)
+- **Limits:** each video ≤ 30 minutes, ≤ 60 minutes per campaign, ≤ 2 GB per file; refused with a plain message on the phone and again by the database.
+- **Deletion:** campaign footage is deleted **14 days after the campaign closes** (or after its deadline), unattached uploads after 7 days. Files go through the existing delete queue.
+- **Account deletion:** deleting an account removes that person's uploaded footage and any exported copies or sections (everything stored under their user id in the footage and export buckets). It happens in the database when the profile is deleted (so it also happens through the delete-user function and any cascade), and the app asks for it first (`delete_my_footage`). Exports must be stored under `<user id>/` in `campaign-footage` or `clip-exports`.
+- **Report:** every uploaded video has a **Report** action for clippers who joined, through the existing reports table: the same reasons (spam, harassment, nudity, other), the same auto-hide threshold (3 reports hide it from clippers until the owner decides) and the same admin queue (dismiss puts it back, hide keeps it hidden, remove deletes it and its files).
+- **Admin screen (owner only):** a Storage tab shows total footage storage (GB), the number of files and the oldest file.
 
 ## 4. Joining (clipper)
 - An **"I'm in"** button shows the frozen terms and the **Clipper Agreement**:
@@ -180,7 +188,7 @@ A simple admin screen (or Supabase dashboard views to start): disputes, "not pai
 
 **Creator walkthrough cards:**
 1. How it works: post a campaign → clippers make clips in Tryal → strangers test them → clippers post on their own accounts → you pay for the views.
-2. Your footage: upload videos from your camera roll, up to 60 minutes in total and 30 minutes each. We delete them 30 days after your campaign closes.
+2. Your footage: upload videos from your camera roll, up to 60 minutes in total and 30 minutes each. We delete them 14 days after your campaign closes.
 3. Setting pay: an optional amount per clip plus a rate per 1,000 views, with a cap and a budget. Example: $3 per clip + $2 per 1,000 views, so 10,000 views = $23 per clip.
 4. Terms freeze once the first clipper joins. Campaign members can message each other about the work, even if your messages are set to nobody. You can still block anyone. Your "Full video" link is frozen too, and every clip uses it with the clipper's own tracked link.
 5. Approving: you have 48 hours to approve or dispute, or the clip auto-approves.
@@ -205,12 +213,12 @@ A simple admin screen (or Supabase dashboard views to start): disputes, "not pai
 **Empty states teach too:** for example, an empty Browse says "No campaigns yet — be the first creator" with a button, and an empty My Clips says "Join a campaign to start earning."
 
 ## 14. Out of scope for v1
-In-app payments/escrow (v2: Stripe Connect after confirming with App Review), automatic view counting from platform APIs, fees/Pro (only the hook for Pro's "find the best moments" suggestions is left), Android. Google Drive / Dropbox footage links and the "Import from Files" picker are gone: footage is uploaded into Tryal.
+In-app payments/escrow (v2: Stripe Connect after confirming with App Review), automatic view counting from platform APIs, fees/Pro (only the hook for Pro's "find the best moments" suggestions is left), Android. The "Import from Files" picker is gone: footage is uploaded into Tryal. A Google Drive / Dropbox link stays only as an optional secondary alternative under the upload (section 3).
 
 ## 15. Build order
 Steps 1-2 below are built. The footage / links work (owner's order) comes next, one step at a time, each confirmed before the next:
 - **a. Post links** (section 16, the non-Money part): standalone, shippable in the current app before Money.
-- **b. Footage upload + campaign creation** (sections 3 and 3.1): resumable background upload, MediaStore, 30-day deletion.
+- **b. Footage upload + campaign creation** (sections 3, 3.1 and 3.3): resumable upload, MediaStore, per-file size cap, 14-day deletion, account deletion removes footage and exports, Report on footage (existing report system), storage totals on the admin screen, optional Drive / Dropbox link. Required before any real creator uses uploads.
 - **c. The campaign screen** (section 3.2).
 - **d. The clipper's section-export flow** (section 5).
 - **e. Money full-video tracked links** (the rest of section 16), then a `money-preview` TestFlight build.

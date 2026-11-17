@@ -13,7 +13,7 @@ import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { minutesLabel } from "@/lib/footageLimits";
-import { campaignDetail, campaignFootage, campaignPaymentInfo, joinCampaign, reportMoney, setCampaignStatus } from "@/lib/moneyApi";
+import { campaignDetail, campaignFootage, campaignFootageLink, campaignPaymentInfo, joinCampaign, reportMoney, setCampaignStatus } from "@/lib/moneyApi";
 import { CLIPPER_AGREEMENT, MESSAGING_NOTICE } from "@/lib/moneyContent";
 import { PAYMENT_LABELS, PLATFORM_LABELS, cardModel, dollars, moneyErrorMessage, profileBadge, type PaymentMethod } from "@/lib/moneyCampaign";
 import { useMoney } from "@/hooks/useMoney";
@@ -35,6 +35,7 @@ export default function CampaignScreen() {
   const q = useQuery({ queryKey: ["money", "campaign", id, me], enabled: !!id && !!me, queryFn: () => campaignDetail(String(id), me) });
   const d = q.data;
   const footage = useQuery({ queryKey: ["money", "footage", id], enabled: !!d && (d.joined || d.mine), queryFn: () => campaignFootage(String(id)) });
+  const footageLink = useQuery({ queryKey: ["money", "footage-link", id], enabled: !!d && (d.joined || d.mine), queryFn: () => campaignFootageLink(String(id)) });
   const pay = useQuery({ queryKey: ["money", "pay", id], enabled: !!d && (d.joined || d.mine), queryFn: () => campaignPaymentInfo(String(id)) });
 
   if (q.isLoading) return <SettingsScaffold title="Campaign"><ActivityIndicator color={theme.accent} /></SettingsScaffold>;
@@ -60,6 +61,16 @@ export default function CampaignScreen() {
     }
   };
 
+  // Report one uploaded video (the same reasons as everything else; 3 reports hide it until the owner decides)
+  const reportFootage = (footageId: string) => {
+    Alert.alert("Report this video", "Why are you reporting it?", [
+      ...([["Spam or scam", "spam"], ["Harassment", "harassment"], ["Nudity or sexual content", "nudity"], ["Something else", "other"]] as const).map(([label, reason]) => ({
+        text: label,
+        onPress: () => { reportMoney(me, "footage", footageId, reason).then(() => Alert.alert("Thanks", "We'll review it.")).catch(() => Alert.alert("Couldn't send the report", "Try again.")); },
+      })),
+      { text: "Cancel", style: "cancel" as const },
+    ]);
+  };
   const report = () => {
     const reasons: Array<[string, "spam" | "harassment" | "nudity" | "other"]> = [["Spam or misleading", "spam"], ["Harassment or bullying", "harassment"], ["Nudity or sexual content", "nudity"], ["Other", "other"]];
     Alert.alert("Report this campaign", "Why are you reporting it?", [
@@ -115,6 +126,13 @@ export default function CampaignScreen() {
           <UiText style={s.text}>{pay.data ? `${PAYMENT_LABELS[pay.data.payment_method as PaymentMethod] ?? pay.data.payment_method}: ${pay.data.payment_handle}` : "…"}</UiText>
           <UiText style={s.text}>The creator pays you directly, outside the app.</UiText>
           {footage.data?.length ? <UiText style={s.text}>Footage: {footage.data.length} {footage.data.length === 1 ? "video" : "videos"}, {minutesLabel(footage.data.reduce((a, x) => a + Number(x.duration_seconds), 0))} in total.</UiText> : null}
+          {footage.data?.map((v, i) => (
+            <View key={v.id} style={styles.videoRow}>
+              <UiText style={s.text}>Video {i + 1} · {minutesLabel(Number(v.duration_seconds))}</UiText>
+              {d.joined ? <Pressable onPress={() => reportFootage(v.id)} accessibilityRole="button" accessibilityLabel={`Report video ${i + 1}`}><UiText style={styles.safetyText}>Report</UiText></Pressable> : null}
+            </View>
+          ))}
+          {footageLink.data ? <Pressable onPress={() => Linking.openURL(footageLink.data!).catch(() => {})} accessibilityRole="link"><UiText style={styles.link}>Open the footage link (Google Drive / Dropbox)</UiText></Pressable> : null}
           {c.full_video_url ? <Pressable onPress={() => Linking.openURL(c.full_video_url!).catch(() => {})} accessibilityRole="link"><UiText style={styles.link}>Watch the full video</UiText></Pressable> : null}
         </View>
       ) : null}
@@ -156,6 +174,7 @@ function Row({ k, v }: { k: string; v: string }) {
 }
 
 const styles = StyleSheet.create({
+  videoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   creator: { flexDirection: "row", alignItems: "center", gap: 12 },
   name: { color: theme.text, fontSize: 16, fontWeight: "800" as const },
   body: { color: theme.text, fontSize: 16, lineHeight: 23 },

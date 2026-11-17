@@ -18,6 +18,8 @@ export const DEFAULT_PLATFORMS: Platform[] = ["tiktok", "instagram", "youtube"];
 export type CampaignForm = {
   title: string;
   description: string;
+  /** optional: a Google Drive / Dropbox link, mainly for footage longer than the upload limit (the uploads are the main way) */
+  footageUrl: string;
   /** optional: the creator's full video (YouTube, TikTok, Instagram, X, Twitch or Spotify) */
   fullVideoUrl: string;
   ratePer1k: string;
@@ -35,7 +37,7 @@ export type CampaignForm = {
 };
 
 export const EMPTY_FORM: CampaignForm = {
-  title: "", description: "", fullVideoUrl: "", ratePer1k: "", capPerClip: "", totalBudget: "", guaranteedPerClip: "",
+  title: "", description: "", footageUrl: "", fullVideoUrl: "", ratePer1k: "", capPerClip: "", totalBudget: "", guaranteedPerClip: "",
   platforms: [...DEFAULT_PLATFORMS], viewWindowDays: 7, minViews: "1000", paymentMethod: null, paymentHandle: "", deadlineDays: 14, maxClips: "5", agree: false,
 };
 
@@ -51,6 +53,11 @@ const parseInt0 = (text: string): number | null => (/^\d+$/.test(text.trim()) ? 
 export function urlHost(url: string): string | null {
   const m = /^https:\/\/([a-z0-9][a-z0-9.-]*)(?:[/?#]|$)/.exec(url.trim().toLowerCase());
   return m ? m[1] : null;
+}
+/** Google Drive and Dropbox share links only (the same rule as money_is_footage_host() in the database). */
+export function footageHostOk(url: string): boolean {
+  const h = urlHost(url);
+  return !!h && (h === "drive.google.com" || h === "dropbox.com" || h.endsWith(".dropbox.com"));
 }
 /** Which site a video link belongs to, by host: the same list as link_platform_of() in the database (shared cases: scripts/post-link-cases.mjs). */
 export function videoLinkPlatform(url: string): "youtube" | "tiktok" | "instagram" | "x" | "twitch" | "spotify" | null {
@@ -80,7 +87,7 @@ export type FormErrors = Partial<Record<keyof CampaignForm | "footage", string>>
 export type CampaignArgs = {
   p_title: string; p_description: string; p_full_video_url: string | null; p_rate_per_1k: number; p_cap_per_clip: number; p_total_budget: number;
   p_guaranteed_per_clip: number; p_platforms: Platform[]; p_view_window_days: number; p_min_views: number; p_payment_method: PaymentMethod;
-  p_payment_handle: string; p_deadline: string; p_max_clips_per_clipper: number; p_agree: boolean; p_footage_ids: string[];
+  p_payment_handle: string; p_deadline: string; p_max_clips_per_clipper: number; p_agree: boolean; p_footage_ids: string[]; p_footage_url: string | null;
 };
 
 export function validateCampaign(f: CampaignForm, now: Date = new Date(), footageIds: string[] = []): { ok: true; args: CampaignArgs } | { ok: false; errors: FormErrors } {
@@ -88,7 +95,9 @@ export function validateCampaign(f: CampaignForm, now: Date = new Date(), footag
   const title = f.title.trim(), description = f.description.trim();
   if (!title) e.title = "Give your campaign a title."; else if (title.length > 60) e.title = "The title can be at most 60 characters.";
   if (!description) e.description = "Say what to clip."; else if (description.length > 1000) e.description = "The description can be at most 1000 characters.";
-  if (footageIds.length < 1) e.footage = "Add at least one video.";
+  const link = withHttps(f.footageUrl);
+  if (link && !footageHostOk(link)) e.footageUrl = "Use a Google Drive or Dropbox share link, or leave it empty.";
+  if (footageIds.length < 1 && !link) e.footage = "Add at least one video, or paste a Google Drive / Dropbox link.";
   const full = withHttps(f.fullVideoUrl);
   if (full && !fullVideoLinkOk(full)) e.fullVideoUrl = "Use a YouTube, TikTok, Instagram, X, Twitch or Spotify link, or leave it empty.";
   const rate = parseMoney(f.ratePer1k), cap = parseMoney(f.capPerClip), budget = parseMoney(f.totalBudget);
@@ -115,7 +124,7 @@ export function validateCampaign(f: CampaignForm, now: Date = new Date(), footag
       p_title: title, p_description: description, p_full_video_url: full || null, p_rate_per_1k: rate!, p_cap_per_clip: cap!, p_total_budget: budget!,
       p_guaranteed_per_clip: guar!, p_platforms: f.platforms, p_view_window_days: f.viewWindowDays, p_min_views: minViews!, p_payment_method: f.paymentMethod!,
       p_payment_handle: f.paymentHandle.trim(), p_deadline: new Date(now.getTime() + f.deadlineDays * 86_400_000).toISOString(),
-      p_max_clips_per_clipper: maxClips!, p_agree: true, p_footage_ids: footageIds,
+      p_max_clips_per_clipper: maxClips!, p_agree: true, p_footage_ids: footageIds, p_footage_url: link || null,
     },
   };
 }
@@ -205,7 +214,8 @@ export function moneyErrorMessage(message: string | undefined | null): string {
   if (m.includes("not available for this account")) return "Money isn't available for this account.";
   if (m.includes("tick every rule")) return "Tick every box to continue.";
   if (m.includes("full video link")) return "Use a YouTube, TikTok, Instagram, X, Twitch or Spotify link for the full video.";
-  if (m.includes("add at least one video")) return "Add at least one video.";
+  if (m.includes("add at least one video")) return "Add at least one video, or paste a Google Drive / Dropbox link.";
+  if (m.includes("footage must be")) return "Footage links must be Google Drive or Dropbox share links.";
   if (m.includes("missing or still uploading")) return "Some videos are still uploading. Wait until they finish.";
   if (m.includes("minutes of footage")) return "A campaign can have at most 60 minutes of footage.";
   if (m.includes("payment handle")) return "Plain text only for the payment handle: an email, @name or $cashtag.";

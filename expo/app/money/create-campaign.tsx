@@ -49,15 +49,15 @@ export default function CreateCampaign() {
   }
 
   /** Check only this step's fields (the full form is checked again at the end, and by the database). */
-  const stepErrors = (keys: string[]): FormErrors => {
+  const stepErrors = (keys: string[], ids: string[] = ["x"]): FormErrors => {
     const filler = { paymentMethod: "paypal" as const, paymentHandle: "ok", agree: true };
-    const r = validateCampaign({ ...f, ...filler }, new Date(), ["x"]);
+    const r = validateCampaign({ ...f, ...filler }, new Date(), ids);
     return r.ok ? {} : (Object.fromEntries(Object.entries(r.errors).filter(([k]) => keys.includes(k))) as FormErrors);
   };
   const next = () => {
     setServerError(null);
     let e: FormErrors = {};
-    if (step === 0 && !items.length) e = { footage: "Add at least one video." };
+    if (step === 0) e = stepErrors(["footage", "footageUrl"], items.some((i) => i.state !== "error") ? ["x"] : []);
     if (step === 1) e = stepErrors(["title", "description", "fullVideoUrl"]);
     if (step === 2) e = stepErrors(["ratePer1k", "capPerClip", "totalBudget", "guaranteedPerClip"]);
     if (Object.keys(e).length) { setErrors(e); return; }
@@ -97,7 +97,7 @@ export default function CreateCampaign() {
       {step === 0 ? (
         <>
           <CoachMark id="create_footage" />
-          <FootageStep items={items} />
+          <FootageStep items={items} link={f.footageUrl} onLink={(t) => set("footageUrl", t)} linkError={errors.footageUrl} />
           {errors.footage ? <UiText style={styles.error}>{errors.footage}</UiText> : null}
         </>
       ) : null}

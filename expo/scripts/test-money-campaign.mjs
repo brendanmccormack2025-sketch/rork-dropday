@@ -5,7 +5,7 @@
  *   node --experimental-strip-types --no-warnings scripts/test-money-campaign.mjs
  */
 import {
-  EMPTY_FORM, cardModel, deadlineLabel, dollars, fullVideoLinkOk, handleOk, videoLinkPlatform, withHttps, PAY_PRESETS, DEFAULT_PLATFORMS, moneyErrorMessage, owedFor, parseMoney, profileBadge, recordLabel, ratingLabel, sortCampaigns, validateCampaign, workedExample,
+  EMPTY_FORM, cardModel, deadlineLabel, dollars, footageHostOk, fullVideoLinkOk, handleOk, videoLinkPlatform, withHttps, PAY_PRESETS, DEFAULT_PLATFORMS, moneyErrorMessage, owedFor, parseMoney, profileBadge, recordLabel, ratingLabel, sortCampaigns, validateCampaign, workedExample,
 } from "../lib/moneyCampaign.ts";
 
 let failed = 0;
@@ -25,7 +25,9 @@ eq("full video link: the same accepted addresses and platforms as the database (
 eq("full video link: every refused address is refused (look-alikes, http, user@host, ports, spaces, other sites)", LINK_BAD.map((u) => fullVideoLinkOk(u)), LINK_BAD.map(() => false));
 eq("full video link: a bare address gets https:// first, as in the post composer", LINK_BARE.map(([u]) => videoLinkPlatform(withHttps(u))), LINK_BARE.map(([, p]) => p));
 eq("full video link: the form takes it empty, with a good link, and refuses a Drive link", [ok({ fullVideoUrl: "" }), ok({ fullVideoUrl: "youtube.com/watch?v=1" }), ok({ fullVideoUrl: "https://drive.google.com/x" })], [true, true, false]);
-eq("the footage is not a link any more: a campaign needs at least one uploaded video, and sends their ids", [ok({}, []), (() => { const r = validateCampaign(GOOD, NOW, IDS); return r.ok ? [r.args.p_footage_ids, "p_footage_url" in r.args, r.args.p_full_video_url] : null; })()], [false, [IDS, false, null]]);
+eq("a campaign needs an uploaded video OR a Drive / Dropbox link, sends the video ids, and the link is null when empty", [ok({}, []), ok({ footageUrl: "https://drive.google.com/drive/folders/abc" }, []), (() => { const r = validateCampaign(GOOD, NOW, IDS); return r.ok ? [r.args.p_footage_ids, r.args.p_footage_url, r.args.p_full_video_url] : null; })()], [false, true, [IDS, null, null]]);
+eq("the Drive / Dropbox link: Drive and Dropbox pass (a bare address gets https://); other hosts, look-alikes, user@host tricks, http and YouTube fail", [["https://drive.google.com/drive/folders/abc", "https://www.dropbox.com/sh/abc/xyz?dl=0", "https://dropbox.com/s/abc/file"].map(footageHostOk), ["https://evil.com/drive.google.com", "https://drive.google.com.evil.com/x", "https://drive.google.com@evil.com/x", "http://drive.google.com/x", "https://www.youtube.com/watch?v=1", "https://notdropbox.com/x", ""].map(footageHostOk), [ok({ footageUrl: "drive.google.com/x" }), ok({ footageUrl: "https://evil.com/x" }), ok({ footageUrl: "https://www.youtube.com/watch?v=1" })]], [[true, true, true], Array(7).fill(false), [true, false, false]]);
+eq("the link can be sent with videos, and its sent value is the https form", (() => { const r = validateCampaign({ ...GOOD, footageUrl: "drive.google.com/x" }, NOW, IDS); return r.ok ? r.args.p_footage_url : null; })(), "https://drive.google.com/x");
 eq("the Pay presets are $1, $2 and $3 per 1,000 views; the defaults (platforms, 7 day window, 14 day deadline, 1000 views, 5 clips) are set so most creators never open More options", [[...PAY_PRESETS], EMPTY_FORM.platforms, EMPTY_FORM.viewWindowDays, EMPTY_FORM.deadlineDays, EMPTY_FORM.minViews, EMPTY_FORM.maxClips, DEFAULT_PLATFORMS === EMPTY_FORM.platforms], [[1, 2, 3], ["tiktok", "instagram", "youtube"], 7, 14, "1000", "5", false]);
 eq("handle: an email, @name and $cashtag pass", ["@some-user_1", "$cashtag", "name.surname+tips@mail.example.com", "pay@example.com"].map(handleOk), Array(4).fill(true));
 eq("handle: links, deep links, bare payment domains, spaces and one character fail", ["https://paypal.me/someone", "venmo://paycharge?txn=pay", "paypal.me", "cash.app/$name", "my handle", "http://x.co", "a", "www.pay.com", "$$"].map(handleOk), Array(9).fill(false));

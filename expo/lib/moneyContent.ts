@@ -42,7 +42,7 @@ export function requiredRules(role: MoneyRole): string[] {
 
 export const CREATOR_CARDS: Card[] = [
   { id: "c1", icon: "workflow", title: "How it works", line: "How it works: post a campaign → clippers make clips in Tryal → strangers test them → clippers post on their own accounts → you pay for the views." },
-  { id: "c2", icon: "film", title: "Your footage", line: "Your footage: upload videos from your camera roll, up to 60 minutes in total and 30 minutes each. We delete them 30 days after your campaign closes." },
+  { id: "c2", icon: "film", title: "Your footage", line: "Your footage: upload videos from your camera roll, up to 60 minutes in total and 30 minutes each. We delete them 14 days after your campaign closes." },
   { id: "c3", icon: "dollar", title: "Setting pay", line: "Setting pay: an optional amount per clip plus a rate per 1,000 views, with a cap and a budget. Example: $3 per clip + $2 per 1,000 views, so 10,000 views = $23 per clip." },
   { id: "c4", icon: "lock", title: "Terms freeze", line: `Terms freeze once the first clipper joins. ${MESSAGING_NOTICE} ${LINK_FROZEN_NOTE}` },
   { id: "c5", icon: "check", title: "Approving", line: "Approving: you have 48 hours to approve or dispute, or the clip auto-approves." },
@@ -82,7 +82,7 @@ export const CAMPAIGN_AGREEMENT = [
   "Terms freeze when the first clipper joins.",
   "48-hour approval window, after which clips auto-approve.",
   "Pay within 3 days of approval.",
-  "The creator uploads footage they own or have the rights to. Tryal stores it privately, shows it only to clippers who joined, and deletes it 30 days after the campaign closes.",
+  "The creator uploads footage they own or have the rights to. Tryal stores it privately, shows it only to clippers who joined, and deletes it 14 days after the campaign closes.",
   "The creator allows their footage to be posted on Tryal, tagged as clipped for them.",
   "A \"Full video\" link is optional. It is frozen once a clipper joins, and every clip uses it through the clipper's own tracked link. Tryal counts taps, never who tapped.",
   "Tryal is not part of the payment.",

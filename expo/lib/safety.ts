@@ -25,6 +25,9 @@ export const setPostInteractions = (post: string, mode: InteractionMode) => call
 export const removeReactionOnMyPost = (reaction: string) => call<void>("remove_reaction_on_my_post", { p_reaction: reaction });
 
 export const adminReports = (status = "pending") => rows<ReportRow>("admin_reports_queue", { p_status: status, p_limit: 50 });
+export type FootageStorage = { files: number | string; total_bytes: number | string; oldest_at: string | null; hidden_files: number | string; campaigns_with_footage: number | string };
+/** The owner's footage storage totals (number of files, bytes, oldest file). */
+export const adminFootageStorage = async (): Promise<FootageStorage | null> => (await rows<FootageStorage>("admin_footage_storage"))[0] ?? null;
 export const adminResolveReport = (report: string, action: ReportAction) => call<void>("admin_report_resolve", { p_report: report, p_action: action });
 export const adminFlags = (status = "open") => rows<FlagRow>("admin_flags_list", { p_status: status, p_limit: 50 });
 export const adminResolveFlag = (flag: string, status: "reviewed" | "dismissed") => call<void>("admin_flag_resolve", { p_flag: flag, p_status: status });

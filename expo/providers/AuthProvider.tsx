@@ -288,6 +288,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
     // Phone hash, contact hashes and the hide list go first (they also cascade with the auth user).
     await supabase.rpc("delete_my_privacy_data").then(null, () => {});
+    // Uploaded campaign footage and exported copies are queued for deletion too (the database also does this when the profile row goes).
+    await supabase.rpc("delete_my_footage").then(null, () => {});
 
     const supabaseUrl =
       process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_URL.length > 0

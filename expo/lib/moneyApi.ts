@@ -79,7 +79,7 @@ export async function joinedCount(campaignId: string): Promise<number> {
   return count ?? 0;
 }
 
-export type MoneyReportTarget = "campaign" | "submission" | "money_review" | "money_user";
+export type MoneyReportTarget = "campaign" | "submission" | "money_review" | "money_user" | "footage";
 export async function reportMoney(reporterId: string, type: MoneyReportTarget, targetId: string, reason: "spam" | "harassment" | "nudity" | "other"): Promise<void> {
   const { error } = await supabase.from("reports").insert({ reporter_id: reporterId, target_type: type, target_id: targetId, reason });
   if (error && !/duplicate|unique/i.test(error.message)) throw new Error(error.message);
@@ -92,3 +92,6 @@ export async function campaignFootage(campaignId: string): Promise<FootageRow[]>
   if (error) throw new Error(error.message);
   return (data ?? []) as FootageRow[];
 }
+
+/** The creator's optional Google Drive / Dropbox link: only the creator and the clippers who joined get it (it is not a readable column). */
+export const campaignFootageLink = (campaignId: string) => rpc<string | null>("campaign_footage_link", { p_campaign: campaignId });

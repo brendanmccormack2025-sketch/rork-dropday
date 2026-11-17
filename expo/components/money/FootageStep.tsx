@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Pressable, StyleSheet, View } from "react-native";
+import { Alert, Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import UiText from "@/components/UiText";
 import PrimaryButton from "@/components/PrimaryButton";
@@ -20,7 +20,7 @@ const stateLabel = (i: UploadItem): string =>
     : i.state === "uploading" ? `Uploading… ${Math.round(i.progress * 100)}%` : "Waiting…";
 
 /** Step 1 of 4: add videos from the camera roll, up to 60 minutes (30 each). */
-export default function FootageStep({ items }: { items: UploadItem[] }) {
+export default function FootageStep({ items, link, onLink, linkError }: { items: UploadItem[]; link: string; onLink: (t: string) => void; linkError?: string }) {
   const [busy, setBusy] = useState(false);
   const add = async () => {
     setBusy(true);
@@ -50,7 +50,13 @@ export default function FootageStep({ items }: { items: UploadItem[] }) {
       ))}
       <PrimaryButton label={items.length ? "Add more videos" : "Add videos"} onPress={add} loading={busy} disabled={full} />
       {active > 0 ? <UiText style={styles.sub}>Keep Tryal open while your videos upload. If you close it, tap Add videos or come back here to continue.</UiText> : null}
-      <UiText style={styles.sub}>Up to 60 minutes in total, 30 minutes each. We delete them 30 days after your campaign closes.</UiText>
+      <UiText style={styles.sub}>Up to 60 minutes in total, 30 minutes each (2 GB per video). We delete them 14 days after your campaign closes.</UiText>
+      <View style={styles.alt}>
+        <UiText style={styles.altTitle}>Or paste a Google Drive / Dropbox link (optional)</UiText>
+        <TextInput value={link} onChangeText={onLink} placeholder="https://drive.google.com/…" placeholderTextColor={theme.textDim} autoCapitalize="none" autoCorrect={false} keyboardType="url" style={styles.altInput} accessibilityLabel="Google Drive or Dropbox link" />
+        <UiText style={styles.sub}>Use this mainly for footage longer than the upload limit. Only clippers who join see the link. Uploading is the main way.</UiText>
+        {linkError ? <UiText style={styles.err}>{linkError}</UiText> : null}
+      </View>
     </View>
   );
 }
@@ -62,5 +68,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: theme.card, borderRadius: 14, borderWidth: 1, borderColor: theme.border, padding: 12 },
   name: { color: theme.text, fontSize: 15, fontWeight: "800" as const },
   sub: { color: theme.textMuted, fontSize: 13 },
+  alt: { gap: 6, borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 12, marginTop: 4 },
+  altTitle: { color: theme.text, fontSize: 14, fontWeight: "800" as const },
+  altInput: { borderWidth: 1, borderColor: theme.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, color: theme.text, backgroundColor: theme.card, fontSize: 15 },
+  err: { color: theme.danger, fontSize: 13, fontWeight: "600" as const },
   link: { color: theme.accent, fontSize: 14, fontWeight: "800" as const },
 });

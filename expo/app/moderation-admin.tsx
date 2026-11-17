@@ -8,11 +8,11 @@ import { ChevronLeft } from "lucide-react-native";
 import UiText from "@/components/UiText";
 import { theme } from "@/constants/theme";
 import { isDebugOwner } from "@/constants/debug";
-import { adminAddTerm, adminFlags, adminLiftSanction, adminModerationLog, adminSanctions, adminSanctionUser, adminRemoveTerm, adminReports, adminResolveFlag, adminResolveReport, adminTerms, type ReportAction } from "@/lib/safety";
+import { adminAddTerm, adminFlags, adminFootageStorage, adminLiftSanction, adminModerationLog, adminSanctions, adminSanctionUser, adminRemoveTerm, adminReports, adminResolveFlag, adminResolveReport, adminTerms, type ReportAction } from "@/lib/safety";
 import { adminRecovery } from "@/lib/recovery";
 import { useAuth } from "@/providers/AuthProvider";
 
-type Tab = "reports" | "flags" | "accounts" | "recovery" | "words";
+type Tab = "reports" | "flags" | "accounts" | "recovery" | "storage" | "words";
 
 /**
  * Owner only (the database checks the admin list again on every call). Reports (posts, reactions, messages), flags from the
@@ -31,6 +31,7 @@ export default function ModerationAdminScreen() {
   const sanctions = useQuery({ queryKey: ["mod", "sanctions"], queryFn: adminSanctions, enabled: owner });
   const modLog = useQuery({ queryKey: ["mod", "log"], queryFn: adminModerationLog, enabled: owner });
   const recovery = useQuery({ queryKey: ["mod", "recovery"], queryFn: adminRecovery, enabled: owner });
+  const storage = useQuery({ queryKey: ["mod", "storage"], queryFn: adminFootageStorage, enabled: owner && tab === "storage" });
   const terms = useQuery({ queryKey: ["mod", "terms"], queryFn: adminTerms, enabled: owner });
 
   const fail = (e: unknown) => Alert.alert("Couldn't do that", e instanceof Error ? e.message : undefined);
@@ -82,7 +83,7 @@ export default function ModerationAdminScreen() {
           <View style={styles.back} />
         </View>
         <View style={styles.tabs}>
-          {([["reports", `Reports${reports.data ? ` (${reports.data.length})` : ""}`], ["flags", `Flags${flags.data ? ` (${flags.data.length})` : ""}`], ["accounts", "Accounts"], ["recovery", "Recovery"], ["words", "Word list"]] as Array<[Tab, string]>).map(([k, label]) => (
+          {([["reports", `Reports${reports.data ? ` (${reports.data.length})` : ""}`], ["flags", `Flags${flags.data ? ` (${flags.data.length})` : ""}`], ["accounts", "Accounts"], ["recovery", "Recovery"], ["storage", "Storage"], ["words", "Word list"]] as Array<[Tab, string]>).map(([k, label]) => (
             <Pressable key={k} onPress={() => setTab(k)} style={[styles.tab, tab === k && styles.tabOn]}>
               <UiText style={[styles.tabText, tab === k && styles.tabTextOn]}>{label}</UiText>
             </Pressable>
@@ -149,6 +150,14 @@ export default function ModerationAdminScreen() {
               <UiText style={styles.muted}>offered {new Date(o.created_at).toLocaleDateString()}{o.boost_post_id ? ` · boosted to ${o.boosted_viewers} people until ${o.boost_ends_at ? new Date(o.boost_ends_at).toLocaleString() : "?"}` : ""}</UiText>
             </View>
           )))}
+          {tab === "storage" && (storage.isLoading ? <ActivityIndicator color={theme.accent} /> : (
+            <View style={styles.card}>
+              <UiText style={styles.cardTitle}>Campaign footage</UiText>
+              <UiText style={styles.muted}>{storage.data ? `${(Number(storage.data.total_bytes) / 1024 ** 3).toFixed(2)} GB in ${Number(storage.data.files)} ${Number(storage.data.files) === 1 ? "file" : "files"} across ${Number(storage.data.campaigns_with_footage)} campaigns` : "Nothing stored."}</UiText>
+              <UiText style={styles.muted}>{storage.data?.oldest_at ? `Oldest file: ${new Date(storage.data.oldest_at).toLocaleDateString()} (${Math.floor((Date.now() - new Date(storage.data.oldest_at).getTime()) / 86_400_000)} days old)` : "No files yet."}</UiText>
+              <UiText style={styles.muted}>{storage.data ? `${Number(storage.data.hidden_files)} hidden after reports. ` : ""}Footage is deleted 14 days after a campaign closes.</UiText>
+            </View>
+          ))}
           {tab === "words" && (
             <>
               <View style={styles.addRow}>
