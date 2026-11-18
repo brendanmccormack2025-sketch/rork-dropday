@@ -235,7 +235,7 @@ function rig(opts = {}) {
   });
   eq("the merge receives both segments in recording order, with no inserted gap clip", [calls.length, calls[0], merged.ok], [1, r2.segments.map((sg) => sg.uri), true]);
   const nat = read("../lib/mergeNative.ts");
-  ok("the native merge lays the files back to back: just those files, no black or silent filler", /clips: uris\.map\(\(uri\) => \(\{ uri, trimStartMs: 0, trimEndMs: WHOLE_FILE_MS \}\)\)/.test(nat) && /overlays: \[\]/.test(nat) && /seamFades: false/.test(nat));
+  ok("the native merge lays the files back to back: just those files, no black or silent filler", /clips: uris\.map\(\(uri, i\) => \(\{ uri, trimStartMs: ranges\?\.\[i\]\?\.startMs \?\? 0, trimEndMs: ranges\?\.\[i\]\?\.endMs \?\? WHOLE_FILE_MS \}\)\)/.test(nat) && /overlays: \[\]/.test(nat) && /seamFades: false/.test(nat));
   const swift = read("../modules/video-render/ios/VideoRenderModule.swift");
   ok("(native: each clip starts where the previous ended)", /cursor = CMTimeAdd\(cursor, range\.duration\)/.test(swift));
 }
