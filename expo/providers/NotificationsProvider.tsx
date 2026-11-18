@@ -17,6 +17,7 @@ export type NotificationType =
   | "spotlight_offer"
   | "recovery_offer"
   | "report_alert"
+  | "footage_stalled"
   | "followed_post_survived"
   | "friend_request"
   | "friend_accept"

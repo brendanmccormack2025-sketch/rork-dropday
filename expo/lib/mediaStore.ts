@@ -15,6 +15,8 @@ export interface MediaStore {
   authHeaders(): Promise<Record<string, string>>;
   /** A short-lived read URL for one stored file, or null if this person may not read it. */
   signedUrl(path: string, seconds?: number): Promise<string | null>;
+  /** several at once (the segments a clipper is about to play); a path that may not be read comes back null */
+  signedUrls(paths: string[], seconds?: number): Promise<Array<string | null>>;
 }
 
 export const supabaseMediaStore: MediaStore = {
@@ -29,5 +31,12 @@ export const supabaseMediaStore: MediaStore = {
   async signedUrl(path, seconds = 3600) {
     const { data, error } = await supabase.storage.from(FOOTAGE_BUCKET).createSignedUrl(path, seconds);
     return error || !data ? null : data.signedUrl;
+  },
+  async signedUrls(paths, seconds = 3600) {
+    if (!paths.length) return [];
+    const { data, error } = await supabase.storage.from(FOOTAGE_BUCKET).createSignedUrls(paths, seconds);
+    if (error || !data) return paths.map(() => null);
+    const byPath = new Map(data.map((d) => [d.path, d.signedUrl ?? null]));
+    return paths.map((p) => byPath.get(p) ?? null);
   },
 };

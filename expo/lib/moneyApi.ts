@@ -85,12 +85,26 @@ export async function reportMoney(reporterId: string, type: MoneyReportTarget, t
   if (error && !/duplicate|unique/i.test(error.message)) throw new Error(error.message);
 }
 
-export type FootageRow = { id: string; duration_seconds: number | string; width: number; height: number; thumb_ok: boolean; thumb_path: string; storage_path: string; sort_order: number };
-/** The campaign's ready videos: the creator and the clippers who joined can read them (the table policy), nobody else. */
+export type FootageRow = {
+  id: string; duration_seconds: number | string; width: number; height: number; thumb_ok: boolean; thumb_path: string; sort_order: number;
+  status: "uploading" | "partial" | "ready" | "hidden" | string; segment_count: number; segments_ready: number; stalled_at: string | null;
+};
+/** The campaign's videos (ready, or partly uploaded): the creator and the clippers who joined can read them (the table policy), nobody else. */
 export async function campaignFootage(campaignId: string): Promise<FootageRow[]> {
-  const { data, error } = await supabase.from("campaign_footage").select("id, duration_seconds, width, height, thumb_ok, thumb_path, storage_path, sort_order").eq("campaign_id", campaignId).eq("status", "ready").order("sort_order");
+  const { data, error } = await supabase.from("campaign_footage").select("id, duration_seconds, width, height, thumb_ok, thumb_path, sort_order, status, segment_count, segments_ready, stalled_at").eq("campaign_id", campaignId).in("status", ["partial", "ready", "uploading"]).order("sort_order");
   if (error) throw new Error(error.message);
   return (data ?? []) as FootageRow[];
+}
+
+export type SegmentRow = { idx: number; start_s: number | string; end_s: number | string; status: "uploading" | "ready" | string; storage_path: string };
+/** One video and its segments (the manifest): what the clipper's viewer plays and which parts are still uploading. */
+export async function footageManifest(footageId: string): Promise<{ video: FootageRow; segments: SegmentRow[] } | null> {
+  const { data: v, error } = await supabase.from("campaign_footage").select("id, duration_seconds, width, height, thumb_ok, thumb_path, sort_order, status, segment_count, segments_ready, stalled_at").eq("id", footageId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!v) return null;
+  const { data: segs, error: e2 } = await supabase.from("campaign_footage_segments").select("idx, start_s, end_s, status, storage_path").eq("footage_id", footageId).order("idx");
+  if (e2) throw new Error(e2.message);
+  return { video: v as FootageRow, segments: (segs ?? []) as SegmentRow[] };
 }
 
 /** The creator's optional Google Drive / Dropbox link: only the creator and the clippers who joined get it (it is not a readable column). */

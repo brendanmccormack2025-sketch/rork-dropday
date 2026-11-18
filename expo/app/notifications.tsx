@@ -56,6 +56,10 @@ export default function NotificationsScreen() {
         router.push("/moderation-admin" as never);
         return;
       }
+      if (notif.type === "footage_stalled") {
+        router.push("/(tabs)/money" as never);
+        return;
+      }
       if (notif.type === "recovery_offer") {
         router.push("/recovery-offer" as never);
         return;

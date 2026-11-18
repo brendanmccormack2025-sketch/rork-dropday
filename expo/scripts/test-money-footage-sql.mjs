@@ -280,6 +280,11 @@ if (!BIN) {
       const g1 = psqlFile("t", mf), g2 = psqlFile("t", mf);
       if (/ERROR/.test(g1.stderr + g2.stderr)) console.log((g1.stderr + g2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 8).join("\n"));
       eq("the footage migration applies cleanly, and again (idempotent)", [/ERROR/.test(g1.stderr), /ERROR/.test(g2.stderr)], [false, false]);
+      // the segments migration (long videos in 1-minute parts), applied right after, as in the real order: every older footage test below must still pass with it
+      const sg = join(sqlDir, "migration-money-segments.sql");
+      const sg1 = psqlFile("t", sg), sg2 = psqlFile("t", sg);
+      if (/ERROR/.test(sg1.stderr + sg2.stderr)) console.log((sg1.stderr + sg2.stderr).split("\n").filter((l) => /ERROR/.test(l)).slice(0, 8).join("\n"));
+      eq("the segments migration applies cleanly, and again (idempotent)", [/ERROR/.test(sg1.stderr), /ERROR/.test(sg2.stderr)], [false, false]);
       eq("(F) the agreement version went up (everybody ticks the new rules), the limits are 60 / 30 minutes, 2 GB, 14 / 7 days", q(`select (agreement_version >= 2) || ':' || max_footage_seconds_total || ':' || max_footage_seconds_each || ':' || max_footage_bytes || ':' || footage_delete_days || ':' || orphan_footage_days from public.money_config`), "true:3600:1800:2147483648:14:7");
       eq("(F) one purge job is scheduled, and the bucket is private with a 2 GB limit and no other file types", [q(`select count(*) from cron.job where jobname = 'money-footage-purge'`), q(`select public::text || ':' || file_size_limit || ':' || array_to_string(allowed_mime_types, ',') from storage.buckets where id = 'campaign-footage'`)], ["1", "false:2147483648:video/mp4,video/quicktime,image/jpeg"]);
       // everybody re-onboards for the new version
@@ -390,11 +395,11 @@ if (!BIN) {
       // W. the one-paste file for the SQL editor (supabase/apply-money-preview.sql), run on this database that already has everything (the live situation)
       {
         const gen = spawnSync("node", ["--experimental-strip-types", "--no-warnings", join(sqlDir, "..", "scripts", "gen-apply-money-preview.mjs"), "--check"], { encoding: "utf8" });
-        eq("(W) apply-money-preview.sql is up to date with the four migration files", gen.status, 0);
+        eq("(W) apply-money-preview.sql is up to date with the five migration files", gen.status, 0);
         const text = readFileSync(join(sqlDir, "apply-money-preview.sql"), "utf8");
         const body = text.replace(/^\s*--.*$/gm, "");
         eq("(W) it has no psql-only commands, no transaction control, no extension install and never calls the birthdate lock-down", [/^\s*\\[a-z]/m.test(body), /^\s*(begin|commit|rollback)\s*;/im.test(body), /create extension/i.test(body), /select\s+public\.money_apply_birthdate_lockdown\s*\(/i.test(body)], [false, false, false, false]);
-        eq("(W) it holds the four files in the right order", ["migration-post-links.sql", "migration-money.sql", "migration-money-board.sql", "migration-money-footage.sql"].map((f) => text.indexOf(`-- PART: ${f}`)).every((v, i, a) => v >= 0 && (i === 0 || v > a[i - 1])), true);
+        eq("(W) it holds the five files in the right order", ["migration-post-links.sql", "migration-money.sql", "migration-money-board.sql", "migration-money-footage.sql", "migration-money-segments.sql"].map((f) => text.indexOf(`-- PART: ${f}`)).every((v, i, a) => v >= 0 && (i === 0 || v > a[i - 1])), true);
         const before = q(`select md5(string_agg(prosrc, '' order by proname)) from pg_proc where pronamespace = 'public'::regnamespace and proname in ('my_features', 'money_allowed', 'money_ready', 'money_join_campaign', 'money_create_campaign', 'money_footage_register')`);
         const paste = join(dir, "paste.sql"); writeFileSync(paste, text); if (asRoot) chownSync(paste, Number(spawnSync("id", ["-u", "postgres"], { encoding: "utf8" }).stdout.trim()), -1);
         const w1 = spawnSync("psql", ["-h", dir, "-p", port, "-U", "postgres", "-X", "-q", "-A", "-t", "-F", "|", "-v", "ON_ERROR_STOP=1", "-d", "t", "-f", paste], { encoding: "utf8" });
@@ -458,6 +463,89 @@ if (!BIN) {
         if (del.status !== 0) console.log("profile delete failed:", del.stderr.split("\n")[0]);
         eq("(X4) deleting the profile (the account deletion path, with cascades) queues that person's files by itself, and removes their footage rows", [del.status, q(`select string_agg(path, ',' order by path) from public.trial_media_delete_queue`), q(`select count(*) from public.campaign_footage where creator_id = '${U(GONE)}'`)], [0, `${U(GONE)}/${g[0]}.jpg,${U(GONE)}/${g[0]}.mp4`, "0"]);
         eq("(X4) the new functions are closed to anon, and the internals to apps", [q(`select has_function_privilege('anon', 'public.delete_my_footage()', 'execute')`), q(`select has_function_privilege('authenticated', 'public.money_footage_queue_user_files(uuid)', 'execute')`), q(`select has_function_privilege('authenticated', 'public.delete_my_footage()', 'execute')`)], ["f", "f", "t"]);
+      }
+      // Y. segmented footage: long videos in 1-minute parts, posted early, streamed, stalled
+      {
+        Q(`delete from public.reports; delete from public.trial_media_delete_queue; delete from public.campaign_footage where creator_id = '${U(C)}' and campaign_id is null`);
+        const regSeg = (uid, dur = 150, w = 1280, h = 720) => as(U(uid), `select string_agg(id || '|' || thumb_path || '|' || segment_seconds || '|' || idx || '|' || start_s || '|' || end_s || '|' || path, '#' order by idx) from public.money_footage_register_segmented(${dur}, ${w}, ${h})`);
+        const plan = (r) => r.out.split("#").map((l) => l.split("|"));
+        const r1 = regSeg(C);
+        const P1 = plan(r1);
+        const vid = P1[0][0];
+        eq("(Y1) registering a 150 s video gives the plan: 3 one-minute segments [0,60] [60,120] [120,150] with their paths, and the thumbnail path", [r1.ok, P1.map((x) => `${x[3]}:${x[4]}-${x[5]}`), P1[0][2], P1[0][6] === `${U(C)}/${vid}/seg-000.mp4`, P1[2][6] === `${U(C)}/${vid}/seg-002.mp4`, P1[0][1] === `${U(C)}/${vid}.jpg`], [true, ["0:0.00-60.00", "1:60.00-120.00", "2:120.00-150.00"], "60", true, true, true]);
+        eq("(Y1) a video of exactly 120 s is 2 segments, 61 s is 2, 60 s is 1; 0 s, over 30 minutes, a clipper and a teen are refused", [plan(regSeg(C, 120)).length, plan(regSeg(C, 61)).length, plan(regSeg(C, 60)).length, regSeg(C, 0).ok, regSeg(C, 1801).ok, regSeg(A).ok, regSeg(TEEN).ok], [2, 2, 1, false, false, false, false]);
+        Q(`delete from public.campaign_footage where creator_id = '${U(C)}' and campaign_id is null and id <> '${vid}'`);
+        eq("(Y1) minutes are reserved when it is registered (the 60 minute ceiling counts videos that are only partly uploaded)", [regSeg(C, 3600).ok, regSeg(C, 1800).ok].join(), "false,true");   // 150 s + 3600 s > 60 min; 150 s + 1800 s fits
+        Q(`delete from public.campaign_footage where creator_id = '${U(C)}' and campaign_id is null and id <> '${vid}'`);
+        eq("(Y2) a video with no segment uploaded yet cannot be used for a campaign; it says why", [as(U(C), `select public.money_create_campaign_with_footage('t', 'd', null, 2, 50, 250, 3, array['tiktok'], 7, 1000, 'paypal', '@c', now() + interval '30 days', 5, true, array['${vid}']::uuid[])`).err.includes("have not started uploading")], [true]);
+        // uploading a segment: storage policy
+        const seg = (i) => `${U(C)}/${vid}/seg-${String(i).padStart(3, "0")}.mp4`;
+        const putAsSeg = (uid, path) => as(uid, `insert into storage.objects (bucket_id, name, owner, metadata) values ('campaign-footage', '${path}', '${uid}', '{"size": 1000}')`);
+        eq("(Y3) the creator can upload each planned segment path and the thumbnail; nobody else can, and nothing outside the plan", [putAsSeg(U(C), seg(0)).ok, putAsSeg(U(C), seg(1)).ok, putAsSeg(U(A), seg(2)).ok, putAsSeg(U(C), seg(9)).ok, putAsSeg(U(C), `${U(C)}/${vid}/extra.mp4`).ok, putAsSeg(U(C), `${U(C)}/${vid}.jpg`).ok], [true, true, false, false, false, true]);
+        eq("(Y3) completing a segment checks the file: wrong size and missing file are refused, an unknown segment or someone else's video too", [as(U(C), `select public.money_segment_complete('${vid}', 0, 999)`).ok, as(U(C), `select public.money_segment_complete('${vid}', 2, 1000)`).ok, as(U(C), `select public.money_segment_complete('${vid}', 7, 1000)`).ok, as(U(BOTH), `select public.money_segment_complete('${vid}', 0, 1000)`).ok, as(U(C), `select public.money_segment_complete('${vid}', 0, 0)`).ok], [false, false, false, false, false]);
+        const c0 = as(U(C), `select public.money_segment_complete('${vid}', 0, 1000)`);
+        eq("(Y3) the first segment makes the video 'partial' (1 of 3 ready, size recorded, thumbnail seen); completing it again is harmless", [c0.out, q(`select status || ':' || segments_ready || '/' || segment_count || ':' || size_bytes || ':' || thumb_ok from public.campaign_footage where id = '${vid}'`), as(U(C), `select public.money_segment_complete('${vid}', 0, 1000)`).out], ["partial", "partial:1/3:1000:true", "partial"]);
+        eq("(Y3) an uploaded (ready) segment accepts no more uploads", putAsSeg(U(C), seg(0)).ok, false);
+        // posting early
+        const cc2 = as(U(C), `select public.money_create_campaign_with_footage('Early', 'd', null, 2, 50, 250, 3, array['tiktok'], 7, 1000, 'paypal', '@c', now() + interval '30 days', 5, true, array['${vid}']::uuid[])`);
+        ok("(Y4) a campaign can be posted as soon as the video has its first segment", cc2.ok);
+        const cid2 = cc2.out;
+        // clippers see it
+        const sees = (uid) => as(uid, `select (select count(*) from public.campaign_footage where id = '${vid}') || '/' || (select count(*) from public.campaign_footage_segments where footage_id = '${vid}')`).out;
+        const readSeg = (uid, i) => as(uid, `select count(*) from storage.objects where bucket_id = 'campaign-footage' and name = '${seg(i)}'`).out;
+        eq("(Y4) before joining, a clipper sees nothing and can read no segment", [sees(U(A)), readSeg(U(A), 0), sees(U(B))], ["0/0", "0", "0/0"]);
+        as(U(A), `select public.money_join_campaign('${cid2}', true)`);
+        eq("(Y4) after joining, a clipper sees the partial video and ALL its segment rows (to show what is still uploading), reads the READY segment's file but not the one still uploading; the creator reads both", [sees(U(A)), readSeg(U(A), 0), readSeg(U(A), 1), readSeg(U(C), 1), as(U(A), `select string_agg(idx || ':' || status, ',' order by idx) from public.campaign_footage_segments where footage_id = '${vid}'`).out], ["1/3", "1", "0", "1", "0:ready,1:uploading,2:uploading"]);
+        eq("(Y4) a clipper cannot touch segments or register, even after joining", [as(U(A), `select public.money_segment_complete('${vid}', 1, 1000)`).ok, as(U(A), `update public.campaign_footage_segments set status = 'ready' where footage_id = '${vid}'`).ok, as(U(A), `delete from public.campaign_footage_segments where footage_id = '${vid}'`).ok], [false, false, false]);
+        // the rest keeps arriving after the terms froze
+        eq("(Y5) the terms are frozen now (a clipper joined) but the registered video's remaining segments still complete, in any order", [q(`select terms_frozen_at is not null from public.campaigns where id = '${cid2}'`), as(U(C), `select public.money_segment_complete('${vid}', 1, 1000)`).out], ["t", "partial"]);
+        putAsSeg(U(C), seg(2)); Q(`update storage.objects set metadata = '{"size": 500}' where name = '${seg(2)}'`);
+        eq("(Y5) the last segment makes it 'ready' (3 of 3), with the total size, and the clipper now reads every segment", [as(U(C), `select public.money_segment_complete('${vid}', 2, 500)`).out, q(`select status || ':' || segments_ready || ':' || size_bytes || ':' || (ready_at is not null) from public.campaign_footage where id = '${vid}'`), readSeg(U(A), 2)], ["ready", "ready:3:2500:true", "1"]);
+        eq("(Y5) but no NEW video can be added to a frozen campaign, and the old rule still blocks removing it", [as(U(C), `select public.money_footage_remove('${vid}')`).ok, q(`select status from public.campaign_footage where id = '${vid}'`)], [false, "ready"]);
+        // reports and hiding on a partial video
+        const v2 = plan(regSeg(BOTH, 120))[0][0];
+        Q(`insert into storage.objects (bucket_id, name, owner, metadata) values ('campaign-footage', '${U(BOTH)}/${v2}/seg-000.mp4', '${U(BOTH)}', '{"size": 10}')`);
+        as(U(BOTH), `select public.money_segment_complete('${v2}', 0, 10)`);
+        const cid3 = as(U(BOTH), `select public.money_create_campaign_with_footage('Part', 'd', null, 2, 50, 250, 3, array['tiktok'], 7, 1000, 'paypal', '@c', now() + interval '30 days', 5, true, array['${v2}']::uuid[])`).out;
+        Q(`insert into public.campaign_members (campaign_id, clipper_id, agreed_terms) values ('${cid3}', '${U(A)}', '{}'), ('${cid3}', '${U(B)}', '{}'), ('${cid3}', '${U(STR)}', '{}') on conflict do nothing`);
+        for (const u of [A, B, STR]) as(U(u), `insert into public.reports (reporter_id, target_type, target_id, reason) values ('${U(u)}', 'footage', '${v2}', 'spam')`);
+        eq("(Y6) three reports hide a PARTIAL video too; a clipper then sees no rows and reads no files", [q(`select status from public.campaign_footage where id = '${v2}'`), as(U(A), `select count(*) from public.campaign_footage_segments where footage_id = '${v2}'`).out, as(U(A), `select count(*) from storage.objects where name = '${U(BOTH)}/${v2}/seg-000.mp4'`).out], ["hidden", "0", "0"]);
+        const rq = q(`select id from public.reports where target_id = '${v2}' limit 1`);
+        eq("(Y6) the owner dismissing the reports puts it back as 'partial' (not 'ready')", [as(U(ADM), `select public.admin_report_resolve('${rq}', 'dismiss')`).ok, q(`select status from public.campaign_footage where id = '${v2}'`)], [true, "partial"]);
+        // a late segment on a hidden video keeps it hidden
+        Q(`update public.campaign_footage set status = 'hidden' where id = '${v2}'; insert into storage.objects (bucket_id, name, owner, metadata) values ('campaign-footage', '${U(BOTH)}/${v2}/seg-001.mp4', '${U(BOTH)}', '{"size": 10}')`);
+        eq("(Y6) a segment that arrives for a hidden video does not un-hide it", [as(U(BOTH), `select public.money_segment_complete('${v2}', 1, 10)`).out, q(`select status from public.campaign_footage where id = '${v2}'`)], ["hidden", "hidden"]);
+        // stalled uploads
+        const v3 = plan(regSeg(BOTH, 180))[0][0];
+        Q(`update public.campaign_footage set last_progress_at = now() - interval '2 days' where id = '${v3}'`);
+        const n0 = q(`select public.money_footage_stall_check()`);
+        eq("(Y7) a video with no progress for 2 days is not stalled yet", [n0, q(`select stalled_at is null from public.campaign_footage where id = '${v3}'`)], ["0", "t"]);
+        Q(`update public.campaign_footage set last_progress_at = now() - interval '4 days' where id = '${v3}'; delete from public.notifications where recipient_id = '${U(BOTH)}'`);
+        eq("(Y7) after 3 days it is flagged stalled once, and its creator gets an in-app notification 'footage_stalled'", [q(`select public.money_footage_stall_check()`), q(`select stalled_at is not null from public.campaign_footage where id = '${v3}'`), q(`select count(*) from public.notifications where recipient_id = '${U(BOTH)}' and type = 'footage_stalled'`), q(`select public.money_footage_stall_check()`)], ["1", "t", "1", "0"]);
+        Q(`insert into storage.objects (bucket_id, name, owner, metadata) values ('campaign-footage', '${U(BOTH)}/${v3}/seg-000.mp4', '${U(BOTH)}', '{"size": 10}')`);
+        eq("(Y7) the next segment clears the flag", [as(U(BOTH), `select public.money_segment_complete('${v3}', 0, 10)`).ok, q(`select stalled_at is null from public.campaign_footage where id = '${v3}'`)], [true, "t"]);
+        eq("(Y7) the notification type was added without losing the others, and the check job is scheduled once", [q(`select pg_get_constraintdef(oid) like '%footage_stalled%' and pg_get_constraintdef(oid) like '%report_alert%' and pg_get_constraintdef(oid) like '%verdict_survived%' from pg_constraint where conname = 'notifications_type_check'`), q(`select count(*) from cron.job where jobname = 'money-footage-stall'`)], ["t", "1"]);
+        eq("(Y7) the stall check is not callable by apps", q(`select has_function_privilege('authenticated', 'public.money_footage_stall_check()', 'execute')`), "f");
+        // deletion covers every segment file
+        Q(`delete from public.trial_media_delete_queue`);
+        const v4 = plan(regSeg(SX_C(), 130))[0][0];
+        function SX_C() { return BOTH; }
+        eq("(Y8) removing a video queues EVERY segment file (and the thumbnail), however far the upload got", [as(U(BOTH), `select public.money_footage_remove('${v4}')`).ok, q(`select count(*) from public.trial_media_delete_queue where path like '${U(BOTH)}/${v4}/seg-%'`)], [true, "3"]);
+        Q(`delete from public.trial_media_delete_queue`);
+        const gone = q(`select id from public.campaign_footage where id = '${v3}'`);
+        Q(`update public.campaign_footage set status = 'deleted', deleted_at = now() where id = '${v3}'`);
+        eq("(Y8) the purge / owner / report paths (status deleted) queue the segments through the trigger", q(`select count(*) from public.trial_media_delete_queue where path like '${U(BOTH)}/${v3}/seg-%'`), "3");
+        Q(`delete from public.trial_media_delete_queue`);
+        // account deletion
+        const GONE2 = 97; mkUser(GONE2); onboard(GONE2, "creator");
+        const v5 = plan(regSeg(GONE2, 130))[0][0];
+        Q(`insert into storage.objects (bucket_id, name, owner, metadata) values ('campaign-footage', '${U(GONE2)}/${v5}/seg-000.mp4', '${U(GONE2)}', '{"size": 10}')`);
+        const d2 = psql("t", `delete from public.profiles where id = '${U(GONE2)}'`, ["-v", "ON_ERROR_STOP=1"]);
+        eq("(Y9) deleting an account queues every segment file, uploaded or only planned", [d2.status, q(`select count(*) from public.trial_media_delete_queue where path like '${U(GONE2)}/${v5}/seg-%'`)], [0, "3"]);
+        // owner totals include partial
+        const tot2 = as(U(ADM), `select files from public.admin_footage_storage()`);
+        eq("(Y9) the owner's totals count partial videos", [tot2.ok, Number(tot2.out) >= 2], [true, true]);
+        eq("(Y9) the new functions are callable by signed-in users only", ["public.money_footage_register_segmented(numeric,integer,integer)", "public.money_segment_complete(uuid,integer,bigint)"].map((f) => [q(`select has_function_privilege('authenticated', '${f}', 'execute')`), q(`select has_function_privilege('anon', '${f}', 'execute')`)].join("")), ["tf", "tf"]);
       }
       // V. the read-only check the owner runs after applying
       {

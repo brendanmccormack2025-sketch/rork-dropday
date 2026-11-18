@@ -48,6 +48,8 @@ export async function renderMerge(
   uris: string[],
   onProgress: (p: number) => void,
   onStage: (stage: string) => void = () => {},
+  /** optional: keep only [startMs, endMs) of each file (same order as `uris`); default is the whole file */
+  ranges?: Array<{ startMs: number; endMs: number }>,
 ): Promise<{ uri: string; durationMs: number; timing?: MergeTimingReport | null }> {
   crumb("begin", { clips: uris.length });
   // the size comes from the first frame; if that never answers, a portrait default is used
@@ -73,7 +75,7 @@ export async function renderMerge(
     }, MERGE_TIMEOUT_MS);
     const json = toRenderJson({
       version: 1,
-      clips: uris.map((uri) => ({ uri, trimStartMs: 0, trimEndMs: WHOLE_FILE_MS })),
+      clips: uris.map((uri, i) => ({ uri, trimStartMs: ranges?.[i]?.startMs ?? 0, trimEndMs: ranges?.[i]?.endMs ?? WHOLE_FILE_MS })),
       overlays: [],
     });
     // A plain concatenation: no dip in the audio at the joins (build 1.0.4; older builds ignore the option).

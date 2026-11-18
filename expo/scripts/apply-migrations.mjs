@@ -3,7 +3,7 @@
  * Applies ONLY the stranger-only, Spotlight, harassment-protection, Recovery Boost, account-sanctions and Tryal-friends migrations to the live database, in this order, each in its own transaction:
  *   supabase/migration-live-snapshot.sql, supabase/migration-known-connections.sql, supabase/migration-stranger-only.sql,
  *   supabase/migration-spotlight.sql, supabase/migration-harassment.sql, supabase/migration-recovery.sql, supabase/migration-sanctions.sql,
- *   supabase/migration-tryal-friends.sql, supabase/migration-post-links.sql, supabase/migration-money.sql, supabase/migration-money-board.sql, supabase/migration-money-footage.sql
+ *   supabase/migration-tryal-friends.sql, supabase/migration-post-links.sql, supabase/migration-money.sql, supabase/migration-money-board.sql, supabase/migration-money-footage.sql, supabase/migration-money-segments.sql
  * It never runs ship.sh, never deploys functions and never publishes an app update.
  *
  *   SUPABASE_ACCESS_TOKEN=sbp_... node scripts/apply-migrations.mjs          check the Vault pepper, apply the eight files
@@ -27,7 +27,7 @@ const REF = process.env.SUPABASE_PROJECT_REF || "tfdjymogbtfavdzgfqas";
 const TOKEN = (process.env.SUPABASE_ACCESS_TOKEN || "").replace(/\s+/g, "");
 const MAX_BYTES = 1_000_000;
 
-export const FILES = ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql", "migration-sanctions.sql", "migration-tryal-friends.sql", "migration-post-links.sql", "migration-money.sql", "migration-money-board.sql", "migration-money-footage.sql"];
+export const FILES = ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql", "migration-sanctions.sql", "migration-tryal-friends.sql", "migration-post-links.sql", "migration-money.sql", "migration-money-board.sql", "migration-money-footage.sql", "migration-money-segments.sql"];
 export const PEPPER_QUERY = "select count(*)::int as n from vault.decrypted_secrets where name = 'trial_contact_pepper' and coalesce(decrypted_secret, '') <> ''";
 export const PEPPER_HELP = `The Vault secret 'trial_contact_pepper' does not exist, so nothing was applied.
 Create it once in the Supabase SQL editor (use a long random value and never change it afterwards, or every stored hash stops matching):

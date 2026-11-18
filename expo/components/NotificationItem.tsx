@@ -17,7 +17,7 @@ import type { NotificationRow } from "@/providers/NotificationsProvider";
  * follow_request, follow_accept, followed_post_survived) and anything unknown
  * render nothing.
  */
-const DISPLAYED_TYPES: string[] = ["like", "reaction", "verdict_survived", "verdict_unjudged", "spotlight_offer", "recovery_offer", "report_alert", "friend_request", "friend_accept"];   // "message" rows exist for the push; chats show their own unread dot   // posts that end or stay incomplete disappear quietly: no such notifications
+const DISPLAYED_TYPES: string[] = ["like", "reaction", "verdict_survived", "verdict_unjudged", "spotlight_offer", "recovery_offer", "report_alert", "friend_request", "friend_accept", "footage_stalled"];   // "message" rows exist for the push; chats show their own unread dot   // posts that end or stay incomplete disappear quietly: no such notifications
 
 export function isDisplayedNotification(notif: { type: string }): boolean {
   return DISPLAYED_TYPES.includes(notif.type);
@@ -66,7 +66,7 @@ export default function NotificationItem({
   };
   const thumbUri = resolveThumbUrl(notif.post?.thumbnail_url ?? null);
   const isVerdict =
-    notif.type === "verdict_survived" || notif.type === "verdict_unjudged" || notif.type === "spotlight_offer" || notif.type === "recovery_offer" || notif.type === "report_alert";
+    notif.type === "verdict_survived" || notif.type === "verdict_unjudged" || notif.type === "spotlight_offer" || notif.type === "recovery_offer" || notif.type === "report_alert" || notif.type === "footage_stalled";
 
   let icon = <Bell color={theme.textMuted} size={15} strokeWidth={2} />;
   let actionText = "";
@@ -99,6 +99,8 @@ export default function NotificationItem({
   } else if (notif.type === "report_alert") {
     icon = <Flag color={theme.accent} size={15} strokeWidth={2} />;
     actionText = "New report to review";
+  } else if (notif.type === "footage_stalled") {
+    actionText = "Your campaign footage stopped uploading. Open Tryal to finish it.";
   }
 
   return (

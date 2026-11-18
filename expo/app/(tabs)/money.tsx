@@ -11,6 +11,7 @@ import CampaignCard from "@/components/money/CampaignCard";
 import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import { useMoney } from "@/hooks/useMoney";
+import { footageUploader } from "@/lib/footageRuntime";
 import { browseCampaigns, myCampaigns, myJoinedCampaigns, type CampaignWithCreator } from "@/lib/moneyApi";
 import { dollars, deadlineLabel, sortCampaigns, type SortKey } from "@/lib/moneyCampaign";
 
@@ -22,6 +23,8 @@ const SORTS: Array<[SortKey, string]> = [["newest", "Newest"], ["rate", "Highest
  * still checks, so nothing shows before the walkthrough and agreement are done.
  */
 export default function MoneyTab() {
+  // an upload that was running when Tryal was closed carries on as soon as the Money tab opens
+  React.useEffect(() => { void footageUploader.restore(); }, []);
   const router = useRouter();
   const { user } = useAuth();
   const { features, profile, loaded, refresh } = useMoney();

@@ -79,6 +79,15 @@ Budget tracking: `budget_committed` = sum of owed amounts on approved clips. Clo
 - **Report:** every uploaded video has a **Report** action for clippers who joined, through the existing reports table: the same reasons (spam, harassment, nudity, other), the same auto-hide threshold (3 reports hide it from clippers until the owner decides) and the same admin queue (dismiss puts it back, hide keeps it hidden, remove deletes it and its files).
 - **Admin screen (owner only):** a Storage tab shows total footage storage (GB), the number of files and the oldest file.
 
+### 3.4 Long footage as segments (built after the first upload test; JS + SQL)
+- **Segments:** each video is uploaded as **1-minute segments** (`money_config.segment_seconds`), each its own small MP4. The database makes the plan (`money_footage_register_segmented`: how many, which start and end times, which paths); the phone follows it. The segment table is the manifest.
+- **Pipeline:** the phone cuts segment N+1 while segment N uploads (one cut at a time; the upload hides behind the cut). Each segment resumes on its own. Before cutting, the phone checks it has about 600 MB free; before the camera roll opens it asks for 1.5 GB (the picker copies each video first).
+- **Posting early:** a campaign can be posted as soon as **each video has its first segment uploaded** (status `partial`). The rest keeps uploading behind the campaign (the creator keeps Tryal open); remaining segments are allowed after the terms freeze because they belong to a video registered before. Clippers see "still uploading: 3 of 12 parts" and cannot choose a part that is not ready.
+- **Time left:** the creator sees "about N minutes left" per video and in total, measured from the segments already done (first estimate: cutting about 25 s per minute of video, upload at 19 Mbps x 80 %).
+- **Stalled:** a video with no new segment for **3 days** is flagged stalled; its creator gets an in-app notification (`footage_stalled`); clippers see "upload stopped". Deletion rules are unchanged (14 days after the campaign closes).
+- **Clipper side:** the clipper previews by streaming segments (signed URLs), marks a section of **at most 3 minutes**, and "Make a clip" downloads **only the segments that cover it**, trims and joins them on the phone with the existing renderer, and hands the file to the editor (final clip up to 60 s). This **replaces the planned native "remote time-range export"**.
+- **Native batch build later (the owner says when):** a segment cutter that uses the hardware encoder (AVAssetExportSession / VideoToolbox, HEVC, 1080p for landscape) and **cuts with passthrough, no re-encode, when the source is already HEVC or H.264 at 1080p or below** (re-encoding only 4K or unusual formats); today's renderer stays as the fallback behind a flag. The background-upload module stays in that batch.
+
 ## 4. Joining (clipper)
 - An **"I'm in"** button shows the frozen terms and the **Clipper Agreement**:
   - only real views count
@@ -218,7 +227,7 @@ In-app payments/escrow (v2: Stripe Connect after confirming with App Review), au
 ## 15. Build order
 Steps 1-2 below are built. The footage / links work (owner's order) comes next, one step at a time, each confirmed before the next:
 - **a. Post links** (section 16, the non-Money part): standalone, shippable in the current app before Money.
-- **b. Footage upload + campaign creation** (sections 3, 3.1 and 3.3): resumable upload, MediaStore, per-file size cap, 14-day deletion, account deletion removes footage and exports, Report on footage (existing report system), storage totals on the admin screen, optional Drive / Dropbox link. Required before any real creator uses uploads.
+- **b. Footage upload + campaign creation** (sections 3, 3.1, 3.3 and 3.4, now in 1-minute segments with early posting): resumable upload, MediaStore, per-file size cap, 14-day deletion, account deletion removes footage and exports, Report on footage (existing report system), storage totals on the admin screen, optional Drive / Dropbox link. Required before any real creator uses uploads.
 - **c. The campaign screen** (section 3.2).
 - **d. The clipper's section-export flow** (section 5).
 - **e. Money full-video tracked links** (the rest of section 16), then a `money-preview` TestFlight build.

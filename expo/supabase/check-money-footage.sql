@@ -23,9 +23,19 @@ from (
   union all
   select 'the database functions the footage screens call',
          case when (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace
-                      and p.proname in ('money_footage_register', 'money_footage_complete', 'money_footage_fail', 'money_footage_remove', 'money_create_campaign_with_footage')
-                      and has_function_privilege('authenticated', p.oid, 'execute')) = 5 then 'ok' else 'MISSING or not executable: run migration-money-footage.sql' end,
+                      and p.proname in ('money_footage_register_segmented', 'money_segment_complete', 'money_footage_remove', 'money_create_campaign_with_footage')
+                      and has_function_privilege('authenticated', p.oid, 'execute')) = 4 then 'ok' else 'MISSING or not executable: run migration-money-segments.sql' end,
          null, 2
+  union all
+  select 'footage segments (long videos in 1-minute parts)',
+         case when to_regclass('public.campaign_footage_segments') is not null
+                and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'campaign_footage' and column_name = 'segments_ready')
+              then 'ok' else 'MISSING: run migration-money-segments.sql' end,
+         (select 'segment length ' || segment_seconds || ' s, stalled after ' || footage_stall_days || ' days' from public.money_config), 2
+  union all
+  select 'the stalled-upload check is scheduled',
+         case when exists (select 1 from cron.job where jobname = 'money-footage-stall') then 'ok' else 'NOT SCHEDULED: run select public.money_footage_stall_check() by hand now and then' end,
+         (select schedule from cron.job where jobname = 'money-footage-stall'), 2
   union all
   select 'the daily purge is scheduled',
          case when exists (select 1 from cron.job where jobname = 'money-footage-purge') then 'ok' else 'NOT SCHEDULED: run select public.money_footage_purge() by hand now and then' end,

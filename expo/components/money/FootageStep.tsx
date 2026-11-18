@@ -6,21 +6,26 @@ import PrimaryButton from "@/components/PrimaryButton";
 import { theme } from "@/constants/theme";
 import { minutesLabel, usedLabel, MAX_TOTAL_SECONDS, usedSeconds } from "@/lib/footageLimits";
 import { footageUploader, pickFootage, recordPickerProblem } from "@/lib/footageRuntime";
-import type { UploadItem } from "@/lib/footageUpload";
+import { isPostable, type UploadItem } from "@/lib/footageUpload";
+import { etaLabel } from "@/lib/footageSegments";
 
-/** The uploader's list, live. Restores a saved list once (an upload that was running when Tryal closed carries on). */
-export function useFootage(): UploadItem[] {
+/**
+ * The uploader's list, live. Restores a saved list once (an upload that was running when Tryal closed carries on).
+ * No argument: the videos being added in the "post a campaign" steps. With a campaign id: the videos of that campaign that are still uploading.
+ */
+export function useFootage(campaignId?: string): UploadItem[] {
   const [items, setItems] = useState<UploadItem[]>(footageUploader.list());
   useEffect(() => { const off = footageUploader.subscribe(setItems); void footageUploader.restore(); return off; }, []);
-  return items;
+  return items.filter((i) => (campaignId ? i.campaignId === campaignId : !i.campaignId));
 }
 
 /** What each row says: where the video is, in words. */
 export function statusLine(i: UploadItem): string {
   if (i.state === "done") return "Ready";
   if (i.state === "error") return i.error ?? "Something went wrong with this video.";
-  if (i.state === "compressing") return `Preparing the video… ${Math.round(i.progress * 300)}%`;
-  if (i.state === "uploading") return i.stage === "uploading the video" ? `Uploading… ${Math.round(i.progress * 100)}%` : `${(i.stage ?? "Working").replace(/^./, (c) => c.toUpperCase())}…`;
+  const left = i.etaSeconds && i.etaSeconds > 0 ? ` · ${etaLabel(i.etaSeconds)}` : "";
+  const first = isPostable(i) ? " · you can post now, the rest keeps uploading" : "";
+  if (i.state === "compressing" || i.state === "uploading") return `${(i.stage ?? "Working").replace(/^./, (c) => c.toUpperCase())}… ${Math.round(i.progress * 100)}%${left}${first}`;
   return "Waiting…";
 }
 
@@ -83,7 +88,7 @@ export default function FootageStep({ items, link, onLink, linkError }: { items:
       ))}
       {notice.length ? <View style={styles.notice}>{notice.map((n) => <UiText key={n} style={styles.err}>{n}</UiText>)}</View> : null}
       <PrimaryButton label={items.length ? "Add more videos" : "Add videos"} onPress={add} loading={busy} disabled={full || busy} />
-      {active > 0 ? <UiText style={styles.sub}>You can carry on to the next step while your videos upload. Keep Tryal open until they are ready. If you close it, come back here to continue.</UiText> : null}
+      {active > 0 ? <UiText style={styles.sub}>{footageUploader.totalEtaSeconds() > 0 ? `All videos: ${etaLabel(footageUploader.totalEtaSeconds())}. ` : ""}You can post as soon as each video's first minute is up, and carry on to the next step meanwhile. Keep Tryal open until everything is uploaded. If you close it, come back to Tryal to continue.</UiText> : null}
       <UiText style={styles.sub}>Up to 60 minutes in total, 30 minutes each (2 GB per video). We delete them 14 days after your campaign closes.</UiText>
       <View style={styles.alt}>
         <UiText style={styles.altTitle}>Or paste a Google Drive / Dropbox link (optional)</UiText>

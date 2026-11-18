@@ -13,6 +13,9 @@ import { theme } from "@/constants/theme";
 import { useAuth } from "@/providers/AuthProvider";
 import { useUserBlocks } from "@/hooks/useUserBlocks";
 import { minutesLabel } from "@/lib/footageLimits";
+import { etaLabel } from "@/lib/footageSegments";
+import { footageUploader } from "@/lib/footageRuntime";
+import { useFootage } from "@/components/money/FootageStep";
 import { campaignDetail, campaignFootage, campaignFootageLink, campaignPaymentInfo, joinCampaign, reportMoney, setCampaignStatus } from "@/lib/moneyApi";
 import { CLIPPER_AGREEMENT, MESSAGING_NOTICE } from "@/lib/moneyContent";
 import { PAYMENT_LABELS, PLATFORM_LABELS, cardModel, dollars, moneyErrorMessage, profileBadge, type PaymentMethod } from "@/lib/moneyCampaign";
@@ -34,7 +37,8 @@ export default function CampaignScreen() {
 
   const q = useQuery({ queryKey: ["money", "campaign", id, me], enabled: !!id && !!me, queryFn: () => campaignDetail(String(id), me) });
   const d = q.data;
-  const footage = useQuery({ queryKey: ["money", "footage", id], enabled: !!d && (d.joined || d.mine), queryFn: () => campaignFootage(String(id)) });
+  const footage = useQuery({ queryKey: ["money", "footage", id], enabled: !!d && (d.joined || d.mine), queryFn: () => campaignFootage(String(id)), refetchInterval: 15_000 });
+  const uploading = useFootage(String(id));
   const footageLink = useQuery({ queryKey: ["money", "footage-link", id], enabled: !!d && (d.joined || d.mine), queryFn: () => campaignFootageLink(String(id)) });
   const pay = useQuery({ queryKey: ["money", "pay", id], enabled: !!d && (d.joined || d.mine), queryFn: () => campaignPaymentInfo(String(id)) });
 
@@ -126,12 +130,25 @@ export default function CampaignScreen() {
           <UiText style={s.text}>{pay.data ? `${PAYMENT_LABELS[pay.data.payment_method as PaymentMethod] ?? pay.data.payment_method}: ${pay.data.payment_handle}` : "…"}</UiText>
           <UiText style={s.text}>The creator pays you directly, outside the app.</UiText>
           {footage.data?.length ? <UiText style={s.text}>Footage: {footage.data.length} {footage.data.length === 1 ? "video" : "videos"}, {minutesLabel(footage.data.reduce((a, x) => a + Number(x.duration_seconds), 0))} in total.</UiText> : null}
-          {footage.data?.map((v, i) => (
-            <View key={v.id} style={styles.videoRow}>
-              <UiText style={s.text}>Video {i + 1} · {minutesLabel(Number(v.duration_seconds))}</UiText>
-              {d.joined ? <Pressable onPress={() => reportFootage(v.id)} accessibilityRole="button" accessibilityLabel={`Report video ${i + 1}`}><UiText style={styles.safetyText}>Report</UiText></Pressable> : null}
-            </View>
-          ))}
+          {footage.data?.map((v, i) => {
+            const mine = uploading.find((u) => u.footageId === v.id);
+            const done = v.segments_ready >= v.segment_count;
+            const state = done ? "ready" : v.stalled_at ? "upload stopped" : `still uploading: ${v.segments_ready} of ${v.segment_count} parts`;
+            return (
+              <View key={v.id} style={{ gap: 4 }}>
+                <View style={styles.videoRow}>
+                  <UiText style={s.text}>Video {i + 1} · {minutesLabel(Number(v.duration_seconds))} · {state}</UiText>
+                  {d.joined ? <Pressable onPress={() => reportFootage(v.id)} accessibilityRole="button" accessibilityLabel={`Report video ${i + 1}`}><UiText style={styles.safetyText}>Report</UiText></Pressable> : null}
+                </View>
+                {v.segments_ready >= 1 ? <Pressable onPress={() => router.push(`/money/footage/${v.id}` as never)} accessibilityRole="button"><UiText style={styles.link}>Preview and pick a section</UiText></Pressable> : null}
+                {d.mine && mine ? (
+                  <UiText style={s.text}>{mine.state === "error" ? (mine.error ?? "The upload stopped.") : `${Math.round(mine.progress * 100)}%${mine.etaSeconds ? ` · ${etaLabel(mine.etaSeconds)}` : ""}. Keep Tryal open.`}{mine.state === "error" ? " " : ""}</UiText>
+                ) : null}
+                {d.mine && mine?.state === "error" ? <Pressable onPress={() => footageUploader.retry(mine.localId)} accessibilityRole="button"><UiText style={styles.link}>Retry</UiText></Pressable> : null}
+                {d.mine && v.stalled_at && !mine ? <UiText style={s.text}>This upload stopped before it finished and is no longer on this phone. Remove the campaign's video and add it again, or ask clippers to use the parts that are ready.</UiText> : null}
+              </View>
+            );
+          })}
           {footageLink.data ? <Pressable onPress={() => Linking.openURL(footageLink.data!).catch(() => {})} accessibilityRole="link"><UiText style={styles.link}>Open the footage link (Google Drive / Dropbox)</UiText></Pressable> : null}
           {c.full_video_url ? <Pressable onPress={() => Linking.openURL(c.full_video_url!).catch(() => {})} accessibilityRole="link"><UiText style={styles.link}>Watch the full video</UiText></Pressable> : null}
         </View>

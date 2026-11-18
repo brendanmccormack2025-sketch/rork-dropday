@@ -14,6 +14,8 @@ import { createCampaign } from "@/lib/moneyApi";
 import { CAMPAIGN_AGREEMENT } from "@/lib/moneyContent";
 import FootageStep, { useFootage } from "@/components/money/FootageStep";
 import { footageUploader } from "@/lib/footageRuntime";
+import { isPostable } from "@/lib/footageUpload";
+import { etaLabel } from "@/lib/footageSegments";
 import {
   DEADLINE_DAYS, EMPTY_FORM, PAY_PRESETS, PAYMENT_LABELS, PAYMENT_METHODS, PLATFORMS, PLATFORM_LABELS, WINDOW_DAYS,
   moneyErrorMessage, validateCampaign, workedExample, type CampaignForm, type FormErrors,
@@ -36,8 +38,10 @@ export default function CreateCampaign() {
   const [serverError, setServerError] = useState<string | null>(null);
   const set = <K extends keyof CampaignForm>(k: K, v: CampaignForm[K]) => setF((x) => ({ ...x, [k]: v }));
   const example = workedExample(f);
-  const uploading = items.some((i) => i.state === "queued" || i.state === "compressing" || i.state === "uploading");
-  const readyIds = items.filter((i) => i.state === "done" && i.footageId).map((i) => i.footageId!);
+  // A video can go into the campaign once its FIRST minute is uploaded (the rest keeps uploading after posting): only a video that has not got that far blocks.
+  const uploading = items.some((i) => i.state !== "error" && !isPostable(i));
+  const readyIds = items.filter(isPostable).map((i) => i.footageId!);
+  const stillGoing = items.some((i) => i.state !== "done" && i.state !== "error");
 
   if (profile && !(profile.role === "creator" || profile.role === "both")) {
     return (
@@ -78,6 +82,7 @@ export default function CreateCampaign() {
     setBusy(true);
     try {
       const id = await createCampaign(r.args);
+      await footageUploader.attach(readyIds, id);   // the videos still uploading carry on behind the campaign
       await footageUploader.clear();
       await qc.invalidateQueries({ queryKey: ["money"] });
       router.replace(`/money/campaign/${id}` as never);
@@ -158,13 +163,14 @@ export default function CreateCampaign() {
             {errors.agree ? <UiText style={styles.error}>{errors.agree}</UiText> : null}
           </View>
           {errors.footage ? <UiText style={styles.error}>{errors.footage}</UiText> : null}
-          {uploading ? <UiText style={s.text}>Wait for your video to finish uploading, then post. You can see its progress on step 1 (Back).</UiText> : null}
+          {uploading ? <UiText style={s.text}>Wait until each video's first minute has uploaded, then post. You can see the progress on step 1 (Back).</UiText> : null}
+          {!uploading && stillGoing ? <UiText style={s.text}>Your videos keep uploading after you post ({etaLabel(footageUploader.totalEtaSeconds()) || "a moment"}). Keep Tryal open. Clippers see "still uploading" on the parts that are not ready yet.</UiText> : null}
           {serverError ? <UiText style={styles.error}>{serverError}</UiText> : null}
         </>
       ) : null}
 
       <View style={{ gap: 10 }}>
-        {step < 3 ? <PrimaryButton label="Next" onPress={next} /> : <PrimaryButton label={uploading ? "Wait for your video to finish uploading" : "Post campaign"} onPress={submit} loading={busy} disabled={uploading} />}
+        {step < 3 ? <PrimaryButton label="Next" onPress={next} /> : <PrimaryButton label={uploading ? "Wait for your video's first minute to upload" : "Post campaign"} onPress={submit} loading={busy} disabled={uploading} />}
         {step > 0 ? <Pressable onPress={() => { setErrors({}); setStep(step - 1); }} accessibilityRole="button"><UiText style={[styles.link, { textAlign: "center" }]}>Back</UiText></Pressable> : null}
       </View>
     </SettingsScaffold>

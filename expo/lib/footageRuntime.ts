@@ -4,7 +4,9 @@ import * as ImagePicker from "expo-image-picker";
 import { getThumbnailAsync } from "expo-video-thumbnails";
 
 import { cacheDirectory, deleteAsync, getInfoAsync, readAsStringAsync, writeAsStringAsync, EncodingType } from "@/lib/fileSystemCompat";
-import { FootageUploader, type FootageDeps, type FootageInput, type Registered, type UploadItem } from "@/lib/footageUpload";
+import { FootageUploader, type FootageDeps, type FootageInput, type UploadItem } from "@/lib/footageUpload";
+import { PICK_MIN_FREE_BYTES, spaceCheck } from "@/lib/footageSegments";
+import * as LegacyFS from "expo-file-system/legacy";
 import { supabaseMediaStore } from "@/lib/mediaStore";
 import { launchLibraryWithRetry } from "@/lib/pickerRetry";
 import { libraryPickerOptions } from "@/lib/pickerOptions";
@@ -17,6 +19,13 @@ import type { TusIO, TusResponse } from "@/lib/tus";
 const KEY = "money.footage.queue.v1";
 const ATTEMPTS_KEY = "money.footage.attempts.v1";
 const CHUNK_FILE = `${cacheDirectory}tus_chunk.bin`;
+
+/** Free space on the phone in bytes (null when it cannot be read: that never blocks anything). */
+export async function freeDiskBytes(): Promise<number | null> {
+  try { const n = await LegacyFS.getFreeDiskStorageAsync(); return Number.isFinite(n) ? n : null; } catch { return null; }
+}
+
+type PlanRow = { id: string; thumb_path: string; segment_seconds: number; idx: number; start_s: number | string; end_s: number | string; path: string };
 
 async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.rpc(name, args);
@@ -59,26 +68,24 @@ export function makeIO(fileUri: string, _size: number): TusIO {
 }
 
 const deps: FootageDeps = {
-  register: async (d, w, h, s) => {
-    const rows = await rpc<Registered[]>("money_footage_register", { p_duration_seconds: d, p_width: w, p_height: h, p_size_bytes: s });
-    return Array.isArray(rows) ? rows[0]! : (rows as unknown as Registered);
+  async registerSegmented(d, w, h) {
+    const rows = await rpc<PlanRow[]>("money_footage_register_segmented", { p_duration_seconds: d, p_width: w, p_height: h });
+    if (!rows?.length) throw new Error("the server returned no plan for this video");
+    return { id: rows[0].id, thumb_path: rows[0].thumb_path, segment_seconds: rows[0].segment_seconds, segments: rows.map((r) => ({ idx: r.idx, start_s: r.start_s, end_s: r.end_s, path: r.path })) };
   },
-  complete: (id) => rpc<void>("money_footage_complete", { p_id: id }),
-  fail: (id) => rpc<void>("money_footage_fail", { p_id: id }),
+  completeSegment: (id, idx, size) => rpc<string>("money_segment_complete", { p_footage: id, p_idx: idx, p_size: size }),
   remove: (id) => rpc<void>("money_footage_remove", { p_id: id }),
-  async compress(uri, onProgress) {
-    // Compression goes through the existing renderer (a plain re-encode). If it cannot, the original is uploaded when it fits the size limit.
-    const info = async (u: string) => { const i = await getInfoAsync(u, { size: true }); return i.exists ? Number((i as { size?: number }).size ?? 0) : 0; };
-    try {
-      const r = await renderMerge([uri], onProgress);
-      const thumb = await getThumbnailAsync(r.uri, { time: 0 }).catch(() => null);
-      return { uri: r.uri, sizeBytes: (await info(r.uri)) || 1, width: thumb?.width ?? 0, height: thumb?.height ?? 0, durationSeconds: r.durationMs / 1000 };
-    } catch (e) {
-      const size = await info(uri);
-      if (!(size > 0)) throw new Error(`that video could not be read (${String((e as Error)?.message ?? e).slice(0, 120)})`);
-      return { uri, sizeBytes: size, width: 0, height: 0, durationSeconds: 0, note: `the compressor failed (${String((e as Error)?.message ?? e).slice(0, 120)}); the original file is uploaded` };
-    }
+  async cutSegment(uri, startS, endS, onProgress) {
+    // One segment of the source, re-encoded by the existing renderer (cut with trim instructions). A later native build adds a hardware path and a no-re-encode path.
+    const r = await renderMerge([uri], onProgress, undefined, [{ startMs: Math.round(startS * 1000), endMs: Math.round(endS * 1000) }]);
+    const i = await getInfoAsync(r.uri, { size: true });
+    return { uri: r.uri, sizeBytes: i.exists ? Number((i as { size?: number }).size ?? 0) : 0 };
   },
+  async dimensions(uri) {
+    const t = await getThumbnailAsync(uri, { time: 0, quality: 0.1 }).catch(() => null);
+    return t && t.width > 0 && t.height > 0 ? { width: t.width, height: t.height } : null;
+  },
+  async freeBytes() { return freeDiskBytes(); },
   async preview(uri) {
     const t = await getThumbnailAsync(uri, { time: 0, quality: 0.4 });
     return t.uri;
@@ -140,6 +147,9 @@ export type PickResult = { inputs: FootageInput[]; message: string | null };
  * the pick silently). Every way this can fail returns a message instead of nothing. `isCancelled` lets the screen's Cancel drop a result that arrives late.
  */
 export async function pickFootage(opts: { onRetry?: (attempt: number) => void; isCancelled?: () => boolean } = {}): Promise<PickResult> {
+  // the picker copies each video into Tryal's cache first: with almost no space left it would fail halfway, so say so before it opens
+  const room = spaceCheck(await freeDiskBytes(), PICK_MIN_FREE_BYTES);
+  if (!room.ok) { recordPickerProblem(room.message, "free space before picking"); return { inputs: [], message: room.message }; }
   let res: ImagePicker.ImagePickerResult;
   try {
     res = await launchLibraryWithRetry(libraryPickerOptions({ videosOnly: true, multiple: { limit: 20 } }), opts.onRetry);

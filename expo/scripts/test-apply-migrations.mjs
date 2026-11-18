@@ -50,7 +50,7 @@ async function withServer(handler, fn) {
   }
 }
 
-eq("the twelve files, in this order, and no others", FILES, ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql", "migration-sanctions.sql", "migration-tryal-friends.sql", "migration-post-links.sql", "migration-money.sql", "migration-money-board.sql", "migration-money-footage.sql"]);
+eq("the thirteen files, in this order, and no others", FILES, ["migration-live-snapshot.sql", "migration-known-connections.sql", "migration-stranger-only.sql", "migration-spotlight.sql", "migration-harassment.sql", "migration-recovery.sql", "migration-sanctions.sql", "migration-tryal-friends.sql", "migration-post-links.sql", "migration-money.sql", "migration-money-board.sql", "migration-money-footage.sql", "migration-money-segments.sql"]);
 eq("a file is wrapped in one transaction", wrapInTransaction("select 1;\n\n"), "begin;\nselect 1;\ncommit;\n");
 const order = readFileSync(new URL("../supabase/MIGRATIONS_ORDER.txt", import.meta.url), "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
 eq("they appear in MIGRATIONS_ORDER.txt in the same order", (() => { const inOrder = (arr, list) => { let i = -1; return list.every((f) => { const j = arr.indexOf(f); const ok = j > i; i = j; return ok; }); }; return inOrder(order, FILES); })(), true);
@@ -74,7 +74,7 @@ await withServer(() => [200, [{ n: 0 }]], async (base, seen) => {
 
 await withServer((q) => [200, q.startsWith("select count(*)::int") ? [{ n: 1 }] : []], async (base, seen) => {
   const r = await runScript([], { SUPABASE_ACCESS_TOKEN: SECRET, SUPABASE_API_BASE: base });
-  eq("with the pepper: pepper check first, then exactly the twelve files in order, each begin ... commit, bearer token sent", [r.status, seen.length, /vault/.test(seen[0].query), seen.slice(1).every((s, i) => s.query === wrapInTransaction(readFileSync(new URL(`../supabase/${FILES[i]}`, import.meta.url), "utf8"))), seen.every((s) => s.auth === `Bearer ${SECRET}`)], [0, 13, true, true, true]);
+  eq("with the pepper: pepper check first, then exactly the twelve files in order, each begin ... commit, bearer token sent", [r.status, seen.length, /vault/.test(seen[0].query), seen.slice(1).every((s, i) => s.query === wrapInTransaction(readFileSync(new URL(`../supabase/${FILES[i]}`, import.meta.url), "utf8"))), seen.every((s) => s.auth === `Bearer ${SECRET}`)], [0, 14, true, true, true]);
   eq("it prints what it applied and that ship.sh etc. were not run; no token", [FILES.every((f) => r.stdout.includes(f)), /Not run: ship\.sh/.test(r.stdout), r.stdout.includes("TOPSECRET")], [true, true, false]);
 });
 
