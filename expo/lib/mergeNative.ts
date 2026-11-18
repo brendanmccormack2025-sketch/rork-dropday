@@ -50,10 +50,12 @@ export async function renderMerge(
   onStage: (stage: string) => void = () => {},
   /** optional: keep only [startMs, endMs) of each file (same order as `uris`); default is the whole file */
   ranges?: Array<{ startMs: number; endMs: number }>,
+  /** optional: a smaller output (longest side in pixels) than the default 1280; used by the footage benchmark */
+  opts?: { maxSide?: number },
 ): Promise<{ uri: string; durationMs: number; timing?: MergeTimingReport | null }> {
   crumb("begin", { clips: uris.length });
   // the size comes from the first frame; if that never answers, a portrait default is used
-  const { width, height } = await step("reading the first frame", SIZE_MS, onStage, () => computeRenderSize({ id: "m0", uri: uris[0]!, type: "video" })).catch(() => ({ width: 720, height: 1280 }));
+  const { width, height } = await step("reading the first frame", SIZE_MS, onStage, () => computeRenderSize({ id: "m0", uri: uris[0]!, type: "video", trimStartMs: ranges?.[0]?.startMs }, opts?.maxSide)).catch(() => ({ width: 720, height: 1280 }));
   const release = await step("waiting for the native renderer", NATIVE_WAIT_MS, onStage, () => acquireNativeWithin(NATIVE_WAIT_MS, "waiting for the native renderer"));
   let subscription: { remove(): void } | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;

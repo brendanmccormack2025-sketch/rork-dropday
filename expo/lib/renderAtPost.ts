@@ -100,12 +100,12 @@ function even(n: number): number {
 }
 
 /** Output size from the first clip's displayed (orientation-corrected) size, long side <= 1280. */
-export async function computeRenderSize(first: DraftClip): Promise<{ width: number; height: number }> {
+export async function computeRenderSize(first: DraftClip, maxSide: number = RENDER_MAX_SIDE): Promise<{ width: number; height: number }> {
   try {
     const { getThumbnailAsync } = await import("expo-video-thumbnails");
     const thumb = await getThumbnailAsync(first.uri, { time: first.trimStartMs ?? 0 });
     if (thumb.width > 0 && thumb.height > 0) {
-      const scale = Math.min(1, RENDER_MAX_SIDE / Math.max(thumb.width, thumb.height));
+      const scale = Math.min(1, maxSide / Math.max(thumb.width, thumb.height));
       return { width: even(thumb.width * scale), height: even(thumb.height * scale) };
     }
   } catch {

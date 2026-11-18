@@ -216,6 +216,10 @@ export default function SettingsScreen() {
                   <Shield color={theme.textMuted} size={18} strokeWidth={2} />
                   <UiText style={styles.rowText}>Footage attempts (debug)</UiText>
                 </Pressable>
+                <Pressable onPress={() => router.push("/footage-benchmark" as never)} style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
+                  <Shield color={theme.textMuted} size={18} strokeWidth={2} />
+                  <UiText style={styles.rowText}>Footage speed test</UiText>
+                </Pressable>
               </View>
             </>
           )}
